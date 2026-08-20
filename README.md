@@ -61,5 +61,7 @@ These extra installs help tie together some theming:
 *If I sent this to you for testing. Just text me if there are any issues/features
 you think will be helpful to other people!* 
 
-[cjre.pl/ogle](https://cjre.pl/ogle)
+(fyi - this is very vibe coded and designed for my personal use + habits so code 100% is a mess but it does what I need it to do)
+
+[cjre.pl/ogle](https://cjre.pl/ogle) 
 
