@@ -892,7 +892,11 @@ def _make_coherence_hud():
             super().__init__(
                 None,
                 Qt.WindowType.FramelessWindowHint
-                | Qt.WindowType.WindowStaysOnTopHint,
+                | Qt.WindowType.WindowStaysOnTopHint
+                # Tool → Qt backs it with an NSPanel, which (as a non-activating
+                # panel) is the only reliable way to float over ANOTHER app's
+                # native-fullscreen Space; a plain NSWindow can't. See _apply_glass.
+                | Qt.WindowType.Tool,
             )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -905,6 +909,11 @@ def _make_coherence_hud():
             lay.setContentsMargins(0, 0, 0, 0)
             lay.addWidget(self._view)
             self._session_max = [0, 0, 0]  # depletion tracking for deck pills
+            # (left, top, w, h) of the visible .hud-bg box relative to the window
+            # top-left, measured after each render. The window can be taller than
+            # the box (inline layout leaves slack), so the red flare shapes itself
+            # to this inset, not the whole window — otherwise it spills past the box.
+            self._box_inset = None
 
         def _reposition(self, w: int, h: int = 60, animate: bool = True):
             avail  = mw.app.primaryScreen().availableGeometry()
@@ -963,10 +972,23 @@ def _make_coherence_hud():
                 except Exception:
                     w, h = 500, 60
                 self._reposition(w, h)
+                # Record the visible box's offset within the window so the flare
+                # can hug it exactly (window ⊇ box vertically). Stored as an inset
+                # applied to the live window position at flare time.
+                try:
+                    self._box_inset = (int(d['bx']), int(d['by']),
+                                       int(d['bw']), int(d['bh']))
+                except Exception:
+                    self._box_inset = None
                 self._apply_glass()
             self._view.page().runJavaScript(
-                "JSON.stringify({w:document.body.offsetWidth,"
-                "h:document.body.offsetHeight})",
+                "(function(){var b=document.querySelector('.hud-bg');"
+                "var r=b?b.getBoundingClientRect():null;"
+                "return JSON.stringify({w:document.body.offsetWidth,"
+                "h:document.body.offsetHeight,"
+                "bx:r?Math.round(r.left):0,by:r?Math.round(r.top):0,"
+                "bw:r?Math.round(r.width):document.body.offsetWidth,"
+                "bh:r?Math.round(r.height):document.body.offsetHeight});})()",
                 _resize)
 
         def refresh(self):
@@ -1093,6 +1115,10 @@ img {{ max-width: 480px !important; max-height: 160px !important;
   margin: 0 auto !important;
 }}
 .card-area li {{ text-align: left !important; }}
+/* Caption mode owns the timing feedback via the pulse, so hide the AnKing
+   card's own countdown (.timer) — and its tags — in the HUD. */
+.timer, #timer,
+#tags-container, .tags-container, .tags {{ display: none !important; }}
 </style></head>
 <body><div class="hud-bg">
   <div class="deck-bars">
@@ -1109,8 +1135,35 @@ img {{ max-width: 480px !important; max-height: 160px !important;
                 ns_win = msg(c_void_p, c_void_p(int(self.winId())), b"window")
                 if not ns_win:
                     return
-                msg(c_void_p, ns_win, b"setLevel:", (c_int,), (3,))
-                msg(c_void_p, ns_win, b"setCollectionBehavior:", (c_ulong,), (1,))
+                # To float over ANOTHER app's native-fullscreen Space the window
+                # must be a NON-ACTIVATING NSPanel (plain NSWindows can't cross a
+                # fullscreen Space's isolation layer). The Tool flag makes Qt back
+                # this widget with an NSPanel; here we add the nonactivating-panel
+                # style bit and lift the level above the menu bar.
+                #   collectionBehavior: 1 = CanJoinAllSpaces (appear on every
+                #   Space, incl. other apps' fullscreen + Anki's own), 16 =
+                #   Stationary (don't get swept by Space switches). NOTE: 256
+                #   (FullScreenAuxiliary) is the OPPOSITE of what we want here —
+                #   it ties the window to its OWN app's fullscreen — so it's gone.
+                is_panel = msg(c_bool, ns_win, b"isKindOfClass:",
+                               (c_void_p,), (cls("NSPanel"),))
+                if is_panel:
+                    cur_mask = msg(c_ulong, ns_win, b"styleMask")
+                    # NSWindowStyleMaskNonactivatingPanel = 1 << 7 = 128
+                    msg(None, ns_win, b"setStyleMask:", (c_ulong,),
+                        (int(cur_mask) | 128,))
+                    msg(None, ns_win, b"setFloatingPanel:", (c_bool,), (True,))
+                    msg(None, ns_win, b"setBecomesKeyOnlyIfNeeded:",
+                        (c_bool,), (True,))
+                    # Default NSPanel hides when the app deactivates — i.e. the
+                    # instant you switch to the other fullscreen app. Keep it up.
+                    msg(None, ns_win, b"setHidesOnDeactivate:", (c_bool,),
+                        (False,))
+                # NSStatusWindowLevel = 25 (above the menu bar, below the
+                # screensaver) — high enough to composite over a fullscreen app.
+                msg(c_void_p, ns_win, b"setLevel:", (c_int,), (25,))
+                msg(c_void_p, ns_win, b"setCollectionBehavior:", (c_ulong,),
+                    (1 | 16,))
                 msg(c_void_p, ns_win, b"setOpaque:", (c_bool,), (False,))
                 msg(c_void_p, ns_win, b"setHasShadow:", (c_bool,), (False,))
                 msg(c_void_p, ns_win, b"setBackgroundColor:", (c_void_p,),
@@ -1203,11 +1256,53 @@ def _toggle_coherence():
             return
     _gtap_log(f"toggling HUD visible={_coherence_hud.isVisible()}")
     _coherence_hud.toggle()
+    # Caption ownership of the timing feedback flips with the HUD: re-evaluate
+    # the countdown bar (hide when entering, restore on exit) and re-target any
+    # live pulse to the new owner window (main window ↔ HUD).
+    try:
+        if _card_timer_instance is not None:
+            _card_timer_instance.sync_bar_pref()
+            ov = getattr(_card_timer_instance, "_overlay", None)
+            if ov is not None and ov.isVisible():
+                ov.set_active(False)
+                # Re-show on the new host only if it's on screen: entering caption
+                # → the HUD (always visible); exiting → the main window (skip when
+                # it's minimized, else the flare lingers at its stale location).
+                if _caption_visible() or _main_on_screen():
+                    ov.set_active(True)
+                    # The HUD slides/measures over ~120ms after toggle-on, so its
+                    # frame isn't final yet — reshape the glow once it settles.
+                    QTimer.singleShot(180, lambda o=ov: o.reposition()
+                                      if o.isVisible() else None)
+    except Exception:
+        pass
 
 
 def _coherence_refresh():
     if _coherence_hud and _coherence_hud.isVisible():
         _coherence_hud.refresh()
+
+
+def _caption_visible():
+    """True while the coherence/caption HUD (Tab+\\) is on screen. In caption
+    mode the HUD owns the timing feedback: the countdown bar is suppressed and
+    the red/green pulse reshapes itself to the HUD frame instead of the main
+    window."""
+    try:
+        return bool(_coherence_hud is not None and _coherence_hud.isVisible())
+    except Exception:
+        return False
+
+
+def _main_on_screen():
+    """True when the main Anki window is actually visible (not minimized/hidden).
+    The card-timer bar and red flare ride the main window, so they must never be
+    shown against it while it's minimized — otherwise they linger at the stale
+    window location (e.g. after exiting caption mode with Anki minimized)."""
+    try:
+        return bool(mw.isVisible() and not mw.isMinimized())
+    except Exception:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -1711,6 +1806,16 @@ def _make_pomodoro():
 
         def _tick(self):
             global _pomo_on_break
+            # Invariant: the XP bar rides the main Anki window. If that window is
+            # minimized or hidden, the bar must be too. The usual WindowStateChange
+            # hide misses the case where the caption HUD (a separate top-level
+            # window) absorbed the minimize, so main never emitted the event —
+            # enforce it here every tick as a backstop.
+            try:
+                if self._xp.isVisible() and (mw.isMinimized() or not mw.isVisible()):
+                    self._xp.hide()
+            except Exception:
+                pass
             if self._on_break:
                 self._break_rem_ms -= 50
                 if self._break_rem_ms <= 0:
@@ -1925,6 +2030,10 @@ def _make_card_timer():
             if _focus_hidden or _focus_mode_on:
                 self.hide()
                 return
+            # Caption mode replaces the countdown bar with the caption pulse.
+            if _caption_visible():
+                self.hide()
+                return
             # Match the width/position of the nav button island (Decks/Add/Browse/
             # Stats/Sync), which lives inside the toolbar webview's DOM — measure it
             # in JS, then map to window coords. Falls back to full content width.
@@ -2077,6 +2186,8 @@ def _make_card_timer():
             self._color = color
             self._max_a = PULSE_MAX_A if max_a is None else max_a
             self._pulse_ms = PULSE_MS if pulse_ms is None else pulse_ms
+            self._radius = float(PULSE_RADIUS)   # outer corner radius; matches
+            #                                      the HUD's when in caption mode
             self._cycles = cycles          # None = loop forever; N = flash N times
             self._cycles_done = 0
             self._pulse_t = QTimer(self)
@@ -2108,6 +2219,30 @@ def _make_card_timer():
                 pass
 
         def reposition(self):
+            # Caption mode: the pulse belongs to the coherence HUD, not the main
+            # window — shape the glow to the HUD's frame (matching its 16px
+            # corner) so it reads as the caption itself pulsing. Use geometry()
+            # (the client rect = the visible box), NOT frameGeometry(): the HUD is
+            # frameless, so on macOS frameGeometry reports a top edge a few px
+            # above the box and the glow spills above it.
+            try:
+                if _caption_visible():
+                    hg = _coherence_hud.geometry()
+                    ins = getattr(_coherence_hud, "_box_inset", None)
+                    if ins:
+                        # Live window position + measured box offset → hug the box.
+                        bx, by, bw, bh = ins
+                        x = hg.x() + bx; y = hg.y() + by
+                        w = min(bw, hg.width()); h = min(bh, hg.height())
+                    else:
+                        x, y, w, h = hg.x(), hg.y(), hg.width(), hg.height()
+                    if w > 0 and h > 0:
+                        self._radius = 16.0   # matches HUD _RADIUS
+                        self.setGeometry(x, y, w, h)
+                        return
+            except Exception:
+                pass
+            self._radius = float(PULSE_RADIUS)
             # Cover the whole window FRAME (frameGeometry includes the native
             # titlebar/drag strip) so the glow reaches every screen edge. In native
             # fullscreen frameGeometry can under-report (glow stops short of the
@@ -2188,9 +2323,22 @@ def _make_card_timer():
                 # 1 = CanJoinAllSpaces, 256 = FullScreenAuxiliary — shows in native fullscreen.
                 msg(c_void_p, ns, b"setCollectionBehavior:", (c_ulong,), (1 | 256,))
                 main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+                # In caption mode the HUD floats above the main window (level 3),
+                # so a glow parented to the main window would hide behind the
+                # HUD's tinted background. Parent it to the HUD instead — ordered
+                # above — so it wraps the caption.
+                host = main
+                if _caption_visible():
+                    try:
+                        hw = msg(c_void_p, c_void_p(int(_coherence_hud.winId())),
+                                 b"window")
+                        if hw:
+                            host = hw
+                    except Exception:
+                        pass
                 if not msg(c_void_p, ns, b"parentWindow"):
-                    if main:
-                        msg(c_void_p, main, b"addChildWindow:ordered:",
+                    if host:
+                        msg(c_void_p, host, b"addChildWindow:ordered:",
                             (c_void_p, c_long), (ns, 1))
                 # Reassert the main window as key so any transient resign-key from
                 # showing this overlay is undone — keeps DOM focus in the AMBOSS /
@@ -2221,7 +2369,7 @@ def _make_card_timer():
             pt.setPen(Qt.PenStyle.NoPen)
             # round the outer corners of the glow frame
             clip = QPainterPath()
-            clip.addRoundedRect(QRectF(0, 0, w, h), float(PULSE_RADIUS), float(PULSE_RADIUS))
+            clip.addRoundedRect(QRectF(0, 0, w, h), float(self._radius), float(self._radius))
             pt.setClipPath(clip)
             # Lighten (max) compositing so overlapping edge bands don't ADD in the
             # corners — that additive brightening was the visible colour seam.
@@ -2333,8 +2481,13 @@ def _make_card_timer():
                 # counting down from the moment the tip actually closes.
                 self._cooldown_until = now + float(
                     _cfg().get("card_timer_flare_cooldown_s", 2.0))
+            # The flare lives on the caption HUD when it's up, otherwise on the
+            # main window — so only show it when its host is actually on screen
+            # (never against a minimized main window).
+            host_on_screen = _caption_visible() or _main_on_screen()
             show = (self._red_wanted and not self._tip_open and now >= self._cooldown_until
-                    and not _break_tint_active and not _pomo_on_break)
+                    and not _break_tint_active and not _pomo_on_break
+                    and host_on_screen)
             if show and not self._overlay.isVisible():
                 self._overlay.set_active(True)
             elif not show and self._overlay.isVisible():
@@ -2417,7 +2570,12 @@ def _make_card_timer():
             self._bar_fade = anim
 
         def _bar_pref_on(self):
-            return bool(_cfg().get("card_timer_show_bar", True))
+            # Caption mode owns the timing feedback via the pulse, so the
+            # countdown bar is suppressed while the coherence HUD is up. It also
+            # rides the main window, so never show it while that's minimized.
+            return (bool(_cfg().get("card_timer_show_bar", True))
+                    and not _caption_visible()
+                    and _main_on_screen())
 
         def sync_bar_pref(self):
             """Show/hide the bar immediately when the setting is toggled mid-card."""
