@@ -27,6 +27,15 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
+  Only has the card contents on screen.
+- **OLED Optimization** — when in fullscreen, uses a true black backdrop. Useful
+  for increasing contrast and readability on Mac displays.
+- **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \**
+  to change the Anki notecard view to be in "caption" form. **Tab+Arrow Keys**
+  adjusts their screen position. Remains visible in this view even when other
+  things are in fullscreen.
+- **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
+  when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
 - **Improved Animations** — typing animation plays on card reveal to prevent
   any recall based on the "shape" of the text rather than content.
 - **Pomodoro** — review-time work intervals, an in-window break screen
@@ -37,8 +46,6 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
   finished for the day. Intensity and timing are adjustable.
 - **Always in front** — always places the Anki app in front of other windows, 
   even when Anki is not focused so you can always see what you are studying.
-- **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
-  when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
 - **Quick Zoom** — for whatever god forsaken reason Anki does not have **Cmd**+**+**
   or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
@@ -63,7 +70,7 @@ These extra installs help tie together some theming:
 *If I sent this to you for testing. Just text me if there are any issues/features
 you think will be helpful to other people!* 
 
-FYI - this is very vibe coded and designed for my personal use / habits. Source code 100% is a mess but it does what I need it to do so I can live with it. 
+FYI - this is very vibe coded and designed for my personal use / habits. Source code 100% is a hot mess but it does what I need it to do so I can live with it. 
 
 [cjre.pl/ogle](https://cjre.pl/ogle) 
 
