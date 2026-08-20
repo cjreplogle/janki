@@ -39,6 +39,8 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
   even when Anki is not focused so you can always see what you are studying.
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
+- **Quick Zoom** — for whatever god forsaken reason Anki does not have **Cmd**+**+**
+  or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
 - **Schedule sync** (optional) — reads a local `.ics` calendar (URL/file)
@@ -61,7 +63,7 @@ These extra installs help tie together some theming:
 *If I sent this to you for testing. Just text me if there are any issues/features
 you think will be helpful to other people!* 
 
-(fyi - this is very vibe coded and designed for my personal use + habits so code 100% is a mess but it does what I need it to do)
+FYI - this is very vibe coded and designed for my personal use / habits. Source code 100% is a mess but it does what I need it to do so I can live with it. 
 
 [cjre.pl/ogle](https://cjre.pl/ogle) 
 
