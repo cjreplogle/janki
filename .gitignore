@@ -1,0 +1,7 @@
+meta.json
+state.json
+aliases.json
+__pycache__/
+*.pyc
+.DS_Store
+janki.ankiaddon
