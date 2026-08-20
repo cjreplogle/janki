@@ -1,14 +1,10 @@
 # Janki
 
 A macOS-focused Anki add-on that reskins the reviewer with native frosted-glass
-transparency and adds a set of focused-study tools: a Pomodoro system with an
-in-window break screen, a per-card "lingering" timer with edge-glow flares, a
-distraction-free Focus Mode, global hotkeys, AMBOSS frosting, and an optional
-local lecture-unsuspender driven by a calendar + spreadsheet.
+transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <u>is not affiliated with</u>.
 
-> **macOS only.** Janki uses native macOS vibrancy, an Objective-C bridge, and
-> CoreGraphics event taps. On Windows/Linux the mac-specific pieces are skipped,
-> so most visual/hotkey features will not work.
+>[!WARNING]
+> **macOS only for now...** If enough people ask, I can try and throw together a Win10 release. No guarantees I have the time to figure it out... (Sorry, you know what my schedule looks like)
 
 ## Install
 
@@ -18,8 +14,8 @@ local lecture-unsuspender driven by a calendar + spreadsheet.
    **Tools → Add-ons → Install from file…** and pick the `.ankiaddon`.
 3. Fully quit and reopen Anki.
 
-**From source (for development)**
-Clone into your Anki add-ons folder as a folder named `janki`:
+**From source**
+Clone/copy file contents into your Anki add-ons folder as a folder named `janki`:
 `~/Library/Application Support/Anki2/addons21/janki/`
 
 ## Features
@@ -27,30 +23,36 @@ Clone into your Anki add-ons folder as a folder named `janki`:
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
+- **Improved Animations** — typing animation plays on card reveal to prevent
+  any recall based on the "shape" of the text rather than content.
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
   Toggle the whole system on/off in settings.
 - **Card timer** — a thin bar fills over N seconds; when it runs out a red
   edge-glow flares (a "time to move on" nudge). A green flare marks a card
   finished for the day. Intensity and timing are adjustable.
+- **Always in front** — always places the Anki app in front of other windows, 
+  even when Anki is not focused so you can always see what you are studying.
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
-  when Anki is not focused.
+  when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
 - **AMBOSS** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
-- **Lecture unsuspender** (optional, cohort-specific) — reads a local `.ics`
-  calendar and a local `.xlsx` lecture→tag map, finds today's lectures, and
-  unsuspends their cards on confirm. See **Tools → Janki: Settings… → Lectures**.
+- **Schedule Sync** (optional) — reads a local `.ics` calendar (URL/file)
+  and a local `.xlsx` lecture→tag map, finds your classes for the day,
+  and adaptively unsuspends relevant tagged cards (AJ/Anking tags tested).
 
-## Settings
+  *The Schedule Sync feature expects your own calendar export and tag spreadsheet;
+  set their paths on the Lectures → Sources tab. Nothing is uploaded — the
+  calendar is read locally (a URL source is optional and fetched only if
+  you enter one).*
 
-**Tools → Janki: Settings…** — a tabbed dialog: Appearance, Focus, Pomodoro,
-General, and Lectures (Sources / Behavior). **Tools → Load today's lectures**
-opens the unsuspend window directly.
+## Suggested Add-Ons
+* [Anki Redesign](https://ankiweb.net/shared/info/2119814566)
+* [Change Interface Font](https://ankiweb.net/shared/info/1431333984)
 
-The lecture feature expects your own calendar export and tag spreadsheet; set
-their paths on the Lectures → Sources tab. Nothing is uploaded — the calendar is
-read locally (a URL source is optional and fetched only if you enter one).
 
-## License
 
-MIT — see [LICENSE](LICENSE).
+## Support
+If I sent this to you for testing. Just text me if there are any issues/features
+you think will be helpful to other people! 
+
