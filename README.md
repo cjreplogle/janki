@@ -1,10 +1,10 @@
 # Janki
 
 A macOS-focused Anki add-on that reskins the reviewer with native frosted-glass
-transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <u>is not affiliated with</u>.
+transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <ins>is not affiliated with</ins>.
 
 >[!WARNING]
-> **macOS only for now...** If enough people ask, I can try and throw together a Win10 release. No guarantees I have the time to figure it out... (Sorry, you know what my schedule looks like)
+> **macOS only for now...** If enough people ask, I can try and throw together a Windows release. No guarantees I have the time to figure it out... (*I have to pass medical school too!*)
 
 ## Install
 
@@ -17,6 +17,10 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 **From source**
 Clone/copy file contents into your Anki add-ons folder as a folder named `janki`:
 `~/Library/Application Support/Anki2/addons21/janki/`
+
+
+> If you wish to change any settings or disable any features, you may do so by navigating to Tools > Janki: Settings...
+
 
 ## Features
 
@@ -35,24 +39,27 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
   even when Anki is not focused so you can always see what you are studying.
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
-- **AMBOSS** — frosts the AMBOSS side panel and hover tooltip; hides term
+- **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
-- **Schedule Sync** (optional) — reads a local `.ics` calendar (URL/file)
+- **Schedule sync** (optional) — reads a local `.ics` calendar (URL/file)
   and a local `.xlsx` lecture→tag map, finds your classes for the day,
   and adaptively unsuspends relevant tagged cards (AJ/Anking tags tested).
 
-  *The Schedule Sync feature expects your own calendar export and tag spreadsheet;
+  *The schedule sync feature expects your own calendar export and tag spreadsheet;
   set their paths on the Lectures → Sources tab. Nothing is uploaded — the
   calendar is read locally (a URL source is optional and fetched only if
   you enter one).*
 
 ## Suggested Add-Ons
+
+These extra installs help tie together some theming:
 * [Anki Redesign](https://ankiweb.net/shared/info/2119814566)
 * [Change Interface Font](https://ankiweb.net/shared/info/1431333984)
 
 
-
 ## Support
-If I sent this to you for testing. Just text me if there are any issues/features
-you think will be helpful to other people! 
+*If I sent this to you for testing. Just text me if there are any issues/features
+you think will be helpful to other people!* 
+
+[cjre.pl/ogle](https://cjre.pl/ogle)
 
