@@ -15,6 +15,7 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 3. Fully quit and reopen Anki.
 
 **From source**
+
 Clone/copy file contents into your Anki add-ons folder as a folder named `janki`:
 `~/Library/Application Support/Anki2/addons21/janki/`
 
