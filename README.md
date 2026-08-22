@@ -53,7 +53,7 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
   underlines unless in fullscreen.
 - **Schedule sync** (optional) — reads a local `.ics` calendar (URL/file)
   and a local `.xlsx` lecture→tag map, finds your classes for the day,
-  and adaptively unsuspends relevant tagged cards (AJ/Anking tags tested).
+  and adaptively unsuspends relevant tagged cards (AJ/Anking/Hutch decks tested)
 
   *The schedule sync feature expects your own calendar export and tag spreadsheet;
   set their paths on the Lectures → Sources tab. Nothing is uploaded — the
