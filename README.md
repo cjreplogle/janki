@@ -31,10 +31,10 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
   Only has the card contents on screen.
 - **OLED Optimization** — when in fullscreen, uses a true black backdrop. Useful
   for increasing contrast and readability on Mac displays.
-- **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \**
+- **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \\**
   to change the Anki notecard view to be in "caption" form. **Tab+Arrow Keys**
   adjusts their screen position. Remains visible in this view even when other
-  things are in fullscreen.
+  things are in fullscreen. (Note: also integrated to work & adjust with remote buttons)
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
 - **Improved Animations** — typing animation plays on card reveal to prevent
