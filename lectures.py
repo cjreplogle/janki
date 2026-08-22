@@ -317,8 +317,20 @@ def _ak_index_reset():
 
 def _norm_source(s):
     """Normalize an AnKing source token: drop a leading '#', lowercase. So the
-    sheet's shorthand 'B&B' and the real tag's '#B&B' segment compare equal."""
+    sheet's shorthand 'B&B' and the real tag's '#B&B' segment compare equal.
+    (No &→and here — that would turn 'B&B' into 'band'.)"""
     return (s or "").lstrip("#").lower()
+
+
+def _leaf_key(s):
+    """Canonical key for matching a concept segment between sheet and collection.
+    Drops the version NN_ number prefix, a leading '*' (AnKing marks some leaves
+    like '*Conduction_Pathway'), lowercases, and maps '&'→'and' (the sheet writes
+    'Fructose_&_Galactose' where the deck has 'fructose_and_galactose')."""
+    s = (s or "").strip().strip('"').strip()   # drop stray quotes from messy cells
+    s = s.lstrip("*")
+    s = re.sub(r"^\d+_", "", s)
+    return s.replace("&", "and").lower()
 
 
 def _ak_tag_index():
@@ -343,7 +355,7 @@ def _ak_tag_index():
         segs = t.split("::")
         src = _norm_source(segs[1]) if len(segs) > 1 else ""
         for seg in segs:
-            leaf = re.sub(r"^\d+_", "", seg).lower()
+            leaf = _leaf_key(seg)
             if not leaf:
                 continue
             by_leaf.setdefault(leaf, set()).add(t)
@@ -366,12 +378,13 @@ def _ak_leaf_search(leaf, source=None):
     idx = _ak_tag_index()
     if not idx:
         return "tag:*%s*" % leaf              # offline: best-effort substring
+    key = _leaf_key(leaf)
     tags = None
     if source:
-        tags = idx["by_src_leaf"].get((_norm_source(source), leaf.lower()))
+        tags = idx["by_src_leaf"].get((_norm_source(source), key))
     if not tags:
         # No source (or that source has no such leaf) → any-source leaf match.
-        tags = idx["by_leaf"].get(leaf.lower())
+        tags = idx["by_leaf"].get(key)
     if not tags:
         return None
     return "(" + " OR ".join('"tag:%s"' % t for t in tags) + ")"
