@@ -475,13 +475,43 @@ def _apply_always_on_top(on: bool) -> None:
 
 
 _tray_icon: "QSystemTrayIcon | None" = None
+_tray_caption_action: "QAction | None" = None
+_tray_focus_action: "QAction | None" = None
+
+
+def _sync_tray_actions() -> None:
+    """Reflect live Caption/Focus state in the menu-bar checkboxes. Called just
+    before the menu opens so the ticks are always accurate (the modes can also be
+    toggled by hotkey)."""
+    try:
+        if _tray_caption_action is not None:
+            _tray_caption_action.setChecked(_caption_visible())
+        if _tray_focus_action is not None:
+            _tray_focus_action.setChecked(bool(_focus_mode_on))
+    except Exception:
+        pass
+
 
 def _apply_tray(on: bool) -> None:
-    global _tray_icon
+    global _tray_icon, _tray_caption_action, _tray_focus_action
     if on:
         if _tray_icon is None:
             _tray_icon = QSystemTrayIcon(mw.windowIcon(), mw)
             menu = QMenu()
+            # Mode toggles, mirrored from the Tab+\ / Tab+F hotkeys, so caption and
+            # focus can be driven from the menu-bar icon even when Anki is unfocused.
+            _tray_caption_action = QAction("Caption mode", mw)
+            _tray_caption_action.setCheckable(True)
+            _tray_caption_action.triggered.connect(lambda _c=False: _toggle_coherence())
+            _tray_focus_action = QAction("Focus mode", mw)
+            _tray_focus_action.setCheckable(True)
+            _tray_focus_action.triggered.connect(lambda _c=False: _toggle_focus_mode())
+            menu.addAction(_tray_caption_action)
+            menu.addAction(_tray_focus_action)
+            last_deck_action = QAction("Open last studied deck", mw)
+            last_deck_action.triggered.connect(lambda _c=False: _open_last_deck())
+            menu.addAction(last_deck_action)
+            menu.addSeparator()
             restore_action = QAction("Open Anki", mw)
             restore_action.triggered.connect(lambda: (mw.showNormal(), mw.activateWindow()))
             quit_action = QAction("Quit", mw)
@@ -489,15 +519,24 @@ def _apply_tray(on: bool) -> None:
             menu.addAction(restore_action)
             menu.addSeparator()
             menu.addAction(quit_action)
+            menu.aboutToShow.connect(_sync_tray_actions)
             _tray_icon.setContextMenu(menu)
             _tray_icon.activated.connect(_on_tray_activated)
         _tray_icon.show()
-        # intercept close-to-minimize
+        # intercept close-to-minimize (the filter itself is gated on tray_minimize,
+        # so showing the icon for the mode controls doesn't hijack the close button)
         mw.installEventFilter(_tray_filter)
     else:
         if _tray_icon is not None:
             _tray_icon.hide()
         mw.removeEventFilter(_tray_filter)
+
+
+def _tray_should_show() -> bool:
+    """The menu-bar icon appears if either it's wanted for its mode controls or
+    tray-minimize needs it as a minimize target."""
+    c = _cfg()
+    return bool(c.get("menubar_controls", True) or c.get("tray_minimize", False))
 
 
 def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
@@ -597,7 +636,10 @@ _swallow_space_until_up = False  # after a hold-Space break skip, eat Space unti
 _remote_active = False   # True while the reviewer has a card up (gamepad gate)
 
 # macOS virtual key codes to intercept when Tab is held
-_GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 126, 125, 124}  # Z X C V Space Escape Backslash F ↑ ↓ →
+_GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 31, 126, 125, 124, 123}  # Z X C V Space Escape Backslash F O ↑ ↓ → ←
+# Shift+Tab + '='/'-' → grow/shrink the caption font (only while the caption HUD
+# is up). Shift-gated so plain Tab+= / Tab+- stay free for anything else.
+_CAP_FONT_KC = {24, 27}  # 24 = '='(+), 27 = '-'
 _KC_TAB = 48
 
 # NOTE: the 8bitdo Zero 2 is a GAMEPAD (handled by the GameController poller, not
@@ -615,11 +657,13 @@ _GTAP_LOG = os.path.expanduser("~/Library/Logs/anki-glass-keytap.log")
 from PyQt6.QtCore import QObject, pyqtSignal as _pyqtSignal
 
 class _KeyBridge(QObject):
-    send_key   = _pyqtSignal(int)   # macOS keycode
+    send_key    = _pyqtSignal(int)  # macOS keycode
+    send_key_rf = _pyqtSignal(int)  # keycode, reveal-first (two-press gamepad flow)
     pomo_space = _pyqtSignal(bool)  # True=press, False=release (Pomodoro bypass)
 
 _key_bridge = _KeyBridge()
 _key_bridge.send_key.connect(lambda kc: _send_key_to_anki(kc))
+_key_bridge.send_key_rf.connect(lambda kc: _send_key_to_anki(kc, reveal_first=True))
 
 def _gtap_log(msg: str) -> None:
     try:
@@ -644,23 +688,25 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
     Used by the gamepad so a press flips the card and you can read it before the
     next press rates — a natural two-press flow. Tab-combos leave it False (their
     single press shows-and-rates)."""
-    # Arrow keys — set coherence HUD position mode
-    _arrow_pos = {126: 'top', 125: 'bottom', 124: 'topright'}
-    if kc in _arrow_pos:
-        new_pos = _arrow_pos[kc]
-        cfg = _cfg() or {}
-        cfg['coherence_position'] = new_pos
-        mw.addonManager.writeConfig(__name__, cfg)
-        _gtap_log(f"coherence_position → {new_pos}")
-        if _coherence_hud and _coherence_hud.isVisible():
-            _coherence_hud._reposition(
-                _coherence_hud.width(), _coherence_hud.height(), animate=True)
-            QTimer.singleShot(230, _coherence_hud.refresh)  # re-inject CSS after animation
+    # Arrow keys — nudge the caption HUD around a 3x3 screen grid (up→top row,
+    # down→bottom row, left→left column, right→right column).
+    _arrow_delta = {126: (-1, 0), 125: (1, 0), 123: (0, -1), 124: (0, 1)}
+    if kc in _arrow_delta:
+        _nudge_coherence(*_arrow_delta[kc])
+        return
+
+    if kc in _CAP_FONT_KC:  # Shift+Tab + '='/'-' — resize the caption font
+        _adjust_caption_font(2 if kc == 24 else -2)
         return
 
     if kc == 3:  # F — toggle Focus Mode
         _gtap_log("F hit → _toggle_focus_mode")
         _toggle_focus_mode()
+        return
+
+    if kc == 31:  # O — open the last-studied deck
+        _gtap_log("O hit → _open_last_deck")
+        _open_last_deck()
         return
 
     key  = _KC_TO_KEY.get(kc)
@@ -722,6 +768,28 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
 
     except Exception as e:
         _gtap_log(f"_send_key_to_anki error: {e}")
+
+
+def _adjust_caption_font(delta: int) -> None:
+    """Shift+Tab + '='/'-' : grow/shrink the caption HUD font live, and persist
+    it (matches the Caption tab's Font size slider, bounds 10–48). No-op unless
+    the caption HUD is on screen."""
+    if not _caption_visible():
+        return
+    cfg = _cfg() or {}
+    cur = max(8, int(cfg.get('caption_font_size', 20)))
+    new = max(10, min(48, cur + delta))
+    if new == cur:
+        return
+    cfg['caption_font_size'] = new
+    mw.addonManager.writeConfig(__name__, cfg)
+    _gtap_log(f"caption_font_size → {new}")
+    if _coherence_hud and _coherence_hud.isVisible():
+        # Live, animated resize (no full re-render → no typewriter replay, no
+        # blank flash). Pass the old size so the window glide is predicted, not
+        # measured mid-transition (which wobbled). Saved config keeps the next
+        # card's render in sync.
+        _coherence_hud.set_font_size(new, cur)
 
 
 def _start_key_tap() -> None:
@@ -821,6 +889,13 @@ def _start_key_tap() -> None:
                     _tab_held = True
                     _tab_used_combo = False
                     return None  # suppress Tab keydown while tracking
+                if _tab_held and kc in _CAP_FONT_KC:
+                    # Only claim '='/'-' when Shift is also held, so it's an
+                    # explicit Shift+Tab combo and doesn't eat plain Tab+=/-.
+                    if CG.CGEventGetFlags(event) & 0x20000:  # kCGEventFlagMaskShift
+                        _tab_used_combo = True
+                        _key_bridge.send_key.emit(kc)
+                        return None  # consume Shift+Tab+=/-
                 if _tab_held and kc in _GLOBAL_KC:
                     _tab_used_combo = True
                     _key_bridge.send_key.emit(kc)
@@ -874,11 +949,110 @@ def _start_key_tap() -> None:
 # Coherence mode — bottom-of-screen card HUD, toggled by Tab+\
 # ---------------------------------------------------------------------------
 
+# Caption HUD screen anchor: a 3x3 grid. row ∈ top/middle/bottom, col ∈
+# left/center/right, stored as "<row>-<col>" in config (coherence_position).
+# Tab+arrows nudge it a cell at a time; the settings grid picks a cell directly.
+_COH_ROWS = ("top", "middle", "bottom")
+_COH_COLS = ("left", "center", "right")
+# Glyphs for the settings grid selector, indexed [row][col].
+_COH_GLYPHS = (("↖", "↑", "↗"), ("←", "•", "→"), ("↙", "↓", "↘"))
+
+
+def _coherence_rc():
+    """(row, col) for the caption anchor, migrating the legacy single-word values
+    (bottom / top / topright) onto the 3x3 grid."""
+    raw = str(_cfg().get("coherence_position", "bottom-center") or "").lower()
+    raw = {"bottom": "bottom-center", "top": "top-center",
+           "topright": "top-right", "center": "middle-center"}.get(raw, raw)
+    row, _, col = raw.partition("-")
+    if row not in _COH_ROWS:
+        row = "bottom"
+    if col not in _COH_COLS:
+        col = "center"
+    return row, col
+
+
+def _coherence_narrow():
+    """Side columns (left/right) constrain width + word-wrap so the box hugs that
+    edge instead of spanning the screen like the centered column does."""
+    return _coherence_rc()[1] != "center"
+
+
+_fs_cache = {"t": 0.0, "v": False}  # short-TTL cache for _frontmost_fullscreen
+
+
+def _frontmost_fullscreen() -> bool:
+    """True when the FRONTMOST app's focused window is in macOS native fullscreen.
+
+    This is the ONLY reliable signal available from Anki's own process/Space:
+    every screen-geometry API (Qt availableGeometry, CGWindowList, NSScreen
+    visibleFrame) reports Anki's own desktop Space and never sees another app's
+    fullscreen. So we ask the Accessibility API (permission already granted for
+    the global hotkeys) for the frontmost window's AXFullScreen attribute.
+
+    When True → a bottom caption drops to the physical screen bottom (no Dock in
+    that Space); when False (desktop) → it clears the Dock. Cached ~0.4s. Any
+    failure degrades to False (Dock-clearing behavior)."""
+    now = _time.monotonic()
+    if now - _fs_cache["t"] < 0.4:
+        return _fs_cache["v"]
+    val = False
+    try:
+        if mw.isFullScreen():
+            val = True
+    except Exception:
+        pass
+    if not val:
+        try:
+            AX = ctypes.CDLL('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+            CF = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+            AX.AXUIElementCreateSystemWide.restype = c_void_p
+            AX.AXUIElementCopyAttributeValue.restype = c_int
+            AX.AXUIElementCopyAttributeValue.argtypes = [
+                c_void_p, c_void_p, ctypes.POINTER(c_void_p)]
+            CF.CFStringCreateWithCString.restype = c_void_p
+            CF.CFStringCreateWithCString.argtypes = [c_void_p, c_char_p, ctypes.c_uint32]
+            CF.CFBooleanGetValue.restype = c_bool
+            CF.CFBooleanGetValue.argtypes = [c_void_p]
+            CF.CFRelease.argtypes = [c_void_p]
+
+            def _cfstr(s):
+                return CF.CFStringCreateWithCString(None, s.encode(), 0x08000100)
+
+            def _attr(el, name):
+                out = c_void_p()
+                k = _cfstr(name)
+                err = AX.AXUIElementCopyAttributeValue(el, k, ctypes.byref(out))
+                CF.CFRelease(k)
+                return out.value if err == 0 else None
+
+            sysw = AX.AXUIElementCreateSystemWide()
+            if sysw:
+                app = _attr(sysw, "AXFocusedApplication")
+                if app:
+                    win = _attr(app, "AXFocusedWindow") or _attr(app, "AXMainWindow")
+                    if win:
+                        fsv = _attr(win, "AXFullScreen")
+                        if fsv:
+                            val = bool(CF.CFBooleanGetValue(fsv))
+                            CF.CFRelease(fsv)
+                        CF.CFRelease(win)
+                    CF.CFRelease(app)
+                CF.CFRelease(sysw)
+        except Exception as _e:
+            _gtap_log(f"_frontmost_fullscreen err: {_e}")
+            val = False
+    _fs_cache["t"] = now
+    _fs_cache["v"] = val
+    return val
+
+
 def _make_coherence_hud():
     from PyQt6.QtWidgets import QWidget, QVBoxLayout
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     from PyQt6.QtGui import QColor
-    from PyQt6.QtCore import QPropertyAnimation, QRect, QEasingCurve
+    from PyQt6.QtCore import (QPropertyAnimation, QRect, QEasingCurve,
+                              QAbstractAnimation)
     from ctypes import c_double
     import json as _json
 
@@ -900,98 +1074,340 @@ def _make_coherence_hud():
             )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            # Passive caption → click-through. The Qt attr covers the widget; the
+            # authoritative pass-through is setIgnoresMouseEvents in _apply_glass.
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self.setStyleSheet("background: transparent;")
             self._view = QWebEngineView(self)
             self._view.page().setBackgroundColor(QColor(0, 0, 0, 0))
             self._view.setStyleSheet("background: transparent;")
+            # Keep the page LIFECYCLE ACTIVE so the renderer paints even while Anki
+            # is a background app (the caption floats over another app / fullscreen).
+            # Otherwise Chromium suspends the background window's renderer and the
+            # caption shows blank — the old code masked this by activating Anki,
+            # which stole focus. Re-asserted in refresh() (Qt can drift it).
+            self._force_active()
+            # Allow the setHtml page (file:// base = the media folder) to actually
+            # load card images from disk; QtWebEngine can otherwise block file://
+            # subresources of setHtml content.
+            try:
+                from PyQt6.QtWebEngineCore import QWebEngineSettings as _QS
+                _s = self._view.settings()
+                _s.setAttribute(_QS.WebAttribute.LocalContentCanAccessFileUrls, True)
+                _s.setAttribute(_QS.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+            except Exception:
+                pass
             self._view.loadFinished.connect(self._on_loaded)
-            lay = QVBoxLayout(self)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.addWidget(self._view)
+            # NO layout: the web view is kept at a FIXED generous viewport pinned to
+            # the top-left, and the WINDOW is sized to the measured box (clipping the
+            # view). Decoupling the render viewport from the window keeps narrow-
+            # column word-wrap — and therefore the measured height — STABLE across
+            # the re-fit passes. (A layout would force view==window, so measuring at a
+            # stale narrower window over-estimated height → the window jumped up then
+            # settled back down when moving bottom-center → a corner.)
+            self._view.move(0, 0)
+            self._view.resize(*self._vp())
             self._session_max = [0, 0, 0]  # depletion tracking for deck pills
             # (left, top, w, h) of the visible .hud-bg box relative to the window
             # top-left, measured after each render. The window can be taller than
             # the box (inline layout leaves slack), so the red flare shapes itself
             # to this inset, not the whole window — otherwise it spills past the box.
             self._box_inset = None
+            self._target_geom = None   # settled target rect, for the caption flare
+            self._box_origin = (0, 0)  # measured (bx,by) of the box in the viewport
+            self._last_fs = None       # last frontmost-fullscreen state, _watch_space
+            # While the caption is up, re-anchor when the frontmost app enters/exits
+            # fullscreen (e.g. leaving the fullscreen app back to the desktop — the
+            # Dock reappears, so a bottom caption must lift above it).
+            from PyQt6.QtCore import QTimer as _QTimer
+            self._space_timer = _QTimer(self)
+            self._space_timer.setInterval(500)
+            self._space_timer.timeout.connect(self._watch_space)
 
-        def _reposition(self, w: int, h: int = 60, animate: bool = True):
-            avail  = mw.app.primaryScreen().availableGeometry()
-            pos    = _cfg().get('coherence_position', 'bottom')
-            if pos == 'topright':
+        def _watch_space(self):
+            if not self.isVisible():
+                return
+            fs = _frontmost_fullscreen()
+            if fs != self._last_fs:
+                self._last_fs = fs
+                # Re-anchor for the current box size. A no-op glide (start ==
+                # target) if the anchor didn't actually move.
+                self._reposition(self.width(), self.height())
+
+        def _vp(self):
+            """Fixed, generous render viewport for the web view. Width must exceed
+            any box (incl. the narrow-column max-width) so wrapping is viewport-
+            independent → stable measured height. Height only needs to be roomy;
+            getBoundingClientRect reports true layout height even past the viewport."""
+            avail = mw.app.primaryScreen().availableGeometry()
+            return max(2200, avail.width()), max(600, avail.height() // 2)
+
+        def _target_rect(self, w: int, h: int):
+            """The final on-screen rect for a measured box (w,h): width clamp per
+            column, x per column, y per row (bottom drops to the physical screen
+            bottom in a fullscreen Space, else clears the Dock)."""
+            avail = mw.app.primaryScreen().availableGeometry()
+            row, col = _coherence_rc()
+            # Side columns wrap to a narrower box so "left"/"right" actually hug the
+            # edge; the centered column grows to fit its content.
+            if col != 'center':
                 max_w = max(440, avail.width() * 3 // 8)
-                w = max(440, min(max_w, w))
-                h = max(40,  min(avail.height() // 3, h))
-                x = avail.x() + avail.width() - w - 16
-                y = avail.y() + 24
-            elif pos == 'top':
+                w = max(320, min(max_w, w))
+            else:
                 w = max(200, min(avail.width() - 80, w))
-                h = max(40,  min(avail.height() // 3, h))
+            h = max(40, min(avail.height() // 3, h))
+            _M = 16   # screen-edge margin
+            if col == 'left':
+                x = avail.x() + _M
+            elif col == 'right':
+                x = avail.x() + avail.width() - w - _M
+            else:
                 x = avail.x() + (avail.width() - w) // 2
+            if row == 'top':
                 y = avail.y() + 24
-            else:  # bottom (default)
-                w = max(200, min(avail.width() - 80, w))
-                h = max(40,  min(avail.height() // 3, h))
-                x = avail.x() + (avail.width() - w) // 2
-                y = avail.y() + avail.height() - h - 24
-            target = QRect(x, y, w, h)
-            self._view.setGeometry(0, 0, w, h)
+            elif row == 'bottom':
+                if _frontmost_fullscreen():
+                    # No Dock in a fullscreen Space → drop to the physical bottom.
+                    full = mw.app.primaryScreen().geometry()
+                    y = full.y() + full.height() - h - 8
+                else:
+                    # Desktop → clear the Dock via the available-area bottom.
+                    y = avail.y() + avail.height() - h - 24
+            else:  # middle
+                y = avail.y() + (avail.height() - h) // 2
+            return QRect(x, y, w, h)
+
+        def _reposition(self, w: int, h: int = 60, animate: bool = True,
+                        move: bool = False):
+            avail  = mw.app.primaryScreen().availableGeometry()
+            row = _coherence_rc()[0]
+            target = self._target_rect(w, h)
+            x, w, h = target.x(), target.width(), target.height()
+            # Publish the SETTLED target so the caption flare can shape to where the
+            # box is going, not its mid-animation rect. Read by PulseOverlay.
+            self._target_geom = target
+            # Keep the view at the fixed generous viewport, shifted so the measured
+            # box top-left lands at the window origin (0,0) — window shows EXACTLY
+            # the box, no empty strip above it.
+            ox, oy = getattr(self, '_box_origin', (0, 0))
+            self._view.move(-ox, -oy)
+            self._view.resize(*self._vp())
             cur = self.geometry()
-            off_screen = (cur.y() > avail.bottom()
-                          or cur.y() + cur.height() < avail.top())
-            # Only play the slide animation on the initial off-screen entry.
-            # A refresh while already on-screen (new card) just snaps to target,
-            # otherwise a width change drags the centered window sideways.
-            if animate and self.isVisible() and self.width() > 0 and off_screen:
-                # Snap start to the target x/width so the slide is purely vertical.
-                if pos == 'bottom':
-                    self.setGeometry(QRect(x, avail.bottom() + 10, w, h))
+            # "Off-screen" = outside the PHYSICAL screen, not the available area.
+            # In a fullscreen Space the caption legitimately sits below avail.bottom
+            # (there's no Dock there) — testing against avail.bottom() wrongly flagged
+            # the on-screen caption as off-screen, so every re-fit replayed the entry
+            # slide and moving to middle jumped to the top first.
+            _full = mw.app.primaryScreen().geometry()
+            off_screen = (cur.y() > _full.y() + _full.height()
+                          or cur.y() + cur.height() < _full.y())
+            # Cancel any in-flight geometry animation so rapid re-measures (image
+            # loads) and moves don't stack / fight.
+            prev = getattr(self, '_anim', None)
+            if prev is not None:
+                try:
+                    if (prev.state() == QAbstractAnimation.State.Running
+                            and prev.endValue() == target):
+                        return
+                except Exception:
+                    pass
+                try:
+                    prev.stop()
+                except Exception:
+                    pass
+                self._anim = None
+            if not (animate and self.isVisible() and self.width() > 0):
+                self.setGeometry(target)
+                return
+            if off_screen:
+                # Entry slide-in: the window was shown off-screen (below the
+                # physical bottom for a bottom anchor, above the top otherwise);
+                # start there at the measured width/x and slide vertically to target.
+                if row == 'bottom':
+                    full = mw.app.primaryScreen().geometry()
+                    self.setGeometry(QRect(x, full.y() + full.height() + 10, w, h))
                 else:
                     self.setGeometry(QRect(x, avail.top() - h - 10, w, h))
-                anim = QPropertyAnimation(self, b"geometry", self)
-                anim.setDuration(220)
-                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-                anim.setStartValue(self.geometry())
-                anim.setEndValue(target)
-                anim.start()
-                self._anim = anim
+                start, dur = self.geometry(), 240
             else:
-                self.setGeometry(target)
+                # Already on-screen: smoothly glide/resize from current geometry to
+                # target (Tab+arrow moves, card flip, late image, font-size change).
+                start, dur = cur, (200 if move else 170)
+            if start == target:
+                self.setGeometry(target)   # nothing changed → no needless animation
+                return
+            anim = QPropertyAnimation(self, b"geometry", self)
+            anim.setDuration(dur)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.setStartValue(start)
+            anim.setEndValue(target)
+            anim.start()
+            self._anim = anim
+
+        # Before measuring, strip TRAILING empty content from the card (the answer
+        # side of AnKing cards ends with empty extra-field wrappers / <br>s / a
+        # dangling Q-A separator that reserve big blank space at the bottom of the
+        # box). meaningful() = has text or real media; everything trailing that
+        # isn't gets removed, recursing into the last meaningful element to trim its
+        # own trailing <br>s. Then report the .hud-bg box rect.
+        _MEASURE_JS = (
+            "(function(){"
+            "function meaningful(n){"
+            "if(n.nodeType===3)return n.textContent.replace(/\\s+/g,'').length>0;"
+            "if(n.nodeType!==1)return false;"
+            "var t=n.tagName;"
+            "if(t==='IMG'||t==='SVG'||t==='CANVAS'||t==='VIDEO'||t==='AUDIO'||t==='TABLE')return true;"
+            "if(n.querySelector&&n.querySelector('img,svg,canvas,video,audio,table'))return true;"
+            "return n.textContent.replace(/\\s+/g,'').length>0;}"
+            "function trim(el){var n,g=0;while((n=el.lastChild)&&g++<800){"
+            "if(n.nodeType===3&&n.textContent.replace(/\\s+/g,'')===''){el.removeChild(n);continue;}"
+            "if(n.nodeType===1&&(n.tagName==='BR'||n.tagName==='HR')){el.removeChild(n);continue;}"
+            "if(n.nodeType===1&&!meaningful(n)){el.removeChild(n);continue;}"
+            "if(n.nodeType===1){trim(n);}break;}}"
+            "try{trim(document.getElementById('qa')||document.querySelector('.card-area')||document.body);}catch(e){}"
+            "var b=document.querySelector('.hud-bg');"
+            "var r=b?b.getBoundingClientRect():null;"
+            "var bh=r?Math.round(r.height):document.body.offsetHeight,ch=-1;"
+            # Recompute height from the DEEPEST real content (text/media) plus the
+            # card-area bottom padding — trailing empty / over-tall wrappers on the
+            # answer side otherwise reserve blank space the raw box rect includes.
+            # Only ever SHRINK (never grow past the real box).
+            "try{var qa=document.getElementById('qa')||document.querySelector('.card-area');"
+            "if(qa&&r){var top=r.top,maxB=top;"
+            # Skip out-of-flow (absolute/fixed) subtrees: they don't set the box's
+            # real height but can render far below it (e.g. an off-box helper element
+            # near the viewport bottom), which otherwise inflated the content height.
+            "function oof(el){var p=el;while(p&&p!==qa){var ps=getComputedStyle(p).position;"
+            "if(ps==='absolute'||ps==='fixed')return true;p=p.parentElement;}return false;}"
+            # media elements: use their own box bottom
+            "var md=qa.querySelectorAll('img,svg,canvas,video,audio,table,hr');"
+            "for(var i=0;i<md.length;i++){if(oof(md[i]))continue;var cr=md[i].getBoundingClientRect();"
+            "var mb=parseFloat(getComputedStyle(md[i]).marginBottom)||0;"
+            "if(cr.bottom+mb>maxB)maxB=cr.bottom+mb;}"
+            # text: measure the glyph bottom via a Range so a container's min-height
+            # / padding below the text doesn't count as content.
+            "var tw=document.createTreeWalker(qa,NodeFilter.SHOW_TEXT,null),tn,rng=document.createRange();"
+            "while((tn=tw.nextNode())){if(tn.textContent.replace(/\\s+/g,'').length===0)continue;"
+            "if(oof(tn.parentElement))continue;"
+            "rng.selectNodeContents(tn);var tr=rng.getBoundingClientRect();if(tr.bottom>maxB)maxB=tr.bottom;}"
+            "var ca=document.querySelector('.card-area');"
+            "var padB=ca?(parseFloat(getComputedStyle(ca).paddingBottom)||0):0;"
+            "ch=Math.ceil(maxB-top+padB);"
+            "if(ch>0&&ch<bh)bh=ch;}}catch(e){}"
+            "return JSON.stringify({w:document.body.offsetWidth,"
+            "h:document.body.offsetHeight,"
+            "bx:r?Math.round(r.left):0,by:r?Math.round(r.top):0,"
+            "bw:r?Math.round(r.width):document.body.offsetWidth,"
+            "bh:bh});})()")
+
+        def _fit(self):
+            """Measure the rendered box and size the window to it."""
+            if not self.isVisible():
+                return
+            self._view.page().runJavaScript(self._MEASURE_JS, self._apply_fit)
+
+        def _apply_fit(self, result):
+            if not self.isVisible():
+                return
+            # Size the window to the VISIBLE .hud-bg box (bw/bh), not the full
+            # <body> (w/h): body is display:inline-block wrapping an inline-flex
+            # box, so it carries a baseline gap BELOW the box that grows with
+            # font-size — that phantom strip looked like reserved room for a
+            # non-existent bottom section.
+            try:
+                d = _json.loads(result)
+                bw = int(d.get('bw') or 0)
+                bh = int(d.get('bh') or 0)
+                bx = int(d.get('bx') or 0)
+                by = int(d.get('by') or 0)
+                if bw > 0 and bh > 0:
+                    w, h = bw, bh
+                else:
+                    w, h, bx, by = int(d['w']), int(d['h']), 0, 0
+            except Exception:
+                w, h, bx, by = 500, 60, 0, 0
+            # The box may not sit flush at the viewport top-left (by>0). Pin it to
+            # the window origin by offsetting the view, so the window shows EXACTLY
+            # the box — otherwise there's `by` px of empty space above the box (and
+            # the flare, filling the window, glowed that far above the box top).
+            self._box_origin = (bx, by)
+            self._reposition(w, h)   # slides in off-screen→target, or glides on resize
+            # Window wraps the box exactly, so the flare inset is the whole window.
+            self._box_inset = (0, 0, w, h)
+            self._apply_glass()
+            # Re-shape a live flare (red / one-shot green) to the new box so it
+            # doesn't stay stuck at the previous size. No-ops for hidden overlays.
+            try:
+                if _card_timer_instance is not None:
+                    _card_timer_instance.reposition()
+            except Exception:
+                pass
+
+        def set_font_size(self, px: int, prev_px: int = 0):
+            """Live font-size change WITHOUT a full re-render: swap an injected
+            <style> so the glyphs ease to the new size (CSS transition above)
+            while the window glides to fit. Used by the Shift+Tab +/- caption
+            resize so it glides instead of snapping.
+
+            We must NOT measure the box mid-transition — getBoundingClientRect
+            returns the animating size, so re-fitting then chases a moving target
+            and the window wobbles back and forth. Instead PREDICT the settled
+            box (only the text scales; the chrome is fixed) and glide there once,
+            in step with the glyph transition; then reconcile with a single _fit
+            AFTER the transition has fully settled."""
+            if not self.isVisible():
+                return
+            css = (
+                ".hud-bg{{font-size:{px}px!important;}}"
+                "#qa,.card,.card-area,"
+                "#qa *:not(kbd):not(sub):not(sup),"
+                ".card *:not(kbd):not(sub):not(sup)"
+                "{{font-size:{px}px!important;}}"
+            ).format(px=int(px))
+            js = ("(function(){var s=document.getElementById('cap-fs-live');"
+                  "if(!s){s=document.createElement('style');s.id='cap-fs-live';"
+                  "document.head.appendChild(s);}s.textContent="
+                  + _json.dumps(css) + ";})()")
+            self._view.page().runJavaScript(js)
+            # Predicted glide: scale only the text portion of the box, leaving the
+            # fixed chrome (card-area padding + the deck-bars pill row) constant.
+            if prev_px and prev_px > 0:
+                ratio = px / float(prev_px)
+                cur = self.geometry()
+                _fixed_h = 2 * _PAD_H          # card-area L/R padding
+                _fixed_v = 2 * _PAD_V + 11     # card padding + deck-bars row (~11px)
+                w = round((cur.width()  - _fixed_h) * ratio) + _fixed_h
+                h = round((cur.height() - _fixed_v) * ratio) + _fixed_v
+                self._reposition(int(w), int(h))  # single OutCubic glide (~170ms)
+            # Reconcile exactly once, after the 170ms font transition settles, so
+            # this measures the STATIC box — a single small correction, no wobble.
+            QTimer.singleShot(210, self._fit)
 
         def _on_loaded(self, _ok):
             if not self.isVisible():
                 return
-            # Measure natural content size, then snap the window to fit exactly.
-            def _resize(result):
-                if not self.isVisible():
-                    return
-                try:
-                    d = _json.loads(result)
-                    w = int(d['w'])
-                    h = int(d['h'])
-                except Exception:
-                    w, h = 500, 60
-                self._reposition(w, h)
-                # Record the visible box's offset within the window so the flare
-                # can hug it exactly (window ⊇ box vertically). Stored as an inset
-                # applied to the live window position at flare time.
-                try:
-                    self._box_inset = (int(d['bx']), int(d['by']),
-                                       int(d['bw']), int(d['bh']))
-                except Exception:
-                    self._box_inset = None
-                self._apply_glass()
-            self._view.page().runJavaScript(
-                "(function(){var b=document.querySelector('.hud-bg');"
-                "var r=b?b.getBoundingClientRect():null;"
-                "return JSON.stringify({w:document.body.offsetWidth,"
-                "h:document.body.offsetHeight,"
-                "bx:r?Math.round(r.left):0,by:r?Math.round(r.top):0,"
-                "bw:r?Math.round(r.width):document.body.offsetWidth,"
-                "bh:r?Math.round(r.height):document.body.offsetHeight});})()",
-                _resize)
+            # Fit now, then re-fit as async images/fonts settle — a late-loading
+            # image would otherwise be clipped by an under-measured box (looked like
+            # the bottom of the card was cut off). Re-fits that find no size change
+            # are no-ops; genuine growth animates smoothly (see _reposition).
+            self._fit()
+            QTimer.singleShot(160, self._fit)
+            QTimer.singleShot(480, self._fit)
 
-        def refresh(self):
+        def _force_active(self):
+            """Force the WebEngine page lifecycle to Active so it keeps rendering
+            while Anki is a background app (else the caption paints blank over
+            another window/fullscreen). Best-effort across Qt versions."""
+            try:
+                from PyQt6.QtWebEngineCore import QWebEnginePage as _QP
+                self._view.page().setLifecycleState(_QP.LifecycleState.Active)
+            except Exception as _e:
+                _gtap_log(f"force_active err: {_e}")
+
+        def refresh(self, animate_text=True):
+            self._force_active()
+            # animate_text=False for re-renders that aren't a new card/side (moving
+            # the HUD, settings tweaks) so the typewriter reveal doesn't replay.
             r    = getattr(mw, 'reviewer', None)
             card = getattr(r, 'card', None)
             if not card:
@@ -1009,7 +1425,7 @@ def _make_coherence_hud():
                     card_css = ''
 
             tw_js = (_typewriter_head(_cfg())
-                     if _cfg().get("typewriter", True) else "")
+                     if (animate_text and _cfg().get("typewriter", True)) else "")
 
             # Deck counts — fixed-width depletion pills
             try:
@@ -1027,18 +1443,47 @@ def _make_coherence_hud():
             _fw_lrn   = int(_PILL_W * _lc / _denom)
             _fw_rev   = int(_PILL_W * _rc / _denom)
 
-            # Position-aware content constraint (topright needs word-wrap)
-            _pos = _cfg().get('coherence_position', 'bottom')
+            # Position-aware content constraint (side columns need word-wrap)
+            _narrow = _coherence_narrow()
             _avail = mw.app.primaryScreen().availableGeometry()
-            if _pos == 'topright':
+            # Caption text alignment (settings: left / center / right).
+            _align = (_cfg().get('caption_align', 'center') or 'center').lower()
+            _ja = {'left': 'flex-start', 'right': 'flex-end'}.get(_align, 'center')
+            _ta = _align if _align in ('left', 'right') else 'center'
+            # Match the reviewer's card font so caption text uses the app serif
+            # (the HUD is a separate webview and otherwise falls back to the
+            # note-type / system sans font — "fonts not working" in caption mode).
+            _cap_font = _cfg().get('card_font', 'Anthropic Serif Text')
+            # Caption text + image size (settings sliders).
+            _cap_fs = max(8, int(_cfg().get('caption_font_size', 20)))
+            _cap_img = max(80, int(_cfg().get('caption_image_max', 480)))
+            _cap_img_h = max(40, int(_cap_img / 3))   # keep the ~3:1 height cap
+            if _narrow:
                 _max_content_w = max(440, _avail.width() * 3 // 8) - _PAD_H * 2
                 _body_w_css = f"max-width:{_max_content_w}px; word-wrap:break-word;"
                 _hud_max_w  = max(440, _avail.width() * 3 // 8)
             else:
+                # Centered column may span nearly the full screen width — short
+                # captions still shrink-to-fit (max-content), long ones can now grow
+                # well past the old 1400px cap before wrapping.
                 _body_w_css = "width:max-content;"
-                _hud_max_w  = 1400
+                _hud_max_w  = max(1400, _avail.width() - 80)
+
+            # Resolve relative <img src="foo.jpg"> against the collection media
+            # folder, exactly like the reviewer. Without a base URL, setHtml has an
+            # empty origin and card images never load (caption showed no photos).
+            from PyQt6.QtCore import QUrl
+            try:
+                _mdir = mw.col.media.dir() if mw.col else None
+                _base = QUrl.fromLocalFile(_mdir + os.sep) if _mdir else QUrl()
+            except Exception:
+                _base = QUrl()
 
             self._view.stop()
+            # Render into the fixed generous viewport so the FIRST measure already
+            # sees final wrapping (no measure-at-stale-width → up-then-down jump).
+            self._view.move(0, 0)
+            self._view.resize(*self._vp())
             self._view.setHtml(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 {tw_js}
@@ -1049,6 +1494,9 @@ body {{
   display: inline-block;
   {_body_w_css}
   margin: 0; padding: 0;
+  /* Collapse the inline-block baseline/descender gap below the box (.hud-bg sets
+     its own line-height) so body height == box height — no phantom bottom strip. */
+  line-height: 0;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }}
 .hud-bg {{
@@ -1077,8 +1525,8 @@ body {{
   flex-shrink: 0;
 }}
 .card-area {{
-  display: flex; align-items: center; justify-content: center;
-  text-align: center;
+  display: flex; align-items: center; justify-content: {_ja};
+  text-align: {_ta};
   padding: {_PAD_V}px {_PAD_H}px;
 }}
 {card_css}
@@ -1092,19 +1540,48 @@ body {{
 }}
 .hud-bg {{
   background: rgba(16,16,22,0.72) !important;
-  font-size: 20px !important;
+  font-size: {_cap_fs}px !important;
   line-height: 1.4 !important;
   padding: 0 !important;
 }}
-.card-area {{ padding: {_PAD_V}px {_PAD_H}px !important; }}
+.card-area {{ padding: {_PAD_V}px {_PAD_H}px !important;
+  justify-content: {_ja} !important; text-align: {_ta} !important; }}
+/* App card serif in the HUD (note-type CSS is injected above and would
+   otherwise set its own font). kbd/shortcut keys left alone. */
+#qa, .card, .card-area, #qa *:not(kbd), .card *:not(kbd) {{
+  font-family: "{_cap_font}", -apple-system, Georgia, serif !important;
+}}
+/* Caption font-size slider. Force ALL card text to the chosen size (the AnKing
+   "Extra" field etc. set their own larger font-size, which the container-only
+   rule didn't override). Exclude kbd (shortcut keys) and sub/sup so those keep
+   their relative sizing (e.g. chemistry subscripts). */
+#qa, .card, .card-area,
+#qa *:not(kbd):not(sub):not(sup), .card *:not(kbd):not(sub):not(sup) {{
+  font-size: {_cap_fs}px !important;
+}}
+/* Smooth glyph scaling when the font size is nudged live (Shift+Tab +/-). The
+   size itself is swapped by an injected <style id="cap-fs-live"> (see
+   HUD.set_font_size); this transition eases the change instead of snapping. */
+.hud-bg,
+#qa, .card, .card-area,
+#qa *:not(kbd):not(sub):not(sup), .card *:not(kbd):not(sub):not(sup) {{
+  transition: font-size 170ms ease !important;
+}}
 .deck-bars {{ padding: 5px 0 3px 0 !important; gap: 8px !important; }}
 .pill {{ background: rgba(255,255,255,0.08) !important; padding: 0 !important; margin: 0 !important; }}
 .fill-new {{ display:block; height:100%; width:{_fw_new}px; background:rgba(91,158,248,0.7) !important; border-radius:2px; }}
 .fill-lrn {{ display:block; height:100%; width:{_fw_lrn}px; background:rgba(248,113,113,0.7) !important; border-radius:2px; }}
 .fill-rev {{ display:block; height:100%; width:{_fw_rev}px; background:rgba(74,222,128,0.7) !important; border-radius:2px; }}
 #qa {{ display: block; }}
-img {{ max-width: 480px !important; max-height: 160px !important;
-       object-fit: contain !important; }}
+img {{ max-width: min({_cap_img}px, 100%) !important; max-height: {_cap_img_h}px !important;
+       object-fit: contain !important;
+       /* block (not inline) so the bottom margin actually adds layout height —
+          inline images ignore vertical margins. Centered; the height measure adds
+          this margin back in so it isn't trimmed away. margin-TOP stays 0: image-
+          occlusion masks are absolutely positioned, and a top margin would shift
+          them down and expose the top of the answer. No opacity, for the same
+          reason (translucent masks would reveal what's under them). */
+       display: block !important; margin: 0 auto 14px auto !important; }}
 /* Lists: keep items left-aligned (bullets + wrapped lines line up), but let
    the list box shrink-to-fit and center as a block, so a left-aligned list
    reads centered on the fullscreen HUD instead of hugging the left edge. */
@@ -1119,6 +1596,9 @@ img {{ max-width: 480px !important; max-height: 160px !important;
    card's own countdown (.timer) — and its tags — in the HUD. */
 .timer, #timer,
 #tags-container, .tags-container, .tags {{ display: none !important; }}
+/* Hide Anki's Q/A separator (<hr id=answer>) in the caption — it read as a
+   stray underline and isn't needed here. */
+hr, #answer {{ display: none !important; }}
 </style></head>
 <body><div class="hud-bg">
   <div class="deck-bars">
@@ -1127,7 +1607,7 @@ img {{ max-width: 480px !important; max-height: 160px !important;
     <div class="pill"><div class="fill-rev"></div></div>
   </div>
   <div class="card-area"><div id="qa" class="card">{body}</div></div>
-</div></body></html>""")
+</div></body></html>""", _base)
 
         def _apply_glass(self):
             try:
@@ -1147,16 +1627,24 @@ img {{ max-width: 480px !important; max-height: 160px !important;
                 #   it ties the window to its OWN app's fullscreen — so it's gone.
                 is_panel = msg(c_bool, ns_win, b"isKindOfClass:",
                                (c_void_p,), (cls("NSPanel"),))
+                # The NON-ACTIVATING style bit (128) is REQUIRED to cross into
+                # another app's fullscreen Space. Re-assert it, but ONLY when it's
+                # actually missing — calling setStyleMask rebuilds the window frame
+                # and cycles resignKey/becomeKey (the focus churn), so we must not
+                # do it redundantly. Checking the current mask makes this idempotent
+                # by value: set once when Qt hasn't applied it (or reset it), skip
+                # otherwise. The cheaper flags below don't rebuild the frame.
                 if is_panel:
-                    cur_mask = msg(c_ulong, ns_win, b"styleMask")
-                    # NSWindowStyleMaskNonactivatingPanel = 1 << 7 = 128
-                    msg(None, ns_win, b"setStyleMask:", (c_ulong,),
-                        (int(cur_mask) | 128,))
+                    cur_mask = int(msg(c_ulong, ns_win, b"styleMask"))
+                    if not (cur_mask & 128):  # NSWindowStyleMaskNonactivatingPanel
+                        msg(None, ns_win, b"setStyleMask:", (c_ulong,),
+                            (cur_mask | 128,))
                     msg(None, ns_win, b"setFloatingPanel:", (c_bool,), (True,))
                     msg(None, ns_win, b"setBecomesKeyOnlyIfNeeded:",
                         (c_bool,), (True,))
-                    # Default NSPanel hides when the app deactivates — i.e. the
-                    # instant you switch to the other fullscreen app. Keep it up.
+                    # CRITICAL: a default NSPanel HIDES when its app deactivates —
+                    # i.e. the moment you switch away from Anki. That made the
+                    # caption vanish whenever Anki lost focus. Keep it visible.
                     msg(None, ns_win, b"setHidesOnDeactivate:", (c_bool,),
                         (False,))
                 # NSStatusWindowLevel = 25 (above the menu bar, below the
@@ -1166,6 +1654,11 @@ img {{ max-width: 480px !important; max-height: 160px !important;
                     (1 | 16,))
                 msg(c_void_p, ns_win, b"setOpaque:", (c_bool,), (False,))
                 msg(c_void_p, ns_win, b"setHasShadow:", (c_bool,), (False,))
+                # Click-through: the caption is a passive read-out, so let every
+                # mouse event fall through to the app underneath. Done at the
+                # NSWindow level because Qt's WA_TransparentForMouseEvents doesn't
+                # reliably cover the QWebEngineView's own native surface.
+                msg(None, ns_win, b"setIgnoresMouseEvents:", (c_bool,), (True,))
                 msg(c_void_p, ns_win, b"setBackgroundColor:", (c_void_p,),
                     (msg(c_void_p, cls("NSColor"), b"clearColor"),))
                 # Clip the composited content to a rounded rect at the CALayer level.
@@ -1186,11 +1679,15 @@ img {{ max-width: 480px !important; max-height: 160px !important;
 
         def toggle(self):
             if self.isVisible():
-                if hasattr(self, '_anim'):
+                if getattr(self, '_anim', None) is not None:
                     self._anim.stop()
                     self._anim = None
+                self._space_timer.stop()
                 self.hide()
-                if not mw.isMinimized() and mw.isVisible():
+                # Only pull Anki back to the front if it was already the focused
+                # app. If the user is working in another app, closing the caption
+                # (Tab+\) must NOT steal focus back to Anki.
+                if _anki_focused and not mw.isMinimized() and mw.isVisible():
                     mw.activateWindow()
             else:
                 # Start off-screen in the slide-in direction.
@@ -1199,28 +1696,64 @@ img {{ max-width: 480px !important; max-height: 160px !important;
                 # The view's geometry is set wider than the window so the
                 # viewport is spacious enough to measure natural content width.
                 avail  = mw.app.primaryScreen().availableGeometry()
-                pos    = _cfg().get('coherence_position', 'bottom')
-                vp_w   = max(440, avail.width() * 3 // 8) if pos == 'topright' else 2000
-                init_w = vp_w if pos == 'topright' else min(400, avail.width() - 80)
-                cx     = avail.x() + (avail.width() - init_w) // 2
-                if pos in ('top', 'topright'):
-                    self.setGeometry(cx, avail.y() - 300, init_w, 200)
+                row, col = _coherence_rc()
+                narrow = col != 'center'
+                vp_w   = max(440, avail.width() * 3 // 8) if narrow else 2000
+                init_w = vp_w if narrow else min(400, avail.width() - 80)
+                # Start off-screen at the TARGET column's x (not centered) so the
+                # slide-in is purely vertical — otherwise a corner anchor first
+                # flashed centered, then jumped sideways to the corner.
+                _M = 16
+                if col == 'left':
+                    ix = avail.x() + _M
+                elif col == 'right':
+                    ix = avail.x() + avail.width() - init_w - _M
                 else:
-                    self.setGeometry(cx, avail.bottom() + 10, init_w, 60)
-                self._view.setGeometry(0, 0, vp_w, 200)
-                self.show()
-                # Wake the WebEngine renderer — it suspends when NSApp is not
-                # active. Delay refresh so the renderer is actually running
-                # before we hand it HTML (avoids blank-on-reopen).
+                    ix = avail.x() + (avail.width() - init_w) // 2
+                # Slide in from the bottom edge for a bottom anchor, else the top.
+                # Start BELOW the physical screen bottom (not avail.bottom(), which
+                # sits above the Dock and left the placeholder — sized with a GUESS
+                # width — briefly visible; for center/right its x depends on width,
+                # so it flashed at the wrong x then jumped to the real-width x).
+                _full = mw.app.primaryScreen().geometry()
+                if row == 'bottom':
+                    self.setGeometry(ix, _full.y() + _full.height() + 10, init_w, 60)
+                else:
+                    self.setGeometry(ix, avail.y() - 300, init_w, 200)
+                self._view.move(0, 0)
+                self._view.resize(*self._vp())
+                # Apply the non-activating NSPanel style (style bit 128,
+                # becomesKeyOnlyIfNeeded, level, CanJoinAllSpaces) BEFORE the first
+                # show(). _apply_glass otherwise runs only after the first render,
+                # so the very first show ordered a not-yet-nonactivating panel to
+                # the front and stole focus from a fullscreen app. winId() forces
+                # native-window creation, so the NSPanel exists to configure here.
                 try:
-                    _msg, _cls = _bridge()
-                    _ns_app = _msg(c_void_p, _cls(b"NSApplication"),
-                                   b"sharedApplication")
-                    _msg(c_void_p, _ns_app,
-                         b"activateIgnoringOtherApps:", (c_bool,), (True,))
+                    self._apply_glass()
                 except Exception:
                     pass
-                QTimer.singleShot(80, self.refresh)
+                self.show()  # Tool/NSPanel + WA_ShowWithoutActivating → no focus steal
+                self._last_fs = None       # re-evaluate the anchor fresh this open
+                self._space_timer.start()  # re-anchor on fullscreen↔desktop changes
+                # Wake the WebEngine renderer before handing it HTML (avoids
+                # blank-on-reopen). Activating NSApp is the surest wake, but it
+                # steals focus — so ONLY do it when Anki is already frontmost. When
+                # another app is focused we must NOT activate; we rely on the launch
+                # wrapper's --disable-renderer-backgrounding flags keeping the
+                # renderer awake, and add a defensive second refresh.
+                if _anki_focused:
+                    try:
+                        _msg, _cls = _bridge()
+                        _ns_app = _msg(c_void_p, _cls(b"NSApplication"),
+                                       b"sharedApplication")
+                        _msg(c_void_p, _ns_app,
+                             b"activateIgnoringOtherApps:", (c_bool,), (True,))
+                    except Exception:
+                        pass
+                    QTimer.singleShot(80, self.refresh)
+                else:
+                    QTimer.singleShot(80, self.refresh)
+                    QTimer.singleShot(260, lambda: self.refresh(animate_text=False))
 
     return HUD()
 
@@ -1240,6 +1773,30 @@ _menu_fade_token = 1
 def _arm_menu_fade():
     global _menu_fade_token
     _menu_fade_token += 1
+
+
+def _nudge_coherence(dr, dc):
+    """Tab+arrow: move the caption HUD one cell across the 3x3 screen grid, clamped
+    at the edges. A pure move (same width class) glides; crossing into/out of the
+    centered column re-renders because the wrap width changes."""
+    row, col = _coherence_rc()
+    ri = max(0, min(2, _COH_ROWS.index(row) + dr))
+    ci = max(0, min(2, _COH_COLS.index(col) + dc))
+    new_pos = f"{_COH_ROWS[ri]}-{_COH_COLS[ci]}"
+    old_narrow = (col != 'center')
+    cfg = _cfg() or {}
+    cfg['coherence_position'] = new_pos
+    mw.addonManager.writeConfig(__name__, cfg)
+    _gtap_log(f"coherence_position → {new_pos}")
+    if _coherence_hud and _coherence_hud.isVisible():
+        if (_COH_COLS[ci] != 'center') != old_narrow:
+            # wrap width changed → re-render + reposition (no typewriter replay:
+            # it's the same card, just a new position)
+            _coherence_hud.refresh(animate_text=False)
+        else:
+            _coherence_hud._reposition(_coherence_hud.width(),
+                                       _coherence_hud.height(),
+                                       animate=True, move=True)
 
 
 def _toggle_coherence():
@@ -1278,9 +1835,9 @@ def _toggle_coherence():
         pass
 
 
-def _coherence_refresh():
+def _coherence_refresh(animate_text=True):
     if _coherence_hud and _coherence_hud.isVisible():
-        _coherence_hud.refresh()
+        _coherence_hud.refresh(animate_text=animate_text)
 
 
 def _caption_visible():
@@ -2227,18 +2784,17 @@ def _make_card_timer():
             # above the box and the glow spills above it.
             try:
                 if _caption_visible():
-                    hg = _coherence_hud.geometry()
-                    ins = getattr(_coherence_hud, "_box_inset", None)
-                    if ins:
-                        # Live window position + measured box offset → hug the box.
-                        bx, by, bw, bh = ins
-                        x = hg.x() + bx; y = hg.y() + by
-                        w = min(bw, hg.width()); h = min(bh, hg.height())
-                    else:
-                        x, y, w, h = hg.x(), hg.y(), hg.width(), hg.height()
-                    if w > 0 and h > 0:
+                    # The HUD window is sized exactly to the visible box (see
+                    # _vp / _apply_fit), so the flare is simply the whole HUD window.
+                    # Prefer the HUD's SETTLED target rect over its live geometry:
+                    # while the box is mid-resize (bottom-anchored), the live rect's
+                    # top hasn't moved yet, which left the flare a few px above the
+                    # top once the box settled.
+                    hg = getattr(_coherence_hud, '_target_geom', None) \
+                        or _coherence_hud.geometry()
+                    if hg.width() > 0 and hg.height() > 0:
                         self._radius = 16.0   # matches HUD _RADIUS
-                        self.setGeometry(x, y, w, h)
+                        self.setGeometry(hg.x(), hg.y(), hg.width(), hg.height())
                         return
             except Exception:
                 pass
@@ -2481,10 +3037,17 @@ def _make_card_timer():
                 # counting down from the moment the tip actually closes.
                 self._cooldown_until = now + float(
                     _cfg().get("card_timer_flare_cooldown_s", 2.0))
+            # Caption mode can suppress the flare entirely (setting) — the HUD is a
+            # small reading surface and the edge glow is often unwanted there.
+            caption_up = _caption_visible()
+            if caption_up and not bool(_cfg().get("caption_flare", True)):
+                if self._overlay.isVisible():
+                    self._overlay.set_active(False)
+                return
             # The flare lives on the caption HUD when it's up, otherwise on the
             # main window — so only show it when its host is actually on screen
             # (never against a minimized main window).
-            host_on_screen = _caption_visible() or _main_on_screen()
+            host_on_screen = caption_up or _main_on_screen()
             show = (self._red_wanted and not self._tip_open and now >= self._cooldown_until
                     and not _break_tint_active and not _pomo_on_break
                     and host_on_screen)
@@ -2541,6 +3104,8 @@ def _make_card_timer():
                 return
             _c = _cfg()
             if not bool(_c.get("card_timer_green_flare", True)):
+                return
+            if _caption_visible() and not bool(_c.get("caption_flare", True)):
                 return
             if _break_tint_active or _pomo_on_break:
                 return
@@ -3399,6 +3964,263 @@ def _stop_gamepad_poll():
 
 
 # ---------------------------------------------------------------------------
+# Focus-INDEPENDENT controller via IOKit HID  (the real path for caption mode)
+# ---------------------------------------------------------------------------
+# GameController (above) is focus-gated on macOS: it won't deliver input to a
+# backgrounded app, so it can't drive Anki while another app is focused/full-
+# screen (see feedback-ankiglass-gamepad). IOHIDManager reads raw device reports
+# off a dedicated CFRunLoop thread, independent of focus — like Karabiner. This
+# is the infrastructure for controller-in-caption-mode.
+#
+# Requires the INPUT MONITORING permission (System Settings > Privacy & Security
+# > Input Monitoring > Anki); macOS prompts on the first IOHIDManagerOpen.
+#
+# Button numbers here are RAW HID usages (Button usage page 0x09, usage = button
+# index), which differ from GameController's logical buttons AND are device-
+# specific. So this LOGS every button ("[hid] button N ...") to discover the
+# mapping, and reads the number->keycode map from config `hid_button_kc`, e.g.
+#   "hid_button_kc": {"1": 18, "2": 19, "3": 20, "4": 21}
+# (kc 18-21 = reviewer keys 1-4 = Again/Hard/Good/Easy). Forwarding is gated the
+# same way as the GC poller: a card is up (_remote_active) AND Anki is not the
+# focused app (_anki_focused) — i.e. exactly caption/background mode, so we never
+# double-fire with Contanki.
+_hid_manager = None
+_hid_cb_ref = None            # keep the CFUNCTYPE callback object alive
+_hid_thread = None
+_hid_shutting_down = False
+_hid_last = {}                # button usage -> last integer value (edge detect)
+_hid_axis_last = {}           # d-pad axis usage -> last quantized pos (0/127/255)
+_hid_runloop = None           # bg thread's CFRunLoop (so teardown can stop it)
+_hid_cf = None                # CoreFoundation handle (for CFRunLoopStop at exit)
+_HID_USAGE_PAGE_BUTTON = 0x09
+
+
+def _hid_button_map():
+    """config hid_button_kc (JSON keys are strings) -> {int button: int keycode}."""
+    raw = _cfg().get("hid_button_kc", {}) or {}
+    out = {}
+    for k, v in raw.items():
+        try:
+            out[int(k)] = int(v)
+        except Exception:
+            pass
+    return out
+
+
+def _start_hid_monitor():
+    """Open an IOHIDManager matching gamepads/joysticks and forward their button
+    presses to the reviewer from a background CFRunLoop thread. No-op unless the
+    `hid_controller` config flag is on."""
+    global _hid_manager, _hid_cb_ref, _hid_thread, _hid_shutting_down, _hid_cf
+    if sys.platform != 'darwin' or _hid_thread is not None:
+        return
+    if not _cfg().get("hid_controller", False):
+        return
+    import threading
+    try:
+        IOKit = ctypes.CDLL('/System/Library/Frameworks/IOKit.framework/IOKit')
+        CF = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    except Exception as e:
+        _gtap_log(f"[hid] framework load: {e}")
+        return
+    try:
+        # --- ctypes signatures. Pointer returns MUST be c_void_p or ctypes
+        #     truncates the 64-bit pointer and CoreFoundation PAC-checks crash. ---
+        IOKit.IOHIDManagerCreate.restype = c_void_p
+        IOKit.IOHIDManagerCreate.argtypes = [c_void_p, ctypes.c_uint32]
+        IOKit.IOHIDManagerSetDeviceMatchingMultiple.argtypes = [c_void_p, c_void_p]
+        IOKit.IOHIDManagerRegisterInputValueCallback.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerScheduleWithRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerOpen.restype = ctypes.c_uint32
+        IOKit.IOHIDManagerOpen.argtypes = [c_void_p, ctypes.c_uint32]
+        IOKit.IOHIDValueGetElement.restype = c_void_p
+        IOKit.IOHIDValueGetElement.argtypes = [c_void_p]
+        IOKit.IOHIDValueGetIntegerValue.restype = c_long
+        IOKit.IOHIDValueGetIntegerValue.argtypes = [c_void_p]
+        IOKit.IOHIDElementGetUsagePage.restype = ctypes.c_uint32
+        IOKit.IOHIDElementGetUsagePage.argtypes = [c_void_p]
+        IOKit.IOHIDElementGetUsage.restype = ctypes.c_uint32
+        IOKit.IOHIDElementGetUsage.argtypes = [c_void_p]
+
+        CF.CFNumberCreate.restype = c_void_p
+        CF.CFNumberCreate.argtypes = [c_void_p, c_int, c_void_p]
+        CF.CFStringCreateWithCString.restype = c_void_p
+        CF.CFStringCreateWithCString.argtypes = [c_void_p, c_char_p, ctypes.c_uint32]
+        CF.CFDictionaryCreate.restype = c_void_p
+        CF.CFDictionaryCreate.argtypes = [c_void_p, ctypes.POINTER(c_void_p),
+                                          ctypes.POINTER(c_void_p), c_long,
+                                          c_void_p, c_void_p]
+        CF.CFArrayCreate.restype = c_void_p
+        CF.CFArrayCreate.argtypes = [c_void_p, ctypes.POINTER(c_void_p), c_long, c_void_p]
+        CF.CFRunLoopGetCurrent.restype = c_void_p
+        CF.CFRunLoopStop.argtypes = [c_void_p]
+        IOKit.IOHIDManagerUnscheduleFromRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerClose.restype = ctypes.c_uint32
+        IOKit.IOHIDManagerClose.argtypes = [c_void_p, ctypes.c_uint32]
+
+        kCFStringEncodingUTF8 = 0x08000100
+        kCFNumberIntType = 9
+        # Addresses of CF's global callback structs (needed to build typed
+        # CFDictionary / CFArray). c_char.in_dll gives the first byte of the
+        # struct; addressof → the struct's address.
+        kKeyCB = ctypes.addressof(ctypes.c_char.in_dll(CF, 'kCFTypeDictionaryKeyCallBacks'))
+        kValCB = ctypes.addressof(ctypes.c_char.in_dll(CF, 'kCFTypeDictionaryValueCallBacks'))
+        kArrCB = ctypes.addressof(ctypes.c_char.in_dll(CF, 'kCFTypeArrayCallBacks'))
+        kMode = c_void_p.in_dll(CF, 'kCFRunLoopDefaultMode').value
+
+        def _cfstr(s):
+            return CF.CFStringCreateWithCString(None, s, kCFStringEncodingUTF8)
+
+        def _cfnum(n):
+            v = c_int(n)
+            return CF.CFNumberCreate(None, kCFNumberIntType, ctypes.byref(v))
+
+        def _match_dict(usage_page, usage):
+            keys = (c_void_p * 2)(_cfstr(b"DeviceUsagePage"), _cfstr(b"DeviceUsage"))
+            vals = (c_void_p * 2)(_cfnum(usage_page), _cfnum(usage))
+            return CF.CFDictionaryCreate(None, keys, vals, 2,
+                                         c_void_p(kKeyCB), c_void_p(kValCB))
+
+        # Match gamepads (Generic Desktop usage 5) and joysticks (usage 4).
+        items = (c_void_p * 2)(_match_dict(1, 5), _match_dict(1, 4))
+        matches = CF.CFArrayCreate(None, items, 2, c_void_p(kArrCB))
+
+        mgr = IOKit.IOHIDManagerCreate(None, 0)
+        if not mgr:
+            _gtap_log("[hid] IOHIDManagerCreate returned NULL")
+            return
+        IOKit.IOHIDManagerSetDeviceMatchingMultiple(mgr, matches)
+
+        HIDCB = ctypes.CFUNCTYPE(None, c_void_p, ctypes.c_uint32, c_void_p, c_void_p)
+
+        def _on_value(context, result, sender, value):
+            # Runs on the background CFRunLoop thread. Only touch plain Python
+            # globals + the thread-safe Qt signal here — NO AppKit (not thread
+            # safe); the focus gate uses the _anki_focused bool tracked on the
+            # main thread.
+            if _hid_shutting_down or not value:
+                return
+            try:
+                elem = IOKit.IOHIDValueGetElement(value)
+                if not elem:
+                    return
+                page = int(IOKit.IOHIDElementGetUsagePage(elem))
+                if page != _HID_USAGE_PAGE_BUTTON:
+                    u = int(IOKit.IOHIDElementGetUsage(elem))
+                    iv = int(IOKit.IOHIDValueGetIntegerValue(value))
+                    # DISCOVERY: log non-button elements (hat switch / d-pad axes
+                    # live on the Generic Desktop page 0x01) on value change so we
+                    # can map the D-pad. Deduped to avoid axis spam. Temporary.
+                    if _cfg().get("hid_discover", False):
+                        k = (page, u)
+                        if _hid_last.get(k) != iv:
+                            _hid_last[k] = iv
+                            _gtap_log(f"[hid] discover page=0x{page:x} "
+                                      f"usage=0x{u:x} value={iv}")
+                    # D-pad → move the caption around the 3x3 grid. The Zero 2
+                    # reports its D-pad as Generic Desktop (0x01) X/Y axes: 0 and
+                    # 255 at the extremes, 127 at rest. Fire the matching arrow
+                    # keycode on the EDGE into an extreme (not on release, not
+                    # repeatedly). Arrows are handled by _send_key_to_anki →
+                    # _nudge_coherence (126=up 125=down 123=left 124=right).
+                    if page == 0x01 and u in (0x30, 0x31):
+                        cur = 0 if iv < 64 else (255 if iv > 191 else 127)
+                        if _hid_axis_last.get(u) != cur:
+                            _hid_axis_last[u] = cur
+                            if cur != 127:
+                                if u == 0x31:
+                                    kc = 126 if cur == 0 else 125
+                                else:
+                                    kc = 123 if cur == 0 else 124
+                                fwd = bool(_remote_active and not _anki_focused)
+                                _gtap_log(f"[hid] dpad kc={kc} fwd={fwd}")
+                                if fwd:
+                                    _key_bridge.send_key.emit(kc)
+                    return
+                usage = int(IOKit.IOHIDElementGetUsage(elem))
+                ival = int(IOKit.IOHIDValueGetIntegerValue(value))
+                last = _hid_last.get(usage)
+                _hid_last[usage] = ival
+                if ival == 1 and last != 1:   # rising edge = button down
+                    fwd = bool(_remote_active and not _anki_focused)
+                    _gtap_log(f"[hid] button {usage} press fwd={fwd} "
+                              f"remote={_remote_active} focused={_anki_focused}")
+                    if fwd:
+                        kc = _hid_button_map().get(usage)
+                        if kc is not None:
+                            # Rating keys use the reveal-first two-press flow (a
+                            # question-side press flips the card, the next rates);
+                            # everything else (e.g. caption toggle) sends plain.
+                            sig = (_key_bridge.send_key_rf if kc in (18, 19, 20, 21)
+                                   else _key_bridge.send_key)
+                            sig.emit(kc)   # -> main thread
+            except Exception as e:
+                _gtap_log(f"[hid] cb: {e}")
+
+        _hid_cb_ref = HIDCB(_on_value)
+        IOKit.IOHIDManagerRegisterInputValueCallback(mgr, _hid_cb_ref, None)
+        _prevent_app_nap()   # keep the bg runloop alive while Anki is backgrounded
+
+        def _run():
+            global _hid_runloop
+            try:
+                _hid_runloop = CF.CFRunLoopGetCurrent()
+                IOKit.IOHIDManagerScheduleWithRunLoop(mgr, _hid_runloop, kMode)
+                ret = int(IOKit.IOHIDManagerOpen(mgr, 0))
+                if ret != 0:
+                    _gtap_log(f"[hid] IOHIDManagerOpen failed 0x{ret:x} — grant "
+                              "Anki 'Input Monitoring' in Privacy & Security")
+                    return
+                _gtap_log("[hid] monitor running (focus-independent)")
+                CF.CFRunLoopRun()   # returns when _stop_hid_monitor stops the loop
+                # Clean teardown ON THIS THREAD (the one that opened/scheduled the
+                # manager) so IOKit isn't torn down under a live callback = the
+                # bus error seen on quit.
+                try:
+                    IOKit.IOHIDManagerUnscheduleFromRunLoop(mgr, _hid_runloop, kMode)
+                    IOKit.IOHIDManagerClose(mgr, 0)
+                except Exception:
+                    pass
+            except Exception as e:
+                _gtap_log(f"[hid] run: {e}")
+
+        _hid_manager = mgr
+        _hid_cf = CF
+        _hid_shutting_down = False
+        _hid_thread = threading.Thread(target=_run, daemon=True)
+        _hid_thread.start()
+        try:
+            mw.app.aboutToQuit.connect(_stop_hid_monitor)
+        except Exception:
+            pass
+        _gtap_log("[hid] monitor started")
+    except Exception as e:
+        _gtap_log(f"[hid] start: {e}")
+
+
+def _stop_hid_monitor():
+    """Stop dispatching HID input and tear the monitor down cleanly BEFORE the
+    process exits. Setting the guard alone isn't enough: the daemon CFRunLoop
+    thread stays inside CFRunLoopRun with the manager open+scheduled, so on quit
+    IOKit can fire the callback (or get torn down under one) mid-shutdown = the
+    bus error. So we also stop the bg runloop and join it; _run then unschedules
+    and closes the manager on its own thread before returning."""
+    global _hid_shutting_down
+    _hid_shutting_down = True
+    rl, cf, th = _hid_runloop, _hid_cf, _hid_thread
+    if cf is not None and rl is not None:
+        try:
+            cf.CFRunLoopStop(rl)   # thread-safe; wakes CFRunLoopRun so _run exits
+        except Exception:
+            pass
+    if th is not None:
+        try:
+            th.join(timeout=1.0)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Auto-hide cursor after idle in fullscreen
 # ---------------------------------------------------------------------------
 _cursor_timer = None
@@ -3676,6 +4498,47 @@ def _toggle_focus_mode() -> None:
         tooltip("Focus Mode " + ("ON" if _focus_mode_on else "OFF"), period=1200)
     except Exception:
         pass
+
+
+def _open_last_deck() -> None:
+    """Tab+O / menu-bar: start studying the last-studied deck straight away —
+    select it and drop into the reviewer (Anki bounces to the overview/congrats
+    screen if nothing is due). The 'current' deck is Anki's persisted
+    last-selected deck, so this survives quitting/reopening."""
+    try:
+        if mw.col is None:
+            return
+        did = None
+        for getter in (
+            lambda: mw.col.decks.get_current_id(),   # modern Anki
+            lambda: mw.col.decks.selected(),          # older fallback
+            lambda: (mw.col.decks.current() or {}).get("id"),
+        ):
+            try:
+                did = getter()
+                if did:
+                    break
+            except Exception:
+                continue
+        if not did:
+            return
+        try:
+            mw.col.decks.select(did)
+        except Exception:
+            pass
+        # Tab+O can fire while Anki is unfocused/minimized — bring it forward first.
+        if mw.isMinimized() or not mw.isVisible():
+            mw.showNormal()
+        mw.activateWindow()
+        # Start the timebox like the "Study Now" button, then enter review. If the
+        # deck has no due cards, moveToState("review") falls through to overview.
+        try:
+            mw.col.startTimebox()
+        except Exception:
+            pass
+        mw.moveToState("review")
+    except Exception as e:
+        _gtap_log(f"open last deck failed: {e}")
 
 
 def _focus_restore_for_nav() -> None:
@@ -4938,6 +5801,38 @@ if hasattr(gui_hooks, "webview_will_set_content"):
     gui_hooks.webview_will_set_content.append(_on_will_set_content)
 
 
+# The "Congratulations! You have finished this deck for now." page is loaded via
+# load_sveltekit_page, which does NOT fire webview_will_set_content — so it never
+# received the glass CSS and rendered opaque. Re-inject the core transparency
+# rules into mw.web on every load (self-healing, idempotent via the style id).
+_CONGRATS_GLASS_CSS = (
+    ":root,html{--canvas:transparent!important;--window-bg:transparent!important;"
+    "--canvas-elevated:transparent!important;--canvas-inset:transparent!important;"
+    "--canvas-overlay:transparent!important;--frame-bg:transparent!important;"
+    "--bs-body-bg:transparent!important;--current-deck:transparent!important;}"
+    "html body *:not(button):not(input):not(select):not(textarea):not(a.deck)"
+    "{background:transparent!important;background-color:transparent!important;"
+    "background-image:none!important;}"
+    "html,body{background:transparent!important;background-color:transparent!important;}"
+    "body,body *{text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.85)!important;}"
+)
+_CONGRATS_GLASS_JS = (
+    "(function(){if(document.getElementById('__janki_congrats_glass'))return;"
+    "var s=document.createElement('style');s.id='__janki_congrats_glass';"
+    "s.textContent='" + _CONGRATS_GLASS_CSS + "';"
+    "if(document.head)document.head.appendChild(s);})();"
+)
+
+
+def _ensure_congrats_glass(*_):
+    if not ACTIVE or not _cfg().get("enabled", True):
+        return
+    try:
+        mw.web.eval(_CONGRATS_GLASS_JS)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
@@ -5112,14 +6007,17 @@ class GlassSettings(QDialog):
 
         # Three tabbed panels. Each page has its own vertical layout; the section
         # builders below append to app_lay / focus_lay / pomo_lay accordingly.
-        from aqt.qt import QTabWidget, QWidget
+        from aqt.qt import (QTabWidget, QWidget, QComboBox, QGridLayout,
+                            QPushButton, QButtonGroup)
         tabs = QTabWidget()
         app_page = QWidget();   app_lay = QVBoxLayout(app_page)
         focus_page = QWidget(); focus_lay = QVBoxLayout(focus_page)
+        cap_page = QWidget();   cap_lay = QVBoxLayout(cap_page)
         pomo_page = QWidget();  pomo_lay = QVBoxLayout(pomo_page)
         gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
         tabs.addTab(app_page, "Appearance")
         tabs.addTab(focus_page, "Focus")
+        tabs.addTab(cap_page, "Caption")
         tabs.addTab(pomo_page, "Pomodoro")
         tabs.addTab(gen_page, "General")
 
@@ -5289,6 +6187,118 @@ class GlassSettings(QDialog):
         self._green_flare.stateChanged.connect(on_green_flare)
         focus_lay.addWidget(self._green_flare)
 
+        # === Caption (coherence HUD) =========================================
+        cap_note = QLabel("Caption mode (Tab+\\) shows the current card in a "
+                          "floating bar that stays on top of other apps. "
+                          "Tab+arrow keys move it around the screen.")
+        cap_note.setWordWrap(True)
+        cap_note.setStyleSheet("color: gray; margin-bottom: 4px;")
+        cap_lay.addWidget(cap_note)
+
+        # Screen position: a 3x3 grid of anchors (mirrors Tab+arrow movement).
+        pos_row = QHBoxLayout()
+        pos_name = QLabel("Screen position")
+        pos_name.setMinimumWidth(140)
+        pos_grid_w = QWidget()
+        pos_grid = QGridLayout(pos_grid_w)
+        pos_grid.setSpacing(4)
+        pos_grid.setContentsMargins(0, 0, 0, 0)
+        self._pos_group = QButtonGroup(self)
+        self._pos_group.setExclusive(True)
+        _cur_row, _cur_col = _coherence_rc()
+        for _ri, _rn in enumerate(_COH_ROWS):
+            for _ci, _cn in enumerate(_COH_COLS):
+                _b = QPushButton(_COH_GLYPHS[_ri][_ci])
+                _b.setCheckable(True)
+                _b.setFixedSize(40, 34)
+                _val = f"{_rn}-{_cn}"
+                _b.setProperty("pos_val", _val)
+                _b.setToolTip(_val.replace("-", " "))
+                if _rn == _cur_row and _cn == _cur_col:
+                    _b.setChecked(True)
+                self._pos_group.addButton(_b)
+                pos_grid.addWidget(_b, _ri, _ci)
+
+        def on_pos_pick(btn):
+            self.cfg["coherence_position"] = btn.property("pos_val")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            if _coherence_hud and _coherence_hud.isVisible():
+                # re-render + reposition to the new anchor; same card → no replay
+                _coherence_hud.refresh(animate_text=False)
+
+        self._pos_group.buttonClicked.connect(on_pos_pick)
+        pos_row.addWidget(pos_name)
+        pos_row.addWidget(pos_grid_w)
+        pos_row.addStretch()
+        cap_lay.addLayout(pos_row)
+
+        # Text alignment inside the caption bar.
+        al_row = QHBoxLayout()
+        al_name = QLabel("Text alignment")
+        al_name.setMinimumWidth(140)
+        self._cap_align = QComboBox()
+        for _lbl, _val in (("Center", "center"), ("Left", "left"), ("Right", "right")):
+            self._cap_align.addItem(_lbl, _val)
+        _cur_align = (self.cfg.get("caption_align", "center") or "center").lower()
+        _ai = self._cap_align.findData(_cur_align)
+        self._cap_align.setCurrentIndex(_ai if _ai >= 0 else 0)
+
+        def on_cap_align(_i):
+            self.cfg["caption_align"] = self._cap_align.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            _coherence_refresh(animate_text=False)   # live re-render, no replay
+
+        self._cap_align.currentIndexChanged.connect(on_cap_align)
+        al_row.addWidget(al_name)
+        al_row.addWidget(self._cap_align)
+        al_row.addStretch()
+        cap_lay.addLayout(al_row)
+
+        # Font size + image size sliders. Each writes its config key and live-
+        # refreshes the HUD (a no-op when caption mode isn't up).
+        def _cap_size_slider(key, label, default, lo, hi, suffix="px"):
+            row = QHBoxLayout()
+            name = QLabel(label)
+            name.setMinimumWidth(140)
+            val = QLabel()
+            s = QSlider(Qt.Orientation.Horizontal)
+            s.setMinimum(lo)
+            s.setMaximum(hi)
+            s.setValue(int(self.cfg.get(key, default)))
+            val.setText(f"{int(self.cfg.get(key, default))}{suffix}")
+
+            def _cb(v, k=key, lbl=val, sfx=suffix):
+                self.cfg[k] = v
+                lbl.setText(f"{v}{sfx}")
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                _coherence_refresh(animate_text=False)   # live re-render, no replay
+
+            s.valueChanged.connect(_cb)
+            row.addWidget(name)
+            row.addWidget(s)
+            row.addWidget(val)
+            cap_lay.addLayout(row)
+
+        _cap_size_slider("caption_font_size", "Font size", 20, 10, 48)
+        _cap_size_slider("caption_image_max", "Image size", 480, 120, 1000)
+
+        # Suppress the red/green edge flare while the caption HUD is up.
+        self._cap_flare = QCheckBox("Show timer flare over the caption bar")
+        self._cap_flare.setChecked(bool(self.cfg.get("caption_flare", True)))
+
+        def on_cap_flare(_state):
+            self.cfg["caption_flare"] = self._cap_flare.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            # If turned off while a flare is live over the HUD, clear it now.
+            if (not self._cap_flare.isChecked() and _caption_visible()
+                    and _card_timer_instance is not None):
+                ov = getattr(_card_timer_instance, "_overlay", None)
+                if ov is not None and ov.isVisible():
+                    ov.set_active(False)
+
+        self._cap_flare.stateChanged.connect(on_cap_flare)
+        cap_lay.addWidget(self._cap_flare)
+
         # === Pomodoro ========================================================
         # --- Pomodoro break spacing -----------------------------------------
         # Master on/off for the whole Pomodoro system (breaks, XP bar, break tint).
@@ -5362,13 +6372,26 @@ class GlassSettings(QDialog):
         self._aot.stateChanged.connect(on_aot)
         gen_lay.addWidget(self._aot)
 
+        self._menubar = QCheckBox("Show menu-bar icon (Caption / Focus mode controls)")
+        self._menubar.setChecked(bool(self.cfg.get("menubar_controls", True)))
+
+        def on_menubar(_state):
+            self.cfg["menubar_controls"] = self._menubar.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            _apply_tray(_tray_should_show())
+
+        self._menubar.stateChanged.connect(on_menubar)
+        gen_lay.addWidget(self._menubar)
+
         self._tray = QCheckBox("Minimize to system tray instead of taskbar")
         self._tray.setChecked(bool(self.cfg.get("tray_minimize", False)))
 
         def on_tray(_state):
             self.cfg["tray_minimize"] = self._tray.isChecked()
             mw.addonManager.writeConfig(__name__, self.cfg)
-            _apply_tray(self._tray.isChecked())
+            # Presence is the OR of both needs; unchecking minimize keeps the icon
+            # when the mode controls still want it.
+            _apply_tray(_tray_should_show())
 
         self._tray.stateChanged.connect(on_tray)
         gen_lay.addWidget(self._tray)
@@ -5385,6 +6408,25 @@ class GlassSettings(QDialog):
 
         self._gkeys.stateChanged.connect(on_gkeys)
         gen_lay.addWidget(self._gkeys)
+
+        # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
+        # caption mode even when another app is focused/fullscreen.
+        self._hid = QCheckBox(
+            "Controller input in caption mode via IOKit HID (requires Input "
+            "Monitoring permission; takes effect on restart)"
+        )
+        self._hid.setChecked(bool(self.cfg.get("hid_controller", False)))
+
+        def on_hid(_state):
+            self.cfg["hid_controller"] = self._hid.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            if self._hid.isChecked():
+                _start_hid_monitor()   # prompts for Input Monitoring on first open
+            # turning off takes effect next launch (the HID runloop thread is
+            # daemon and torn down on quit)
+
+        self._hid.stateChanged.connect(on_hid)
+        gen_lay.addWidget(self._hid)
 
         # Frosting the AMBOSS hover tip alters its geometry/stacking, which makes
         # some tippy configs flicker on/off — this lets you turn just that off
@@ -5519,25 +6561,26 @@ def _startup():
         # webview has focus.
         from aqt.qt import QShortcut, QKeySequence
         _zscs = []
-        for _seq, _d in (("Ctrl+=", 0.1), ("Ctrl++", 0.1), ("Ctrl+-", -0.1)):
+        for _seq, _d in (("Ctrl+=", 0.05), ("Ctrl++", 0.05), ("Ctrl+-", -0.05)):
             _sc = QShortcut(QKeySequence(_seq), mw)
             _sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
             _sc.activated.connect(lambda d=_d: _change_card_zoom(d))
             _zscs.append(_sc)
         mw._janki_zoom_scs = _zscs   # keep refs alive
 
-        if _cfg().get("tray_minimize", False):
+        if _tray_should_show():
             _apply_tray(True)
 
         if _cfg().get("global_keys", False):
             _apply_global_keys(True)
 
-        # Gamepad poller DISABLED for now. GameController can't read the pad while
-        # Anki is backgrounded (OS routes it to the focused app), so it can only
-        # ever double-fire with Contanki when Anki is focused — no benefit, only
-        # harm. Contanki handles the controller during focused review (incl. HUD
-        # up). Revisiting via an IOKit HID monitor later.
+        # Gamepad poller DISABLED (GameController is focus-gated — can't read the
+        # pad while Anki is backgrounded, so it only double-fires with Contanki).
         # _start_gamepad_poll()
+        # Focus-INDEPENDENT controller via IOKit HID — the real path for driving
+        # Anki from a controller in caption mode while another app is focused.
+        # Opt-in (config hid_controller) + needs Input Monitoring permission.
+        _start_hid_monitor()
 
         # Auto-hide the cursor after 10s idle while fullscreen.
         _start_cursor_hide()
@@ -5578,6 +6621,13 @@ def _startup():
                 _remote_active = True
                 _coherence_refresh()
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
+
+        # Re-glass any mw.web page that skipped webview_will_set_content — notably
+        # the deck-finished "Congratulations" page (loaded via load_sveltekit_page).
+        try:
+            mw.web.loadFinished.connect(_ensure_congrats_glass)
+        except Exception:
+            pass
 
         # XP bar: pause when leaving the reviewer.
         # Menu fade: fade when opening a deck (→ overview) or returning from study.
