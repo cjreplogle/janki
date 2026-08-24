@@ -65,6 +65,7 @@ Clone/copy file contents into your Anki add-ons folder as a folder named `janki`
 These extra installs help tie together some theming:
 * [Anki Redesign](https://ankiweb.net/shared/info/2119814566)
 * [Change Interface Font](https://ankiweb.net/shared/info/1431333984)
+* [AMBOSS](https://www.amboss.com/us/anki) (optional but I just properly integrated it with my UI changes)
 
 
 ## Support
