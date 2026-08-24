@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .DS_Store
 janki.ankiaddon
+janki-lectures.log
+anki-glass-keytap.log
