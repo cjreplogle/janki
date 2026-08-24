@@ -75,8 +75,8 @@ def _log(msg):
 
 def _cfg():
     cfg = mw.addonManager.getConfig(__name__) or {}
-    cfg.setdefault("ics_path", "~/Downloads/replogcj.ics")
-    cfg.setdefault("xlsx_path", "~/Downloads/Corresponding Anki Decks.xlsx")
+    cfg.setdefault("ics_path", "")
+    cfg.setdefault("xlsx_path", "")
     cfg.setdefault("timezone", "America/New_York")
     cfg.setdefault("auto_on_launch", True)
     for suffix, _match, _label in TAG_FAMILIES:
@@ -1163,7 +1163,7 @@ def build_settings_pages():
 
     g.addWidget(QLabel("<b>Spreadsheet</b> (.xlsx lecture → tag map)"), 0, 0, 1, 3)
     xlsx_edit = QLineEdit(cfg.get("xlsx_path", ""))
-    xlsx_edit.setPlaceholderText("~/Downloads/Corresponding Anki Decks.xlsx")
+    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx")
     xlsx_btn = QPushButton("Browse…")
 
     def _pick_xlsx():
@@ -1180,7 +1180,7 @@ def build_settings_pages():
 
     g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 3, 0, 1, 3)
     ics_edit = QLineEdit(cfg.get("ics_path", ""))
-    ics_edit.setPlaceholderText("~/Downloads/replogcj.ics   or   https://…/basic.ics")
+    ics_edit.setPlaceholderText("~/Downloads/lectures.ics   or   https://…/basic.ics")
     ics_btn = QPushButton("Browse…")
 
     def _pick_ics():
