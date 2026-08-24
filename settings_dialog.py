@@ -17,6 +17,24 @@ class GlassSettings(QDialog):
         self.cfg.setdefault("tint_mode", "custom")
         lay = QVBoxLayout(self)
 
+        # On non-macOS the native visual features don't run (they no-op) — only the
+        # lecture importer is cross-platform. Warn up front so the inert tabs below
+        # don't confuse Windows/Linux users.
+        if sys.platform != "darwin":
+            _warn = QLabel(
+                "⚠️  Janki's visual features (transparency / glass, caption "
+                "HUD, global hotkeys, controller input, Pomodoro) are macOS-only and "
+                "won't work on this platform. Only “Load today's lectures” is "
+                "supported here."
+            )
+            _warn.setWordWrap(True)
+            _warn.setStyleSheet(
+                "QLabel { background: rgba(255,176,32,0.15); color: #b26a00; "
+                "border: 1px solid rgba(255,176,32,0.55); border-radius: 6px; "
+                "padding: 8px 10px; }"
+            )
+            lay.addWidget(_warn)
+
         # Three tabbed panels. Each page has its own vertical layout; the section
         # builders below append to app_lay / focus_lay / pomo_lay accordingly.
         from aqt.qt import (QTabWidget, QWidget, QComboBox, QGridLayout,

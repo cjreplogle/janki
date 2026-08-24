@@ -33,7 +33,9 @@ from aqt.qt import QAction, QMessageBox, QTimer
 from aqt.utils import showInfo, tooltip
 
 ADDON_DIR = os.path.dirname(__file__)
-LOG_PATH = os.path.expanduser("~/Library/Logs/janki-lectures.log")
+# Log inside the add-on folder (cross-platform; findable via Tools > Add-ons >
+# View Files) rather than a macOS-only ~/Library/Logs path.
+LOG_PATH = os.path.join(ADDON_DIR, "janki-lectures.log")
 
 # Live reference to the non-modal Lectures dialog so Qt doesn't garbage-collect it.
 _lectures_dlg = None

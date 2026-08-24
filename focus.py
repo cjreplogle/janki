@@ -75,8 +75,11 @@ def _track_app_focus():
     global key tap only reads a plain Space while Anki is focused (Tab+Space still
     overrides when unfocused)."""
     try:
-        def _on_state(state):
-            state._anki_focused = (state == Qt.ApplicationState.ApplicationActive)
+        def _on_state(app_state):
+            # NB: param is app_state, NOT state — `state` is the shared-flags
+            # module (from . import state); a param named `state` would shadow it
+            # so this assignment would never reach state._anki_focused.
+            state._anki_focused = (app_state == Qt.ApplicationState.ApplicationActive)
         mw.app.applicationStateChanged.connect(_on_state)
         _track_app_focus._ref = _on_state   # keep the slot alive
         state._anki_focused = (mw.app.applicationState() == Qt.ApplicationState.ApplicationActive)
