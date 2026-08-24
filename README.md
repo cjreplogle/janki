@@ -71,7 +71,7 @@ These extra installs help tie together some theming:
 *If I sent this to you for testing. Just text me if there are any issues/features
 you think will be helpful to other people!* 
 
-FYI - this is very vibe coded and designed around my personal habits. Source code 100% is a hot mess but it does what I need it to, so I can live with it. 
+FYI - this is very vibe coded and designed around my personal habits. Source code 100% is a hot mess but it does what I need it to, so I can live with it. Hopefully it helps you too.
 
 [cjre.pl/ogle](https://cjre.pl/ogle) 
 
