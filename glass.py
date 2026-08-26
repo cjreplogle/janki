@@ -745,6 +745,7 @@ def _reassert_transparent():
 # ---------------------------------------------------------------------------
 
 _orig_webview_init = AnkiWebView.__init__
+_orig_theme_did_change = getattr(AnkiWebView, "on_theme_did_change", None)
 
 
 def _patched_webview_init(self, *a, **k):
@@ -757,17 +758,37 @@ def _patched_webview_init(self, *a, **k):
         pass
 
 
+def _patched_theme_did_change(self, *a, **k):
+    # Anki re-sets the page background to the opaque CANVAS colour on every theme
+    # change (and once at startup), repainting the webview opaque over the glass.
+    # Let Anki run, then force it transparent again. Runtime equivalent of the
+    # qt/aqt/webview.py source patch (which we deliberately do NOT ship via the
+    # .pyc patcher, to avoid version drift).
+    if _orig_theme_did_change is not None:
+        _orig_theme_did_change(self, *a, **k)
+    if not ACTIVE:
+        return
+    try:
+        self.page().setBackgroundColor(QColor(Qt.GlobalColor.transparent))
+    except Exception:
+        pass
+
+
 if ACTIVE:
     AnkiWebView.__init__ = _patched_webview_init
+    if _orig_theme_did_change is not None:
+        AnkiWebView.on_theme_did_change = _patched_theme_did_change
 
 
 def _clear_existing_webviews():
     if not ACTIVE:
         return
     try:
-        central = mw.centralWidget()
-        views = [c for c in central.children() if isinstance(c, AnkiWebView)] if central else []
-        for v in views:
+        # findChildren is RECURSIVE — catches mw.web / toolbarWeb / bottomWeb /
+        # reviewer.web wherever they're nested. (centralWidget().children() only
+        # returned direct children, missing the main webviews, so their page
+        # background — the opaque theme canvas — stayed opaque over the glass.)
+        for v in mw.findChildren(AnkiWebView):
             try:
                 v.page().setBackgroundColor(QColor(Qt.GlobalColor.transparent))
             except Exception:

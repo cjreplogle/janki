@@ -862,3 +862,34 @@ def _ensure_congrats_glass(*_):
         mw.web.eval(_CONGRATS_GLASS_JS)
     except Exception:
         pass
+
+
+# Rescue near-black card text: on the dark glass / OLED-black background, any text
+# whose colour is too close to black is invisible. Walk the card, and for each
+# element whose text colour is near-black AND whose effective background is dark,
+# force the text white. (Guarded by the effective-bg check so dark text sitting on
+# a light inline box — e.g. a highlight — is left alone.)
+_TEXT_CONTRAST_JS = (
+    "(function(){"
+    "function P(c){var m=c&&c.match(/rgba?\\(([^)]+)\\)/);if(!m)return null;"
+    "var p=m[1].split(',').map(parseFloat);return{r:p[0],g:p[1],b:p[2],a:p.length>3?p[3]:1};}"
+    "function L(o){return o?0.299*o.r+0.587*o.g+0.114*o.b:null;}"
+    "function bg(el){var e=el;while(e){var b=P(getComputedStyle(e).backgroundColor);"
+    "if(b&&b.a>0)return L(b);e=e.parentElement;}return 0;}"
+    "var root=document.getElementById('qa')||document.querySelector('.card')||document.body;"
+    "if(!root)return;var els=[root];var q=root.querySelectorAll('*');"
+    "for(var i=0;i<q.length;i++)els.push(q[i]);"
+    "els.forEach(function(el){var c=P(getComputedStyle(el).color);"
+    "if(!c||c.a===0)return;"
+    "if(L(c)<55&&bg(el)<128){el.style.setProperty('color','#fff','important');}});"
+    "})();"
+)
+
+
+def _apply_text_contrast(*_):
+    if not ACTIVE or not _cfg().get("text_black_to_white", True):
+        return
+    try:
+        mw.web.eval(_TEXT_CONTRAST_JS)
+    except Exception:
+        pass

@@ -44,7 +44,7 @@ except Exception as _e:
 from .bridge import _bridge
 from .config import ACTIVE, _cfg
 from . import state
-from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, settings_dialog, tray
+from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, settings_dialog, stock_selfheal, tray
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +111,12 @@ def _patch_tooltip():
 
 def _startup():
     try:
+        # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
+        # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a
+        # restart. No-op on a source build, when already patched, or on an
+        # unvalidated Anki version. See stock_selfheal.py.
+        stock_selfheal.maybe_self_heal()
+
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
@@ -178,6 +184,7 @@ def _startup():
             def _on_show_question(_r):
                 state._remote_active = True
                 hud._coherence_refresh()
+                css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 focus._apply_card_zoom()      # re-assert card zoom on the new card
                 amboss._start_amboss_size_watch()   # widen window while previews are up
                 amboss._apply_amboss_underlines()   # hide term underlines unless fullscreen
@@ -188,6 +195,7 @@ def _startup():
             def _on_show_answer(_r):
                 state._remote_active = True
                 hud._coherence_refresh()
+                css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
 
         # Re-glass any mw.web page that skipped webview_will_set_content — notably

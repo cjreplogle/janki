@@ -8,19 +8,32 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 
 ## Install
 
-**From a release file**
-1. Download `janki.ankiaddon` from the [Releases](../../releases) page.
-2. Double-click it (Anki opens and installs), or in Anki:
-   **Tools → Add-ons → Install from file…** and pick the `.ankiaddon`.
-3. Fully quit and reopen Anki.
+Runs on **normal, stock Anki** — no custom build, no separate launcher app.
 
-**From source**
+1. **Install Anki** (if you haven't) from [apps.ankiweb.net](https://apps.ankiweb.net).
+2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
+3. **Double-click it** (Anki opens and installs it), or in Anki:
+   **Tools → Add-ons → Install from file…** → pick the `.ankiaddon`.
+4. **Restart Anki.** On first launch Janki applies a small one-time patch to Anki
+   so the frosted glass can work, then asks you to **quit and reopen once**. Do
+   that, and the glass is on. From then on, just open Anki normally.
 
-Clone/copy file contents into your Anki add-ons folder as a folder named `janki`:
-`~/Library/Application Support/Anki2/addons21/janki/`
+> [!NOTE]
+> **Why the one-time patch + restart?** True transparency needs a setting applied
+> before Anki starts drawing — something an add-on alone can't do. Janki patches
+> two of Anki's own files to enable it (backups are kept), and **re-applies
+> automatically after any Anki update**, prompting a quick restart when it does.
+> It only edits local rendering/startup code — your collection, sync, and login
+> are untouched. Everything except the visual glass still works even if you skip
+> the restart.
 
+> [!WARNING]
+> **macOS only.** On other platforms the add-on loads but the glass is skipped.
 
-> If you wish to change any settings or disable any features, you may do so by navigating to Tools > Janki: Settings...
+**From source (devs):** copy the files into
+`~/Library/Application Support/Anki2/addons21/janki/`.
+
+> To change or disable any feature: **Tools → Janki: Settings…**
 
 
 ## Features

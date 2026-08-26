@@ -255,7 +255,7 @@ def _make_pomodoro():
                 f"<div class='jb-title'>{title}</div>"
                 f"<div class='jb-session'>{_sess_txt}</div>"
                 f"<div class='jb-timer' id='__jbreak_timer'>{mins}:{secs:02d}</div>"
-                "<div class='jb-hint'>Hold Space to skip</div>"
+                "<div class='jb-hint'>Hold Space or B to skip</div>"
                 "<div id='__jbreak_bt'><div id='__jbreak_bf'></div></div>"
                 "</div>"
             )
