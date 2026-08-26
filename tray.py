@@ -33,14 +33,17 @@ def _apply_tray(on: bool) -> None:
             menu = QMenu()
             # Mode toggles, mirrored from the Tab+\ / Tab+F hotkeys, so caption and
             # focus can be driven from the menu-bar icon even when Anki is unfocused.
-            _tray_caption_action = QAction("Caption mode", mw)
-            _tray_caption_action.setCheckable(True)
-            _tray_caption_action.triggered.connect(lambda _c=False: hud._toggle_coherence())
-            _tray_focus_action = QAction("Focus mode", mw)
-            _tray_focus_action.setCheckable(True)
-            _tray_focus_action.triggered.connect(lambda _c=False: focus._toggle_focus_mode())
-            menu.addAction(_tray_caption_action)
-            menu.addAction(_tray_focus_action)
+            # Caption/Focus mode are macOS-native, so only offer them there — the
+            # rest of the tray (open/quit, close-to-tray) is cross-platform.
+            if sys.platform == "darwin":
+                _tray_caption_action = QAction("Caption mode", mw)
+                _tray_caption_action.setCheckable(True)
+                _tray_caption_action.triggered.connect(lambda _c=False: hud._toggle_coherence())
+                _tray_focus_action = QAction("Focus mode", mw)
+                _tray_focus_action.setCheckable(True)
+                _tray_focus_action.triggered.connect(lambda _c=False: focus._toggle_focus_mode())
+                menu.addAction(_tray_caption_action)
+                menu.addAction(_tray_focus_action)
             last_deck_action = QAction("Open last studied deck", mw)
             last_deck_action.triggered.connect(lambda _c=False: focus._open_last_deck())
             menu.addAction(last_deck_action)

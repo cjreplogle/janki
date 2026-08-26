@@ -1,6 +1,7 @@
 """Floating coherence HUD (directional pad overlay)."""
 
 import os
+import sys
 import time as _time
 import ctypes
 from ctypes import c_void_p, c_char_p, c_bool, c_int, c_ulong
@@ -871,6 +872,9 @@ def _prewarm_coherence_hud():
     panel and doesn't, hence the "first time only" steal). Realizing + styling the
     panel here, hidden, moves that churn to launch (nothing to steal from), so the
     first real open just shows an already-non-activating panel."""
+    # Caption HUD is a native non-activating NSPanel — macOS only.
+    if sys.platform != "darwin":
+        return
     global _coherence_hud
     if _coherence_hud is not None:
         return
@@ -885,6 +889,9 @@ def _prewarm_coherence_hud():
 
 
 def _toggle_coherence():
+    # Native NSPanel caption HUD — macOS only.
+    if sys.platform != "darwin":
+        return
     global _coherence_hud
     keytap._gtap_log("_toggle_coherence called")
     if _coherence_hud is None:
