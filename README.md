@@ -89,6 +89,10 @@ so nothing is left behind.
   or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
+- **Mobile cards** (Tools → Janki: Mobile cards) — AnkiMobile/AnkiDroid can't run
+  add-ons, so this stamps an OLED-dark background, a serif font, and the text-reveal
+  animation into your note types (scoped to mobile). It rides your normal sync to
+  the phone/iPad — nothing to install there — and is one-click reversible.
 - **Schedule sync** (optional) — reads a local `.ics` calendar (URL/file)
   and a local `.xlsx` lecture→tag map, finds your classes for the day,
   and adaptively unsuspends relevant tagged cards (AJ/Anking/Hutch decks tested)
