@@ -89,3 +89,10 @@ FYI - this is very vibe coded and designed around my personal habits. Source cod
 
 [cjre.pl/ogle](https://cjre.pl/ogle) 
 
+## License
+
+Licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LICENSE)).
+Janki extends [Anki](https://github.com/ankitects/anki), which is also AGPL-3.0; the
+self-heal patches Anki's own files locally at runtime and does not redistribute
+Anki's source.
+
