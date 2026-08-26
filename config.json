@@ -105,5 +105,6 @@
   "always_on_top": false,
   "tray_minimize": true,
   "text_black_to_white": true,
-  "stock_selfheal": true
+  "stock_selfheal": true,
+  "mobile_cards": false
 }

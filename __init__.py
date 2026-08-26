@@ -130,9 +130,12 @@ def _startup():
         mw._amboss_diagnose = amboss._amboss_diagnose
 
         # Tools ▸ "Janki: Mobile cards" — stamp OLED + animation + font into every
-        # note type so it syncs to AnkiMobile (which can't run add-ons).
+        # note type so it syncs to AnkiMobile (which can't run add-ons). EXPERIMENTAL
+        # and off by default: it rewrites every note type's templates, so it only
+        # appears once you deliberately set config "mobile_cards": true.
         try:
-            mobilecards.install_menu()
+            if _cfg().get("mobile_cards", False):
+                mobilecards.install_menu()
         except Exception as _mc_exc:
             log("mobilecards menu: %s" % _mc_exc)
 
