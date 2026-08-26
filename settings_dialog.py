@@ -4,7 +4,7 @@ import sys
 from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
 
-from .config import _cfg
+from .config import _cfg, SAFE
 from . import amboss, card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, stock_selfheal, tray
 
 class GlassSettings(QDialog):
@@ -477,8 +477,9 @@ class GlassSettings(QDialog):
         # automatically). This lets you cleanly REMOVE it: restore the original
         # files, delete backups/cache, and stop the auto-re-patch — the correct way
         # to undo everything before removing the add-on.
+        # Patch controls only in the glass edition (the safe edition never patches).
         _pstate = stock_selfheal.patch_state()
-        if _pstate != "unsupported":
+        if _pstate != "unsupported" and not SAFE:
             _patch_note = QLabel(
                 "Glass patch: Janki patches Anki's own files so the frosted glass "
                 "can work (originals are backed up). Remove it before uninstalling "

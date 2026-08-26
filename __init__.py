@@ -42,7 +42,7 @@ except Exception as _e:
     raise
 
 from .bridge import _bridge
-from .config import ACTIVE, _cfg
+from .config import ACTIVE, GLASS, _cfg
 from . import state
 from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, settings_dialog, stock_selfheal, tray
 
@@ -225,29 +225,29 @@ def _startup():
         # its own. Bumping the token here would fire a *second* fade on the next
         # re-render of that same screen.
 
-        if ACTIVE:
+        # GLASS = window transparency (glass edition only). In the safe edition
+        # GLASS is False, so none of this runs and Anki is never touched.
+        if GLASS:
             glass._unify_titlebar()
             glass._clear_existing_webviews()
-            # Apply the native glass repeatedly — when launched via the .app
-            # (Launch Services) the window can come up opaque before our calls
-            # land, so we retry over the first few seconds and self-heal.
+            # Re-assert the native glass a few times — a cold Launch-Services start
+            # can bring the window up opaque before our calls land, so we retry.
             for delay in (200, 500, 900, 1500, 2500, 4000):
                 QTimer.singleShot(delay, glass._reapply_native)
             # reload ALL webviews (toolbar/main/bottom) so each re-injects the
-            # transparency CSS — the cold .app launch can leave some opaque.
-            # NOTE: this is a visible content reload (blank frame → re-render), so
-            # it's kept OUT of the first ~1s where it read as a flicker right after
-            # the fade. Window transparency in that early window is already handled
-            # by the _reapply_native retries + _clear_existing_webviews above; this
-            # late pass only re-asserts CSS on a cold launch that came up opaque.
+            # transparency CSS — the cold launch can leave some opaque. Kept out of
+            # the first ~1s so it doesn't read as a flicker.
             QTimer.singleShot(2600, glass._reload_all_webviews)
-            glass._install_fullscreen_watcher()
             QTimer.singleShot(1000, glass._sync_oled)  # in case we start full-screen
-            # Flush profile meta periodically + on quit so profile-stored auth
-            # tokens (e.g. AMBOSS) survive the `just run` wrapper's exit, which
-            # can skip Anki's normal clean-shutdown save.
+
+        # ACTIVE = features (run in BOTH editions — safe edition has these without
+        # any glass/patch). None of these require window transparency.
+        if ACTIVE:
+            # Fullscreen watcher keeps the overlays aligned (its glass re-assert +
+            # OLED calls no-op when not GLASS).
+            glass._install_fullscreen_watcher()
             tray._start_profile_autosave()
-            # Per-card lingering-warning bar under the toolbar (replaces the AnKing timer).
+            # Per-card lingering-warning bar + red/green flares.
             if _cfg().get("card_timer", True):
                 card_timer._apply_card_timer(True)
             if _cfg().get("amboss_frost", True):
@@ -255,7 +255,8 @@ def _startup():
             if _cfg().get("always_on_top", False):
                 glass._apply_always_on_top(True)
         else:
-            print("[janki] not launched via AnkiGlass.command — inactive.", file=sys.stderr)
+            print("[janki] inactive (no ANKI_GLASS and not the safe edition).",
+                  file=sys.stderr)
     except Exception as exc:
         print(f"[janki] startup error: {exc}", file=sys.stderr)
 

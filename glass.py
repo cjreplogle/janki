@@ -7,7 +7,7 @@ from aqt.webview import AnkiWebView
 from aqt.qt import QColor, QEvent, QObject, Qt, QTimer
 
 from .bridge import NSRect, _bridge, _cgs
-from .config import ACTIVE, _cfg
+from .config import GLASS, _cfg
 from . import amboss, card_timer, css, keytap, pomodoro, tray
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ _desat_view = None
 
 def _apply_native_glass():
     global _vibrancy_installed
-    if not ACTIVE or sys.platform != "darwin":
+    if not GLASS or sys.platform != "darwin":
         return
     try:
         msg, cls = _bridge()
@@ -91,7 +91,7 @@ def _apply_native_glass():
 def _install_vibrancy():
     """Insert a native NSVisualEffectView as a sibling directly behind Anki's Qt
     view (no reparent → no offset), giving real live desktop blur."""
-    if not ACTIVE or sys.platform != "darwin":
+    if not GLASS or sys.platform != "darwin":
         return
     global _vibrancy_installed
     if _vibrancy_installed:
@@ -258,7 +258,7 @@ MATERIALS = [
 
 def _set_material(m: int):
     """Change the vibrancy material live (controls how grey/opaque the frost is)."""
-    if not ACTIVE:
+    if not GLASS:
         return
     cfg = _cfg()
     cfg["material"] = int(m)
@@ -330,6 +330,8 @@ def _set_oled(on: bool):
 
 def _sync_oled():
     """Apply OLED state based on config + current full-screen status."""
+    if not GLASS:
+        return                         # OLED is a glass-edition feature only
     cfg = _cfg()
     want = bool(cfg.get("oled_fullscreen", False)) and mw.isFullScreen()
     if want != _oled_active:
@@ -343,7 +345,7 @@ def _apply_always_on_top(on: bool) -> None:
 
 
 def _reload_all_webviews():
-    if not ACTIVE:
+    if not GLASS:
         return
     # Wake the WebEngine renderer before reloading — it stays suspended while
     # the NSApp is inactive (e.g. after minimize or when a floating window like
@@ -391,7 +393,7 @@ def _wake_main_webviews():
     and QtWebEngine never paints it. The fix is to re-sync Qt's visibility state
     by calling mw.show() (which re-shows the whole widget tree), then explicitly
     show each webview so its surface repaints."""
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         was_vis = mw.isVisible()
@@ -444,7 +446,7 @@ def _reapply_native():
     """Re-assert the full native glass stack (transparency + tint + corners +
     blur). Idempotent and cheap; called with retries at startup and whenever the
     window is activated, so a cold Launch-Services start can't leave it opaque."""
-    if not ACTIVE or sys.platform != "darwin":
+    if not GLASS or sys.platform != "darwin":
         return
     try:
         if _oled_active:
@@ -551,7 +553,7 @@ def _unify_titlebar():
     """Merge the macOS title bar into the window: transparent titlebar, hidden
     title text, and full-size content view so the glass extends to the very top.
     Traffic-light buttons remain (they float over the content)."""
-    if not ACTIVE or sys.platform != "darwin":
+    if not GLASS or sys.platform != "darwin":
         return
     try:
         msg, cls = _bridge()
@@ -642,7 +644,7 @@ def _assert_window_transparent():
     """Safe: just force the NSWindow non-opaque with a clear background. No
     reparenting / vibrancy (so no misalignment). Belt-and-suspenders in case Qt
     resets the opacity that the source patch set at creation."""
-    if not ACTIVE or sys.platform != "darwin":
+    if not GLASS or sys.platform != "darwin":
         return
     try:
         msg, cls = _bridge()
@@ -695,7 +697,7 @@ def _force_recreate_translucent():
     """Destroy + recreate the native window so its surface is rebuilt WITH an
     alpha channel (only way to get true translucency when WA_TranslucentBackground
     wasn't set at original creation time). setWindowFlags() forces the recreate."""
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -722,7 +724,7 @@ def _force_recreate_translucent():
 
 
 def _reassert_transparent():
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         msg, cls = _bridge()
@@ -750,7 +752,7 @@ _orig_theme_did_change = getattr(AnkiWebView, "on_theme_did_change", None)
 
 def _patched_webview_init(self, *a, **k):
     _orig_webview_init(self, *a, **k)
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         self.page().setBackgroundColor(QColor(Qt.GlobalColor.transparent))
@@ -766,7 +768,7 @@ def _patched_theme_did_change(self, *a, **k):
     # .pyc patcher, to avoid version drift).
     if _orig_theme_did_change is not None:
         _orig_theme_did_change(self, *a, **k)
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         self.page().setBackgroundColor(QColor(Qt.GlobalColor.transparent))
@@ -774,14 +776,14 @@ def _patched_theme_did_change(self, *a, **k):
         pass
 
 
-if ACTIVE:
+if GLASS:
     AnkiWebView.__init__ = _patched_webview_init
     if _orig_theme_did_change is not None:
         AnkiWebView.on_theme_did_change = _patched_theme_did_change
 
 
 def _clear_existing_webviews():
-    if not ACTIVE:
+    if not GLASS:
         return
     try:
         # findChildren is RECURSIVE — catches mw.web / toolbarWeb / bottomWeb /

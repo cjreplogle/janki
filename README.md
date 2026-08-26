@@ -8,7 +8,16 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 
 ## Install
 
-Runs as an Anki plugin **with an additional patch layer for some features** — no custom build or separate app.
+Runs as an Anki plugin on **normal, stock Anki** — no custom build or separate app.
+There are two builds on the [Releases](../../releases) page — pick one:
+
+- **`janki.ankiaddon` (Glass)** — the full frosted-glass experience. Adds a small,
+  self-healing, reversible **patch layer** to Anki that enables the transparency
+  (details below).
+- **`janki-safe.ankiaddon` (Safe / no-glass)** — **never touches Anki's files.**
+  Everything except the window transparency + OLED: card timer & flares, Focus
+  Mode, AMBOSS frost, near-black→white text, hotkeys, Pomodoro, caption, controller,
+  quick zoom, lectures. Best if you're unsure or on a managed/work Mac.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.

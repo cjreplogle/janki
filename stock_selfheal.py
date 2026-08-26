@@ -233,9 +233,9 @@ def maybe_self_heal() -> None:
     ad = _aqt_dir()
     if ad is None:
         return                         # source build or not an app bundle
-    try:                               # respect the user's opt-out (uninstall button)
-        from .config import _cfg
-        if not _cfg().get("stock_selfheal", True):
+    try:                               # never patch in the safe edition; respect opt-out
+        from .config import _cfg, SAFE
+        if SAFE or not _cfg().get("stock_selfheal", True):
             return
     except Exception:
         pass
