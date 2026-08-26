@@ -316,6 +316,20 @@ def _build_css(cfg, context):
             "html .night_mode .card *, html .nightMode.card * {\n"
             "  background: transparent !important;\n"
             "  background-color: transparent !important;\n}\n</style>\n")
+        # Strip the card CONTAINER outline(s). Some note types (AnKing/AnKingMed and
+        # bundled templates) border both `.card` and the inner `#qa`, which reads as a
+        # "box within a box" on the glass. Scoped to the two containers ONLY (not
+        # descendants) so tables, kbd keys, and cloze/hint boxes keep their borders.
+        # Not seen on setups running the Anki Redesign add-on (it already restyles the
+        # card), but shows on a clean install — so we neutralise it here regardless.
+        parts.append(
+            "<style>\n"
+            "#qa, .card,\n"
+            "html .night_mode #qa, html .nightMode #qa,\n"
+            "html .night_mode .card, html .nightMode.card {\n"
+            "  border: none !important;\n"
+            "  outline: none !important;\n"
+            "  box-shadow: none !important;\n}\n</style>\n")
         # Lists: keep items left-aligned (bullets + wrapped lines line up), but let
         # the list box shrink-to-fit so the centered card centers it as a block —
         # a left-aligned list then reads centered instead of hugging the left edge.
@@ -390,13 +404,21 @@ def _typewriter_head(cfg) -> str:
     min_ms = int(cfg.get("typewriter_min_ms", 300))  # floor for short cards
     max_ms = int(cfg.get("typewriter_max_ms", 2600))  # cap for very long cards
     static = "true" if cfg.get("typewriter_static", True) else "false"
+    # Single user-facing speed knob (1.0 = normal, 2.0 = twice as fast). Applied
+    # as a uniform divisor on the final duration so it scales EVERY card, even the
+    # long ones pinned at max_ms. Clamped to a sane range.
+    try:
+        speed = float(cfg.get("typewriter_speed", 1.0))
+    except (TypeError, ValueError):
+        speed = 1.0
+    speed = max(0.25, min(8.0, speed))
     return (
         # Hide the card until the script reveals it, so the full text never flashes
         # before the animation. A safety timer reveals it even if the script fails.
         "<style>#qa{visibility:hidden;}</style>\n"
         "<script>\n"
         "(function(){\n"
-        f"  var WPM={wpm}, MIN_MS={min_ms}, MAX_MS={max_ms}, STATIC={static};\n"
+        f"  var WPM={wpm}, MIN_MS={min_ms}, MAX_MS={max_ms}, STATIC={static}, SPEED={speed};\n"
         "  function ready(fn){ if(document.readyState!='loading') fn();\n"
         "    else document.addEventListener('DOMContentLoaded', fn); }\n"
         "  ready(function(){\n"
@@ -426,7 +448,7 @@ def _typewriter_head(cfg) -> str:
         "    function outerSig(){ var c=qa.cloneNode(true), cs=c.querySelectorAll('.cloze');\n"
         "      for(var i=0;i<cs.length;i++){ cs[i].textContent=''; }\n"
         "      return (c.textContent||'').replace(/\\s+/g,' ').trim(); }\n"
-        "    function timing(total){ var MS=Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000));\n"
+        "    function timing(total){ var MS=Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED;\n"
         "      return Math.max(1, Math.ceil(total/Math.max(1,(MS/12)))); }\n"
         "    function typeOutStatic(clozeOnly, done){ var nodes=collect(clozeOnly), spans=[];\n"
         "      nodes.forEach(function(e){ var tn=e[0], text=e[1];\n"
@@ -446,7 +468,7 @@ def _typewriter_head(cfg) -> str:
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!total){ reveal(); done(); return; }\n"
         "      // duration scales with length at WPM (5 chars/word), clamped.\n"
-        "      var MS=Math.max(MIN_MS, Math.min(MAX_MS, (total/5)/WPM*60000));\n"
+        "      var MS=Math.max(MIN_MS, Math.min(MAX_MS, (total/5)/WPM*60000))/SPEED;\n"
         "      nodes.forEach(function(x){ x[0].nodeValue=''; });\n"
         "      reveal();   // reveal the now-emptied card (no flash of full text)\n"
         "      var perTick=Math.max(1, Math.ceil(total/Math.max(1,(MS/12))));\n"

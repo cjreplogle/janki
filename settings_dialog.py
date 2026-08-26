@@ -111,6 +111,31 @@ class GlassSettings(QDialog):
             row.addWidget(val)
             app_lay.addLayout(row)
 
+        # --- Text animation speed -------------------------------------------
+        # Uniform multiplier on the typewriter reveal duration (1.0 = normal,
+        # higher = faster). Applies to the NEXT card render — no live re-run.
+        # Slider is x10 so we keep 0.1x steps over 0.5x–4.0x.
+        ta_row = QHBoxLayout()
+        ta_name = QLabel("Text animation speed")
+        ta_name.setMinimumWidth(140)
+        ta_val = QLabel()
+        ta_s = QSlider(Qt.Orientation.Horizontal)
+        ta_s.setMinimum(5)     # 0.5x (slower)
+        ta_s.setMaximum(40)    # 4.0x (faster)
+        ta_s.setValue(int(round(float(self.cfg.get("typewriter_speed", 1.0)) * 10)))
+
+        def _ta_cb(v):
+            self.cfg["typewriter_speed"] = v / 10.0
+            ta_val.setText(f"{v/10.0:.1f}x")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        ta_s.valueChanged.connect(_ta_cb)
+        ta_val.setText(f"{float(self.cfg.get('typewriter_speed', 1.0)):.1f}x")
+        ta_row.addWidget(ta_name)
+        ta_row.addWidget(ta_s)
+        ta_row.addWidget(ta_val)
+        app_lay.addLayout(ta_row)
+
         # === Focus ===========================================================
         # --- Card timer curve ------------------------------------------------
         # Show/hide the thin progress bar under the toolbar. Independent of the red
