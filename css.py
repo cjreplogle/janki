@@ -896,11 +896,16 @@ def _ensure_congrats_glass(*_):
         pass
 
 
-# Rescue near-black card text: on the dark glass / OLED-black background, any text
-# whose colour is too close to black is invisible. Walk the card, and for each
-# element whose text colour is near-black AND whose effective background is dark,
-# force the text white. (Guarded by the effective-bg check so dark text sitting on
-# a light inline box — e.g. a highlight — is left alone.)
+# Rescue black/grey card text on the dark glass / OLED background, WITHOUT
+# touching intentional colours (green/blue cloze, coloured highlights, etc.).
+# For each element we recolour to white only when its text colour is:
+#   * near-GRAYSCALE (max-min channel < 40 → black/grey, not a real colour), AND
+#   * reasonably dark (luminance < 140 → catches black through mid-grey; leaves
+#     already-light text alone), AND
+#   * sitting on a dark effective background (< 128 → so dark text on a light
+#     inline box, e.g. a highlight, is left readable and light mode is untouched).
+# Saturated colours (green/blue/red) always have a large max-min gap, so they're
+# preserved regardless of how dark they are.
 _TEXT_CONTRAST_JS = (
     "(function(){"
     "function P(c){var m=c&&c.match(/rgba?\\(([^)]+)\\)/);if(!m)return null;"
@@ -913,7 +918,8 @@ _TEXT_CONTRAST_JS = (
     "for(var i=0;i<q.length;i++)els.push(q[i]);"
     "els.forEach(function(el){var c=P(getComputedStyle(el).color);"
     "if(!c||c.a===0)return;"
-    "if(L(c)<55&&bg(el)<128){el.style.setProperty('color','#fff','important');}});"
+    "var gray=(Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b))<40;"
+    "if(gray&&L(c)<140&&bg(el)<128){el.style.setProperty('color','#fff','important');}});"
     "})();"
 )
 
