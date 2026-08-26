@@ -1302,7 +1302,24 @@ def _open_settings_dialog():
 
 # --------------------------------------------------------------- run -----------
 
+def _paths_ready() -> bool:
+    """True only once the user has set BOTH sources. On a fresh install these are
+    empty, so trying to read them raises "[Errno 2] No such file or directory: ''".
+    Guard on this so the feature stays dormant until it's actually configured."""
+    c = _cfg()
+    return bool((c.get("ics_path") or "").strip() and (c.get("xlsx_path") or "").strip())
+
+
 def run_today(interactive=True):
+    if not _paths_ready():
+        if interactive:
+            showInfo(
+                "Janki Lectures isn't set up yet.\n\n"
+                "Add your calendar (.ics) and lecture→tag map (.xlsx) under "
+                "Tools → Janki: Settings… → Lectures → Sources, then try again.",
+                title="Janki Lectures",
+            )
+        return
     try:
         if interactive:
             _open_today_dialog()
@@ -1340,6 +1357,8 @@ def _on_profile_open():
     # lectures still works manually anytime).
     if not _cfg().get("auto_on_launch", True):
         return
+    if not _paths_ready():
+        return                     # nothing configured yet → stay silent on launch
     today = _today().isoformat()
     st = _load_state()
     if st.get("last_auto_date") == today:
