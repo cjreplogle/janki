@@ -10,7 +10,7 @@ from aqt.overview import Overview, OverviewBottomBar
 from aqt.reviewer import Reviewer, ReviewerBottomBar
 from aqt.toolbar import TopToolbar
 
-from .config import ACTIVE, _cfg
+from .config import ACTIVE, GLASS, _cfg
 from . import focus, glass, hud
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ def _body_rgba(cfg):
 
 
 def _build_css(cfg, context):
-    if not ACTIVE or not cfg.get("enabled", True):
+    if not GLASS or not cfg.get("enabled", True):
         return ""
     props = _props(cfg)
     blur = cfg.get("blur_radius", 12)
@@ -822,7 +822,7 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # Review history charts on the deck browser.
         if isinstance(context, DeckBrowser):
             web_content.head += "\n" + _stats_head()
-        if ACTIVE:
+        if GLASS:
             QTimer.singleShot(150, glass._clear_existing_webviews)
     except Exception as exc:
         print(f"[janki] css hook: {exc}", file=sys.stderr)
@@ -856,7 +856,7 @@ _CONGRATS_GLASS_JS = (
 
 
 def _ensure_congrats_glass(*_):
-    if not ACTIVE or not _cfg().get("enabled", True):
+    if not GLASS or not _cfg().get("enabled", True):
         return
     try:
         mw.web.eval(_CONGRATS_GLASS_JS)
