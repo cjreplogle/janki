@@ -21,8 +21,36 @@ _CURSOR_HIDE_S = 10.0     # idle seconds before hiding
 _CURSOR_TICK_MS = 500
 
 
+def _cursor_hide() -> None:
+    """Hide the cursor with a persistent, balanced [NSCursor hide] (unlike
+    setHiddenUntilMouseMoves:, which QtWebEngine's constant cursor-set calls on
+    repaint immediately cancel). Must be balanced 1:1 with _cursor_show()."""
+    global _cursor_hidden
+    if _cursor_hidden:
+        return
+    try:
+        msg, cls = _bridge()
+        msg(None, cls(b"NSCursor"), b"hide")
+        _cursor_hidden = True
+    except Exception:
+        pass
+
+
+def _cursor_show() -> None:
+    """Undo _cursor_hide() (balanced unhide)."""
+    global _cursor_hidden
+    if not _cursor_hidden:
+        return
+    try:
+        msg, cls = _bridge()
+        msg(None, cls(b"NSCursor"), b"unhide")
+    except Exception:
+        pass
+    _cursor_hidden = False
+
+
 def _cursor_tick():
-    global _cursor_last_pos, _cursor_idle_s, _cursor_hidden
+    global _cursor_last_pos, _cursor_idle_s
     try:
         from PyQt6.QtGui import QCursor
         pos = QCursor.pos()
@@ -31,7 +59,7 @@ def _cursor_tick():
     if pos != _cursor_last_pos:
         _cursor_last_pos = pos
         _cursor_idle_s = 0.0
-        _cursor_hidden = False  # the OS auto-unhides on the move
+        _cursor_show()          # reveal on any movement
         # NOTE: focus-mode chrome is deliberately NOT restored on move — it
         # "stays hidden" until Focus Mode is toggled off (Tab+F).
         return
@@ -41,16 +69,13 @@ def _cursor_tick():
         fs = mw.isFullScreen()
     except Exception:
         fs = False
-    # Cursor auto-hide stays fullscreen-only (hiding the cursor in a window is odd).
-    if fs and _cursor_idle_s >= _CURSOR_HIDE_S and not _cursor_hidden:
-        try:
-            msg, cls = _bridge()
-            # Hide until the next mouse move (AppKit restores it automatically).
-            msg(None, cls(b"NSCursor"), b"setHiddenUntilMouseMoves:",
-                (c_bool,), (True,))
-            _cursor_hidden = True
-        except Exception:
-            pass
+    # Hide the cursor after idle when the screen is meant to be distraction-free:
+    # OS fullscreen OR Focus Mode engaged (which is often just a maximized window).
+    hide_ctx = fs or _focus_mode_on
+    if hide_ctx and _cursor_idle_s >= _CURSOR_HIDE_S:
+        _cursor_hide()
+    elif not hide_ctx:
+        _cursor_show()          # never leave it stuck hidden outside those contexts
     # Focus Mode: after the same idle delay, hide the toolbar + bottom bar so only
     # the note-card text remains — works in ANY window state. Stays hidden until
     # Tab+F toggles it off.
@@ -180,6 +205,23 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0) -> None:
         pass
 
 
+def _reassert_web_focus() -> None:
+    """Return keyboard focus to the reviewer webview after Focus Mode hides the
+    chrome. Hiding toolbarWeb/bottomWeb (and poking the card-timer's native child
+    windows) can knock keyboard focus off mw.web in fullscreen. When the webview
+    isn't focused, Contanki's Gamepad API sees a NoFocus state and controller
+    presses stop rating the card and start hitting its focus/Fullscreen bindings —
+    which in a native-fullscreen Space bounces you back to the desktop. Re-focusing
+    mw.web keeps the reviewer document focused so Contanki keeps working."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    try:
+        web.setFocus()
+    except Exception:
+        pass
+
+
 def _focus_set_hidden(hidden: bool) -> None:
     global _focus_hidden
     # Set state FIRST so it can never get stuck (a stuck _focus_hidden=True leaves
@@ -215,6 +257,7 @@ def _focus_set_hidden(hidden: bool) -> None:
                 except Exception:
                     pass
             _focus_apply_card(True, off)     # +toolbar_h: card jumped up, slide down
+            _reassert_web_focus()  # keep the reviewer webview focused (see below)
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
@@ -284,6 +327,7 @@ def _toggle_focus_mode() -> None:
             _focus_set_hidden(True)
     else:
         _focus_set_hidden(False)    # bring the chrome back right away
+        _cursor_show()              # and reveal the cursor if it was auto-hidden
     try:
         from aqt.utils import tooltip
         tooltip("Focus Mode " + ("ON" if _focus_mode_on else "OFF"), period=1200)

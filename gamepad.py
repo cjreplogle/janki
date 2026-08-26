@@ -201,6 +201,15 @@ def _hid_button_map():
     return out
 
 
+def _hid_break_skip_usage():
+    """HID button usage that skips a Pomodoro break when held (mirrors hold-Space).
+    Default 2 = the 8bitdo B button (the one used to flip cards)."""
+    try:
+        return int(_cfg().get("hid_break_skip_usage", 2))
+    except Exception:
+        return 2
+
+
 def _start_hid_monitor():
     """Open an IOHIDManager matching gamepads/joysticks and forward their button
     presses to the reviewer from a background CFRunLoop thread. No-op unless the
@@ -335,6 +344,19 @@ def _start_hid_monitor():
                 ival = int(IOKit.IOHIDValueGetIntegerValue(value))
                 last = _hid_last.get(usage)
                 _hid_last[usage] = ival
+                # Break-skip: hold the configured button (default B / usage 2) to
+                # skip a Pomodoro break, mirroring the hold-Space bypass. Drive the
+                # SAME pomo_space signal the keyboard path uses (press=arm the 3s
+                # fill ticker, release=reset) so the fill/skip logic is shared. This
+                # runs regardless of focus — the break overlay is up, so there's no
+                # card to rate underneath — and returns so the press isn't also
+                # forwarded as a rating.
+                if state._pomo_on_break and usage == _hid_break_skip_usage():
+                    if ival == 1 and last != 1:      # button down
+                        keytap._key_bridge.pomo_space.emit(True)
+                    elif ival == 0 and last == 1:    # button up
+                        keytap._key_bridge.pomo_space.emit(False)
+                    return
                 if ival == 1 and last != 1:   # rising edge = button down
                     fwd = bool(state._remote_active and not state._anki_focused)
                     keytap._gtap_log(f"[hid] button {usage} press fwd={fwd} "
