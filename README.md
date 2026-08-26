@@ -33,6 +33,13 @@ Runs on **normal, stock Anki** — no custom build, no separate launcher app.
 **From source (devs):** copy the files into
 `~/Library/Application Support/Anki2/addons21/janki/`.
 
+### Uninstall
+Because the glass involves a small patch to Anki's own files, remove it the clean
+way: **Tools → Janki: Settings… → General → "Restore stock Anki (remove glass
+patch)"**, restart, then delete the add-on from **Tools → Add-ons**. That restores
+Anki's original files (repairing its signature) and clears everything Janki added,
+so nothing is left behind.
+
 > To change or disable any feature: **Tools → Janki: Settings…**
 
 

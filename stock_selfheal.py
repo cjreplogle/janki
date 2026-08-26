@@ -20,6 +20,7 @@ NOTHING (glass just stays off, Anki keeps working) and notifies once.
 import os
 import sys
 import shutil
+import filecmp
 import subprocess
 import py_compile
 import urllib.request
@@ -175,6 +176,54 @@ def _prompt_restart() -> None:
         pass
 
 
+def patch_state() -> str:
+    """'patched' | 'unpatched' | 'unsupported' — for the settings UI."""
+    if sys.platform != "darwin":
+        return "unsupported"
+    ad = _aqt_dir()
+    if ad is None:
+        return "unsupported"
+    if os.environ.get("ANKI_GLASS"):
+        return "patched"               # running the patched app right now
+    for name in _PATCHERS:
+        pyc = ad / (Path(name).stem + ".pyc")
+        bak = pyc.with_suffix(".pyc.janki-orig")
+        if bak.exists() and pyc.exists() and not filecmp.cmp(pyc, bak, shallow=False):
+            return "patched"
+    return "unpatched"
+
+
+def unpatch(purge: bool = True) -> int:
+    """Restore Anki's original .pyc from the backups (repairs the code signature,
+    since the bytes match the sealed originals again). If purge, also delete the
+    backups, the fetch cache, and the notice markers so NOTHING janki remains in
+    Anki.app. Returns the number of files restored. Callers should also set config
+    stock_selfheal=False so the self-heal doesn't just re-patch on next launch."""
+    ad = _aqt_dir()
+    if ad is None:
+        return 0
+    n = 0
+    for name in _PATCHERS:
+        pyc = ad / (Path(name).stem + ".pyc")
+        bak = pyc.with_suffix(".pyc.janki-orig")
+        if bak.exists():
+            try:
+                shutil.copy2(bak, pyc)
+                n += 1
+                if purge:
+                    bak.unlink()
+            except Exception as exc:
+                print(f"[janki] unpatch {name}: {exc}", file=sys.stderr)
+    if purge:
+        shutil.rmtree(_CACHE, ignore_errors=True)
+        for m in (".janki_selfheal_notified", ".janki_unsupported_notified"):
+            try:
+                (Path.home() / m).unlink()
+            except Exception:
+                pass
+    return n
+
+
 def maybe_self_heal() -> None:
     """Entry point — safe to call unconditionally at startup."""
     if sys.platform != "darwin":
@@ -184,6 +233,12 @@ def maybe_self_heal() -> None:
     ad = _aqt_dir()
     if ad is None:
         return                         # source build or not an app bundle
+    try:                               # respect the user's opt-out (uninstall button)
+        from .config import _cfg
+        if not _cfg().get("stock_selfheal", True):
+            return
+    except Exception:
+        pass
     if sys.version_info[:2] != (3, 13):
         return                         # can't produce matching bytecode
     h = _buildhash()

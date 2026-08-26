@@ -5,7 +5,7 @@ from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
 
 from .config import _cfg
-from . import amboss, card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, tray
+from . import amboss, card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, stock_selfheal, tray
 
 class GlassSettings(QDialog):
     """macOS-Terminal-style controls: background colour, opacity, blur radius."""
@@ -471,6 +471,72 @@ class GlassSettings(QDialog):
 
         self._amtip.stateChanged.connect(on_amtip)
         gen_lay.addWidget(self._amtip)
+
+        # --- Glass patch / uninstall ----------------------------------------
+        # On stock Anki the glass needs a small patch to Anki's own files (applied
+        # automatically). This lets you cleanly REMOVE it: restore the original
+        # files, delete backups/cache, and stop the auto-re-patch — the correct way
+        # to undo everything before removing the add-on.
+        _pstate = stock_selfheal.patch_state()
+        if _pstate != "unsupported":
+            _patch_note = QLabel(
+                "Glass patch: Janki patches Anki's own files so the frosted glass "
+                "can work (originals are backed up). Remove it before uninstalling "
+                "the add-on so Anki is left clean."
+            )
+            _patch_note.setWordWrap(True)
+            _patch_note.setStyleSheet("color: gray; margin-top: 8px;")
+            gen_lay.addWidget(_patch_note)
+
+            self._patch_btn = QPushButton()
+
+            def _refresh_patch_btn():
+                st = stock_selfheal.patch_state()
+                self._patch_btn.setText(
+                    "Restore stock Anki (remove glass patch)" if st == "patched"
+                    else "Apply glass patch to Anki")
+
+            def _on_patch_btn():
+                from aqt.qt import QMessageBox
+                if stock_selfheal.patch_state() == "patched":
+                    m = QMessageBox(self)
+                    m.setWindowTitle("Restore stock Anki")
+                    m.setText("Remove Janki's glass patch and restore Anki's "
+                              "original files?")
+                    m.setInformativeText(
+                        "Turns the frosted glass off and stops it re-applying. After "
+                        "you restart Anki, you can safely remove the Janki add-on "
+                        "from Tools → Add-ons and nothing will be left behind.")
+                    yes = m.addButton("Restore & disable",
+                                      QMessageBox.ButtonRole.AcceptRole)
+                    m.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                    m.exec()
+                    if m.clickedButton() is not yes:
+                        return
+                    self.cfg["stock_selfheal"] = False
+                    mw.addonManager.writeConfig(__name__, self.cfg)
+                    n = stock_selfheal.unpatch(purge=True)
+                    _refresh_patch_btn()
+                    r = QMessageBox(self)
+                    r.setWindowTitle("Janki")
+                    r.setText(f"Restored {n} file(s) to stock Anki.")
+                    r.setInformativeText(
+                        "Quit and reopen Anki — the glass is off and won't re-apply. "
+                        "You can now remove the Janki add-on whenever you like.")
+                    q = r.addButton("Quit Anki now", QMessageBox.ButtonRole.AcceptRole)
+                    r.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+                    r.exec()
+                    if r.clickedButton() is q:
+                        mw.close()
+                else:
+                    self.cfg["stock_selfheal"] = True
+                    mw.addonManager.writeConfig(__name__, self.cfg)
+                    stock_selfheal.maybe_self_heal()   # fetch+patch+prompt restart
+                    _refresh_patch_btn()
+
+            _refresh_patch_btn()
+            self._patch_btn.clicked.connect(_on_patch_btn)
+            gen_lay.addWidget(self._patch_btn)
 
         hint = QLabel("Colour + opacity set the tint; blur radius blurs the desktop "
                       "behind Anki (like Terminal). Changes apply live and save "
