@@ -8,9 +8,9 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 
 ## Install
 
-Runs on **normal, stock Anki** — no custom build, no separate launcher app.
+Runs as an Anki plugin **with an additional patch layer for some features** — no custom build or separate app.
 
-1. **Install Anki** (if you haven't) from [apps.ankiweb.net](https://apps.ankiweb.net).
+1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
 3. **Double-click it** (Anki opens and installs it), or in Anki:
    **Tools → Add-ons → Install from file…** → pick the `.ankiaddon`.
@@ -20,15 +20,14 @@ Runs on **normal, stock Anki** — no custom build, no separate launcher app.
 
 > [!NOTE]
 > **Why the one-time patch + restart?** True transparency needs a setting applied
-> before Anki starts drawing — something an add-on alone can't do. Janki patches
+> before Anki starts drawing — something an add-on alone can't do. Janki modifies
 > two of Anki's own files to enable it (backups are kept), and **re-applies
 > automatically after any Anki update**, prompting a quick restart when it does.
 > It only edits local rendering/startup code — your collection, sync, and login
 > are untouched. Everything except the visual glass still works even if you skip
 > the restart.
 
-> [!WARNING]
-> **macOS only.** On other platforms the add-on loads but the glass is skipped.
+
 
 **From source (devs):** copy the files into
 `~/Library/Application Support/Anki2/addons21/janki/`.
