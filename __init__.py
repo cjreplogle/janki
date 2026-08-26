@@ -127,6 +127,7 @@ def _startup():
 
         # Diagnostic helpers kept available programmatically, but off the menu.
         mw._glass_diagnose = diagnostics.glass_diagnose_live
+        mw._amboss_diagnose = amboss._amboss_diagnose
 
         # Card zoom: Cmd+Plus / Cmd+Minus (Qt maps Ctrl→Cmd on macOS). Bind both
         # Cmd+= and Cmd+Shift+= for zoom-in (the '+' key needs Shift on most layouts)

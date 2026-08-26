@@ -108,6 +108,38 @@ def _frost_one_amboss(wv):
     _frost_widget_chain(wv)
 
 
+def _make_widget_transparent(w) -> None:
+    """Force a Qt widget's background transparent by EVERY mechanism Qt paints
+    with: the translucent-bg attribute, autoFillBackground off, a transparent
+    PALETTE, and a scoped stylesheet. The palette is the key one — some AMBOSS
+    containers paint their background via the palette Window/Base role, which a
+    stylesheet `background: transparent` can't override, leaving the opaque
+    'white box' slightly larger than the frosted webview in front of it."""
+    try:
+        from aqt.qt import QPalette, QColor
+        w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        w.setAutoFillBackground(False)
+        try:
+            pal = w.palette()
+            for _role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base,
+                          QPalette.ColorRole.Button):
+                pal.setColor(_role, QColor(0, 0, 0, 0))
+            w.setPalette(pal)
+        except Exception:
+            pass
+        cur = w.styleSheet() or ""
+        if "/*janki-frost*/" not in cur:
+            # scope the rule to THIS widget only (objectName or class) so we
+            # don't blanket child buttons/labels into invisibility
+            nm = w.objectName()
+            sel = ("#" + nm) if nm else type(w).__name__
+            w.setStyleSheet(cur + "\n/*janki-frost*/ " + sel +
+                            "{ background: transparent; background-color: transparent; }")
+        w.update()
+    except Exception:
+        pass
+
+
 def _frost_widget_chain(wv):
     try:
         from PyQt6.QtWidgets import QWidget
@@ -117,20 +149,7 @@ def _frost_widget_chain(wv):
     w = wv
     hops = 0
     while w is not None and hops < 7:
-        try:
-            w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            w.setAutoFillBackground(False)
-            cur = w.styleSheet() or ""
-            if "/*janki-frost*/" not in cur:
-                # scope the rule to THIS widget only (objectName or class) so we
-                # don't blanket child buttons/labels into invisibility
-                nm = w.objectName()
-                sel = ("#" + nm) if nm else type(w).__name__
-                w.setStyleSheet(cur + "\n/*janki-frost*/ " + sel +
-                                "{ background: transparent; background-color: transparent; }")
-                w.update()
-        except Exception:
-            pass
+        _make_widget_transparent(w)
         # stop once we reach one of Anki's own containers (already glassed)
         try:
             if w is mw or w is getattr(mw, "centralWidget", lambda: None)():
@@ -155,13 +174,7 @@ def _frost_amboss_navbar():
                 continue
             if nm.endswith("webview"):
                 continue   # webviews handled separately
-            w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            w.setAutoFillBackground(False)
-            cur = w.styleSheet() or ""
-            if "/*janki-frost*/" not in cur:
-                w.setStyleSheet(cur + "\n/*janki-frost*/ #" + nm +
-                                "{ background: transparent; background-color: transparent; }")
-                w.update()
+            _make_widget_transparent(w)
         except Exception:
             pass
 
