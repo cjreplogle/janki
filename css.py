@@ -10,7 +10,7 @@ from aqt.overview import Overview, OverviewBottomBar
 from aqt.reviewer import Reviewer, ReviewerBottomBar
 from aqt.toolbar import TopToolbar
 
-from .config import ACTIVE, GLASS, _cfg
+from .config import log, ACTIVE, GLASS, _cfg
 from . import focus, glass, hud
 
 # ---------------------------------------------------------------------------
@@ -847,7 +847,7 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         if GLASS:
             QTimer.singleShot(150, glass._clear_existing_webviews)
     except Exception as exc:
-        print(f"[janki] css hook: {exc}", file=sys.stderr)
+        log(f"css hook: {exc}")
 
 
 if hasattr(gui_hooks, "webview_will_set_content"):

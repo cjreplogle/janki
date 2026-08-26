@@ -4,7 +4,7 @@ import sys
 from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
 
-from .config import _cfg, SAFE
+from .config import log, _cfg, SAFE
 from . import amboss, card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, stock_selfheal, tray
 
 class GlassSettings(QDialog):
@@ -62,7 +62,7 @@ class GlassSettings(QDialog):
             if _lsave:
                 self._lecture_savers.append(_lsave)
         except Exception as _e:
-            print("[janki] lecture settings tabs failed: %s" % _e, file=sys.stderr)
+            log("lecture settings tabs failed: %s" % _e)
 
         lay.addWidget(tabs)
 
@@ -557,6 +557,9 @@ class GlassSettings(QDialog):
                 else:
                     self.cfg["stock_selfheal"] = True
                     mw.addonManager.writeConfig(__name__, self.cfg)
+                    # Clear any recorded crash for this build so the retry actually
+                    # runs (otherwise the crash-guard back-off would skip it).
+                    stock_selfheal.clear_failure()
                     stock_selfheal.maybe_self_heal()   # fetch+patch+prompt restart
                     _refresh_patch_btn()
 
@@ -581,7 +584,7 @@ class GlassSettings(QDialog):
                 try:
                     _fn()
                 except Exception as _e:
-                    print("[janki] lecture save failed: %s" % _e, file=sys.stderr)
+                    log("lecture save failed: %s" % _e)
             self.accept()
 
         close.clicked.connect(_close_settings)

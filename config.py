@@ -1,9 +1,18 @@
 """Activation gate and add-on config access."""
 
 import os
+import sys
 from pathlib import Path
 
 from aqt import mw
+
+
+def log(msg: str) -> None:
+    """Janki's internal notice channel. Quiet by default so a fresh install (or a
+    machine whose Qt/ObjC bridge rejects some calls) doesn't spew warnings into
+    Anki's console. Set the env var JANKI_DEBUG=1 to see them."""
+    if os.environ.get("JANKI_DEBUG"):
+        sys.stderr.write("[janki] %s\n" % msg)
 
 
 def _is_active() -> bool:
