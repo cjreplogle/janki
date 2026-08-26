@@ -45,6 +45,7 @@
   "typewriter_min_ms": 120,
   "typewriter_max_ms": 2600,
   "typewriter_static": true,
+  "typewriter_speed": 1.0,
   "global_keys": true,
   "hid_controller": true,
   "hid_button_kc": {
