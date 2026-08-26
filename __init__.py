@@ -44,7 +44,7 @@ except Exception as _e:
 from .bridge import _bridge
 from .config import log, ACTIVE, GLASS, _cfg
 from . import state
-from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, settings_dialog, stock_selfheal, tray
+from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, mobilecards, pomodoro, settings_dialog, stock_selfheal, tray
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,13 @@ def _startup():
         # Diagnostic helpers kept available programmatically, but off the menu.
         mw._glass_diagnose = diagnostics.glass_diagnose_live
         mw._amboss_diagnose = amboss._amboss_diagnose
+
+        # Tools ▸ "Janki: Mobile cards" — stamp OLED + animation + font into every
+        # note type so it syncs to AnkiMobile (which can't run add-ons).
+        try:
+            mobilecards.install_menu()
+        except Exception as _mc_exc:
+            log("mobilecards menu: %s" % _mc_exc)
 
         # Card zoom: Cmd+Plus / Cmd+Minus (Qt maps Ctrl→Cmd on macOS). Bind both
         # Cmd+= and Cmd+Shift+= for zoom-in (the '+' key needs Shift on most layouts)
