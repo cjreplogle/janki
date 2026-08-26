@@ -38,11 +38,11 @@ try:
     from aqt.reviewer import Reviewer, ReviewerBottomBar
     from aqt.toolbar import TopToolbar
 except Exception as _e:
-    print(f"[janki] import error: {_e}", file=sys.stderr)
+    log(f"import error: {_e}")
     raise
 
 from .bridge import _bridge
-from .config import ACTIVE, GLASS, _cfg
+from .config import log, ACTIVE, GLASS, _cfg
 from . import state
 from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, settings_dialog, stock_selfheal, tray
 
@@ -239,6 +239,11 @@ def _startup():
             # the first ~1s so it doesn't read as a flicker.
             QTimer.singleShot(2600, glass._reload_all_webviews)
             QTimer.singleShot(1000, glass._sync_oled)  # in case we start full-screen
+            # Crash-guard: we've reached the add-on, so aqt init + window creation
+            # (where the injected glass setup runs) survived. Give the first paint
+            # a moment, then clear the "pending" sentinel so the guard leaves glass
+            # on. If a launch dies before this, the next start rolls glass back.
+            QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
 
         # ACTIVE = features (run in BOTH editions — safe edition has these without
         # any glass/patch). None of these require window transparency.
@@ -255,10 +260,9 @@ def _startup():
             if _cfg().get("always_on_top", False):
                 glass._apply_always_on_top(True)
         else:
-            print("[janki] inactive (no ANKI_GLASS and not the safe edition).",
-                  file=sys.stderr)
+            log("inactive (no ANKI_GLASS and not the safe edition).")
     except Exception as exc:
-        print(f"[janki] startup error: {exc}", file=sys.stderr)
+        log(f"startup error: {exc}")
 
 
 if hasattr(gui_hooks, "main_window_did_init"):
@@ -274,5 +278,4 @@ elif hasattr(gui_hooks, "profile_did_open"):
 try:
     from . import lectures  # noqa: F401
 except Exception as _lec_exc:
-    print("[janki] lectures submodule failed to load: %s" % _lec_exc,
-          file=sys.stderr)
+    log("lectures submodule failed to load: %s" % _lec_exc)

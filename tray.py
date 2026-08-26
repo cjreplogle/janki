@@ -4,7 +4,7 @@ import sys
 from aqt import mw
 from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
 
-from .config import _cfg
+from .config import log, _cfg
 from . import focus, gamepad, hud, pomodoro
 
 _tray_icon: "QSystemTrayIcon | None" = None
@@ -108,7 +108,7 @@ def _flush_profile():
     try:
         mw.pm.save()
     except Exception as exc:
-        print(f"[janki] profile flush: {exc}", file=sys.stderr)
+        log(f"profile flush: {exc}")
 
 
 def _start_profile_autosave():

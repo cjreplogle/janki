@@ -35,6 +35,12 @@ There are two builds on the [Releases](../../releases) page — pick one:
 > It only edits local rendering/startup code — your collection, sync, and login
 > are untouched. Everything except the visual glass still works even if you skip
 > the restart.
+>
+> **Safe by design:** if the glass ever fails to start on your Anki version, Janki
+> automatically rolls its changes back on the next launch and opens plain Anki —
+> it will never leave you stuck on a broken/crashing app. You can re-enable it
+> later from **Tools → Janki: Settings… → General**. Prefer zero risk? Use the
+> **Safe** build, which never patches Anki at all.
 
 
 

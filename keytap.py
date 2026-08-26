@@ -7,7 +7,7 @@ from aqt import mw
 from aqt.qt import QObject, QTimer
 
 from .bridge import _bridge
-from .config import _cfg
+from .config import log, _cfg
 from . import state
 from . import focus, hud
 
@@ -212,7 +212,7 @@ def _start_key_tap() -> None:
                 AX.AXIsProcessTrustedWithOptions.argtypes = [c_void_p]
                 AX.AXIsProcessTrustedWithOptions(opts)
             except Exception as _pe:
-                print(f"[janki] accessibility prompt failed: {_pe}", file=sys.stderr)
+                log(f"accessibility prompt failed: {_pe}")
                 from aqt.utils import showInfo
                 QTimer.singleShot(0, lambda: showInfo(
                     "Janki: global hotkeys require Accessibility permission.\n\n"
@@ -330,7 +330,7 @@ def _start_key_tap() -> None:
         _key_tap_running = True
     except Exception as exc:
         _gtap_log(f"EXCEPTION: {exc}")
-        print(f"[janki] key tap: {exc}", file=sys.stderr)
+        log(f"key tap: {exc}")
 
 
 def _apply_global_keys(on: bool) -> None:

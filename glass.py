@@ -7,7 +7,7 @@ from aqt.webview import AnkiWebView
 from aqt.qt import QColor, QEvent, QObject, Qt, QTimer
 
 from .bridge import NSRect, _bridge, _cgs
-from .config import GLASS, _cfg
+from .config import log, GLASS, _cfg
 from . import amboss, card_timer, css, keytap, pomodoro, tray
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ def _apply_native_glass():
     try:
         msg, cls = _bridge()
     except Exception as exc:
-        print(f"[janki] ObjC bridge failed: {exc}", file=sys.stderr)
+        log(f"ObjC bridge failed: {exc}")
         return
 
     try:
@@ -40,12 +40,12 @@ def _apply_native_glass():
                 central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                 central.setAutoFillBackground(False)
         except Exception as exc:
-            print(f"[janki] Qt attrs: {exc}", file=sys.stderr)
+            log(f"Qt attrs: {exc}")
 
         nsview = c_void_p(int(mw.winId()))
         window = msg(c_void_p, nsview, b"window")
         if not window:
-            print("[janki] no NSWindow", file=sys.stderr)
+            log("no NSWindow")
             return
 
         # 1. Window transparent (reinforce at the native layer).
@@ -85,7 +85,7 @@ def _apply_native_glass():
         # surface. Nudge it (1px resize — safe, unlike hide/show), then re-assert.
         QTimer.singleShot(60, _reassert_transparent)
     except Exception as exc:
-        print(f"[janki] native glass failed: {exc}", file=sys.stderr)
+        log(f"native glass failed: {exc}")
 
 
 def _install_vibrancy():
@@ -138,7 +138,7 @@ def _install_vibrancy():
         _apply_blur(float(_cfg().get("blur_radius", 0)))
         _vibrancy_installed = True
     except Exception as exc:
-        print(f"[janki] vibrancy install: {exc}", file=sys.stderr)
+        log(f"vibrancy install: {exc}")
 
 
 def _apply_desat(alpha: float):
@@ -156,7 +156,7 @@ def _apply_desat(alpha: float):
         if layer and cg:
             msg(None, layer, b"setBackgroundColor:", (c_void_p,), (cg,))
     except Exception as exc:
-        print(f"[janki] desat: {exc}", file=sys.stderr)
+        log(f"desat: {exc}")
 
 
 def _set_neutralize(alpha: float):
@@ -176,7 +176,7 @@ def _apply_frost_alpha(a: float):
         msg(None, _vibrancy_view, b"setAlphaValue:", (c_double,),
             (max(0.0, min(1.0, float(a))),))
     except Exception as exc:
-        print(f"[janki] frost alpha: {exc}", file=sys.stderr)
+        log(f"frost alpha: {exc}")
 
 
 def _set_frost_alpha(a: float):
@@ -219,7 +219,7 @@ def _apply_blur(radius: float):
         msg(None, layer, b"setMasksToBounds:", (c_bool,), (True,))
         msg(None, layer, b"setBackgroundFilters:", (c_void_p,), (arr,))
     except Exception as exc:
-        print(f"[janki] blur: {exc}", file=sys.stderr)
+        log(f"blur: {exc}")
 
 
 def _set_blur(radius: float):
@@ -236,7 +236,7 @@ def _apply_window_blur(radius: float):
     try:
         lib = _cgs()
         if not lib:
-            print("[janki] CGS blur API unavailable", file=sys.stderr)
+            log("CGS blur API unavailable")
             return
         msg, _cls = _bridge()
         win = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
@@ -246,7 +246,7 @@ def _apply_window_blur(radius: float):
         cid = lib.CGSMainConnectionID()
         lib.CGSSetWindowBackgroundBlurRadius(cid, int(wid), max(0, int(radius)))
     except Exception as exc:
-        print(f"[janki] window blur: {exc}", file=sys.stderr)
+        log(f"window blur: {exc}")
 
 
 # Common NSVisualEffectMaterial values, roughly light→neutral→dark/opaque.
@@ -268,7 +268,7 @@ def _set_material(m: int):
             msg, _cls = _bridge()
             msg(None, _vibrancy_view, b"setMaterial:", (c_long,), (int(m),))
         except Exception as exc:
-            print(f"[janki] set material: {exc}", file=sys.stderr)
+            log(f"set material: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ def _set_window_black(on: bool):
         if black:
             msg(None, win, b"setBackgroundColor:", (c_void_p,), (black,))
     except Exception as exc:
-        print(f"[janki] oled window: {exc}", file=sys.stderr)
+        log(f"oled window: {exc}")
 
 
 def _set_oled(on: bool):
@@ -460,7 +460,7 @@ def _reapply_native():
         _round_corners(_cfg().get("win_corner_radius", 11))
         _apply_window_blur(_cfg().get("blur_radius", 20))
     except Exception as exc:
-        print(f"[janki] reapply: {exc}", file=sys.stderr)
+        log(f"reapply: {exc}")
 
 
 class _FullscreenWatcher(QObject):
@@ -567,7 +567,7 @@ def _unify_titlebar():
         msg(None, win, b"setTitlebarAppearsTransparent:", (c_bool,), (True,))
         msg(None, win, b"setTitleVisibility:", (c_long,), (1,))     # NSWindowTitleHidden
     except Exception as exc:
-        print(f"[janki] titlebar: {exc}", file=sys.stderr)
+        log(f"titlebar: {exc}")
 
 
 def _round_layer(msg, view, radius):
@@ -637,7 +637,7 @@ def _round_corners(radius: float):
                 if layer:
                     msg(None, layer, b"setMaskedCorners:", (c_ulong,), (mask,))
     except Exception as exc:
-        print(f"[janki] round corners: {exc}", file=sys.stderr)
+        log(f"round corners: {exc}")
 
 
 def _assert_window_transparent():
@@ -655,7 +655,7 @@ def _assert_window_transparent():
         msg(None, win, b"invalidateShadow")
         msg(None, win, b"displayIfNeeded")
     except Exception as exc:
-        print(f"[janki] assert transparent: {exc}", file=sys.stderr)
+        log(f"assert transparent: {exc}")
     _apply_window_tint()
 
 
@@ -690,7 +690,7 @@ def _apply_window_tint():
             msg(None, win, b"setOpaque:", (c_bool,), (False,))
             msg(None, win, b"setBackgroundColor:", (c_void_p,), (col,))
     except Exception as exc:
-        print(f"[janki] window tint: {exc}", file=sys.stderr)
+        log(f"window tint: {exc}")
 
 
 def _force_recreate_translucent():
@@ -720,7 +720,7 @@ def _force_recreate_translucent():
         QTimer.singleShot(300, _clear_existing_webviews)
         QTimer.singleShot(400, lambda: (mw.web.reload() if mw.web else None))
     except Exception as exc:
-        print(f"[janki] recreate failed: {exc}", file=sys.stderr)
+        log(f"recreate failed: {exc}")
 
 
 def _reassert_transparent():
@@ -739,7 +739,7 @@ def _reassert_transparent():
         mw.resize(g.width() + 1, g.height())
         mw.resize(g.width(), g.height())
     except Exception as exc:
-        print(f"[janki] reassert failed: {exc}", file=sys.stderr)
+        log(f"reassert failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
