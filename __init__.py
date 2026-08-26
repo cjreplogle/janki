@@ -52,6 +52,10 @@ from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, 
 # ---------------------------------------------------------------------------
 
 def _patch_tooltip():
+    # The glass tooltip strips its shadow/background via the native Cocoa bridge;
+    # on other platforms keep Anki's stock tooltip.
+    if sys.platform != "darwin":
+        return
     import aqt.utils as _aqtu
 
     def _glass_tooltip(msg_text, period=3000, parent=None, y_offset=100, x_offset=0):

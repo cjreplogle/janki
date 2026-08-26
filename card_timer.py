@@ -1,5 +1,6 @@
 """Per-card lingering-warning bar under the toolbar."""
 
+import sys
 from ctypes import c_void_p, c_bool, c_long, c_ulong
 from aqt import mw, gui_hooks
 from aqt.qt import Qt, QTimer
@@ -803,6 +804,9 @@ def _make_card_timer():
 
 
 def _apply_card_timer(on: bool) -> None:
+    # Native edge-glow overlays (Cocoa/CGS) — macOS only.
+    if sys.platform != "darwin":
+        return
     global _card_timer_instance
     if on:
         if _card_timer_instance is None:

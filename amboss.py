@@ -1,5 +1,6 @@
 """AMBOSS webview frosting, narrow-hide, underlines, and diagnostics."""
 
+import sys
 from aqt import mw, gui_hooks
 from aqt.qt import QColor, Qt, QTimer
 
@@ -374,6 +375,10 @@ def _amboss_diagnose() -> None:
 
 
 def _apply_amboss_frost(on: bool) -> None:
+    # Widget/navbar frosting uses native macOS vibrancy — macOS only. (The
+    # JS-based underline + narrow-hide helpers stay cross-platform.)
+    if sys.platform != "darwin":
+        return
     global _amboss_frost_timer
     if on:
         # scan periodically: the AMBOSS panel is created lazily when first opened,

@@ -17,15 +17,17 @@ class GlassSettings(QDialog):
         self.cfg.setdefault("tint_mode", "custom")
         lay = QVBoxLayout(self)
 
-        # On non-macOS the native visual features don't run (they no-op) — only the
-        # lecture importer is cross-platform. Warn up front so the inert tabs below
-        # don't confuse Windows/Linux users.
+        # On non-macOS the native visual features cleanly no-op (guarded). The
+        # cross-platform features still run. Warn up front so the mac-only controls
+        # below don't confuse Windows/Linux users.
         if sys.platform != "darwin":
             _warn = QLabel(
-                "⚠️  Janki's visual features (transparency / glass, caption "
-                "HUD, global hotkeys, controller input, Pomodoro) are macOS-only and "
-                "won't work on this platform. Only “Load today's lectures” is "
-                "supported here."
+                "ℹ️  On this platform Janki runs its cross-platform features — "
+                "today's-lectures import, card zoom (Ctrl +/−), the text-reveal "
+                "animation, dark-text rescue, deck stats, and close-to-tray. The "
+                "macOS-only visuals (glass/transparency, caption HUD, Pomodoro, "
+                "card-timer flares, AMBOSS frost, global hotkeys, controller) are "
+                "turned off here."
             )
             _warn.setWordWrap(True)
             _warn.setStyleSheet(

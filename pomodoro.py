@@ -1,5 +1,6 @@
 """Pomodoro timer widget."""
 
+import sys
 from ctypes import c_void_p, c_bool, c_long, c_ulong
 from aqt import mw
 from aqt.qt import Qt, QTimer
@@ -634,6 +635,9 @@ _pomo_instance = None
 
 
 def _apply_pomodoro(on: bool) -> None:
+    # Break screen + tint use native Cocoa overlays — macOS only.
+    if sys.platform != "darwin":
+        return
     global _pomo_instance
     if on:
         if _pomo_instance is None:

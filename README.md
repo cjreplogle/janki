@@ -3,8 +3,12 @@
 A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins the reviewer with native frosted-glass
 transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <ins>is not affiliated with</ins>.
 
->[!WARNING]
-> **Lots of features are only functional on macOS and untested on Windows devices...** Will properly port some core functionalities to Windows as a separate fork when I find the time / people ask for them.
+>[!NOTE]
+> **Most of the visual/native features are macOS-only.** On Windows/Linux the
+> native bits are cleanly disabled (no errors), and the **Safe** build still runs
+> the cross-platform features: today's-lectures import, card zoom (Ctrl +/−), the
+> text-reveal animation, dark-text rescue, deck stats, and close-to-tray. A proper
+> Windows port of the mac-only visuals may come later if people ask.
 
 ## Install
 
