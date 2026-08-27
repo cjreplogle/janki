@@ -41,10 +41,10 @@ except Exception as _e:
     log(f"import error: {_e}")
     raise
 
-from .bridge import _bridge
-from .config import log, ACTIVE, GLASS, _cfg
-from . import state
-from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, mobilecards, pomodoro, settings_dialog, stock_selfheal, tray, updater
+from .src.bridge import _bridge
+from .src.config import log, ACTIVE, GLASS, _cfg
+from .src import state
+from .src import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, mobilecards, pomodoro, settings_dialog, stock_selfheal, tray, updater
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +300,6 @@ elif hasattr(gui_hooks, "profile_did_open"):
 # lectures") and the once-a-day auto-prompt; its settings panes are hosted inside
 # GlassSettings above.
 try:
-    from . import lectures  # noqa: F401
+    from .src import lectures  # noqa: F401
 except Exception as _lec_exc:
     log("lectures submodule failed to load: %s" % _lec_exc)
