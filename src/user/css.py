@@ -472,8 +472,13 @@ def _typewriter_head(cfg) -> str:
         # Restore plain text nodes so AMBOSS (and text selection / screen readers)
         # never see a word split into per-character spans — that split is what made
         # every letter its own AMBOSS marker / dropdown.
-        "      function finish(){ for(var h=0;h<holders.length;h++){\n"
-        "          try{ holders[h][0].replaceWith(document.createTextNode(holders[h][1])); }catch(e){} }\n"
+        "      function finish(){ for(var h=0;h<holders.length;h++){ var hd=holders[h][0];\n"
+        # If AMBOSS has already wrapped a term inside this holder (its underline
+        # marker / tooltip element), DON'T collapse it — replacing the holder with a
+        # plain text node would wipe that marker and the underline vanishes when the
+        # animation ends. Only collapse holders AMBOSS hasn't touched.
+        "          try{ if(hd.querySelector && hd.querySelector('.amboss-marker,amboss-tooltip-content')) continue;\n"
+        "               hd.replaceWith(document.createTextNode(holders[h][1])); }catch(e){} }\n"
         "        done(); }\n"
         "      var total=spans.length; if(!total){ finish(); return; }\n"
         "      var perTick=timing(total), i=0;\n"
