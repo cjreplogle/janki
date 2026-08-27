@@ -267,18 +267,22 @@ def _amboss_narrow_hide_js(min_w):
 
 
 def _apply_amboss_narrow_hide():
+    """DISABLED. This used to hide AMBOSS hover tooltips when the reviewer webview
+    was narrower than preview_min_window_width — but with the AMBOSS panel open the
+    reviewer is routinely < 900px, so tooltips vanished on the question side (the
+    rule was applied only on question renders) and came back on reveal. That was
+    more annoying than the overflow it guarded against, so now we do the opposite:
+    actively remove any leftover hide rule so tooltips always show."""
     web = getattr(mw, "web", None)
     if web is None:
         return
+    js = ("(function(){var s=document.getElementById('__janki_tip_narrow');"
+          "if(s)s.remove();})()")
     try:
-        min_w = int(_cfg().get("preview_min_window_width", 900))
-    except Exception:
-        min_w = 900
-    try:
-        web.eval(_amboss_narrow_hide_js(min_w))
+        web.eval(js)
     except Exception:
         try:
-            web.page().runJavaScript(_amboss_narrow_hide_js(min_w))
+            web.page().runJavaScript(js)
         except Exception:
             pass
 
