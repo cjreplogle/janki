@@ -329,7 +329,14 @@ def _build_css(cfg, context):
             "html .night_mode .card, html .nightMode.card {\n"
             "  border: none !important;\n"
             "  outline: none !important;\n"
-            "  box-shadow: none !important;\n}\n</style>\n")
+            "  box-shadow: none !important;\n"
+            # Also flatten the FILLED/ROUNDED form of the bubble: a note type that
+            # gives the card its own tinted, rounded, shadowed panel reads as a
+            # second window floating inside the glass. Strip the fill + rounding so
+            # the card text sits directly on the one sheet of glass.
+            "  border-radius: 0 !important;\n"
+            "  background: transparent !important;\n"
+            "  background-color: transparent !important;\n}\n</style>\n")
         # Lists: keep items left-aligned (bullets + wrapped lines line up), but let
         # the list box shrink-to-fit so the centered card centers it as a block —
         # a left-aligned list then reads centered instead of hugging the left edge.
