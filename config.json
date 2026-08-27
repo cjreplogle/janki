@@ -107,5 +107,6 @@
   "text_black_to_white": true,
   "stock_selfheal": true,
   "mobile_cards": false,
-  "auto_update_check": true
+  "auto_update_check": true,
+  "win_height_bump_done": false
 }
