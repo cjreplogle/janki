@@ -11,7 +11,7 @@ from . import tray
 from ..util import diagnostics, keytap
 from ..integrations import gamepad
 from ..integrations import amboss
-from . import stock_selfheal
+from . import stock_selfheal, updater
 
 class GlassSettings(QDialog):
     """macOS-Terminal-style controls: background colour, opacity, blur radius."""
@@ -574,6 +574,18 @@ class GlassSettings(QDialog):
             _refresh_patch_btn()
             self._patch_btn.clicked.connect(_on_patch_btn)
             gen_lay.addWidget(self._patch_btn)
+
+        # --- Updates --------------------------------------------------------
+        # Janki auto-checks on launch; this is the manual trigger (moved here from
+        # the Tools menu).
+        _upd_note = QLabel("Janki checks for updates automatically on launch.")
+        _upd_note.setWordWrap(True)
+        _upd_note.setStyleSheet("color: gray; margin-top: 8px;")
+        gen_lay.addWidget(_upd_note)
+        self._upd_btn = QPushButton("Check for updates now  (v%s)"
+                                    % updater._current_version())
+        self._upd_btn.clicked.connect(lambda: updater.check(interactive=True))
+        gen_lay.addWidget(self._upd_btn)
 
         hint = QLabel("Colour + opacity set the tint; blur radius blurs the desktop "
                       "behind Anki (like Terminal). Changes apply live and save "
