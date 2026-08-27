@@ -5,7 +5,9 @@ from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
 
 from .config import log, _cfg, SAFE
-from . import amboss, card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, stock_selfheal, tray
+from . import card_timer, diagnostics, focus, gamepad, glass, hud, keytap, pomodoro, tray
+from .integrations import amboss
+from .system import stock_selfheal
 
 class GlassSettings(QDialog):
     """macOS-Terminal-style controls: background colour, opacity, blur radius."""
@@ -57,7 +59,7 @@ class GlassSettings(QDialog):
         # everything lives in ONE settings window. Their save fns run on Close.
         self._lecture_savers = []
         try:
-            from . import lectures as _lectures
+            from .integrations import lectures as _lectures
             _pages, _lsave = _lectures.build_settings_pages()
             for _title, _widget in _pages:
                 tabs.addTab(_widget, _title)

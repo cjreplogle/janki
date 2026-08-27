@@ -32,9 +32,10 @@ from aqt import mw, gui_hooks
 from aqt.qt import QAction, QMessageBox, QTimer
 from aqt.utils import showInfo, tooltip
 
-# lectures.py lives in src/; keep runtime files (log, aliases.json, state.json) at
-# the add-on ROOT (one directory up) so existing files + .gitignore still match.
-ADDON_DIR = os.path.dirname(os.path.dirname(__file__))
+# lectures.py lives in src/integrations/; keep runtime files (log, aliases.json,
+# state.json) at the add-on ROOT (two directories up) so existing files +
+# .gitignore still match.
+ADDON_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 # Log inside the add-on folder (cross-platform; findable via Tools > Add-ons >
 # View Files) rather than a macOS-only ~/Library/Logs path.
 LOG_PATH = os.path.join(ADDON_DIR, "janki-lectures.log")

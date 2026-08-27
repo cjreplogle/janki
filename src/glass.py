@@ -8,7 +8,8 @@ from aqt.qt import QColor, QEvent, QObject, Qt, QTimer
 
 from .bridge import NSRect, _bridge, _cgs
 from .config import log, GLASS, _cfg
-from . import amboss, card_timer, css, keytap, pomodoro, tray
+from . import card_timer, css, keytap, pomodoro, tray
+from .integrations import amboss
 
 # ---------------------------------------------------------------------------
 # Native transparency + vibrancy
