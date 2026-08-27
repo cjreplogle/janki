@@ -10,8 +10,9 @@ from aqt.overview import Overview, OverviewBottomBar
 from aqt.reviewer import Reviewer, ReviewerBottomBar
 from aqt.toolbar import TopToolbar
 
-from .config import log, ACTIVE, GLASS, _cfg
-from . import focus, glass, hud
+from ..util.config import log, ACTIVE, GLASS, _cfg
+from ..feature import focus
+from . import glass, hud
 
 # ---------------------------------------------------------------------------
 # CSS

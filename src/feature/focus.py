@@ -5,10 +5,11 @@ from ctypes import c_bool
 from aqt import mw
 from aqt.qt import Qt, QTimer
 
-from .bridge import _bridge
-from .config import _cfg
-from . import state
-from . import card_timer, keytap
+from ..util.bridge import _bridge
+from ..util.config import _cfg
+from ..util import state
+from . import card_timer
+from ..util import keytap
 
 # ---------------------------------------------------------------------------
 # Auto-hide cursor after idle in fullscreen

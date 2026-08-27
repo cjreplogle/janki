@@ -5,10 +5,11 @@ from ctypes import c_void_p, c_bool, c_long, c_ulong
 from aqt import mw
 from aqt.qt import Qt, QTimer
 
-from .bridge import _bridge
-from .config import _cfg
-from . import state
-from . import card_timer, focus, keytap
+from ..util.bridge import _bridge
+from ..util.config import _cfg
+from ..util import state
+from . import card_timer, focus
+from ..util import keytap
 
 # ---------------------------------------------------------------------------
 # Pomodoro timer — XP bar + break screen with hold-Space bypass

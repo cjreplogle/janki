@@ -36,9 +36,9 @@ def _safe_edition() -> bool:
     in the safe build. It runs every feature but NEVER patches Anki or attempts
     window transparency / OLED / the self-heal."""
     try:
-        # config.py lives in src/, so the flag (written at the add-on ROOT by the
-        # safe build) is one directory up.
-        return (Path(__file__).resolve().parent.parent / "safe_edition.flag").exists()
+        # config.py lives in src/util/, so the flag (written at the add-on ROOT by
+        # the safe build) is two directories up.
+        return (Path(__file__).resolve().parent.parent.parent / "safe_edition.flag").exists()
     except Exception:
         return False
 

@@ -8,7 +8,8 @@ from aqt.qt import QTimer
 
 from .bridge import _bridge
 from .config import ACTIVE, _cfg
-from . import glass, keytap
+from ..ui import glass
+from . import keytap
 
 # ---------------------------------------------------------------------------
 # Diagnostics

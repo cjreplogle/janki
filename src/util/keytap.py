@@ -9,7 +9,8 @@ from aqt.qt import QObject, QTimer
 from .bridge import _bridge
 from .config import log, _cfg
 from . import state
-from . import focus, hud
+from ..feature import focus
+from ..ui import hud
 
 # ---------------------------------------------------------------------------
 # Global hotkeys (Tab+Z/X/C/V/Space → Anki reviewer when not focused)

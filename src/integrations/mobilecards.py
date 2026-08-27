@@ -13,7 +13,7 @@ import re
 from aqt import mw
 from aqt.utils import showInfo, askUser, tooltip
 
-from ..config import log
+from ..util.config import log
 
 # --- fenced blocks (markers make apply idempotent + remove exact) --------------
 

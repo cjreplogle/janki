@@ -4,8 +4,10 @@ import sys
 from aqt import mw
 from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
 
-from .config import log, _cfg
-from . import focus, gamepad, hud, pomodoro
+from ..util.config import log, _cfg
+from ..feature import focus, pomodoro
+from ..ui import hud
+from ..integrations import gamepad
 
 _tray_icon: "QSystemTrayIcon | None" = None
 _tray_caption_action: "QAction | None" = None

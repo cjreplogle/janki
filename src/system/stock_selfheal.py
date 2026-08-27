@@ -36,7 +36,7 @@ import py_compile
 import urllib.request
 from pathlib import Path
 
-from ..config import log
+from ..util.config import log
 
 _RAW = "https://raw.githubusercontent.com/ankitects/anki/{h}/qt/aqt/{name}"
 _CACHE = Path.home() / ".janki_stock_cache"
@@ -332,7 +332,7 @@ def maybe_self_heal() -> None:
     if ad is None:
         return                         # source build or not an app bundle
     try:                               # never patch in the safe edition; respect opt-out
-        from ..config import _cfg, SAFE
+        from ..util.config import _cfg, SAFE
         if SAFE or not _cfg().get("stock_selfheal", True):
             return
     except Exception:

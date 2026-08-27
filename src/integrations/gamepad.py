@@ -6,10 +6,11 @@ from ctypes import c_void_p, c_char_p, c_int, c_long
 from aqt import mw
 from aqt.qt import QTimer
 
-from .bridge import _bridge
-from .config import _cfg
-from . import state
-from . import hud, keytap
+from ..util.bridge import _bridge
+from ..util.config import _cfg
+from ..util import state
+from ..ui import hud
+from ..util import keytap
 
 # ---------------------------------------------------------------------------
 # Focus-independent gamepad (GameController framework)

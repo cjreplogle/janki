@@ -5,10 +5,11 @@ from ctypes import c_void_p, c_bool, c_long, c_ulong
 from aqt import mw, gui_hooks
 from aqt.qt import Qt, QTimer
 
-from .bridge import _bridge
-from .config import _cfg
-from . import state
-from . import focus, hud
+from ..util.bridge import _bridge
+from ..util.config import _cfg
+from ..util import state
+from . import focus
+from ..ui import hud
 
 # ---------------------------------------------------------------------------
 # Per-card "lingering" warning bar (under the top toolbar)
