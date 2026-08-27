@@ -79,40 +79,6 @@ def _amboss_webviews():
     return out
 
 
-def close_amboss() -> bool:
-    """Best-effort close of the AMBOSS side panel: hide the pane/dock that holds
-    its webview. Scoped to ancestors of a confirmed AMBOSS webview, and never
-    touches Anki's own main window / central widget, so it can't hide core UI.
-    Returns True if it hid something (for a tooltip)."""
-    try:
-        from aqt.qt import QDockWidget, QSplitter
-    except Exception:
-        QDockWidget = QSplitter = ()
-    try:
-        central = mw.centralWidget()
-    except Exception:
-        central = None
-    closed = False
-    for wv in _amboss_webviews():
-        try:
-            target, w, hops = wv, wv, 0
-            while w is not None and hops < 12:
-                if QDockWidget and isinstance(w, QDockWidget):
-                    target = w
-                    break
-                p = w.parentWidget()
-                if p is None or p is mw or p is central or (QSplitter and isinstance(p, QSplitter)):
-                    target = w        # the AMBOSS pane (child of the splitter/central)
-                    break
-                w, hops = p, hops + 1
-            if target is not mw and target is not central:
-                target.hide()
-                closed = True
-        except Exception:
-            pass
-    return closed
-
-
 def _frost_one_amboss(wv):
     # transparent Qt page background (kills the opaque CANVAS slab)
     try:
