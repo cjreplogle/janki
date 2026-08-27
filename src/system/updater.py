@@ -22,7 +22,7 @@ from datetime import date
 from aqt import mw
 from aqt.utils import showInfo, askUser
 
-from .config import SAFE, log
+from ..config import SAFE, log
 
 _REPO = "cjreplogle/janki"
 _API = "https://api.github.com/repos/%s/releases/latest" % _REPO
@@ -35,8 +35,8 @@ def _asset_name() -> str:
 
 def _current_version() -> str:
     try:
-        # updater.py lives in src/; manifest.json is at the add-on ROOT (one up).
-        m = json.loads((Path(__file__).resolve().parent.parent / "manifest.json")
+        # updater.py lives in src/system/; manifest.json is at the add-on ROOT.
+        m = json.loads((Path(__file__).resolve().parent.parent.parent / "manifest.json")
                        .read_text(encoding="utf-8"))
         return str(m.get("human_version", "0"))
     except Exception:
@@ -157,7 +157,7 @@ def _mark_checked() -> None:
 def maybe_auto_check() -> None:
     """Once-a-day background check on launch; silent unless an update exists."""
     try:
-        from .config import _cfg
+        from ..config import _cfg
         if not _cfg().get("auto_update_check", True):
             return
         if _checked_today():
