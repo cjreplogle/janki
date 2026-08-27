@@ -197,13 +197,13 @@ _AMBOSS_TOOLTIP_JS = (
     # text is readable even if CSS backdrop-filter doesn't render under the glass
     # patch's software compositing; the blur is a bonus where it does. .tippy-content
     # stays transparent so we get ONE frosted surface, not a nested box.
-    "s.textContent='.tippy-box,.tippy-tooltip{background:rgba(28,28,30,.92)!important;"
-    "color:#ededed!important;border:none!important;border-radius:12px!important;"
-    "box-shadow:0 8px 28px rgba(0,0,0,.45)!important;"
-    "-webkit-backdrop-filter:blur(22px) saturate(140%);"
-    "backdrop-filter:blur(22px) saturate(140%);}"
+    # Keep the tippy container transparent — the visible text lives in the
+    # <amboss-tooltip-content> shadow host, and frosting .tippy-box left the haze
+    # offset below the text. The frost goes on :host instead (see shadow()).
+    "s.textContent='.tippy-box,.tippy-tooltip{background:transparent!important;"
+    "border:none!important;box-shadow:none!important;}"
     ".tippy-box .tippy-content,.tippy-tooltip .tippy-content{background:transparent!important;"
-    "color:#ededed!important;padding:10px 12px!important;}"
+    "color:#ededed!important;}"
     ".tippy-box .tippy-arrow,.tippy-arrow{color:rgba(28,28,30,.92)!important;}';"
     "(document.head||document.documentElement).appendChild(s);}"
     "function shadow(el){try{var r=el.shadowRoot;if(!r)return;"
@@ -211,8 +211,11 @@ _AMBOSS_TOOLTIP_JS = (
     "var st=document.createElement('style');st.id='__janki_shadow_frost';"
     "st.textContent='*{background-color:transparent!important;color:#ededed!important;'+"
     "'border-color:transparent!important;outline:none!important;box-shadow:none!important;}'+"
-    "':host{display:block!important;background:transparent!important;"
-    "color:#ededed!important;border:none!important;box-shadow:none!important;}';"
+    "':host{display:block!important;background:rgba(28,28,30,.92)!important;"
+    "color:#ededed!important;border:none!important;border-radius:12px!important;"
+    "padding:10px 12px!important;box-shadow:0 8px 28px rgba(0,0,0,.45)!important;"
+    "-webkit-backdrop-filter:blur(22px) saturate(140%);"
+    "backdrop-filter:blur(22px) saturate(140%);}';"
     "r.appendChild(st);}catch(e){}}"
     "function all(){css();var e=document.querySelectorAll('amboss-tooltip-content');"
     "for(var i=0;i<e.length;i++)shadow(e[i]);}"
