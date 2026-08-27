@@ -44,7 +44,7 @@ except Exception as _e:
 from .bridge import _bridge
 from .config import log, ACTIVE, GLASS, _cfg
 from . import state
-from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, mobilecards, pomodoro, settings_dialog, stock_selfheal, tray
+from . import amboss, card_timer, css, diagnostics, focus, gamepad, glass, hud, keytap, mobilecards, pomodoro, settings_dialog, stock_selfheal, tray, updater
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,15 @@ def _startup():
         # Diagnostic helpers kept available programmatically, but off the menu.
         mw._glass_diagnose = diagnostics.glass_diagnose_live
         mw._amboss_diagnose = amboss._amboss_diagnose
+
+        # In-app updater: a "Check for updates" menu item + a throttled once-a-day
+        # background check (Janki isn't on AnkiWeb, so this replaces manual GitHub
+        # reinstalls). Both fail-safe.
+        try:
+            updater.install_menu()
+            updater.maybe_auto_check()
+        except Exception as _up_exc:
+            log("updater: %s" % _up_exc)
 
         # Tools ▸ "Janki: Mobile cards" — stamp OLED + animation + font into every
         # note type so it syncs to AnkiMobile (which can't run add-ons). EXPERIMENTAL
