@@ -168,9 +168,5 @@ def maybe_auto_check() -> None:
     except Exception as exc:
         log("auto update check: %s" % exc)
 
-
-def install_menu() -> None:
-    from aqt.qt import QAction
-    act = QAction("Janki: Check for updates…", mw)
-    act.triggered.connect(lambda: check(interactive=True))
-    mw.form.menuTools.addAction(act)
+# The manual "Check for updates now" trigger lives in the settings dialog
+# (General tab), which calls check(interactive=True) directly.

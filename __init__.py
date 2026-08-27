@@ -135,11 +135,10 @@ def _startup():
         mw._glass_diagnose = diagnostics.glass_diagnose_live
         mw._amboss_diagnose = amboss._amboss_diagnose
 
-        # In-app updater: a "Check for updates" menu item + a throttled once-a-day
-        # background check (Janki isn't on AnkiWeb, so this replaces manual GitHub
-        # reinstalls). Both fail-safe.
+        # In-app updater: throttled once-a-day background check on launch (Janki
+        # isn't on AnkiWeb, so this replaces manual GitHub reinstalls). The manual
+        # "Check for updates now" trigger lives in Janki: Settings… → General.
         try:
-            updater.install_menu()
             updater.maybe_auto_check()
         except Exception as _up_exc:
             log("updater: %s" % _up_exc)
