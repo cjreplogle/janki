@@ -192,14 +192,19 @@ _AMBOSS_TOOLTIP_JS = (
     "var s=document.createElement('style');s.id=SID;"
     # single frosted surface lives on .tippy-content; the container above it and
     # everything inside the shadow root are fully transparent → no nested frame.
-    "s.textContent='.tippy-popper .tippy-tooltip,.tippy-tooltip{background:transparent!important;"
-    "background-color:transparent!important;box-shadow:none!important;border:none!important;}'+"
-    "'.tippy-popper .tippy-content,.tippy-tooltip .tippy-content{"
-    "background:rgba(34,34,36,.55)!important;color:#ededed!important;"
+    # Frost the ACTUAL tooltip container. tippy v6 uses .tippy-box (older AMBOSS
+    # used .tippy-tooltip) — cover both. The background is fairly opaque (0.92) so
+    # text is readable even if CSS backdrop-filter doesn't render under the glass
+    # patch's software compositing; the blur is a bonus where it does. .tippy-content
+    # stays transparent so we get ONE frosted surface, not a nested box.
+    "s.textContent='.tippy-box,.tippy-tooltip{background:rgba(28,28,30,.92)!important;"
+    "color:#ededed!important;border:none!important;border-radius:12px!important;"
+    "box-shadow:0 8px 28px rgba(0,0,0,.45)!important;"
     "-webkit-backdrop-filter:blur(22px) saturate(140%);"
-    "backdrop-filter:blur(22px) saturate(140%);"
-    "border:none!important;border-radius:12px!important;"
-    "box-shadow:0 8px 28px rgba(0,0,0,.35)!important;padding:10px 12px!important;}';"
+    "backdrop-filter:blur(22px) saturate(140%);}"
+    ".tippy-box .tippy-content,.tippy-tooltip .tippy-content{background:transparent!important;"
+    "color:#ededed!important;padding:10px 12px!important;}"
+    ".tippy-box .tippy-arrow,.tippy-arrow{color:rgba(28,28,30,.92)!important;}';"
     "(document.head||document.documentElement).appendChild(s);}"
     "function shadow(el){try{var r=el.shadowRoot;if(!r)return;"
     "if(r.querySelector('#__janki_shadow_frost'))return;"
