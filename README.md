@@ -50,6 +50,13 @@ There are two builds on the [Releases](../../releases) page — pick one:
 **From source (devs):** copy the files into
 `~/Library/Application Support/Anki2/addons21/janki/`.
 
+### Updating
+After the first install, Janki updates itself — no more manual downloads. It
+checks this repo's Releases about once a day and, when a newer version is out,
+offers a one-click **Update now** (it grabs the matching build, installs it, and
+keeps your settings). You can also trigger it anytime with **Tools → Janki: Check
+for updates…**, or turn the auto-check off via the `auto_update_check` config.
+
 ### Uninstall
 Because the glass involves a small patch to Anki's own files, remove it the clean
 way: **Tools → Janki: Settings… → General → "Restore stock Anki (remove glass
