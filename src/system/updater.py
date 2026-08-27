@@ -22,7 +22,7 @@ from datetime import date
 from aqt import mw
 from aqt.utils import showInfo, askUser
 
-from ..config import SAFE, log
+from ..util.config import SAFE, log
 
 _REPO = "cjreplogle/janki"
 _API = "https://api.github.com/repos/%s/releases/latest" % _REPO
@@ -157,7 +157,7 @@ def _mark_checked() -> None:
 def maybe_auto_check() -> None:
     """Once-a-day background check on launch; silent unless an update exists."""
     try:
-        from ..config import _cfg
+        from ..util.config import _cfg
         if not _cfg().get("auto_update_check", True):
             return
         if _checked_today():
