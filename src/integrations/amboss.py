@@ -200,25 +200,67 @@ _AMBOSS_TOOLTIP_JS = (
     # Keep the tippy container transparent — the visible text lives in the
     # <amboss-tooltip-content> shadow host, and frosting .tippy-box left the haze
     # offset below the text. The frost goes on :host instead (see shadow()).
-    "s.textContent='.tippy-box,.tippy-tooltip{background:transparent!important;"
-    "border:none!important;box-shadow:none!important;}"
-    ".tippy-box .tippy-content,.tippy-tooltip .tippy-content{background:transparent!important;"
-    "color:#ededed!important;}"
+    # AMBOSS bundles tippy v5 (popper 1.16.1), so the light surface is
+    # `.tippy-tooltip.light-theme`, whose light box-shadow glow + white bg (specificity
+    # 0,2,0) beat a plain .tippy-tooltip and showed as a light ring OUTSIDE our dark
+    # :host panel. Kill its box-shadow/filter/background and the white arrow, and zero
+    # .tippy-content padding. v6 `.tippy-box` selectors are kept as a harmless fallback.
+    "s.textContent='.tippy-tooltip,.tippy-tooltip.light-theme,.tippy-box,"
+    ".tippy-box[data-theme~=light],.tippy-box[data-theme~=amboss]{"
+    "background:transparent!important;background-color:transparent!important;"
+    "border:0!important;box-shadow:none!important;filter:none!important;}"
+    ".tippy-tooltip .tippy-content,.tippy-tooltip.light-theme .tippy-content,"
+    ".tippy-box .tippy-content{background:transparent!important;"
+    "background-color:transparent!important;padding:0!important;color:#ededed!important;}"
+    ".tippy-tooltip.light-theme .tippy-backdrop,.tippy-backdrop{"
+    "background:transparent!important;background-color:transparent!important;}"
+    ".tippy-tooltip.light-theme[x-placement^=top] .tippy-arrow{border-top-color:rgba(28,28,30,.92)!important;}"
+    ".tippy-tooltip.light-theme[x-placement^=bottom] .tippy-arrow{border-bottom-color:rgba(28,28,30,.92)!important;}"
+    ".tippy-tooltip.light-theme[x-placement^=left] .tippy-arrow{border-left-color:rgba(28,28,30,.92)!important;}"
+    ".tippy-tooltip.light-theme[x-placement^=right] .tippy-arrow{border-right-color:rgba(28,28,30,.92)!important;}"
     ".tippy-box .tippy-arrow,.tippy-arrow{color:rgba(28,28,30,.92)!important;}';"
     "(document.head||document.documentElement).appendChild(s);}"
     "function shadow(el){try{var r=el.shadowRoot;if(!r)return;"
-    "if(r.querySelector('#__janki_shadow_frost'))return;"
+    "function inj(){if(r.querySelector('#__janki_shadow_frost'))return;"
     "var st=document.createElement('style');st.id='__janki_shadow_frost';"
     "st.textContent='*{background-color:transparent!important;color:#ededed!important;'+"
     "'border-color:transparent!important;outline:none!important;box-shadow:none!important;}'+"
-    "':host{display:block!important;background:rgba(28,28,30,.92)!important;"
-    "color:#ededed!important;border:none!important;border-radius:12px!important;"
-    "padding:10px 12px!important;box-shadow:0 8px 28px rgba(0,0,0,.45)!important;"
-    "-webkit-backdrop-filter:blur(22px) saturate(140%);"
-    "backdrop-filter:blur(22px) saturate(140%);}';"
-    "r.appendChild(st);}catch(e){}}"
+    # NOTE: backdrop-filter (blur of content behind) needs GPU compositing, but the
+    # launcher runs with --disable-gpu (required for the window glass), so Chromium
+    # drops it. We keep it as best-effort (activates if a GPU build is ever used) and
+    # rely on a mostly-opaque frosted-dark panel for readability meanwhile.
+    "':host{display:block!important;background:rgba(28,28,30,.88)!important;"
+    "color:#ededed!important;border:1px solid rgba(255,255,255,.08)!important;"
+    "border-radius:14px!important;padding:16px 20px!important;"
+    "box-shadow:0 10px 32px rgba(0,0,0,.5)!important;"
+    "-webkit-backdrop-filter:blur(30px) saturate(160%);"
+    "backdrop-filter:blur(30px) saturate(160%);}';"
+    "r.appendChild(st);}"
+    "inj();"
+    # AMBOSS re-sets shadowRoot.innerHTML when the tooltip loads its real content
+    # (spinner -> card), which wipes our injected <style> and re-adds the template's
+    # own `.amboss-card{background:white}` (the second/inner box). The light-DOM
+    # observer can't see shadow-internal mutations, so watch the shadow root itself
+    # and re-inject whenever our style is gone.
+    "if(!el.__jkso){el.__jkso=new MutationObserver(inj);el.__jkso.observe(r,{childList:true});}"
+    "}catch(e){}}"
+    # The tippy wrapper chain (popper root / .tippy-box / .tippy-tooltip / content)
+    # paints its own box — a second panel around our frosted :host. Rather than chase
+    # tippy's version-specific class names, walk up from each tooltip host and force
+    # every ancestor transparent with no border/shadow/padding, so only the :host
+    # panel remains. Inline !important beats any AMBOSS/tippy stylesheet.
+    "function ancestors(el){var p=el.parentNode,n=0;"
+    "while(p&&p.nodeType===1&&n<6){var tn=(p.tagName||'').toLowerCase();"
+    "if(tn==='body'||tn==='html')break;"
+    "p.style.setProperty('background','transparent','important');"
+    "p.style.setProperty('background-color','transparent','important');"
+    "p.style.setProperty('border','0','important');"
+    "p.style.setProperty('box-shadow','none','important');"
+    "p.style.setProperty('filter','none','important');"
+    "p.style.setProperty('padding','0','important');"
+    "p=p.parentNode;n++;}}"
     "function all(){css();var e=document.querySelectorAll('amboss-tooltip-content');"
-    "for(var i=0;i<e.length;i++)shadow(e[i]);}"
+    "for(var i=0;i<e.length;i++){shadow(e[i]);ancestors(e[i]);}}"
     "all();try{if(!window.__janki_tippy_obs){window.__janki_tippy_obs="
     "new MutationObserver(all);window.__janki_tippy_obs.observe("
     "document.documentElement,{childList:true,subtree:true});}}catch(e){}})();"
@@ -296,17 +338,10 @@ def _apply_amboss_narrow_hide():
 
 
 # ---------------------------------------------------------------------------
-# Hide AMBOSS term underlines unless in fullscreen. AMBOSS underlines matched
-# terms with a border-bottom on `span.amboss-marker` (see the AMBOSS add-on's
-# reviewer.py). We keep them out of the way in windowed review and only reveal
-# them in native fullscreen (the immersive read).
+# AMBOSS term underlines (border-bottom on `span.amboss-marker`, from the AMBOSS
+# add-on's reviewer.py) are shown in ALL modes — fullscreen and windowed. We just
+# make sure any leftover hide-style from a previous version is removed.
 # ---------------------------------------------------------------------------
-_AMBOSS_UL_HIDE_JS = (
-    "(function(){var ID='__janki_amboss_ul';var s=document.getElementById(ID);"
-    "if(!s){s=document.createElement('style');s.id=ID;"
-    "(document.head||document.documentElement).appendChild(s);}"
-    "s.textContent='span.amboss-marker{border-bottom:0 !important;}';})()"
-)
 _AMBOSS_UL_SHOW_JS = (
     "(function(){var s=document.getElementById('__janki_amboss_ul');"
     "if(s)s.remove();})()"
@@ -314,13 +349,12 @@ _AMBOSS_UL_SHOW_JS = (
 
 
 def _apply_amboss_underlines():
-    """Show AMBOSS term underlines only in fullscreen; hide them windowed."""
+    """Show AMBOSS term underlines in every mode (windowed + fullscreen)."""
     web = getattr(mw, "web", None)
     if web is None:
         return
     try:
-        js = _AMBOSS_UL_SHOW_JS if mw.isFullScreen() else _AMBOSS_UL_HIDE_JS
-        web.eval(js)
+        web.eval(_AMBOSS_UL_SHOW_JS)
     except Exception:
         pass
 

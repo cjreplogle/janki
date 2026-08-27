@@ -434,6 +434,18 @@ def _typewriter_head(cfg) -> str:
         "    var reveal=function(){ try{ qa.style.visibility='visible'; }catch(e){} };\n"
         "    setTimeout(reveal, 600);\n"   # safety: never leave the card hidden
         "    var observer, animating=false;\n"
+        # AMBOSS marks terms (span.amboss-marker + underline) async on card show via
+        # ambossAddon.tooltip.phraseMarker.mark(phrases). Our reveal fragments then
+        # normalizes the DOM, wiping those markers, and AMBOSS never re-fires. So we
+        # (1) wrap mark() to remember the phrases for THIS card, and (2) re-mark on the
+        # clean DOM once the animation finishes. Cleared per-card so we never re-mark
+        # with a previous card's terms; a no-op when AMBOSS isn't installed.
+        "    function jkAmbPm(){ try{ return window.ambossAddon&&ambossAddon.tooltip&&ambossAddon.tooltip.phraseMarker; }catch(e){ return null; } }\n"
+        "    function jkAmbHook(){ var pm=jkAmbPm(); if(pm && !pm.__jkw){ try{ var o=pm.mark.bind(pm);\n"
+        "      pm.mark=function(p){ window.__jkAmbPhr=p; return o(p); }; pm.__jkw=1; }catch(e){} } }\n"
+        "    function jkAmbRemark(){ var pm=jkAmbPm(), p=window.__jkAmbPhr; if(pm && p){ try{ window.__jkRemark=1;\n"
+        "      pm.hideAll(); pm.mark(p); setTimeout(function(){ window.__jkRemark=0; }, 250); }catch(e){ window.__jkRemark=0; } } }\n"
+        "    jkAmbHook();\n"
         "    function skip(node){ var p=node.parentNode;\n"
         "      while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
         "        if(t==='SCRIPT'||t==='STYLE') return true;\n"
@@ -512,18 +524,23 @@ def _typewriter_head(cfg) -> str:
         "    function isClozeBack(){ var cz=qa.querySelectorAll('.cloze');\n"
         "      for(var i=0;i<cz.length;i++){ var t=(cz[i].textContent||'').trim();\n"
         "        if(t && !/^\\[[\\s\\S]*\\]$/.test(t)) return true; } return false; }\n"
-        "    function run(){ if(animating) return;\n"
-        "      var s=qa.textContent||'';\n"
-        "      if(!s || !s.trim()){ return; }        // ignore transient empty states\n"
+        "    function run(){ if(animating||window.__jkRemark) return;\n"
+        "      var raw=qa.textContent||'';\n"
+        "      if(!raw || !raw.trim()){ return; }     // ignore transient empty states\n"
+        # Whitespace-invariant signature: AMBOSS's phraseMarker permanently inserts
+        # spaces around block tags (div/p/br/li) with no despacify, which would look
+        # like a new card and re-fire the reveal (double animation on the first,
+        # slow-to-mark card). Stripping whitespace makes the card identity stable.
+        "      var s=raw.replace(/\\s+/g,'');\n"
         "      if(s===lastSig){ reveal(); return; }  // already showing this card\n"
-        "      lastSig=s;\n"
+        "      lastSig=s; window.__jkAmbPhr=null; jkAmbHook();\n"
         "      // Cloze reveal → show instantly, no animation. Front of cloze (and basic\n"
         "      // cards) fall through and animate normally.\n"
         "      if(qa.querySelector('.cloze') && isClozeBack()){ reveal(); return; }\n"
         "      animating=true;\n"
         "      if(observer) observer.disconnect();\n"
         "      typeOut(false, function(){ animating=false;\n"
-        "        if(observer) observer.observe(qa,{childList:true}); }); }\n"
+        "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }); }\n"
         "    // childList-only + SYNCHRONOUS run: the observer microtask fires before\n"
         "    // the browser paints, so emptying the text here means the full text is\n"
         "    // never shown. Fires only on real card/answer swaps, not image/MathJax.\n"

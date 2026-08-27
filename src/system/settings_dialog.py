@@ -3,6 +3,7 @@
 import sys
 from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
+from aqt.utils import tooltip
 
 from ..util.config import log, _cfg, SAFE
 from ..features import card_timer, focus, pomodoro
@@ -599,6 +600,31 @@ class GlassSettings(QDialog):
         _mob_note.setWordWrap(True)
         _mob_note.setStyleSheet("color: gray; margin-top: 8px;")
         app_lay.addWidget(_mob_note)
+
+        # Card font used on mobile. Changing it re-stamps the note types live if the
+        # theming is already applied (so it shows on the next sync).
+        _mfont_row = QHBoxLayout()
+        _mfont_name = QLabel("Mobile card font")
+        _mfont_name.setMinimumWidth(140)
+        self._mob_font = QComboBox()
+        for _lbl in mobilecards.FONTS:
+            self._mob_font.addItem(_lbl, _lbl)
+        _fi = self._mob_font.findData(mobilecards.current_font())
+        self._mob_font.setCurrentIndex(_fi if _fi >= 0 else 0)
+
+        def on_mob_font(_i):
+            self.cfg["mobile_font"] = self._mob_font.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            if mobilecards.is_applied():
+                mobilecards.restyle_font()
+                tooltip("Mobile font updated — Sync to push it to your devices.")
+
+        self._mob_font.currentIndexChanged.connect(on_mob_font)
+        _mfont_row.addWidget(_mfont_name)
+        _mfont_row.addWidget(self._mob_font)
+        _mfont_row.addStretch()
+        app_lay.addLayout(_mfont_row)
+
         _mob_row = QHBoxLayout()
         self._mob_apply = QPushButton("Apply UI theming to mobile cards")
         self._mob_revert = QPushButton("Revert mobile theming")
