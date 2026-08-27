@@ -339,22 +339,49 @@ def _apply_amboss_narrow_hide():
 
 # ---------------------------------------------------------------------------
 # AMBOSS term underlines (border-bottom on `span.amboss-marker`, from the AMBOSS
-# add-on's reviewer.py) are shown in ALL modes — fullscreen and windowed. We just
-# make sure any leftover hide-style from a previous version is removed.
+# add-on's reviewer.py) are shown in ALL modes — fullscreen and windowed. On the
+# FRONT they fade in (AMBOSS sets border-bottom-color non-!important, so an
+# animation from transparent with an implicit end-frame settles to AMBOSS's real
+# colour). The fade is gated on `html.jk-ul-fade`, which we add on the question and
+# remove on the answer, so back-side underlines appear instantly. The style is
+# injected once per document (persists across cards).
 # ---------------------------------------------------------------------------
-_AMBOSS_UL_SHOW_JS = (
-    "(function(){var s=document.getElementById('__janki_amboss_ul');"
-    "if(s)s.remove();})()"
-)
+def _amboss_ul_js(front: bool) -> str:
+    toggle = "add" if front else "remove"
+    return (
+        "(function(){"
+        "var old=document.getElementById('__janki_amboss_ul');if(old)old.remove();"  # drop legacy hide-style
+        "var ID='__janki_amboss_ul_fade';if(!document.getElementById(ID)){"
+        "var s=document.createElement('style');s.id=ID;"
+        # `backwards` fill so each marker stays transparent during its stagger delay
+        # (no colour flash before its turn).
+        "s.textContent='@keyframes jkUlFade{from{border-bottom-color:transparent;}}"
+        "html.jk-ul-fade span.amboss-marker{animation:jkUlFade .45s ease-out backwards;}';"
+        "(document.head||document.documentElement).appendChild(s);}"
+        "try{document.documentElement.classList." + toggle + "('jk-ul-fade');}catch(e){}"
+        # Stagger: give each marker (in document order) an incremental animation-delay
+        # so underlines fade in one after another, not all at once. A debounced
+        # observer re-applies it after any (re-)mark, regardless of which path marked.
+        "function stag(){var m=document.querySelectorAll('span.amboss-marker');"
+        "for(var i=0;i<m.length;i++){m[i].style.animationDelay=(i*90)+'ms';}}"
+        "if(!window.__jkUlObs){var pend=false;"
+        "function sched(){if(pend)return;pend=true;setTimeout(function(){pend=false;stag();},60);}"
+        "try{window.__jkUlObs=new MutationObserver(sched);"
+        "var root=document.getElementById('qa')||document.querySelector('.card')||document.body;"
+        "window.__jkUlObs.observe(root,{childList:true,subtree:true});}catch(e){}}"
+        "stag();"
+        "})()"
+    )
 
 
-def _apply_amboss_underlines():
-    """Show AMBOSS term underlines in every mode (windowed + fullscreen)."""
+def _apply_amboss_underlines(front: bool = True):
+    """Show AMBOSS term underlines in every mode; fade them in on the front only
+    (instant on the back)."""
     web = getattr(mw, "web", None)
     if web is None:
         return
     try:
-        web.eval(_AMBOSS_UL_SHOW_JS)
+        web.eval(_amboss_ul_js(front))
     except Exception:
         pass
 

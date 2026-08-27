@@ -243,6 +243,7 @@ def _startup():
                 state._remote_active = True
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
+                amboss._apply_amboss_underlines(front=False)  # back: no fade, instant
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
 
         # Re-glass any mw.web page that skipped webview_will_set_content — notably

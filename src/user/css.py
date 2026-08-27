@@ -441,8 +441,12 @@ def _typewriter_head(cfg) -> str:
         # clean DOM once the animation finishes. Cleared per-card so we never re-mark
         # with a previous card's terms; a no-op when AMBOSS isn't installed.
         "    function jkAmbPm(){ try{ return window.ambossAddon&&ambossAddon.tooltip&&ambossAddon.tooltip.phraseMarker; }catch(e){ return null; } }\n"
+        # While the reveal is animating, SUPPRESS AMBOSS's marking (just cache the
+        # phrases): those markers would be destroyed by the reveal anyway and fading
+        # them in would be a wasted first fade. The single post-animation re-mark
+        # (jkAmbRemark, after animating=false) then paints once -> one fade per card.
         "    function jkAmbHook(){ var pm=jkAmbPm(); if(pm && !pm.__jkw){ try{ var o=pm.mark.bind(pm);\n"
-        "      pm.mark=function(p){ window.__jkAmbPhr=p; return o(p); }; pm.__jkw=1; }catch(e){} } }\n"
+        "      pm.mark=function(p){ window.__jkAmbPhr=p; if(animating) return; return o(p); }; pm.__jkw=1; }catch(e){} } }\n"
         "    function jkAmbRemark(){ var pm=jkAmbPm(), p=window.__jkAmbPhr; if(pm && p){ try{ window.__jkRemark=1;\n"
         "      pm.hideAll(); pm.mark(p); setTimeout(function(){ window.__jkRemark=0; }, 250); }catch(e){ window.__jkRemark=0; } } }\n"
         "    jkAmbHook();\n"
