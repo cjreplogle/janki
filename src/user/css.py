@@ -462,23 +462,25 @@ def _typewriter_head(cfg) -> str:
         "      return Math.max(1, Math.ceil(total/Math.max(1,(MS/12)))); }\n"
         "    function typeOutStatic(clozeOnly, done){ var nodes=collect(clozeOnly), spans=[], holders=[];\n"
         "      nodes.forEach(function(e){ var tn=e[0], text=e[1];\n"
-        # Wrap each text node's chars in ONE holder span so we can collapse the
-        # whole thing back to a single clean text node when the reveal finishes.
+        # Wrap each char in a tagged span inside ONE holder, so the reveal can be
+        # per-char but every span is removable afterward (see finish()).
         "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1');\n"
         "        for(var i=0;i<text.length;i++){ var sp=document.createElement('span');\n"
-        "          sp.textContent=text[i]; sp.style.visibility='hidden'; holder.appendChild(sp); spans.push(sp); }\n"
-        "        if(tn.parentNode){ tn.parentNode.replaceChild(holder, tn); holders.push([holder, text]); } });\n"
+        "          sp.className='__jtwc'; sp.textContent=text[i]; sp.style.visibility='hidden';\n"
+        "          holder.appendChild(sp); spans.push(sp); }\n"
+        "        if(tn.parentNode){ tn.parentNode.replaceChild(holder, tn); holders.push(holder); } });\n"
         "      reveal();\n"   # full layout is present (all chars sized) → nothing moves
-        # Restore plain text nodes so AMBOSS (and text selection / screen readers)
-        # never see a word split into per-character spans — that split is what made
-        # every letter its own AMBOSS marker / dropdown.
-        "      function finish(){ for(var h=0;h<holders.length;h++){ var hd=holders[h][0];\n"
-        # If AMBOSS has already wrapped a term inside this holder (its underline
-        # marker / tooltip element), DON'T collapse it — replacing the holder with a
-        # plain text node would wipe that marker and the underline vanishes when the
-        # animation ends. Only collapse holders AMBOSS hasn't touched.
-        "          try{ if(hd.querySelector && hd.querySelector('.amboss-marker,amboss-tooltip-content')) continue;\n"
-        "               hd.replaceWith(document.createTextNode(holders[h][1])); }catch(e){} }\n"
+        # On finish, strip EVERY Janki char-span (even ones AMBOSS wrapped inside a
+        # marker), then unwrap the holder + normalize — leaving clean text with
+        # AMBOSS's own marker as a single element. That fixes: per-letter dropdowns,
+        # wrong tooltip position, the fullscreen-hide (span.amboss-marker matches
+        # again), and preserves the underline.
+        "      function finish(){ for(var h=0;h<holders.length;h++){ var hd=holders[h];\n"
+        "          try{ var cs=hd.querySelectorAll('span.__jtwc');\n"
+        "               for(var c=0;c<cs.length;c++){ cs[c].replaceWith(document.createTextNode(cs[c].textContent)); }\n"
+        "               var par=hd.parentNode;\n"
+        "               if(par){ while(hd.firstChild){ par.insertBefore(hd.firstChild, hd); }\n"
+        "                 par.removeChild(hd); par.normalize(); } }catch(e){} }\n"
         "        done(); }\n"
         "      var total=spans.length; if(!total){ finish(); return; }\n"
         "      var perTick=timing(total), i=0;\n"
