@@ -166,6 +166,20 @@ def _startup():
             _zscs.append(_sc)
         mw._janki_zoom_scs = _zscs   # keep refs alive
 
+        # Open the window 10px taller — ONE TIME only (guarded so it never compounds
+        # across launches; Anki persists the new size itself). Applied after the
+        # window has restored its saved geometry.
+        if not _cfg().get("win_height_bump_done", False):
+            def _bump_height():
+                try:
+                    mw.resize(mw.width(), mw.height() + 10)
+                    c = _cfg()
+                    c["win_height_bump_done"] = True
+                    mw.addonManager.writeConfig(__name__, c)
+                except Exception as _e:
+                    log("win height bump: %s" % _e)
+            QTimer.singleShot(300, _bump_height)
+
         if tray._tray_should_show():
             tray._apply_tray(True)
 
