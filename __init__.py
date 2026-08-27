@@ -166,8 +166,9 @@ def _startup():
             _zscs.append(_sc)
         mw._janki_zoom_scs = _zscs   # keep refs alive
 
-        # Close the AMBOSS side panel (it has no obvious in-app close): Cmd+Shift+A.
-        _amboss_close_sc = QShortcut(QKeySequence("Ctrl+Shift+A"), mw)
+        # Close the AMBOSS side panel (it has no obvious in-app close): Cmd+Opt+A.
+        # (Cmd+Shift+A is Anki's built-in Add-ons shortcut, so avoid it.)
+        _amboss_close_sc = QShortcut(QKeySequence("Ctrl+Alt+A"), mw)
         _amboss_close_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
         _amboss_close_sc.activated.connect(lambda: amboss.close_amboss())
         mw._janki_amboss_close_sc = _amboss_close_sc
