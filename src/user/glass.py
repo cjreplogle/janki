@@ -6,10 +6,13 @@ from aqt import mw
 from aqt.webview import AnkiWebView
 from aqt.qt import QColor, QEvent, QObject, Qt, QTimer
 
-from .bridge import NSRect, _bridge, _cgs
-from .config import log, GLASS, _cfg
-from . import card_timer, css, keytap, pomodoro, tray
-from .integrations import amboss
+from ..util.bridge import NSRect, _bridge, _cgs
+from ..util.config import log, GLASS, _cfg
+from ..features import card_timer, pomodoro
+from . import css
+from ..system import tray
+from ..util import keytap
+from ..integrations import amboss
 
 # ---------------------------------------------------------------------------
 # Native transparency + vibrancy

@@ -4,7 +4,7 @@ import sys
 from aqt import mw, gui_hooks
 from aqt.qt import QColor, Qt, QTimer
 
-from ..config import _cfg
+from ..util.config import _cfg
 
 # ---------------------------------------------------------------------------
 # AMBOSS side-panel frost — the AMBOSS add-on (1044112126) embeds a WebView

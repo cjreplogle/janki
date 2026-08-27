@@ -9,10 +9,12 @@ from typing import Optional
 from aqt import mw
 from aqt.qt import Qt, QTimer
 
-from .bridge import _bridge
-from .config import _cfg
-from . import state
-from . import card_timer, css, keytap
+from ..util.bridge import _bridge
+from ..util.config import _cfg
+from ..util import state
+from ..features import card_timer
+from . import css
+from ..util import keytap
 
 # ---------------------------------------------------------------------------
 # Coherence mode — bottom-of-screen card HUD, toggled by Tab+\
