@@ -15,11 +15,33 @@ from pathlib import Path
 from aqt import mw
 from aqt.utils import showInfo, askUser, tooltip
 
-from ..util.config import log
+from ..util.config import log, _cfg
 
 # Original note-type CSS + templates are backed up here (in $HOME so it survives an
 # add-on update, which wipes the add-on folder). Revert restores from this exactly.
 _BACKUP = Path.home() / ".janki_mobile_theme_backup.json"
+
+# Selectable card fonts (label -> font-family stack). The chosen label is stored in
+# config as `mobile_font`; the stack is baked into the note-type CSS on apply.
+FONTS = {
+    "Georgia (serif)": 'Georgia,"Times New Roman",serif',
+    "Times New Roman": '"Times New Roman",Times,serif',
+    "System (sans-serif)": '-apple-system,system-ui,"Segoe UI",Roboto,sans-serif',
+    "Rounded": 'ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif',
+    "Helvetica": 'Helvetica,Arial,sans-serif',
+    "Typewriter (mono)": 'ui-monospace,Menlo,"Courier New",Courier,monospace',
+}
+DEFAULT_FONT = "Georgia (serif)"
+
+
+def current_font() -> str:
+    """The label of the currently selected mobile font (falls back to default)."""
+    lbl = _cfg().get("mobile_font", DEFAULT_FONT)
+    return lbl if lbl in FONTS else DEFAULT_FONT
+
+
+def _font_stack() -> str:
+    return FONTS.get(current_font(), FONTS[DEFAULT_FONT])
 
 # --- fenced blocks (markers make apply idempotent + remove exact) --------------
 
@@ -30,19 +52,20 @@ _TPL_END = "<!--janki-mobile-end-->"
 
 # Scoped to the platform classes Anki adds to the card (covered both as the card
 # element itself and as an ancestor, since that has varied across versions).
-_CSS_BLOCK = (
-    _CSS_START + "\n"
-    ".mobile,.iphone,.ipad,.android{background:#000 !important;}\n"
-    ".mobile .card,.card.mobile,.mobile.card,"
-    ".iphone .card,.card.iphone,.ipad .card,.card.ipad,"
-    ".android .card,.card.android{\n"
-    "  background:#000 !important;color:#fff !important;\n"
-    "  font-family:Georgia,\"Times New Roman\",serif !important;\n"
-    "}\n"
-    ".mobile .card a,.card.mobile a,.iphone .card a,.card.iphone a,"
-    ".ipad .card a,.card.ipad a,.android .card a,.card.android a{color:#6db3ff !important;}\n"
-    + _CSS_END
-)
+def _css_block() -> str:
+    return (
+        _CSS_START + "\n"
+        ".mobile,.iphone,.ipad,.android{background:#000 !important;}\n"
+        ".mobile .card,.card.mobile,.mobile.card,"
+        ".iphone .card,.card.iphone,.ipad .card,.card.ipad,"
+        ".android .card,.card.android{\n"
+        "  background:#000 !important;color:#fff !important;\n"
+        "  font-family:" + _font_stack() + " !important;\n"
+        "}\n"
+        ".mobile .card a,.card.mobile a,.iphone .card a,.card.iphone a,"
+        ".ipad .card a,.card.ipad a,.android .card a,.card.android a{color:#6db3ff !important;}\n"
+        + _CSS_END
+    )
 
 # Text-reveal animation. Self-contained, mobile-only, front/back aware (only the
 # newly-shown answer types on the back, via the #answer marker), and guarded so
@@ -154,7 +177,7 @@ def apply_all() -> None:
                     },
                 }
             m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
-                + "\n\n" + _CSS_BLOCK + "\n"
+                + "\n\n" + _css_block() + "\n"
             for t in m["tmpls"]:
                 t["qfmt"] = _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END).rstrip() \
                     + "\n" + _TPL_BLOCK + "\n"
@@ -181,6 +204,30 @@ def apply_all() -> None:
         % (n_types, n_tmpls),
         title="Janki: Mobile cards",
     )
+
+
+def restyle_font() -> None:
+    """Re-stamp only the CSS block (new font) on note types that already carry the
+    theming — silent and idempotent, so the font dropdown takes effect live without
+    the full apply confirmation. No-op if theming isn't applied."""
+    if mw is None or mw.col is None or not is_applied():
+        return
+    n = 0
+    try:
+        for m in mw.col.models.all():
+            if _CSS_START not in (m.get("css", "") or ""):
+                continue
+            m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
+                + "\n\n" + _css_block() + "\n"
+            try:
+                mw.col.models.update_dict(m)
+            except Exception:
+                mw.col.models.save(m)
+            n += 1
+        if n:
+            mw.reset()
+    except Exception as exc:
+        log("mobilecards restyle: %s" % exc)
 
 
 def remove_all() -> None:
