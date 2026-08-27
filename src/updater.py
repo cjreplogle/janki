@@ -35,7 +35,8 @@ def _asset_name() -> str:
 
 def _current_version() -> str:
     try:
-        m = json.loads((Path(__file__).resolve().parent / "manifest.json")
+        # updater.py lives in src/; manifest.json is at the add-on ROOT (one up).
+        m = json.loads((Path(__file__).resolve().parent.parent / "manifest.json")
                        .read_text(encoding="utf-8"))
         return str(m.get("human_version", "0"))
     except Exception:
