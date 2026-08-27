@@ -10,10 +10,16 @@ them cleanly.
 """
 
 import re
+import json
+from pathlib import Path
 from aqt import mw
 from aqt.utils import showInfo, askUser, tooltip
 
 from ..util.config import log
+
+# Original note-type CSS + templates are backed up here (in $HOME so it survives an
+# add-on update, which wipes the add-on folder). Revert restores from this exactly.
+_BACKUP = Path.home() / ".janki_mobile_theme_backup.json"
 
 # --- fenced blocks (markers make apply idempotent + remove exact) --------------
 
@@ -83,7 +89,40 @@ def _stripped(text: str, start: str, end: str) -> str:
     return pat.sub("", text)
 
 
-# --- apply / remove ------------------------------------------------------------
+# --- backup / state ------------------------------------------------------------
+
+def _load_backup() -> dict:
+    try:
+        return json.loads(_BACKUP.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_backup(d: dict) -> None:
+    try:
+        _BACKUP.write_text(json.dumps(d), encoding="utf-8")
+    except Exception as exc:
+        log("mobilecards backup save: %s" % exc)
+
+
+def is_applied() -> bool:
+    """True if the mobile theming is currently applied (a backup exists, or any
+    note type still carries the fenced block)."""
+    if _BACKUP.exists():
+        return True
+    try:
+        for m in mw.col.models.all():
+            if _CSS_START in (m.get("css", "") or ""):
+                return True
+            for t in m["tmpls"]:
+                if _TPL_START in (t.get("qfmt", "") or "") or _TPL_START in (t.get("afmt", "") or ""):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+# --- apply / revert ------------------------------------------------------------
 
 def apply_all() -> None:
     if mw is None or mw.col is None:
@@ -91,15 +130,29 @@ def apply_all() -> None:
     if not askUser(
         "Add the mobile styling (OLED dark + text animation + Georgia serif) to "
         "ALL your note types?\n\n"
-        "It's scoped to phones/tablets, so your desktop look is untouched, and "
-        "you can undo it anytime with “Remove mobile styling”. You'll need to "
-        "sync afterwards to push it to the iPad.",
+        "Your current note-type styling is saved locally first, so you can revert "
+        "to exactly what you had. It's scoped to phones/tablets, so your desktop "
+        "look is untouched. Sync afterwards to push it to the iPad.",
         title="Janki: Mobile cards",
     ):
         return
+    backup = _load_backup()
     n_types = n_tmpls = 0
     try:
         for m in mw.col.models.all():
+            mid = str(m["id"])
+            # Back up the ORIGINAL (our fenced block stripped), once per note type.
+            if mid not in backup:
+                backup[mid] = {
+                    "name": m.get("name", ""),
+                    "css": _stripped(m.get("css", ""), _CSS_START, _CSS_END),
+                    "tmpls": {
+                        str(t["ord"]): {
+                            "qfmt": _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END),
+                            "afmt": _stripped(t.get("afmt", ""), _TPL_START, _TPL_END),
+                        } for t in m["tmpls"]
+                    },
+                }
             m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
                 + "\n\n" + _CSS_BLOCK + "\n"
             for t in m["tmpls"]:
@@ -113,6 +166,7 @@ def apply_all() -> None:
             except Exception:
                 mw.col.models.save(m)
             n_types += 1
+        _save_backup(backup)
         mw.reset()
     except Exception as exc:
         log("mobilecards apply: %s" % exc)
@@ -121,45 +175,60 @@ def apply_all() -> None:
         return
     showInfo(
         "Applied mobile styling to %d note types (%d templates).\n\n"
-        "Now Sync to push it to your iPad (make sure AnkiMobile is set to a Dark "
-        "theme for the full OLED effect).\n\n"
-        "To undo: Tools → Janki: Mobile cards → Remove mobile styling."
+        "Now Sync to push it to your iPad (set AnkiMobile to a Dark theme for the "
+        "full OLED effect). Your original styling is saved — use “Revert mobile "
+        "theming” to restore it exactly."
         % (n_types, n_tmpls),
         title="Janki: Mobile cards",
     )
 
 
 def remove_all() -> None:
+    """Revert: restore each note type's saved original CSS + templates exactly.
+    Falls back to stripping the fenced block for any note type without a backup."""
     if mw is None or mw.col is None:
         return
-    if not askUser("Remove Janki's mobile styling from all note types?",
-                   title="Janki: Mobile cards"):
+    if not askUser("Revert Janki's mobile theming and restore your original "
+                   "note-type styling?", title="Janki: Mobile cards"):
         return
+    backup = _load_backup()
     n = 0
     try:
         for m in mw.col.models.all():
-            css = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() + "\n"
-            changed = css != (m.get("css", "") or "")
-            m["css"] = css
-            for t in m["tmpls"]:
-                q = _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END).rstrip() + "\n"
-                a = _stripped(t.get("afmt", ""), _TPL_START, _TPL_END).rstrip() + "\n"
-                changed = changed or q != (t.get("qfmt", "") or "") or a != (t.get("afmt", "") or "")
-                t["qfmt"], t["afmt"] = q, a
-            if changed:
-                try:
-                    mw.col.models.update_dict(m)
-                except Exception:
-                    mw.col.models.save(m)
-                n += 1
+            mid = str(m["id"])
+            saved = backup.get(mid)
+            if saved:
+                m["css"] = saved.get("css", m.get("css", ""))
+                for t in m["tmpls"]:
+                    st = saved.get("tmpls", {}).get(str(t["ord"]))
+                    if st:
+                        t["qfmt"], t["afmt"] = st.get("qfmt", t["qfmt"]), st.get("afmt", t["afmt"])
+                    else:
+                        t["qfmt"] = _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END)
+                        t["afmt"] = _stripped(t.get("afmt", ""), _TPL_START, _TPL_END)
+            else:
+                m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END)
+                for t in m["tmpls"]:
+                    t["qfmt"] = _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END)
+                    t["afmt"] = _stripped(t.get("afmt", ""), _TPL_START, _TPL_END)
+            try:
+                mw.col.models.update_dict(m)
+            except Exception:
+                mw.col.models.save(m)
+            n += 1
+        try:
+            _BACKUP.unlink()
+        except Exception:
+            pass
         mw.reset()
     except Exception as exc:
-        log("mobilecards remove: %s" % exc)
-        showInfo("Janki: couldn't remove mobile styling (%s)." % exc,
+        log("mobilecards revert: %s" % exc)
+        showInfo("Janki: couldn't revert mobile styling (%s)." % exc,
                  title="Janki: Mobile cards")
         return
-    showInfo("Removed mobile styling from %d note types.\n\nSync to update the iPad."
-             % n, title="Janki: Mobile cards")
+    showInfo("Reverted mobile theming and restored your original styling across "
+             "%d note types.\n\nSync to update the iPad." % n,
+             title="Janki: Mobile cards")
 
 
 def install_menu() -> None:

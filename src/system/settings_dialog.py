@@ -10,7 +10,7 @@ from ..user import glass, hud
 from . import tray
 from ..util import diagnostics, keytap
 from ..integrations import gamepad
-from ..integrations import amboss
+from ..integrations import amboss, mobilecards
 from . import stock_selfheal, updater
 
 class GlassSettings(QDialog):
@@ -586,6 +586,40 @@ class GlassSettings(QDialog):
                                     % updater._current_version())
         self._upd_btn.clicked.connect(lambda: updater.check(interactive=True))
         gen_lay.addWidget(self._upd_btn)
+
+        # --- Mobile cards (iPad / iPhone) -----------------------------------
+        # AnkiMobile can't run add-ons, so this bakes Janki's look into your note
+        # types (OLED dark, serif, text animation), which syncs to the phone/iPad.
+        # Originals are saved locally first; Revert restores them exactly.
+        _mob_note = QLabel(
+            "Apply Janki's look to your cards on AnkiMobile/AnkiDroid (OLED dark, "
+            "serif, text animation). Edits your note types' styling — your originals "
+            "are saved locally, and Revert restores them exactly. Sync afterwards; "
+            "desktop is unaffected.")
+        _mob_note.setWordWrap(True)
+        _mob_note.setStyleSheet("color: gray; margin-top: 8px;")
+        app_lay.addWidget(_mob_note)
+        _mob_row = QHBoxLayout()
+        self._mob_apply = QPushButton("Apply UI theming to mobile cards")
+        self._mob_revert = QPushButton("Revert mobile theming")
+
+        def _refresh_mob():
+            self._mob_revert.setEnabled(mobilecards.is_applied())
+
+        def _on_mob_apply():
+            mobilecards.apply_all()
+            _refresh_mob()
+
+        def _on_mob_revert():
+            mobilecards.remove_all()
+            _refresh_mob()
+
+        self._mob_apply.clicked.connect(_on_mob_apply)
+        self._mob_revert.clicked.connect(_on_mob_revert)
+        _refresh_mob()
+        _mob_row.addWidget(self._mob_apply)
+        _mob_row.addWidget(self._mob_revert)
+        app_lay.addLayout(_mob_row)
 
         hint = QLabel("Colour + opacity set the tint; blur radius blurs the desktop "
                       "behind Anki (like Terminal). Changes apply live and save "
