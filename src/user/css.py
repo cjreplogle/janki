@@ -397,6 +397,14 @@ def _build_css(cfg, context):
             "  border: none !important; border-radius: 9px !important; }\n"
             "html body .header .hitem:hover, html body a.hitem:hover {\n"
             "  background: rgba(255,255,255,0.12) !important; }\n"
+            # AMBOSS injects an absolutely-positioned 108px-wide toggle (.amboss-indicator,
+            # inside an <a> firing amboss:side_panel:toggle) pinned to the top-right. At our
+            # window width its (often invisible) hit area overlaps the Sync button, so clicks
+            # near Sync accidentally open the AMBOSS viewer. Neutralize the phantom target —
+            # the viewer still opens via its own hotkey.
+            "html body a[data_e2e_test_id=\"amboss-action-indicator\"],\n"
+            "html body .amboss-indicator {\n"
+            "  display: none !important; pointer-events: none !important; }\n"
             "</style>\n"
         )
         parts.append(top_round)
