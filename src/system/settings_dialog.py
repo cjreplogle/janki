@@ -625,6 +625,21 @@ class GlassSettings(QDialog):
         _mfont_row.addStretch()
         app_lay.addLayout(_mfont_row)
 
+        # Tap feedback: the subtle ripple dot shown when you tap to reveal an answer
+        # on mobile. Re-stamps the templates live (silent) so it lands on next sync.
+        self._mob_tapfb = QCheckBox("Tap feedback (ripple dot on reveal) on mobile cards")
+        self._mob_tapfb.setChecked(bool(self.cfg.get("mobile_tap_feedback", True)))
+
+        def on_mob_tapfb(_s):
+            self.cfg["mobile_tap_feedback"] = bool(self._mob_tapfb.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            if mobilecards.is_applied():
+                mobilecards.restamp_templates()
+                tooltip("Mobile tap feedback updated — Sync to push it to your devices.")
+
+        self._mob_tapfb.stateChanged.connect(on_mob_tapfb)
+        app_lay.addWidget(self._mob_tapfb)
+
         _mob_row = QHBoxLayout()
         self._mob_apply = QPushButton("Apply UI theming to mobile cards")
         self._mob_revert = QPushButton("Revert mobile theming")

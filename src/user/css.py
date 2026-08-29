@@ -466,6 +466,13 @@ def _typewriter_head(cfg) -> str:
         "            p.classList.contains('MathJax_Preview')||p.classList.contains('mjx-chtml')||\n"
         "            p.classList.contains('amboss-marker'))) return true;\n"
         "        p=p.parentNode; } return false; }\n"
+        # True if the text node sits inside an underline (<u>/<ins> or an inline
+        # text-decoration:underline). Underlined runs are revealed whole (below) to
+        # avoid a costly per-frame underline recompute on software-composited glass.
+        "    function isUnderlined(node){ var p=node.parentNode; while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
+        "        if(t==='U'||t==='INS') return true;\n"
+        "        if(p.style && (p.style.textDecoration||'').indexOf('underline')>=0) return true;\n"
+        "        p=p.parentNode; } return false; }\n"
         "    function collect(clozeOnly){\n"
         "      if(clozeOnly){ var out=[], cs=qa.querySelectorAll('.cloze');\n"
         "        for(var k=0;k<cs.length;k++){ var w2=document.createTreeWalker(cs[k],NodeFilter.SHOW_TEXT,null),m;\n"
@@ -485,13 +492,20 @@ def _typewriter_head(cfg) -> str:
         "    function timing(total){ var MS=Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED;\n"
         "      return Math.max(1, Math.ceil(total/Math.max(1,(MS/12)))); }\n"
         "    function typeOutStatic(clozeOnly, done){ var nodes=collect(clozeOnly), spans=[], holders=[];\n"
-        "      nodes.forEach(function(e){ var tn=e[0], text=e[1];\n"
+        "      nodes.forEach(function(e){ var tn=e[0], text=e[1], nu=isUnderlined(tn);\n"
         # Wrap each char in a tagged span inside ONE holder, so the reveal can be
-        # per-char but every span is removable afterward (see finish()).
+        # per-char but every span is removable afterward (see finish()). EXCEPTION:
+        # text inside an underline (<u>) is revealed as ONE span, not fragmented.
+        # Splitting underlined text into many inline boxes makes the browser recompute
+        # the underline across all fragments the first time that run paints — a ~150ms
+        # spike per underline on software-composited (--disable-gpu) glass. Revealing
+        # the underlined run whole (the phrase pops in) avoids it; other text still
+        # types char-by-char.
         "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1');\n"
-        "        for(var i=0;i<text.length;i++){ var sp=document.createElement('span');\n"
+        "        if(nu){ var sp=document.createElement('span'); sp.className='__jtwc'; sp.textContent=text; sp.style.visibility='hidden'; holder.appendChild(sp); spans.push(sp); }\n"
+        "        else { for(var i=0;i<text.length;i++){ var sp=document.createElement('span');\n"
         "          sp.className='__jtwc'; sp.textContent=text[i]; sp.style.visibility='hidden';\n"
-        "          holder.appendChild(sp); spans.push(sp); }\n"
+        "          holder.appendChild(sp); spans.push(sp); } }\n"
         "        if(tn.parentNode){ tn.parentNode.replaceChild(holder, tn); holders.push(holder); } });\n"
         "      reveal();\n"   # full layout is present (all chars sized) → nothing moves
         # On finish, strip EVERY Janki char-span (even ones AMBOSS wrapped inside a
