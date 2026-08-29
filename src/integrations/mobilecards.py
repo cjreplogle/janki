@@ -154,6 +154,11 @@ def _css_block() -> str:
         ".mobile .cloze,.iphone .cloze,.ipad .cloze,.android .cloze{color:#6db3ff !important;}\n"
         # AnKing: hide the broken hyperlink watermark photo (#pic / _AnKingRound.png).
         ".mobile #pic,.iphone #pic,.ipad #pic,.android #pic{display:none !important;}\n"
+        # Let taps on images pass THROUGH to the card, so position-press grading + the
+        # tap flare work over photos (AnkiMobile otherwise swallows image taps for its
+        # native zoom, and our touchstart never fires). Trade-off: no tap/pinch-zoom on
+        # card images. Scoped to mobile; desktop unaffected.
+        ".mobile img,.iphone img,.ipad img,.android img{pointer-events:none !important;}\n"
         # AnKing: keep the resource hint buttons in a horizontal row, not stacked.
         ".mobile .hintBtn,.iphone .hintBtn,.ipad .hintBtn,.android .hintBtn{\n"
         "  display:inline-block !important;vertical-align:middle;margin:3px 2px;\n"
@@ -189,12 +194,98 @@ _TPL_BLOCK = (
     "  var cls=(document.body&&document.body.className||'')+' '+"
     "(document.documentElement&&document.documentElement.className||'')+' '+(qa.className||'');\n"
     "  if(!/mobile|ipad|iphone|android/i.test(cls)) return;   // mobile only\n"
+    # --- tap-position flare (POC) — only fires when a tap actually DID something
+    # (revealed the answer or graded), detected by a card re-render after the tap.
+    # The touch listeners just RECORD the last tap (position + whether we were on the
+    # back); the draw happens on the next render (see the consume check after the sig
+    # guard). Listen-only (no preventDefault) so position-press grading still works.
+    "  if(!window.__jkFlareInit){ window.__jkFlareInit=1;\n"
+    # Handlers defined ONCE on window (persist across cards); state lives on window too.
+    # They're RE-BOUND to the current document every render (block after this guard),
+    # because AnkiMobile swaps the document per card — that dropped the listeners after
+    # card 1. The flare draws immediately on touchstart and is removed if the touch
+    # becomes a scroll (nothing needs to survive the card change).
+    # IO cards have no <hr id=answer> marker, so front/back can't be told apart —
+    # give them the edge-glow directly (detected via IO's container elements).
+    "    window.__jkIsIO=function(){ try{ return !!document.querySelector('[id^=\"io-\"],#io-overlay,#io-wrapper,[class*=occlus]'); }catch(e){ return false; } };\n"
+    "    window.__jkH={\n"
+    # Draw the flare IMMEDIATELY on touchstart (visible before the card advances). If
+    # the touch becomes a scroll, remove it. Nothing has to survive the card change.
+    "      ts:function(ev){ try{ var t=ev.touches&&ev.touches[0]; if(!t)return; window.__jkMoved=false; window.__jkSX=t.clientX; window.__jkSY=t.clientY;\n"
+    "          window.__jkFlareDraw({x:t.clientX,y:t.clientY,wasBack:!!document.getElementById('answer')}); }catch(e){} },\n"
+    "      tm:function(ev){ try{ var t=ev.touches&&ev.touches[0]; if(!t)return; if(!window.__jkMoved&&(Math.abs(t.clientX-window.__jkSX)>12||Math.abs(t.clientY-window.__jkSY)>12)){ window.__jkMoved=true; var el=window.__jkEl; if(el&&el.parentNode) el.parentNode.removeChild(el); } }catch(e){} },\n"
+    # Pointer events as a fallback trigger: they often still fire when an overlay (e.g.
+    # Image Occlusion) swallows the touch events. Deduped against touch via __jkLast.
+    "      pd:function(ev){ try{ window.__jkMoved=false; window.__jkSX=ev.clientX; window.__jkSY=ev.clientY; window.__jkFlareDraw({x:ev.clientX,y:ev.clientY,wasBack:!!document.getElementById('answer')}); }catch(e){} },\n"
+    "      pm:function(ev){ try{ if(!window.__jkMoved&&(Math.abs(ev.clientX-window.__jkSX)>12||Math.abs(ev.clientY-window.__jkSY)>12)){ window.__jkMoved=true; var el=window.__jkEl; if(el&&el.parentNode) el.parentNode.removeChild(el); } }catch(e){} }\n"
+    "    };\n"
+    # Draw: neutral/subtle for a reveal (front->back); grade-coloured for a grade
+    # (back->next). Grade zones = left/right column x top/middle/bottom third —
+    # left+middle=Hard, left+top/bottom=Again; right+middle=Good, right+top/bottom=Easy.
+    "    window.__jkFlareDraw=function(p){ if(window.__jkLast&&Date.now()-window.__jkLast<350) return; window.__jkLast=Date.now();\n"
+    "      var vw=window.innerWidth||1, vh=window.innerHeight||1, fx=p.x/vw, fy=p.y/vh, grade, col; window.__jkEl=null;\n"
+    # Back-side: <hr id=answer> when present (normal cards). IO has no such marker, so
+    # infer from the input sequence — taps alternate reveal,grade,reveal,grade..., one
+    # reveal + one grade per card, so a toggle stays in sync and self-resets each grade.
+    # State kept on window + localStorage so it survives IO's front->back re-render.
+    "      var back=p.wasBack;\n"
+    # Cloze cards have no <hr id=answer> either — detect the back reliably: cloze text
+    # is bracketed ([...]) on the front and the real (unbracketed) answer on the back.
+    "      if(!back){ var cz=document.querySelectorAll('.cloze'); for(var ci=0;ci<cz.length;ci++){ var ct=(cz[ci].textContent||'').trim(); if(ct && !/^\\[[\\s\\S]*\\]$/.test(ct)){ back=true; break; } } }\n"
+    "      if(!back && window.__jkIsIO()){ var s=window.__jkState; if(s===undefined){ try{ s=parseInt(localStorage.getItem('jkState'))||0; }catch(e){ s=0; } }\n"
+    "        back=(s===1); var ns=back?0:1; window.__jkState=ns; try{ localStorage.setItem('jkState',ns); }catch(e){}\n"
+    "        if(!back){ window.__jkJR=1; try{ localStorage.setItem('jkJR',1); }catch(e){} } }\n"
+    # Grade zones on AnkiMobile's 3x3 grid (thirds at 33%/67%). Only the exact CENTRE
+    # cell (middle third of BOTH x and y) is dead → no flare. Else: left half = Hard
+    # (mid row) / Again (top+bottom); right half = Good (mid) / Easy (top+bottom).
+    "      if(back){ var mid=(fy>=0.33&&fy<0.67), midX=(fx>=0.33&&fx<0.67);\n"
+    "        if(mid&&midX){ return; }\n"
+    "        var left=fx<0.5;\n"
+    "        grade=left?(mid?'Hard':'Again'):(mid?'Good':'Easy');\n"
+    "        col=grade==='Again'?'#ff4d4f':grade==='Hard'?'#ffb84d':grade==='Good'?'#4dd07a':'#3ba7ff';\n"
+    # Grade flare = pulsing edge-glow like the desktop timer flare: an inset colour
+    # glow that blooms in from every edge, one in/out pulse. Position picks the colour.
+    "        var f=document.createElement('div');\n"
+    # Side glow that tapers at top & bottom (rounded profile): two elliptical radial
+    # gradients centred at the left & right edge mid-heights, grade colour fading to
+    # transparent — each side reads as a vertical lens, faint near the top/bottom.
+    "        f.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483646;opacity:.15;transition:opacity .3s ease-in;background:radial-gradient(28% 60% at 0% 50%,'+col+',transparent),radial-gradient(28% 60% at 100% 50%,'+col+',transparent)';\n"
+    "        document.body.appendChild(f); window.__jkEl=f;\n"
+    "        setTimeout(function(){ try{ f.style.opacity='0'; }catch(e){} }, 160);\n"
+    "        setTimeout(function(){ try{ f.parentNode&&f.parentNode.removeChild(f); }catch(e){} }, 520);\n"
+    "      } else { grade='Show'; col='#c8c8d0';\n"
+    # Reveal = subtle neutral ripple at the press point — only when tap feedback is on
+    # (mobile_tap_feedback, baked in as __JK_FB__ at apply time).
+    "        if(__JK_FB__){ var d=document.createElement('div');\n"
+    "        d.style.cssText='position:fixed;left:'+p.x+'px;top:'+p.y+'px;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;pointer-events:none;z-index:2147483647;background:'+col+';box-shadow:0 0 10px 2px '+col+';opacity:.2;transition:transform .45s ease-out,opacity .45s ease-out;';\n"
+    "        document.body.appendChild(d); window.__jkEl=d;\n"
+    "        requestAnimationFrame(function(){ d.style.transform='scale(7)'; d.style.opacity='0'; });\n"
+    "        setTimeout(function(){ try{ d.parentNode&&d.parentNode.removeChild(d); }catch(e){} }, 550); } }\n"
+    "      };\n"
+    "  }\n"
+    # Re-bind the once-defined listeners to the CURRENT document EVERY render (remove
+    # then add = idempotent if it persisted, re-attached if AnkiMobile swapped it).
+    # This is what makes taps register on every card, not just the first.
+    "  try{ var H=window.__jkH; if(H){\n"
+    "    document.removeEventListener('touchstart',H.ts,true); document.addEventListener('touchstart',H.ts,true);\n"
+    "    document.removeEventListener('touchmove',H.tm,true); document.addEventListener('touchmove',H.tm,true);\n"
+    "    document.removeEventListener('pointerdown',H.pd,true); document.addEventListener('pointerdown',H.pd,true);\n"
+    "    document.removeEventListener('pointermove',H.pm,true); document.addEventListener('pointermove',H.pm,true);\n"
+    "  } }catch(e){}\n"
+    # IO reveal/grade sync: this render is the back (keep state) only if a reveal just
+    # happened (__jkJR); otherwise it's a NEW card → reset to 'expect reveal' (state 0).
+    # Makes a missed grade tap self-correct on the next card instead of showing grade
+    # on the reveal press.
+    "  try{ if(window.__jkIsIO && window.__jkIsIO()){ var jr=window.__jkJR; if(jr===undefined){ try{ jr=parseInt(localStorage.getItem('jkJR'))||0; }catch(e){ jr=0; } }\n"
+    "    if(jr){ window.__jkJR=0; try{ localStorage.setItem('jkJR',0); }catch(e){} }\n"
+    "    else { window.__jkState=0; try{ localStorage.setItem('jkState',0); }catch(e){} } } }catch(e){}\n"
     # Guard on the rendered text, not a flag on the (persistent) #qa element:
     # AnkiMobile reuses #qa across cards, so an element flag fires only on the first
     # card. A content signature re-runs on each new card, yet still dedupes the two
     # runs on the back (FrontSide's copy of this script + the afmt copy).
     "  var sig=(qa.textContent||'');\n"
     "  if(window.__jmobSig===sig) return; window.__jmobSig=sig;\n"
+    # (Flare now draws immediately on tap — no next-render consume needed.)
     # No-empty-scroll: CSS 100vh here is taller than the visible viewport, leaving dead
     # scrollable space below a short card. Pin <body> to the real visible height so the
     # card still centers, and turn off overflow whenever the content fits (long cards
@@ -206,18 +297,26 @@ _TPL_BLOCK = (
     "    jkFit(); setTimeout(jkFit,300); setTimeout(jkFit,1200); setTimeout(jkFit,3000);\n"
     "    if(!window.__jmFit){ window.__jmFit=1; window.addEventListener('resize',jkFit); }\n"
     "  }catch(e){}\n"
-    "  var SPEED=1.5;                                          // higher = faster\n"
+    "  var SPEED=1.25;                                         // higher = faster\n"
     "  var marker=document.getElementById('answer');\n"
+    # Underlined text is revealed as one whole span (below), not char-split: on
+    # desktop glass, fragmenting a <u> into many inline boxes triggers a ~150ms
+    # underline recompute. Mirrored here for consistency (cheap either way).
+    "  function jkUL(node){ var p=node.parentNode; while(p&&p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
+    "    if(t==='U'||t==='INS') return true;\n"
+    "    if(p.style&&(p.style.textDecoration||'').indexOf('underline')>=0) return true;\n"
+    "    p=p.parentNode; } return false; }\n"
     "  var w=document.createTreeWalker(qa,NodeFilter.SHOW_TEXT,null),nodes=[],n;\n"
     "  while(n=w.nextNode()){ var p=n.parentNode,t=(p.tagName||'').toUpperCase();\n"
     "    if(t==='SCRIPT'||t==='STYLE') continue;\n"
     "    if(!n.nodeValue||!n.nodeValue.trim()) continue;\n"
     "    if(marker && !(marker.compareDocumentPosition(n)&4)) continue;  // back: only after <hr id=answer>\n"
-    "    nodes.push([n,n.nodeValue]); }\n"
+    "    nodes.push([n,n.nodeValue,jkUL(n)]); }\n"
     "  var holders=[],spans=[];\n"
     "  nodes.forEach(function(e){ var h=document.createElement('span');\n"
-    "    for(var i=0;i<e[1].length;i++){ var s=document.createElement('span');\n"
-    "      s.textContent=e[1][i]; s.style.visibility='hidden'; h.appendChild(s); spans.push(s); }\n"
+    "    if(e[2]){ var s=document.createElement('span'); s.textContent=e[1]; s.style.visibility='hidden'; h.appendChild(s); spans.push(s); }\n"
+    "    else { for(var i=0;i<e[1].length;i++){ var s=document.createElement('span');\n"
+    "      s.textContent=e[1][i]; s.style.visibility='hidden'; h.appendChild(s); spans.push(s); } }\n"
     "    if(e[0].parentNode){ e[0].parentNode.replaceChild(h,e[0]); holders.push([h,e[1]]); } });\n"
     "  var per=Math.max(1,Math.ceil(spans.length/Math.max(1,(600/SPEED)/12))),i=0;\n"
     "  function done(){ for(var k=0;k<holders.length;k++){ try{ holders[k][0].replaceWith(\n"
@@ -229,6 +328,13 @@ _TPL_BLOCK = (
     "</script>\n"
     + _TPL_END
 )
+
+
+def _tpl_block() -> str:
+    """The per-card mobile script with runtime flags baked in from config.
+    `mobile_tap_feedback` -> __JK_FB__ (the reveal ripple dot)."""
+    fb = "true" if _cfg().get("mobile_tap_feedback", True) else "false"
+    return _TPL_BLOCK.replace("__JK_FB__", fb)
 
 
 def _stripped(text: str, start: str, end: str) -> str:
@@ -300,6 +406,21 @@ def is_applied() -> bool:
 
 # --- apply / revert ------------------------------------------------------------
 
+def _sync_now() -> None:
+    """Trigger Anki's normal sync (same as clicking the Sync button) so applied
+    mobile-theming changes push to devices without a manual click. No-op if the
+    method isn't available or sync isn't set up."""
+    if mw is None:
+        return
+    try:
+        if hasattr(mw, "on_sync_button_clicked"):
+            mw.on_sync_button_clicked()
+        elif hasattr(mw, "onSync"):
+            mw.onSync()
+    except Exception as exc:
+        log("mobilecards auto-sync: %s" % exc)
+
+
 def apply_all() -> None:
     if mw is None or mw.col is None:
         return
@@ -332,11 +453,12 @@ def apply_all() -> None:
                 }
             m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
                 + "\n\n" + _css_block() + "\n"
+            blk = _tpl_block()
             for t in m["tmpls"]:
                 qf = _strip_anking_decorations(_stripped(t.get("qfmt", ""), _TPL_START, _TPL_END))
                 af = _strip_anking_decorations(_stripped(t.get("afmt", ""), _TPL_START, _TPL_END))
-                t["qfmt"] = qf.rstrip() + "\n" + _TPL_BLOCK + "\n"
-                t["afmt"] = af.rstrip() + "\n" + _TPL_BLOCK + "\n"
+                t["qfmt"] = qf.rstrip() + "\n" + blk + "\n"
+                t["afmt"] = af.rstrip() + "\n" + blk + "\n"
                 n_tmpls += 1
             try:
                 mw.col.models.update_dict(m)
@@ -352,12 +474,13 @@ def apply_all() -> None:
         return
     showInfo(
         "Applied mobile styling to %d note types (%d templates).\n\n"
-        "Now Sync to push it to your iPad (set AnkiMobile to a Dark theme for the "
+        "Syncing now to push it to your iPad (set AnkiMobile to a Dark theme for the "
         "full OLED effect). Your original styling is saved — use “Revert mobile "
         "theming” to restore it exactly."
         % (n_types, n_tmpls),
         title="Janki: Mobile cards",
     )
+    _sync_now()
 
 
 def restyle_font() -> None:
@@ -381,8 +504,42 @@ def restyle_font() -> None:
             n += 1
         if n:
             mw.reset()
+            _sync_now()
     except Exception as exc:
         log("mobilecards restyle: %s" % exc)
+
+
+def restamp_templates() -> None:
+    """Re-stamp only the per-card template block (e.g. after toggling tap feedback)
+    on note types that already carry the theming — silent, no confirmation. No-op if
+    theming isn't applied."""
+    if mw is None or mw.col is None or not is_applied():
+        return
+    blk = _tpl_block()
+    n = 0
+    try:
+        for m in mw.col.models.all():
+            changed = False
+            for t in m["tmpls"]:
+                if _TPL_START not in (t.get("qfmt", "") or "") \
+                        and _TPL_START not in (t.get("afmt", "") or ""):
+                    continue
+                qf = _strip_anking_decorations(_stripped(t.get("qfmt", ""), _TPL_START, _TPL_END))
+                af = _strip_anking_decorations(_stripped(t.get("afmt", ""), _TPL_START, _TPL_END))
+                t["qfmt"] = qf.rstrip() + "\n" + blk + "\n"
+                t["afmt"] = af.rstrip() + "\n" + blk + "\n"
+                changed = True
+            if changed:
+                try:
+                    mw.col.models.update_dict(m)
+                except Exception:
+                    mw.col.models.save(m)
+                n += 1
+        if n:
+            mw.reset()
+            _sync_now()
+    except Exception as exc:
+        log("mobilecards restamp: %s" % exc)
 
 
 def remove_all() -> None:
