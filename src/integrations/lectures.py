@@ -672,10 +672,19 @@ def build_lecture_map(families=None):
     """
     if families is None:
         families = _enabled_families()
-    path = _cfg()["xlsx_path"]
+    path = (_cfg().get("xlsx_path") or "").strip()
+    # Not configured → empty map (never call zipfile on an empty/missing path).
+    if not path:
+        return {}
     # A plain-text tag map (.txt) is parsed differently from an .xlsx workbook.
-    if (path or "").strip().lower().endswith(".txt"):
+    if path.lower().endswith(".txt"):
         return _build_lecture_map_txt(path, families)
+    # Guard a missing local file so _load_xlsx never raises FileNotFoundError.
+    try:
+        if not _is_url(path) and not os.path.exists(_p(path)):
+            return {}
+    except Exception:
+        return {}
     m = {}
     for name, rows in _load_xlsx(path):
         # Anchor = every block's decks header. Match case-insensitively on the
@@ -914,6 +923,16 @@ def _open_today_dialog(day_offset=0):
     _ics_reset()                       # fresh top-level open → refetch URL calendars
     _ak_index_reset()                  # …and rebuild the AnKing tag index (once)
     m, keys, opts = _get_map(families)  # cached by xlsx mtime + families
+    if not m:
+        # Nothing to load (no tag map set, or the file is missing/empty) → send the
+        # user straight to the import/settings window to add one.
+        tooltip("Janki Lectures — no lectures loaded; opening settings to import a "
+                "tag map.", period=3500)
+        try:
+            _open_settings_dialog()
+        except Exception as e:
+            _log("open settings from empty lecture window failed: %s" % e)
+        return
     aliases = _load_aliases()
 
     # Per-(lecture, family) SUSPENDED card-id sets: {(nk, fam_suffix): set(cids)}.
