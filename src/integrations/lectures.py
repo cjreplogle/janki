@@ -588,6 +588,74 @@ def _extract_searches(cell, families, ak_column=False):
     return out
 
 
+def _build_lecture_map_txt(path, families):
+    """Parse a plain-text tag map into the same structure as the xlsx path.
+
+    Format: sections delimited by '====' rules, the lecture name sitting between
+    two rules, followed by that lecture's tag lines (AnKing '#AK_…::…' paths and/or
+    'tag:'/'deck:' lines). Non-tag prose (Bonus/Note/etc.) is ignored.
+
+        =====================
+        CONNECTIVE TISSUE
+        =====================
+        #AK_Step1_v12::#Physeo::…::Connective_Tissue
+        #AK_Step1_v12::#B&B::…::Connective_Tissue
+    """
+    m = {}
+    try:
+        text = _read_source_text(path)
+    except Exception as e:
+        _log("txt read failed: %s" % e)
+        return m
+    lines = text.splitlines()
+    n = len(lines)
+
+    def is_rule(s):
+        s = s.strip()
+        return len(s) >= 4 and set(s) == {"="}
+
+    def flush(name, taglines):
+        if not name or not taglines:
+            return
+        searches = _extract_searches("\n".join(taglines), families)
+        if not searches:
+            return
+        key = _norm(name)
+        if not key:
+            return
+        entry = m.setdefault(key, {"display": name, "searches": []})
+        for s in searches:
+            if s not in entry["searches"]:
+                entry["searches"].append(s)
+
+    cur, tags, i = None, [], 0
+    while i < n:
+        if is_rule(lines[i]):
+            flush(cur, tags)
+            cur, tags = None, []
+            # lecture name = next non-empty, non-rule line; skip the closing rule.
+            j = i + 1
+            while j < n and not lines[j].strip():
+                j += 1
+            if j < n and not is_rule(lines[j]):
+                cur = lines[j].strip()
+                k = j + 1
+                while k < n and not lines[k].strip():
+                    k += 1
+                i = (k + 1) if (k < n and is_rule(lines[k])) else (j + 1)
+                continue
+            i += 1
+            continue
+        if cur is not None:
+            s = lines[i].strip()
+            if s.startswith("#") or s.lower().startswith(("tag:", "deck:")):
+                tags.append(s)
+        i += 1
+    flush(cur, tags)
+    _log("build_lecture_map(txt): %d lectures" % len(m))
+    return m
+
+
 def build_lecture_map(families=None):
     """norm_lecture_name -> {'display': str, 'searches': [str, ...]} across all sheets.
 
@@ -604,8 +672,12 @@ def build_lecture_map(families=None):
     """
     if families is None:
         families = _enabled_families()
+    path = _cfg()["xlsx_path"]
+    # A plain-text tag map (.txt) is parsed differently from an .xlsx workbook.
+    if (path or "").strip().lower().endswith(".txt"):
+        return _build_lecture_map_txt(path, families)
     m = {}
-    for name, rows in _load_xlsx(_cfg()["xlsx_path"]):
+    for name, rows in _load_xlsx(path):
         # Anchor = every block's decks header. Match case-insensitively on the
         # "corresponding decks" stem so header variants ("Corresponding Decks",
         # "Corresponding Decks/Tags", trailing spaces) are all caught.
@@ -835,6 +907,9 @@ def _open_today_dialog(day_offset=0):
     families = _enabled_families(cfg)
     cutoff = float(cfg.get("fuzzy_cutoff", 0.72))
     ics_path = cfg["ics_path"]
+    # No calendar configured → manual mode: list every lecture in the tag map and
+    # let the user pick which to unsuspend (no day navigation, no fuzzy matching).
+    no_cal = not (ics_path or "").strip()
 
     _ics_reset()                       # fresh top-level open → refetch URL calendars
     _ak_index_reset()                  # …and rebuild the AnKing tag index (once)
@@ -875,6 +950,9 @@ def _open_today_dialog(day_offset=0):
     nav.addWidget(btn_prev); nav.addWidget(btn_today); nav.addWidget(btn_next)
     nav.addSpacing(12); nav.addWidget(day_hdr); nav.addStretch(1)
     v.addLayout(nav)
+    if no_cal:                       # no calendar → no day navigation
+        for _w in (btn_prev, btn_today, btn_next):
+            _w.setVisible(False)
 
     info_lbl = QLabel("")
     v.addWidget(info_lbl)
@@ -909,7 +987,8 @@ def _open_today_dialog(day_offset=0):
         return sel or set(src_cbs.keys())   # never let an empty selection zero-out
 
     table = QTableWidget(0, 4, dlg)
-    table.setHorizontalHeaderLabels(["Use", "Calendar event", "Matched lecture", "Cards"])
+    table.setHorizontalHeaderLabels(
+        ["Use", "Lecture" if no_cal else "Calendar event", "Matched lecture", "Cards"])
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -918,6 +997,8 @@ def _open_today_dialog(day_offset=0):
     hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
     hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+    if no_cal:                       # the "Matched lecture" combo is redundant here
+        table.setColumnHidden(2, True)
     v.addWidget(table)
 
     total_lbl = QLabel("")
@@ -1060,9 +1141,15 @@ def _open_today_dialog(day_offset=0):
 
     def _populate(offset):
         st["offset"] = offset
-        target = _today() + datetime.timedelta(days=offset)
-        st["target"] = target
-        events = _ics_by_date(ics_path).get(target, [])
+        if no_cal:
+            # Manual mode: every lecture in the map, tracked under today's key.
+            target = _today()
+            st["target"] = target
+            events = [m[nk]["display"] for nk in opts]
+        else:
+            target = _today() + datetime.timedelta(days=offset)
+            st["target"] = target
+            events = _ics_by_date(ics_path).get(target, [])
         st["events"] = events
         has_day_state = _has_day_state(target)
         _owned, active_lecs = _load_day_active(target)
@@ -1075,16 +1162,22 @@ def _open_today_dialog(day_offset=0):
         btn_today.setEnabled(offset != 0)
         # "Re-suspend day" only makes sense once the day has been unsuspended.
         btn_resusp.setEnabled(has_day_state)
-        day_hdr.setText("<b>%s — %s</b>"
-                        % (_day_label(offset), target.strftime("%a %b %d, %Y")))
-        if events:
+        if no_cal:
+            day_hdr.setText("<b>All lectures</b>")
             info_lbl.setText(
-                "%d calendar events, %d lectures in spreadsheet. Pick the matching "
-                "lecture for each row. “~” = auto-guess (fuzzy). Changes are saved."
-                % (len(events), len(m)))
+                "No calendar set — tick the lectures to unsuspend, then Apply. "
+                "%d lectures in the tag map." % len(m))
         else:
-            info_lbl.setText("No calendar events for %s (%s). Use Prev/Next day."
-                             % (_day_label(offset), target.strftime("%a %b %d, %Y")))
+            day_hdr.setText("<b>%s — %s</b>"
+                            % (_day_label(offset), target.strftime("%a %b %d, %Y")))
+            if events:
+                info_lbl.setText(
+                    "%d calendar events, %d lectures in spreadsheet. Pick the matching "
+                    "lecture for each row. “~” = auto-guess (fuzzy). Changes are saved."
+                    % (len(events), len(m)))
+            else:
+                info_lbl.setText("No calendar events for %s (%s). Use Prev/Next day."
+                                 % (_day_label(offset), target.strftime("%a %b %d, %Y")))
         state_lbl.setVisible(has_day_state)
         if has_day_state:
             state_lbl.setText(
@@ -1120,6 +1213,8 @@ def _open_today_dialog(day_offset=0):
             if has_day_state:
                 disp = m[resolved]["display"] if resolved else None
                 want_checked = disp in active_set
+            elif no_cal:
+                want_checked = False           # manual mode: user picks
             else:
                 want_checked = bool(resolved)
             chk.setCheckState(_Qt.CheckState.Checked if want_checked
@@ -1298,15 +1393,15 @@ def build_settings_pages():
     g = QGridLayout(src)
     g.setColumnStretch(1, 1)
 
-    g.addWidget(QLabel("<b>Spreadsheet</b> (.xlsx lecture → tag map)"), 0, 0, 1, 3)
+    g.addWidget(QLabel("<b>Tag map</b> (.xlsx spreadsheet or .txt lecture → tag list)"), 0, 0, 1, 3)
     xlsx_edit = QLineEdit(cfg.get("xlsx_path", ""))
-    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx")
+    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx  or  …_Tags_by_Lecture.txt")
     xlsx_btn = QPushButton("Browse…")
 
     def _pick_xlsx():
         fn, _f = QFileDialog.getOpenFileName(
-            src, "Choose spreadsheet", os.path.dirname(_p(xlsx_edit.text())) or "",
-            "Spreadsheets (*.xlsx *.xlsm);;All files (*)")
+            src, "Choose tag map", os.path.dirname(_p(xlsx_edit.text())) or "",
+            "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
         if fn:
             xlsx_edit.setText(fn)
 
@@ -1457,11 +1552,12 @@ def _open_settings_dialog():
 # --------------------------------------------------------------- run -----------
 
 def _paths_ready() -> bool:
-    """True only once the user has set BOTH sources. On a fresh install these are
-    empty, so trying to read them raises "[Errno 2] No such file or directory: ''".
-    Guard on this so the feature stays dormant until it's actually configured."""
+    """True once the TAG MAP is set (the calendar is optional). Without a calendar
+    the lecture window runs in manual mode (pick lectures to unsuspend). On a fresh
+    install the path is empty, so guard on this so the feature stays dormant until
+    it's actually configured."""
     c = _cfg()
-    return bool((c.get("ics_path") or "").strip() and (c.get("xlsx_path") or "").strip())
+    return bool((c.get("xlsx_path") or "").strip())
 
 
 def run_today(interactive=True):
@@ -1469,8 +1565,10 @@ def run_today(interactive=True):
         if interactive:
             showInfo(
                 "Janki Lectures isn't set up yet.\n\n"
-                "Add your calendar (.ics) and lecture→tag map (.xlsx) under "
-                "Tools → Janki: Settings… → Lectures → Sources, then try again.",
+                "Add your lecture→tag map (.xlsx or .txt) under Tools → Janki: "
+                "Settings… → Lectures → Sources, then try again. A calendar (.ics) "
+                "is optional — with one, lectures align to the day; without one, "
+                "you pick lectures to unsuspend manually.",
                 title="Janki Lectures",
             )
         return
@@ -1478,7 +1576,11 @@ def run_today(interactive=True):
         if interactive:
             _open_today_dialog()
             return
-        # Non-interactive (not currently wired): silently unsuspend auto-matches.
+        # Non-interactive (auto-on-launch): only the calendar drives auto-matching.
+        # With no calendar there's nothing to align, so never mass-unsuspend.
+        if not (_cfg().get("ics_path") or "").strip():
+            return
+        # Silently unsuspend auto-matches.
         matched, _unmatched = match_today(_enabled_families())
         ids = set()
         for _cal, _res, searches, _fz in matched:
