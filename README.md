@@ -73,6 +73,9 @@ so nothing is left behind.
   serif card font, OLED full-screen mode.
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
+- **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
+  you from getting distracted. Escape by holding space/the entry bind for 10s.
+  Tiered into three modes depending on your preferences.
 - **OLED Optimization** — when in fullscreen, uses a true black backdrop. Useful
   for increasing contrast and readability on Mac displays.
 - **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \\**
