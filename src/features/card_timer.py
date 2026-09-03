@@ -1,11 +1,12 @@
 """Per-card lingering-warning bar under the toolbar."""
 
 import sys
-from ctypes import c_void_p, c_bool, c_long, c_ulong
+import ctypes
+from ctypes import c_void_p, c_bool, c_long, c_ulong, c_char_p
 from aqt import mw, gui_hooks
 from aqt.qt import Qt, QTimer
 
-from ..util.bridge import _bridge
+from ..util.bridge import _bridge, NSPoint, NSRect, NSSize
 from ..util.config import _cfg
 from ..util import state
 from . import focus
@@ -22,7 +23,7 @@ def _make_card_timer():
     by card length). When it fills it turns red — a 'you've lingered' nudge,
     replacing the AnKing note-type timer. Mirrors the bottom XP bar."""
     from PyQt6.QtWidgets import QWidget
-    from PyQt6.QtGui import QColor, QPainter, QBrush
+    from PyQt6.QtGui import QColor, QPainter, QBrush, QPen
     from PyQt6.QtCore import QRectF, QPoint
 
     cfg = _cfg()
@@ -45,28 +46,129 @@ def _make_card_timer():
     # fraction of the way each edge gradient reaches toward the centre (0.5 = centre)
     PULSE_REACH = max(0.05, min(0.5, float(cfg.get("card_timer_pulse_reach", 0.45))))
 
+    # Countdown RING (top-right) — replaces the old under-toolbar bar. It starts as
+    # a full circle and depletes clockwise as the card timer runs down.
+    RING_D = int(cfg.get("card_timer_ring_size", 11))          # ring diameter (px)
+    RING_STROKE = float(cfg.get("card_timer_ring_thickness", 3.0))
+    RING_MARGIN = int(cfg.get("card_timer_ring_margin", 14))   # fallback inset from the corner
+    RING_GAP = int(cfg.get("card_timer_ring_gap", 12))         # gap right of the Sync button
+    RING_ANCHOR = str(cfg.get("card_timer_ring_anchor", "window")).lower()  # "window" | "screen"
+    RING_CORNER = str(cfg.get("card_timer_ring_corner", "tray")).lower()    # "top" | "tray" | "bottom"
+    BAR_TOP_LIFT = int(cfg.get("card_timer_bar_top_lift", 31))              # px to lift the top bar over the tab bar
+    RING_OPACITY = float(cfg.get("card_timer_ring_opacity", 0.48))
+    RING_CLOSE_MS = int(cfg.get("card_timer_ring_close_ms", 780))  # ring wipe-out on card complete
+    BAR_CLOSE_MS = int(cfg.get("card_timer_bar_close_ms", 500))    # bar wipe-out (a bit quicker)
+    RING_BOX = RING_D + 8                                       # widget box (padding for round caps)
+
+    def _op():
+        # Live transparency for the ring/bar (settings slider applies with no rebuild).
+        return float(_cfg().get("card_timer_ring_opacity", RING_OPACITY))
+
+    def _fs_now():
+        # Robust fullscreen check: Qt's isFullScreen() misses macOS NATIVE
+        # (green-button) fullscreen, so also check the NSWindow style mask
+        # (FullScreen = 1<<14) and whether the window covers the whole screen.
+        try:
+            if mw.isFullScreen():
+                return True
+            msg, cls = _bridge()
+            mns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+            if mns and (int(msg(c_ulong, mns, b"styleMask")) & (1 << 14)):
+                return True
+            scr = mw.screen() if hasattr(mw, "screen") else None
+            if scr is not None and mw.frameGeometry().height() >= scr.geometry().height() - 8:
+                return True
+        except Exception:
+            pass
+        return False
+
     class TimerBar(QWidget):
         def __init__(self):
+            # NOTE: no WindowStaysOnTopHint — addChildWindow(ordered:Above) keeps it
+            # above the main window, and the StaysOnTop/Tool "floating panel"
+            # promotion made the main window resign key when the bar showed/filled
+            # (stealing focus, esp. in fullscreen). Same lesson as PulseOverlay.
             super().__init__(None,
                 Qt.WindowType.FramelessWindowHint |
-                Qt.WindowType.WindowStaysOnTopHint |
                 Qt.WindowType.Tool)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-            self.setFixedHeight(BAR_H)
             self._p = 0.0
+            self._center_fill = False    # narrow/centred bars fill from the middle out
             self._warn = False
+            self._warn_t0 = 0.0          # monotonic when warn began (fill→pulse blend)
             self._native_done = False
+            self._float_mode = None      # None=undecided, True=screen-level float, False=child
             self._pulse = 0.0            # 0..2pi phase for the overtime pulse
             self._pulse_t = QTimer(self)
             self._pulse_t.setInterval(33)   # ~30 fps
             self._pulse_t.timeout.connect(self._pulse_tick)
-            self.setWindowOpacity(OPACITY)
+            # "snap shut" close animation state (on card complete)
+            self._closing = False
+            self._close_filled = 0.0     # arc length (fraction) captured at close
+            self._close_warn = False     # was it red (overtime) when it closed?
+            self._close_wipe = 0.0       # 0→1: how far the tail has chased the lead
+            self._close_t0 = 0.0
+            self._close_t = QTimer(self)
+            self._close_t.setInterval(16)   # ~60 fps
+            self._close_t.timeout.connect(self._close_tick)
+            self.setWindowOpacity(_op())
 
         def _pulse_tick(self):
             import math
             self._pulse = (self._pulse + 0.18) % (2 * math.pi)
             self.update()
+
+        def finish_close(self):
+            """Card complete: the trailing end loops around and catches up to the
+            leading end, wiping the arc out, then hide. Skips if there was no
+            progress or the ring is suppressed (Focus/Caption)."""
+            if focus._focus_hidden or focus._focus_mode_on or hud._caption_visible():
+                self._closing = False
+                return
+            if self._mode() == "off":      # off: nothing to animate
+                self._closing = False
+                self.hide()
+                return
+            if self._p <= 0.0 and not self._warn:
+                self._closing = False
+                return
+            import time
+            self._pulse_t.stop()
+            self._closing = True
+            self._close_filled = 1.0 if self._warn else self._p
+            self._close_warn = self._warn
+            self._close_wipe = 0.0
+            self._close_ms = BAR_CLOSE_MS if self._mode() == "bar" else RING_CLOSE_MS
+            self._close_t0 = time.monotonic()
+            # It's already on screen (the question phase was showing it); just make
+            # sure and start the animation.
+            self.setWindowOpacity(_op())
+            if not self.isVisible():
+                self.show()
+            if not self._close_t.isActive():
+                self._close_t.start()
+            self.update()
+
+        def _close_tick(self):
+            import time
+            prog = (time.monotonic() - self._close_t0) * 1000.0 / max(1, getattr(self, "_close_ms", RING_CLOSE_MS))
+            if prog >= 1.0:
+                self._close_t.stop()
+                self._closing = False
+                self.hide()
+                return
+            self._close_wipe = prog * prog * (3.0 - 2.0 * prog)   # smoothstep (ease in-out)
+            self.update()
+
+        def _mode(self):
+            return str(_cfg().get("card_timer_style", "ring")).lower()
+
+        def _fill_alpha(self):
+            # Faint early, de-fade toward full. In fullscreen the floor is higher so
+            # the small/narrow indicator stays legible.
+            floor = 110 if mw.isFullScreen() else 60
+            return min(255, int(floor + (160 - floor) * (self._p ** 2.5)))
 
         def _fallback_full(self):
             try:
@@ -76,22 +178,9 @@ def _make_card_timer():
             except Exception:
                 pass
 
-        def reposition(self):
-            # Focus Mode: hide the progress bar entirely (distracting in focus).
-            # Gate on Focus being ARMED (_focus_mode_on), not just chrome currently
-            # hidden — after returning to the reviewer the chrome is briefly back
-            # (_focus_hidden False) before the idle re-hide, and the bar must not
-            # reappear in that window.
-            if focus._focus_hidden or focus._focus_mode_on:
-                self.hide()
-                return
-            # Caption mode replaces the countdown bar with the caption pulse.
-            if hud._caption_visible():
-                self.hide()
-                return
-            # Match the width/position of the nav button island (Decks/Add/Browse/
-            # Stats/Sync), which lives inside the toolbar webview's DOM — measure it
-            # in JS, then map to window coords. Falls back to full content width.
+        def _reposition_bar_tray(self):
+            # Original bar: matched to the toolbar's nav-button island (just below
+            # Decks/Add/Browse/Stats/Sync).
             tw = getattr(mw, "toolbarWeb", None) or getattr(getattr(mw, "toolbar", None), "web", None)
             if tw is None:
                 self._fallback_full()
@@ -125,8 +214,156 @@ def _make_card_timer():
                 except Exception:
                     self._fallback_full()
 
+        def _reposition_bar(self):
+            corner = str(_cfg().get("card_timer_ring_corner", RING_CORNER)).lower()
+            self._center_fill = False   # default: fill left→right (full-width bars)
+            # "tray" → the original under-toolbar island bar.
+            if corner == "tray":
+                self._reposition_bar_tray()
+                return
+            # "top"/"bottom" → full-width strip at the window edge (XP-bar style).
+            try:
+                geo = mw.geometry()
+                rad = int(_cfg().get("win_corner_radius", 11))
+                # "Bottom (Narrow)" → notch-width bar centred at the bottom.
+                if corner == "bottom_narrow":
+                    self._center_fill = True    # fill from the middle out (looks centred)
+                    nw = self._notch_width() or int(_cfg().get("card_timer_bar_notch_w", 180))
+                    if self._is_fs():
+                        scr = mw.screen() if hasattr(mw, "screen") else None
+                        sg = scr.geometry() if scr is not None else geo
+                        w = nw
+                        x = sg.x() + (sg.width() - w) // 2
+                        y = sg.y() + sg.height() - BAR_H
+                    else:
+                        w = max(40, nw // 2)          # ~half width windowed
+                        x = geo.x() + (geo.width() - w) // 2
+                        y = geo.y() + geo.height() - BAR_H - 5   # padding from the bottom
+                    self.setGeometry(x, y, w, BAR_H)
+                    return
+                # Fullscreen + top: notch-width, centred just below the notch.
+                if corner != "bottom" and self._is_fs():
+                    self._center_fill = True    # fill from the middle out
+                    scr = mw.screen() if hasattr(mw, "screen") else None
+                    sg = scr.geometry() if scr is not None else geo
+                    # Same width as the notch, centred just below it. Qt clamps the
+                    # window below the notch/menu-bar automatically.
+                    w = self._notch_width() or int(_cfg().get("card_timer_bar_notch_w", 180))
+                    x = sg.x() + (sg.width() - w) // 2
+                    self.setGeometry(x, sg.y(), w, BAR_H)
+                    return
+                if corner == "bottom":
+                    y = geo.y() + geo.height() - BAR_H
+                else:
+                    y = geo.y() - BAR_TOP_LIFT   # over the tab/title bar
+                # Inset by the window corner radius so the bar's ends don't extend
+                # past the window's rounded corners.
+                self.setGeometry(geo.x() + rad, y, max(1, geo.width() - 2 * rad), BAR_H)
+            except Exception:
+                pass
+
+        def reposition(self):
+            # Focus Mode: hide entirely (distracting in focus). Gate on Focus being
+            # ARMED (_focus_mode_on), not just chrome currently hidden.
+            if focus._focus_hidden or focus._focus_mode_on:
+                self.hide()
+                return
+            # Caption mode replaces the countdown with the caption pulse.
+            if hud._caption_visible():
+                self.hide()
+                return
+            # Keep the native window in the right mode (screen-level float for the
+            # fullscreen bar, focus-safe child window otherwise).
+            self._set_float(self._should_float())
+            if self._mode() == "bar":
+                self._reposition_bar()
+                return
+            # Reference corner: "window" = the main Anki window frame (rides with
+            # the window); "screen" = the whole display (availableGeometry).
+            try:
+                if RING_ANCHOR == "screen":
+                    scr = mw.screen() if hasattr(mw, "screen") else None
+                    g = scr.availableGeometry() if scr is not None else None
+                else:
+                    g = mw.frameGeometry()
+                if g is not None:
+                    right_edge = g.x() + g.width()
+                    top_y = g.y()
+                    bottom_y = g.y() + g.height()
+                else:
+                    tr = mw.web.mapToGlobal(QPoint(mw.web.width(), 0))
+                    br = mw.web.mapToGlobal(QPoint(mw.web.width(), mw.web.height()))
+                    right_edge = tr.x()
+                    top_y = tr.y()
+                    bottom_y = br.y()
+            except Exception:
+                return
+            fallback_x = right_edge - RING_BOX - RING_MARGIN
+            fallback_y = top_y + RING_MARGIN
+            # Read live so the settings dropdown applies without a rebuild.
+            corner = str(_cfg().get("card_timer_ring_corner", RING_CORNER)).lower()
+
+            # Bottom-right: sit above the answer bar by anchoring to the card content
+            # area's bottom (mw.web), in the remaining-count numbers' row.
+            if corner in ("bottom", "bottom_narrow"):
+                try:
+                    br = mw.web.mapToGlobal(QPoint(mw.web.width(), mw.web.height()))
+                    x = br.x() - RING_BOX - RING_MARGIN
+                    y = br.y() + 2
+                except Exception:
+                    x = right_edge - RING_BOX - RING_MARGIN
+                    y = bottom_y - RING_BOX - RING_MARGIN
+                self.setGeometry(x, y, RING_BOX, RING_BOX)
+                return
+
+            # "top" → true top-right corner of the window/screen (not the Sync row).
+            if corner != "tray":
+                self.setGeometry(fallback_x, fallback_y, RING_BOX, RING_BOX)
+                return
+
+            # "tray": line up vertically with the Sync button (toolbar row) and sit just
+            # OUTSIDE it — nestled close to the right of the Sync button (clamped to
+            # stay inside the window edge). Measure both in the toolbar webview.
+            tw = getattr(mw, "toolbarWeb", None) or getattr(getattr(mw, "toolbar", None), "web", None)
+            if tw is None:
+                self.setGeometry(fallback_x, fallback_y, RING_BOX, RING_BOX)
+                return
+            js = ("(function(){var cy=null,t=document.querySelector('.toolbar');"
+                  "if(t){var r=t.getBoundingClientRect();cy=(r.top+r.bottom)/2;}"
+                  "var it=document.querySelectorAll('.toolbar a,.toolbar button,.hitem,a.hitem');"
+                  "var mr=null;for(var i=0;i<it.length;i++){var q=it[i].getBoundingClientRect();"
+                  "if(q.width>0&&(mr===null||q.right>mr))mr=q.right;}return [cy,mr];})()")
+
+            def _cb(res):
+                try:
+                    base = tw.mapToGlobal(QPoint(0, 0))
+                    cy = res[0] if res else None
+                    mr = res[1] if res else None
+                    y = (base.y() + int(round(cy)) - RING_BOX // 2) if cy is not None else fallback_y
+                    if mr is not None:
+                        sync_right = base.x() + int(round(mr))
+                        x = sync_right + RING_GAP        # just outside the Sync button
+                        if x + RING_BOX > right_edge - 2:  # keep inside the edge
+                            x = right_edge - RING_BOX - 2
+                    else:
+                        x = fallback_x
+                    self.setGeometry(x, y, RING_BOX, RING_BOX)
+                except Exception:
+                    pass
+
+            try:
+                tw.evalWithCallback(js, _cb)
+            except Exception:
+                try:
+                    tw.page().runJavaScript(js, _cb)
+                except Exception:
+                    self.setGeometry(fallback_x, fallback_y, RING_BOX, RING_BOX)
+
         def set_state(self, p, warn):
             self._p = max(0.0, min(1.0, p))
+            if warn and not self._warn:      # rising edge → start the fill→pulse blend
+                import time
+                self._warn_t0 = time.monotonic()
             self._warn = warn
             try:
                 if warn:
@@ -162,6 +399,99 @@ def _make_card_timer():
                 msg(None, ns, b"orderOut:", (c_void_p,), (None,))
             except Exception:
                 pass
+            self._float_mode = None   # re-decide child vs float on next show
+
+        def _is_fs(self):
+            return _fs_now()
+
+        def _should_float(self):
+            # Always a focus-safe child window now (the fullscreen bar just centres
+            # below the notch instead of floating into the top corner).
+            return False
+
+        def _notch_width(self):
+            # Width of the macOS notch, from the screen's auxiliary top areas
+            # (macOS 12+). 0 if unavailable / no notch. Guarded so it never calls an
+            # unrecognized selector on older systems.
+            try:
+                msg, cls = _bridge()
+                ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+                scr = msg(c_void_p, ns, b"screen") if ns else None
+                if not scr:
+                    scr = msg(c_void_p, cls(b"NSScreen"), b"mainScreen")
+                if not scr:
+                    return 0
+                lib = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.dylib")
+                lib.sel_registerName.restype = c_void_p
+                lib.sel_registerName.argtypes = [c_char_p]
+                sel = lib.sel_registerName(b"auxiliaryTopLeftArea")
+                if not msg(c_bool, scr, b"respondsToSelector:", (c_void_p,), (sel,)):
+                    return 0
+                la = msg(NSRect, scr, b"auxiliaryTopLeftArea")
+                ra = msg(NSRect, scr, b"auxiliaryTopRightArea")
+                nw = ra.origin.x - (la.origin.x + la.size.width)
+                if 40 < nw < 400:
+                    return int(round(nw))
+            except Exception:
+                pass
+            return 0
+
+        def _set_float(self, on):
+            # Idempotent: only re-wire the native window when the mode changes.
+            if getattr(self, "_float_mode", None) == on:
+                return
+            try:
+                msg, cls = _bridge()
+                ns = msg(c_void_p, c_void_p(int(self.winId())), b"window")
+                if not ns:
+                    return
+                if on:
+                    parent = msg(c_void_p, ns, b"parentWindow")
+                    if parent:
+                        msg(None, parent, b"removeChildWindow:", (c_void_p,), (ns,))
+                    # Above the menu bar / notch safe-area so the frame isn't
+                    # constrained below them (NSMainMenuWindowLevel is 24).
+                    lvl = int(_cfg().get("card_timer_bar_fs_level", 1000))
+                    msg(None, ns, b"setLevel:", (c_long,), (c_long(lvl),))
+                    # appear over other Spaces / a fullscreen window
+                    msg(None, ns, b"setCollectionBehavior:", (c_ulong,), (c_ulong(1 | (1 << 8)),))
+                    msg(None, ns, b"setHidesOnDeactivate:", (c_bool,), (False,))
+                    if msg(c_bool, ns, b"isKindOfClass:", (c_void_p,), (cls(b"NSPanel"),)):
+                        cur = int(msg(c_ulong, ns, b"styleMask"))
+                        if not (cur & 128):   # NSWindowStyleMaskNonactivatingPanel (no focus steal)
+                            msg(None, ns, b"setStyleMask:", (c_ulong,), (c_ulong(cur | 128),))
+                        msg(None, ns, b"setFloatingPanel:", (c_bool,), (True,))
+                        msg(None, ns, b"setBecomesKeyOnlyIfNeeded:", (c_bool,), (True,))
+                    msg(None, ns, b"orderFront:", (c_void_p,), (None,))
+                else:
+                    msg(None, ns, b"setLevel:", (c_long,), (c_long(0),))       # NSNormalWindowLevel
+                    msg(None, ns, b"setCollectionBehavior:", (c_ulong,), (c_ulong(0),))
+                    if not msg(c_void_p, ns, b"parentWindow"):
+                        main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+                        if main:
+                            msg(c_void_p, main, b"addChildWindow:ordered:",
+                                (c_void_p, c_long), (ns, 1))
+                self._float_mode = on
+            except Exception:
+                pass
+
+        def _native_top_place(self, w, rad, fs_lift):
+            # Set the native frame (Cocoa bottom-left) to the physical screen top.
+            # At a level above the menu bar this isn't constrained; deferred so it
+            # wins over Qt's own (clamped) geometry pass.
+            try:
+                msg, cls = _bridge()
+                ns = msg(c_void_p, c_void_p(int(self.winId())), b"window")
+                scr = mw.screen() if hasattr(mw, "screen") else None
+                sg = scr.geometry() if scr is not None else None
+                if not ns or sg is None:
+                    return
+                ox = float(sg.x() + sg.width() - w - rad)
+                oy = float(sg.height() - BAR_H + fs_lift)  # Cocoa: y up from bottom
+                r = NSRect(NSPoint(ox, oy), NSSize(float(w), float(BAR_H)))
+                msg(None, ns, b"setFrame:display:", (NSRect, c_bool), (r, True))
+            except Exception:
+                pass
 
         def _apply_native(self):
             try:
@@ -173,46 +503,136 @@ def _make_card_timer():
                 msg(c_void_p, ns, b"setHasShadow:", (c_bool,), (False,))
                 msg(c_void_p, ns, b"setBackgroundColor:", (c_void_p,),
                     (msg(c_void_p, cls("NSColor"), b"clearColor"),))
-                if not msg(c_void_p, ns, b"parentWindow"):
-                    main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
-                    if main:
-                        msg(c_void_p, main, b"addChildWindow:ordered:",
-                            (c_void_p, c_long), (ns, 1))
                 self._native_done = True
             except Exception:
                 pass
+            self._set_float(self._should_float())
 
-        def paintEvent(self, ev):
-            if self._p <= 0:
-                return
+        def _paint_bar(self):
+            # Original thin progress bar (horizontal).
             import math
             pt = QPainter(self)
             pt.setRenderHint(QPainter.RenderHint.Antialiasing)
             pt.setPen(Qt.PenStyle.NoPen)
             fullw = float(self.width())
             hrad = min(float(BAR_H) / 2.0, fullw / 2.0)
+            if self._closing:
+                # wipe-out: the trailing (left) end chases the leading (right) end,
+                # so the drawn bar shrinks to nothing; fade out as it closes.
+                fv = self._close_filled
+                t = self._close_wipe
+                if self._close_warn:
+                    r, g, b = 255, 70, 70
+                else:
+                    r = int(90 + 165 * fv)
+                    g = max(0, int(210 - 120 * fv))
+                    b = max(0, int(255 - 200 * fv))
+                a = max(0, int(205 * (1.0 - 0.6 * t)))
+                w = fv * fullw * (1.0 - t)
+                left = (fullw - w) / 2.0 if self._center_fill else t * fv * fullw
+                if w > 0:
+                    rad = min(float(BAR_H) / 2.0, w / 2.0)
+                    pt.setBrush(QBrush(QColor(r, g, b, a)))
+                    pt.drawRoundedRect(QRectF(left, 0.0, w, float(BAR_H)), rad, rad)
+                pt.end()
+                return
+            if self._p <= 0:
+                pt.end()
+                return
             if self._warn:
-                # overtime: pulse a full-width red glow behind the bar to alert.
-                # Phase from a shared clock anchored at expiry (_flare_origin) so the
-                # bar pulses IN SYNC with the PulseOverlay flare AND the first cycle
-                # starts from the trough.
                 import time
                 phase = ((time.monotonic() - state._flare_origin) * 1000.0 % PULSE_MS) / PULSE_MS
-                s = 0.5 - 0.5 * math.cos(2 * math.pi * phase)   # 0..1, synced
-                glow = QColor(255, 60, 60, int(40 + 150 * s))
-                pt.setBrush(QBrush(glow))
+                s = 0.5 - 0.5 * math.cos(2 * math.pi * phase)
+                pt.setBrush(QBrush(QColor(255, 60, 60, int(40 + 150 * s))))
                 pt.drawRoundedRect(QRectF(0.0, 0.0, fullw, float(BAR_H)), hrad, hrad)
                 col = QColor(255, 70, 70, int(180 + 60 * s))
             else:
-                # cyan (calm) → amber as it fills toward the warning
                 r = int(90 + 165 * self._p)
                 g = max(0, int(210 - 120 * self._p))
                 b = max(0, int(255 - 200 * self._p))
-                col = QColor(r, g, b, 205)
+                # Faint early, de-fade as it fills (same curve as the ring).
+                col = QColor(r, g, b, self._fill_alpha())
             pt.setBrush(QBrush(col))
             w = fullw * self._p
+            fx = (fullw - w) / 2.0 if self._center_fill else 0.0
             rad = min(float(BAR_H) / 2.0, w / 2.0)
-            pt.drawRoundedRect(QRectF(0.0, 0.0, w, float(BAR_H)), rad, rad)
+            pt.drawRoundedRect(QRectF(fx, 0.0, w, float(BAR_H)), rad, rad)
+            pt.end()
+
+        def paintEvent(self, ev):
+            if self._mode() == "bar":
+                self._paint_bar()
+                return
+            import math
+            pt = QPainter(self)
+            pt.setRenderHint(QPainter.RenderHint.Antialiasing)
+            inset = RING_STROKE / 2.0 + 1.0
+            box = float(self.width())
+            rect = QRectF(inset, inset, box - 2 * inset, box - 2 * inset)
+            # Arc colour + alpha. The alpha follows a curve that stays faint while
+            # far from done and brightens over a longer window near the end (so the
+            # amber/red is visible for a good while).
+            if self._closing:
+                # wipe-out: the trailing end chases the leading end around, so the
+                # drawn arc shrinks to nothing. Colour by the captured fill (red if
+                # it was overtime).
+                fv = self._close_filled
+                if self._close_warn:
+                    r, g, b = 255, 70, 70
+                else:
+                    r = int(90 + 165 * fv)
+                    g = max(0, int(210 - 120 * fv))
+                    b = max(0, int(255 - 200 * fv))
+                a = min(255, int(60 + 195 * (fv ** 2)))
+                # Fade out as it closes so the last sliver is more transparent.
+                a = max(0, int(a * (1.0 - 0.6 * self._close_wipe)))
+                col = QColor(r, g, b, a)
+                filled = fv
+            elif self._warn:
+                # overtime: the whole ring pulses red, IN SYNC with the PulseOverlay
+                # flare (shared _flare_origin clock, first cycle starts at the trough).
+                import time
+                now = time.monotonic()
+                phase = ((now - state._flare_origin) * 1000.0 % PULSE_MS) / PULSE_MS
+                s = 0.5 - 0.5 * math.cos(2 * math.pi * phase)   # 0..1, synced
+                pr, pg, pb, pa = 255, 70, 70, int(170 + 70 * s)
+                # Ease from the just-filled amber ring into the red pulse so it
+                # doesn't snap. bf: 0 at warn start → 1 after ~500ms.
+                bf = min(1.0, (now - self._warn_t0) * 1000.0 / 500.0) if self._warn_t0 else 1.0
+                bf = bf * bf * (3 - 2 * bf)   # smoothstep
+                ar, ag, ab, aa = 255, 90, 55, 255   # amber fill-end colour
+                r = int(ar + (pr - ar) * bf)
+                g = int(ag + (pg - ag) * bf)
+                b = int(ab + (pb - ab) * bf)
+                a = int(aa + (pa - aa) * bf)
+                col = QColor(r, g, b, a)
+                filled = 1.0
+            else:
+                # cyan (calm) → amber as it fills toward the warning, and de-fade
+                # (grow more solid) the closer it gets to full.
+                r = int(90 + 165 * self._p)
+                g = max(0, int(210 - 120 * self._p))
+                b = max(0, int(255 - 200 * self._p))
+                a = self._fill_alpha()
+                col = QColor(r, g, b, a)
+                filled = self._p
+            # (No background track — only the progress arc is drawn.)
+            # Fill clockwise from 12 o'clock as time elapses; a complete red ring at
+            # expiry. (Qt angles: 1/16°, CCW positive → negative span = clockwise.)
+            pen = QPen(col)
+            pen.setWidthF(RING_STROKE)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pt.setPen(pen)
+            if self._closing:
+                # Trailing end advanced by wipe·arc; remaining length shrinks to 0.
+                t = self._close_wipe
+                start16 = int(round((90.0 - t * filled * 360.0) * 16))
+                span16 = int(round(-(filled * 360.0 * (1.0 - t)) * 16))
+            else:
+                start16 = 90 * 16
+                span16 = int(-filled * 360 * 16)
+            if span16 != 0:
+                pt.drawArc(rect, start16, span16)
             pt.end()
 
     class PulseOverlay(QWidget):
@@ -302,7 +722,7 @@ def _make_card_timer():
             # fullscreen frameGeometry can under-report (glow stops short of the
             # bottom), so use the window's authoritative screen rect there.
             try:
-                if mw.isFullScreen():
+                if _fs_now():
                     scr = mw.screen()
                     if scr is None and mw.windowHandle() is not None:
                         scr = mw.windowHandle().screen()
@@ -548,10 +968,24 @@ def _make_card_timer():
             show = (self._red_wanted and not self._tip_open and now >= self._cooldown_until
                     and not state._break_tint_active and not state._pomo_on_break
                     and host_on_screen)
-            if show and not self._overlay.isVisible():
-                self._overlay.set_active(True)
-            elif not show and self._overlay.isVisible():
+            if show:
+                self._overlay._max_a = self._flare_alpha()   # boost in fullscreen/focus
+                if not self._overlay.isVisible():
+                    self._overlay.set_active(True)
+                else:
+                    self._overlay.update()
+            elif self._overlay.isVisible():
                 self._overlay.set_active(False)
+
+        def _flare_alpha(self):
+            # Peak edge alpha for the red flare. Fullscreen has no window chrome/glass
+            # to read against, so it needs a stronger glow than windowed.
+            _c = _cfg()
+            if _fs_now():
+                return int(_c.get("card_timer_pulse_alpha_fullscreen", 44))
+            if focus._focus_hidden:
+                return int(_c.get("card_timer_pulse_alpha_focus", 24))
+            return int(_c.get("card_timer_pulse_alpha", PULSE_MAX_A))
 
         def start_card(self, text_len):
             # Read the shape params LIVE so settings changes apply to the very next
@@ -579,17 +1013,21 @@ def _make_card_timer():
             self._amboss_poll.stop()
             if self._overlay:
                 self._overlay.set_active(False)   # new card → clear any lingering pulse
-            self._bar.reposition()
-            self._bar.set_state(0.0, False)
+            # (The previous card's ring already wiped out in stop_card when the
+            # answer was shown.) If a wipe is still animating, leave it — the new
+            # ring fades in below after the delay.
+            if not self._bar._closing:
+                self._bar.reposition()
+                self._bar.set_state(0.0, False)
             # Focus Mode keeps the bar hidden; the "Show timer bar" setting can also
             # hide it (independent of the red flare, which still fires either way).
             # Don't pop the bar in immediately — wait a beat, then fade it in, so it
             # doesn't flash on every card flip. _bar_gen invalidates the pending fade
             # if the card changes first.
             self._bar_gen += 1
-            self._bar.hide()
             if not (focus._focus_hidden or focus._focus_mode_on) and self._bar_pref_on():
-                delay = int(_c.get("card_timer_bar_delay_ms", 500))
+                # Appear near-instantly (cap the legacy delay).
+                delay = min(60, int(_c.get("card_timer_bar_delay_ms", 0)))
                 gen = self._bar_gen
                 QTimer.singleShot(delay, lambda g=gen: self._fade_in_bar(g))
             if not self._t.isActive():
@@ -607,7 +1045,10 @@ def _make_card_timer():
             if state._break_tint_active or state._pomo_on_break:
                 return
             # Refresh look/length live so settings changes apply with no rebuild.
-            self._green._max_a = int(_c.get("card_timer_green_alpha", 16))
+            _ga = int(_c.get("card_timer_green_alpha", 16))
+            if _fs_now():
+                _ga = int(_c.get("card_timer_green_alpha_fullscreen", 46))
+            self._green._max_a = _ga
             self._green._cycles = max(1, int(_c.get("card_timer_green_cycles", 1)))
             self._green._pulse_ms = int(_c.get("card_timer_green_ms", 900))
             self._green.set_active(True)
@@ -626,7 +1067,7 @@ def _make_card_timer():
             anim = QPropertyAnimation(self._bar, b"windowOpacity")
             anim.setDuration(int(_cfg().get("card_timer_bar_fade_ms", 260)))
             anim.setStartValue(0.0)
-            anim.setEndValue(OPACITY)
+            anim.setEndValue(_op())
             anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
             anim.start()
             self._bar_fade = anim
@@ -635,7 +1076,7 @@ def _make_card_timer():
             # Caption mode owns the timing feedback via the pulse, so the
             # countdown bar is suppressed while the coherence HUD is up. It also
             # rides the main window, so never show it while that's minimized.
-            return (bool(_cfg().get("card_timer_show_bar", True))
+            return (str(_cfg().get("card_timer_style", "ring")).lower() != "off"
                     and not hud._caption_visible()
                     and hud._main_on_screen())
 
@@ -643,7 +1084,7 @@ def _make_card_timer():
             """Show/hide the bar immediately when the setting is toggled mid-card."""
             if self._active and not (focus._focus_hidden or focus._focus_mode_on) and self._bar_pref_on():
                 self._bar.reposition()
-                self._bar.setWindowOpacity(OPACITY)
+                self._bar.setWindowOpacity(_op())
                 self._bar.show()
             else:
                 self._bar.hide()
@@ -662,7 +1103,7 @@ def _make_card_timer():
             if focus._focus_hidden or focus._focus_mode_on or not self._bar_pref_on():
                 self._bar.hide()
             elif self._active:
-                self._bar.setWindowOpacity(OPACITY)
+                self._bar.setWindowOpacity(_op())
                 self._bar.show()
                 # The toolbar webview was just re-shown and needs a beat to re-lay
                 # out before we can measure the button island — reposition now and
@@ -670,15 +1111,20 @@ def _make_card_timer():
                 for d in (0, 130, 320):
                     QTimer.singleShot(d, self._bar.reposition)
 
-        def stop_card(self):
+        def stop_card(self, wipe=False):
             self._active = False
             self._t.stop()
             self._red_wanted = False
             self._tip_open = False
             self._cooldown_until = 0.0
             self._amboss_poll.stop()
-            self._bar.set_state(0.0, False)
-            self._bar.hide()
+            # Wipe-out only on a real card action (answer revealed). Plain navigation
+            # away (Decks/menu) or a break just hides it.
+            if wipe:
+                self._bar.finish_close()
+            else:
+                self._bar.set_state(0.0, False)
+                self._bar.hide()
             if self._overlay:
                 self._overlay.set_active(False)
 
@@ -781,8 +1227,8 @@ def _make_card_timer():
                 pass
 
     def _on_answer(card):
-        # Flipping the card in time is the goal — clear the linger bar + pulse.
-        mgr.stop_card()
+        # Flipping the card in time is the goal — wipe the ring out + clear pulse.
+        mgr.stop_card(wipe=True)
 
     def _on_state(new_state, old_state):
         if new_state != "review":

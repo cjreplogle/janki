@@ -87,6 +87,7 @@ def _cfg():
     for suffix, _match, _label in TAG_FAMILIES:
         cfg.setdefault("unsuspend_%s" % suffix, suffix in _DEFAULT_ON)
     cfg.setdefault("fuzzy_cutoff", 0.72)
+    cfg.setdefault("match_coverage", 0.6)
     return cfg
 
 
@@ -291,10 +292,125 @@ def _load_xlsx(path):
     return out
 
 
+# Parenthetical notes on calendar events ("(group)", "(Team A)", "(NOT recorded)",
+# "(histology module)") aren't part of the lecture name — strip them before matching.
+_PARENS = re.compile(r"\s*\([^()]*\)")
+
+# Domain synonyms: the calendar and the spreadsheet sometimes name the SAME lecture
+# differently (the calendar says "Pharmacokinetics", the sheet says "ADME"). These
+# share no letters, so fuzzy matching can't bridge them — map each variant to a
+# shared canonical token, applied to both sides so they line up. Add pairs here as
+# they come up (left = word as written, right = canonical).
+_SYNONYMS = {
+    "pharmacokinetics": "adme",
+    "pharmacokinetic": "adme",
+}
+_SYN_RE = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, _SYNONYMS)))
+
+
+def _apply_synonyms(s):
+    return _SYN_RE.sub(lambda m: _SYNONYMS[m.group(0)], s)
+
+
 def _norm(s):
     s = (s or "").lower()
     s = s.replace("&", " and ")
+    s = _PARENS.sub("", s)
+    s = _apply_synonyms(s)
+    # Unify "Introduction to X" with "Intro to X" so the two phrasings match (a
+    # spelled-out prefix no longer blocks a hit). Canonicalized to "intro" rather
+    # than dropped entirely: removing it collapses e.g. "Intro to Pharmacology" to
+    # just "pharmacology", which then mis-ranks onto "Autonomic Pharmacology"
+    # instead of the real "Intro to pharmacology and drug approval" lecture.
+    s = re.sub(r"\bintroduction\b", "intro", s)
     return re.sub(r"[^a-z0-9]+", "", s)
+
+
+# --- fuzzy-match guard ---------------------------------------------------------
+# difflib's raw character ratio over-scores titles that share a common prefix or
+# suffix ("Intro to Pharmacology" vs "Intro to Histology" = 0.74, over the 0.72
+# cutoff) and can't tell "Genetics 1" from "Genetics 2" (0.89). So after difflib
+# ranks the candidates we gate each one on its DISTINCTIVE words + any lecture
+# number before accepting the match.
+_MATCH_STOP = {
+    # filler words
+    "the", "of", "to", "and", "a", "an", "in", "for", "on", "with", "intro",
+    "introduction", "overview", "review", "part", "module", "modules", "session",
+    "lecture", "pt", "our",
+    # session / format / admin words: these show up in calendar EVENT names
+    # ("Back Anatomy practical exam", "Cellular aging (small groups)") but aren't
+    # the lecture subject, so they must not count against keyword coverage.
+    "exam", "exams", "midterm", "final", "quiz", "quizzes", "assessment", "test",
+    "practical", "practicals", "lab", "labs", "laboratory", "workshop",
+    "recitation", "seminar", "panel", "tutorial", "orientation", "prep",
+    "optional", "mandatory", "small", "groups", "group", "team", "teams",
+    "discussion", "debate", "case", "cases", "worksheet", "exercise", "activity",
+    "dissection", "study", "studies", "selfstudy", "selfstudies", "self",
+    "practice", "training", "certification",
+}
+_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8}
+
+
+def _match_tokens(s):
+    s = (s or "").lower().replace("&", " and ")
+    s = _PARENS.sub("", s)
+    s = _apply_synonyms(s)
+    return re.findall(r"[a-z0-9]+", s)
+
+
+def _lecture_number(tokens):
+    """First arabic/roman numeral among the tokens (Genetics '2' / OxPhos 'II'), else None."""
+    for t in tokens:
+        if t.isdigit():
+            return int(t)
+        if t in _ROMAN:
+            return _ROMAN[t]
+    return None
+
+
+def _key_tokens(tokens):
+    """Distinctive words: drop filler/stopwords + bare numerals, keep words >=4 chars."""
+    return [t for t in tokens
+            if t not in _MATCH_STOP and not t.isdigit() and t not in _ROMAN and len(t) >= 4]
+
+
+def _titles_compatible(a, b, coverage=0.6):
+    """True if calendar title `a` could be candidate lecture `b`. Requires: numbers
+    agree when both are numbered; and enough of the distinctive words in the
+    calendar title are present in the candidate — the sheet may be more descriptive,
+    but the calendar's own keywords must (mostly) land. `coverage` is the fraction
+    that must match (config `match_coverage`, default 0.6 = 2-of-3 passes, e.g.
+    "histology muscle tissue" -> "Histology module - skeletal muscle"; 1-of-2 still
+    fails). A near-identical normalized string is also accepted. This blocks
+    single-shared-word collisions like 'epithelia & pathology' -> 'orthopedic
+    developmental pathology', number mix-ups like 'Genetics 1' -> 'Genetics 2', and
+    prefix collisions like 'connective tissue' -> 'ecg 2'."""
+    ta, tb = _match_tokens(a), _match_tokens(b)
+    na, nb = _lecture_number(ta), _lecture_number(tb)
+    if na is not None and nb is not None and na != nb:
+        return False
+    ka, kb = _key_tokens(ta), _key_tokens(tb)
+    if not ka and not kb:
+        return True    # neither has distinctive words -> trust difflib's score
+    if not ka or not kb:
+        return False   # one side has distinctive words, the other none -> not a match
+
+    def _covered(x):
+        return max(difflib.SequenceMatcher(None, x, y).ratio() for y in kb) >= 0.8
+
+    if sum(1 for x in ka if _covered(x)) / len(ka) >= coverage:
+        return True    # enough of the calendar's keywords appear in the candidate
+    return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio() >= 0.88
+
+
+def _fuzzy_match(display, key, keys, m, cutoff):
+    """Best fuzzy map key for a calendar title, or None. difflib ranks the top
+    candidates; _titles_compatible vetoes the wrong ones (see above)."""
+    coverage = float(_cfg().get("match_coverage", 0.6))
+    for ck in difflib.get_close_matches(key, keys, n=5, cutoff=cutoff):
+        if _titles_compatible(display, m[ck]["display"], coverage):
+            return ck
+    return None
 
 
 # AnKing (source, leaf) -> exact tags index. Two hard constraints drive this:
@@ -475,26 +591,41 @@ def _extract_searches(cell, families, ak_column=False):
 def build_lecture_map(families=None):
     """norm_lecture_name -> {'display': str, 'searches': [str, ...]} across all sheets.
 
-    Sheets are laid out in horizontal blocks; each block has a
-    'Corresponding Decks/Tags' header. Lecture name sits one column left of it,
-    AJ tags in that column, #AK (ANKING) tags one column right. `families`
-    defaults to the toggled-on set in config.
+    Each sheet is a course module (SFOM, MSK, …) and is laid out in horizontal
+    biweekly blocks placed side by side. Every block carries its own
+    'Corresponding Decks/Tags' header, and the columns are read RELATIVE to it:
+    lecture title one column LEFT, AJ/hUtChCOM decks in that column, #AK (ANKING)
+    tags one column RIGHT. So biweekly 1 = A/B/C, biweekly 2 = F/G/H, biweekly 3 =
+    K/L/M, … — each block's title/decks/anking shift together and are found by its
+    own header, not by fixed column letters. A block only contributes lectures once
+    its title column is filled in; blocks with a header but a blank title column
+    (common while the sheet is still being built out for later biweeklies) yield
+    nothing until the titles are added. `families` defaults to the toggled-on set.
     """
     if families is None:
         families = _enabled_families()
     m = {}
     for name, rows in _load_xlsx(_cfg()["xlsx_path"]):
+        # Anchor = every block's decks header. Match case-insensitively on the
+        # "corresponding decks" stem so header variants ("Corresponding Decks",
+        # "Corresponding Decks/Tags", trailing spaces) are all caught.
         anchors = set()
         for r in rows:
             for ci, val in r.items():
-                if (val or "").strip() == "Corresponding Decks/Tags":
+                if (val or "").strip().lower().startswith("corresponding decks"):
                     anchors.add(ci)
         if not anchors:
             anchors = {1}
+        n_before = len(m)
         for r in rows:
             for c in anchors:
                 lec = (r.get(c - 1) or "").strip()
                 if not lec or lec == "Our Lecture" or lec.startswith("If you see"):
+                    continue
+                # Skip non-lecture cells that land in a title column: header labels
+                # and stray numeric cells (card counts / widths that some blocks
+                # leave in the title column). A real title always has a letter.
+                if lec.lower() in ("anking tags", "notes") or not re.search(r"[A-Za-z]", lec):
                     continue
                 searches = _extract_searches(r.get(c), families)
                 searches += _extract_searches(r.get(c + 1), families, ak_column=True)
@@ -507,6 +638,8 @@ def build_lecture_map(families=None):
                 for s in searches:
                     if s not in entry["searches"]:
                         entry["searches"].append(s)
+        _log("build_lecture_map: sheet %r anchors=%d lectures+=%d"
+             % (name, len(anchors), len(m) - n_before))
     return m
 
 
@@ -549,9 +682,8 @@ def match_today(families=None):
         if key in m:
             matched.append((lec, m[key]["display"], m[key]["searches"], False))
             continue
-        close = difflib.get_close_matches(key, keys, n=1, cutoff=cutoff)
-        if close:
-            mk = close[0]
+        mk = _fuzzy_match(lec, key, keys, m, cutoff)
+        if mk:
             matched.append((lec, m[mk]["display"], m[mk]["searches"], True))
         else:
             unmatched.append(lec)
@@ -976,9 +1108,9 @@ def _open_today_dialog(day_offset=0):
             if nkey in m:
                 resolved = nkey
             else:
-                close = difflib.get_close_matches(nkey, keys, n=1, cutoff=cutoff)
-                if close:
-                    resolved, fuzzy = close[0], True
+                mk = _fuzzy_match(ev, nkey, keys, m, cutoff)
+                if mk:
+                    resolved, fuzzy = mk, True
             st["auto_keys"].append(resolved)
 
             evi = QTableWidgetItem(ev + ("   (~)" if fuzzy else ""))
@@ -1217,6 +1349,10 @@ def build_settings_pages():
 
     # Jump straight to the unsuspend window to add/remove today's lectures.
     today_btn = QPushButton("Open today's lecture window…")
+    today_btn.setStyleSheet(
+        "QPushButton{background-color:#55585e;color:white;border:none;"
+        "padding:5px 12px;border-radius:5px;}"
+        "QPushButton:hover{background-color:#61646b;}")
     today_btn.clicked.connect(lambda: _open_today_dialog())
     g.addWidget(today_btn, 6, 1, 1, 2)
     g.setRowStretch(7, 1)
@@ -1252,6 +1388,20 @@ def build_settings_pages():
     bg.addWidget(fuzzy, row, 1)
     row += 1
 
+    bg.addWidget(QLabel("Keyword coverage:"), row, 0)
+    coverage = QDoubleSpinBox()
+    coverage.setRange(0.30, 1.00)
+    coverage.setSingleStep(0.05)
+    coverage.setDecimals(2)
+    coverage.setValue(float(cfg.get("match_coverage", 0.6)))
+    coverage.setToolTip(
+        "Fraction of a lecture title's keywords that must be present to accept a "
+        "fuzzy match. Higher = stricter (fewer wrong matches); lower = looser.\n"
+        "0.60 lets a 2-of-3-word title match (e.g. “histology muscle tissue” "
+        "→ “Histology module - skeletal muscle”).")
+    bg.addWidget(coverage, row, 1)
+    row += 1
+
     bg.addWidget(QLabel("Timezone:"), row, 0)
     tz_edit = QLineEdit(cfg.get("timezone", "America/New_York"))
     bg.addWidget(tz_edit, row, 1)
@@ -1267,6 +1417,7 @@ def build_settings_pages():
         for suffix, cb in fam_cbs.items():
             cur["unsuspend_%s" % suffix] = cb.isChecked()
         cur["fuzzy_cutoff"] = float(fuzzy.value())
+        cur["match_coverage"] = float(coverage.value())
         cur["timezone"] = tz_edit.text().strip() or "America/New_York"
         try:
             mw.addonManager.writeConfig(__name__, cur)

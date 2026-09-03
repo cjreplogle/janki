@@ -8,7 +8,7 @@ from aqt.qt import Qt, QTimer
 from ..util.bridge import _bridge
 from ..util.config import _cfg
 from ..util import state
-from . import card_timer, focus
+from . import card_timer, focus, lockdown
 from ..util import keytap
 
 # ---------------------------------------------------------------------------
@@ -543,6 +543,9 @@ def _make_pomodoro():
 
         def _begin_break(self):
             self._tint.hide()          # the break screen now takes over the cue
+            # If lockdown is engaged, relax it for the break so Space skips the
+            # break normally; it re-locks when work resumes (_end_break).
+            lockdown.on_pomodoro_break(True)
             # Stop any running card timer — it must not tick behind the break screen
             # (starts fresh in _end_break). Belt-and-suspenders vs. hook order.
             if card_timer._card_timer_instance is not None:
@@ -594,6 +597,8 @@ def _make_pomodoro():
                     focus._focus_set_hidden(True)
             else:
                 self._in_review = False
+            # Re-assert lockdown if it was relaxed for this break.
+            lockdown.on_pomodoro_break(False)
 
         def _session_display(self):
             if LONG_AFTER <= 0:

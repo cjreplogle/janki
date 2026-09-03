@@ -5,13 +5,14 @@ from aqt import mw
 from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
 
 from ..util.config import log, _cfg
-from ..features import focus, pomodoro
+from ..features import focus, lockdown, pomodoro
 from ..user import hud
 from ..integrations import gamepad
 
 _tray_icon: "QSystemTrayIcon | None" = None
 _tray_caption_action: "QAction | None" = None
 _tray_focus_action: "QAction | None" = None
+_tray_lockdown_action: "QAction | None" = None
 
 
 def _sync_tray_actions() -> None:
@@ -23,12 +24,14 @@ def _sync_tray_actions() -> None:
             _tray_caption_action.setChecked(hud._caption_visible())
         if _tray_focus_action is not None:
             _tray_focus_action.setChecked(bool(focus._focus_mode_on))
+        if _tray_lockdown_action is not None:
+            _tray_lockdown_action.setChecked(lockdown.is_locked())
     except Exception:
         pass
 
 
 def _apply_tray(on: bool) -> None:
-    global _tray_icon, _tray_caption_action, _tray_focus_action
+    global _tray_icon, _tray_caption_action, _tray_focus_action, _tray_lockdown_action
     if on:
         if _tray_icon is None:
             _tray_icon = QSystemTrayIcon(mw.windowIcon(), mw)
@@ -44,8 +47,12 @@ def _apply_tray(on: bool) -> None:
                 _tray_focus_action = QAction("Focus mode", mw)
                 _tray_focus_action.setCheckable(True)
                 _tray_focus_action.triggered.connect(lambda _c=False: focus._toggle_focus_mode())
+                _tray_lockdown_action = QAction("Lockdown mode", mw)
+                _tray_lockdown_action.setCheckable(True)
+                _tray_lockdown_action.triggered.connect(lambda _c=False: lockdown.toggle())
                 menu.addAction(_tray_caption_action)
                 menu.addAction(_tray_focus_action)
+                menu.addAction(_tray_lockdown_action)
             last_deck_action = QAction("Open last studied deck", mw)
             last_deck_action.triggered.connect(lambda _c=False: focus._open_last_deck())
             menu.addAction(last_deck_action)
@@ -79,11 +86,19 @@ def _tray_should_show() -> bool:
 
 def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
     if reason == QSystemTrayIcon.ActivationReason.Trigger:
-        if mw.isVisible():
-            mw.hide()
-        else:
+        # Only ever RESTORE on click — never hide. Hiding here fought the context
+        # menu (every other click hid the app), and a re-shown glass window can
+        # come back blank, so it looked un-unhideable. The menu's "Open Anki" /
+        # close-to-tray handle hiding.
+        if not mw.isVisible() or mw.isMinimized():
             mw.showNormal()
+            mw.raise_()
             mw.activateWindow()
+            try:
+                from ..user import glass
+                glass._wake_main_webviews()   # repaint the transparent window
+            except Exception:
+                pass
 
 
 class _TrayFilter(QObject):

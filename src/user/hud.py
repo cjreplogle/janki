@@ -524,7 +524,14 @@ def _make_coherence_hud():
             # Match the reviewer's card font so caption text uses the app serif
             # (the HUD is a separate webview and otherwise falls back to the
             # note-type / system sans font — "fonts not working" in caption mode).
-            _cap_font = _cfg().get('card_font', 'Anthropic Serif Text')
+            _cap_font = css.ui_font_label()
+            # The HUD is a separate webview whose base URL is the media dir, so it
+            # can't reach the /_addons font export — pull Lora in from media instead.
+            try:
+                from ..integrations import mobilecards as _mc
+                _lora_face = _mc.ensure_lora_media_face()
+            except Exception:
+                _lora_face = ""
             # Caption text + image size (settings sliders).
             _cap_fs = max(8, int(_cfg().get('caption_font_size', 20)))
             _cap_img = max(80, int(_cfg().get('caption_image_max', 480)))
@@ -559,6 +566,7 @@ def _make_coherence_hud():
 <html><head><meta charset="utf-8">
 {tw_js}
 <style>
+{_lora_face}
 * {{ box-sizing:border-box; margin:0; padding:0; }}
 html, body {{ background: transparent !important; }}
 body {{

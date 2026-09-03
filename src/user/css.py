@@ -15,6 +15,53 @@ from ..features import focus
 from . import glass, hud
 
 # ---------------------------------------------------------------------------
+# Fonts
+# ---------------------------------------------------------------------------
+
+# Add-on package dir name → builds the /_addons/<dir>/... URL that Anki's media
+# server exposes for our bundled web assets (registered via setWebExports in
+# __init__). Lets @font-face load the shipped Lora .ttf in every webview.
+_ADDON = __name__.split(".")[0]
+_FONTS_URL = "/_addons/%s/assets/fonts" % _ADDON
+
+# Selectable system-wide UI + card fonts (label -> font-family stack). "Lora" is
+# bundled with the add-on (declared via @font-face below) so it renders even when
+# it isn't installed system-wide; the rest are system fonts. The chosen label is
+# stored in config key `card_font`; an unknown value is treated as a literal
+# family name so a hand-typed font still works.
+UI_FONTS = {
+    "Lora": '"Lora",Georgia,"Times New Roman",serif',
+    "Anthropic Serif Text": '"Anthropic Serif Text",-apple-system,Georgia,serif',
+    "Georgia": 'Georgia,"Times New Roman",serif',
+    "System (sans-serif)": '-apple-system,system-ui,"Segoe UI",Roboto,sans-serif',
+    "Helvetica": 'Helvetica,Arial,sans-serif',
+    "Times New Roman": '"Times New Roman",Times,serif',
+}
+DEFAULT_UI_FONT = "Lora"
+
+
+def ui_font_label(cfg=None):
+    return (cfg or _cfg()).get("card_font", DEFAULT_UI_FONT)
+
+
+def ui_font_stack(cfg=None):
+    lbl = ui_font_label(cfg)
+    return UI_FONTS.get(lbl, '"%s",-apple-system,Georgia,serif' % lbl)
+
+
+def lora_face_css():
+    """@font-face for the bundled Lora (regular + italic), served from the add-on
+    via the media server. Included in every webview so 'Lora' resolves anywhere."""
+    return (
+        "@font-face{font-family:'Lora';font-weight:400 700;font-style:normal;"
+        "font-display:swap;src:url('%s/Lora.ttf');}\n"
+        "@font-face{font-family:'Lora';font-weight:400 700;font-style:italic;"
+        "font-display:swap;src:url('%s/Lora-Italic.ttf');}\n"
+        % (_FONTS_URL, _FONTS_URL)
+    )
+
+
+# ---------------------------------------------------------------------------
 # CSS
 # ---------------------------------------------------------------------------
 
@@ -68,6 +115,130 @@ def _body_rgba(cfg):
     return f"rgba({r},{g},{b},{cfg.get('body_opacity', 0.55):.2f})"
 
 
+# The AMBOSS QBank home widget sits at the bottom of the deck browser, so a short
+# window cuts it off (bottom half below the fold). This script fades it out when it
+# can't be shown whole vertically and back in when there's room. Detection is the
+# box's VERTICAL overflow past the viewport bottom (maxB - vh); that's stable w.r.t.
+# the box's own visibility, so it can't ping-pong. Changes commit only after
+# settling SETTLE ms (kills mount flicker); a 250ms poll drives it since resize
+# events are unreliable here. Reads only geometry, never text.
+# _qbank_fit_js(dbg): when dbg, paints a small live metrics overlay for tuning.
+def _qbank_fit_js(dbg=False):
+    return (
+    "<script>(function(){\n"
+    "var DBG=%s;\n" % ("true" if dbg else "false") +
+    "var ID='amboss-qbank-widget';var SID='__janki_qbank_fit';\n"
+    # Settle is long during the initial mount window (absorbs React's flicker) then
+    # ~immediate afterward, so scroll fade-in stays in lockstep with the stats layers
+    # (which fade with no settle) instead of trailing them.
+    "var T0=Date.now();function settle(){return (Date.now()-T0<2000)?300:50;}\n"
+    "var state=null;var pWant=null;var pSince=0;var M={};\n"
+    "function style(){if(document.getElementById(SID))return;\n"
+    "var s=document.createElement('style');s.id=SID;\n"
+    # Default VISIBLE; the gate adds .jk-qbank-unfit to fade it out. Opacity-only (no
+    # transform) so it matches the stats layers and never visibly moves. Default-
+    # visible is deliberate: if a measurement glitches (clip() returns null) the box
+    # stays shown rather than getting stuck invisible.
+    "s.textContent='#'+ID+'{transition:opacity .15s ease;}'\n"
+    "+'#'+ID+'.jk-qbank-unfit{opacity:0!important;pointer-events:none!important;}';\n"
+    "(document.head||document.documentElement).appendChild(s);}\n"
+    # VERTICAL overflow of the box across the host + its light- and shadow-DOM
+    # descendants (it renders into a shadow root). ov = how far the box's bottom
+    # spills below the window (or its top above): >0 = it can't be shown whole,
+    # <=0 = it fits with |ov| px to spare. null = nothing rendered yet.
+    "function clip(el){var vh=document.documentElement.clientHeight||window.innerHeight;\n"
+    "var any=false,maxB=-1e9,minT=1e9;\n"
+    "function look(n){try{var r=n.getBoundingClientRect();\n"
+    "if(r.width>0&&r.height>0){any=true;if(r.bottom>maxB)maxB=r.bottom;if(r.top<minT)minT=r.top;}}catch(e){}}\n"
+    "look(el);var a=el.querySelectorAll?el.querySelectorAll('*'):[];\n"
+    "for(var i=0;i<a.length&&i<800;i++)look(a[i]);\n"
+    "if(el.shadowRoot){var b=el.shadowRoot.querySelectorAll('*');\n"
+    "for(var j=0;j<b.length&&j<800;j++)look(b[j]);}\n"
+    "M.vh=vh;M.any=any;\n"
+    "if(!any){M.ov=null;return null;}\n"
+    "var ov=maxB-vh;if(-minT>ov)ov=-minT;\n"
+    "M.maxB=Math.round(maxB);M.minT=Math.round(minT);\n"
+    "M.bh=Math.round(maxB-minT);M.ov=Math.round(ov);\n"
+    "return ov;}\n"
+    # Once the user has scrolled at all, the box is normal scrollable content — show
+    # it so it scrolls in like the counters/map/plot below it. Only at the top rest
+    # position do we hide it, and only when it straddles the fold (a half-box would
+    # look off at launch): preemptive GAP + hysteresis so it fades BEFORE it clips.
+    # Show the box as soon as it's essentially in view (bottom ~at the fold), hide
+    # only once its bottom drops below the fold and it starts to clip. Minimal buffer
+    # so it isn't invisible while on-screen; a small hysteresis avoids boundary
+    # flicker. The AMBOSS load-jump is handled by the scroll-yank guard below.
+    "function want(){var el=document.getElementById(ID);if(!el)return null;\n"
+    "var c=clip(el);if(c===null)return null;\n"
+    "if(state==='hide')return (M.maxB<=M.vh-6)?'show':'hide';\n"
+    "return (M.maxB>M.vh+4)?'hide':'show';}\n"
+    # Commit a state change only after it has held for SETTLE ms — absorbs the React
+    # mount's transient width stages (the open flicker) and any drag jitter.
+    "function tick(){style();var w=want();\n"
+    "if(w!==null){\n"
+    "if(w===state){pWant=null;}\n"
+    "else if(w!==pWant){pWant=w;pSince=Date.now();}\n"
+    "else if(Date.now()-pSince>=settle()){\n"
+    "state=w;pWant=null;var el=document.getElementById(ID);\n"
+    "if(el){if(w==='hide')el.classList.add('jk-qbank-unfit');\n"
+    "else el.classList.remove('jk-qbank-unfit');}}}\n"
+    "if(DBG)dbg();}\n"
+    "function dbg(){var d=document.getElementById('__jk_qbank_dbg');\n"
+    "if(!d){d=document.createElement('div');d.id='__jk_qbank_dbg';\n"
+    "d.style.cssText='position:fixed;left:6px;top:6px;z-index:2147483647;'\n"
+    "+'font:11px/1.4 monospace;color:#0f0;background:rgba(0,0,0,.8);'\n"
+    "+'padding:5px 8px;border-radius:6px;white-space:pre;pointer-events:none;';\n"
+    "document.body.appendChild(d);}\n"
+    "d.textContent='qbank state='+state+' want='+pWant+'\\n'\n"
+    "+'ov='+M.ov+' boxH='+M.bh+'\\n'\n"
+    "+'maxB='+M.maxB+' minT='+M.minT+' vh='+M.vh;}\n"
+    "var pend=false;function sched(){if(pend)return;pend=true;\n"
+    "requestAnimationFrame(function(){pend=false;tick();});}\n"
+    "sched();try{window.addEventListener('resize',sched);}catch(e){}\n"
+    "try{window.addEventListener('scroll',sched,{passive:true});}catch(e){}\n"
+    # Timed backstops for the async mount + a steady poll (resize events unreliable).
+    "[150,400,800,1500,2500].forEach(function(ms){setTimeout(sched,ms);});\n"
+    "setInterval(sched,150);\n"
+    "try{if(window.ResizeObserver){new ResizeObserver(sched).observe(document.documentElement);}}catch(e){}\n"
+    "try{var mo=new MutationObserver(function(){sched();\n"
+    "var el=document.getElementById(ID);\n"
+    "if(el&&el.shadowRoot&&!el.__jkSObs){el.__jkSObs=new MutationObserver(sched);\n"
+    "el.__jkSObs.observe(el.shadowRoot,{childList:true,subtree:true});sched();}});\n"
+    "mo.observe(document.documentElement,{childList:true,subtree:true});}catch(e){}\n"
+    # Scroll position keeper. Two jobs, both keyed on recent USER input (wheel/touch/
+    # key/scrollbar) so we never fight the user:
+    #  1) Revert big programmatic scroll jumps (AMBOSS yanking to the QBank widget).
+    #  2) Preserve position across deck-browser re-renders — a sync completing (and the
+    #     sync-status clearing) re-renders the page and resets it to the top, often
+    #     TWICE. We remember the user's last position and restore it as content
+    #     settles, plus a short watchdog that re-corrects a delayed snap-to-top.
+    "var _py=0,_lu=0,_o=null;var SK='__janki_db_scroll';\n"
+    "function _mu(){_lu=Date.now();}\n"
+    "function _sy(){return window.pageYOffset||document.documentElement.scrollTop||0;}\n"
+    "['wheel','touchstart','touchmove','keydown','mousedown'].forEach(function(ev){\n"
+    "try{window.addEventListener(ev,_mu,{passive:true});}catch(e){}});\n"
+    "try{var _sv=sessionStorage.getItem(SK);if(_sv){var p=JSON.parse(_sv);\n"
+    "if(p&&p.y>6&&Date.now()-p.t<120000)_o=p;}}catch(e){}\n"
+    "function _restore(){if(_o&&_o.y>6){_py=_o.y;window.scrollTo(0,_o.y);}}\n"
+    # restore as content settles after a (re-)render, unless the user is scrolling
+    "if(_o){[0,80,250,600,1000,1500].forEach(function(ms){setTimeout(function(){\n"
+    "if(Date.now()-_lu>400)_restore();},ms);});}\n"
+    # watchdog (~8s): catch a delayed snap-to-top from the sync-status clearing
+    "var _n=0,_wd=setInterval(function(){_n++;\n"
+    "if(_o&&_o.y>6&&_sy()<6&&Date.now()-_lu>500)_restore();\n"
+    "if(_n>40)clearInterval(_wd);},200);\n"
+    "try{window.addEventListener('scroll',function(){\n"
+    "var y=_sy();\n"
+    "if(Math.abs(y-_py)>120&&Date.now()-_lu>250){window.scrollTo(0,_py);return;}\n"
+    "_py=y;\n"
+    # only a genuine user scroll updates the saved target (programmatic ones don't)
+    "if(Date.now()-_lu<300){_o={y:y,t:Date.now()};\n"
+    "try{sessionStorage.setItem(SK,JSON.stringify(_o));}catch(e){}}\n"
+    "},{passive:true});}catch(e){}\n"
+    "})();</script>\n"
+    )
+
+
 def _build_css(cfg, context):
     if not GLASS or not cfg.get("enabled", True):
         return ""
@@ -105,6 +276,25 @@ def _build_css(cfg, context):
         "</style>\n"
     )
     parts = [base]
+
+    # System-wide UI font, applied for every context (appended before the
+    # per-screen branches). Anki's chrome inherits font-family from the root, so
+    # setting it on <body> cascades to the deck list (Deck/New/Learn/Due), deck
+    # names, counts, the cumulative/daily counters, toolbar and overview text.
+    # Form controls (button/input/select/textarea/option) DON'T inherit font by
+    # default, so those are forced explicitly. This inheritance-based approach
+    # deliberately AVOIDS a universal `*` !important rule — that stuttered/suppressed
+    # the nav fade + hover transitions on the software-composited (--disable-gpu) path.
+    _stack = ui_font_stack(cfg)
+    parts.append(
+        "<style>\n"
+        + lora_face_css() +
+        "html body, html body button, html body input, html body select,\n"
+        "html body textarea, html body option {\n"
+        "  font-family: %s !important; }\n"
+        "</style>\n" % _stack
+    )
+
     screens = cfg.get("screens", {})
     r = int(cfg.get("win_corner_radius", 11))
 
@@ -146,6 +336,14 @@ def _build_css(cfg, context):
         parts.append("<style>\nbody center > table:first-of-type {\n" + props
                      + "  overflow:hidden;\n}\n</style>\n")
         parts.append("<style>#studiedToday,#sts-table{display:none!important;}</style>\n")
+        # Pull the AMBOSS QBank box up toward the deck list: Anki inserts a <br>
+        # between the deck table and the stats section, which leaves a big gap. Also
+        # zero the box's bottom margin and the stats block's top margin so the
+        # QBank↔calendar gap matches the tight deck↔QBank gap above.
+        parts.append("<style>body center > br{display:none!important;}\n"
+                     "html body #amboss-qbank-widget{margin-top:0!important;"
+                     "margin-bottom:0!important;zoom:0.9;}\n"
+                     "html body #glass-stats{margin-top:8px!important;}</style>\n")
         # Hide the scrollbar: when the stats block sizing lands at the viewport
         # boundary the scrollbar would toggle on/off (a few-px flicker, bottom
         # right). A zero-width scrollbar can't flicker and no longer steals
@@ -154,6 +352,12 @@ def _build_css(cfg, context):
         parts.append("<style>::-webkit-scrollbar{width:0!important;height:0!important;"
                      "background:transparent!important;}"
                      "html{scrollbar-width:none!important;}</style>\n")
+        # AMBOSS QBank home widget (#amboss-qbank-widget) has an internal min-width;
+        # when the window is too narrow it overflows the viewport and shows a
+        # half-clipped box. Fade it out until the window is wide enough to show it
+        # whole (self-adapting: measures actual clipping, no magic px threshold).
+        if cfg.get("amboss_qbank_autohide", True):
+            parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
         parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
             and screens.get("bottom_bar", True):
@@ -224,24 +428,43 @@ def _build_css(cfg, context):
                 "</style>\n"
             )
         else:
-            # Reviewer: keep the innertable flex layout (edit/more on the sides).
+            # Reviewer bottom bar. DEFAULT (windowed): Edit/More hidden, #middle
+            # (Show Answer / ease buttons) spans the whole bar to the window edges.
+            # FULLSCREEN (body.janki-fs, toggled by _sync_reviewer_fs): Edit/More
+            # show in equal side cells so #middle stays centred — except on the
+            # answer side, where they're hidden so the ease buttons fill.
             parts.append(
                 "<style>\n"
                 "html, body { overflow-x: hidden !important; }\n"
                 "#outer { width:100% !important; box-sizing:border-box !important;"
                 " padding:2px 6px !important; }\n"
                 "#innertable { width:100% !important; }\n"
-                "#innertable > tbody > tr { display:flex !important; flex-wrap:wrap !important;\n"
-                "  align-items:center !important; justify-content:center !important; gap:6px !important; }\n"
+                "#innertable > tbody > tr { display:flex !important; flex-wrap:nowrap !important;\n"
+                "  align-items:center !important; gap:6px !important; min-height:40px !important; }\n"
                 "#innertable > tbody > tr > td { padding:2px !important; }\n"
-                "#middle { flex:1 1 auto !important; display:flex !important; flex-wrap:wrap !important;\n"
+                # Windowed default: hide the Edit/More side cells entirely.
+                "#innertable > tbody > tr > td:first-child,\n"
+                "#innertable > tbody > tr > td:last-child { display:none !important; }\n"
+                "#middle { flex:1 1 auto !important; display:flex !important; flex-wrap:nowrap !important;\n"
                 "  justify-content:center !important; align-items:center !important; gap:6px !important; }\n"
                 "#middle center, #middle table, #middle tbody, #middle tr, #middle td {\n"
                 "  display:contents !important; }\n"
                 "#middle button { flex:1 1 0 !important; }\n"
-                "#innertable > tbody > tr > td.stat { min-width:0 !important; flex:0 0 auto !important; }\n"
-                "#outer button { padding:6px 12px !important; min-width:0 !important;"
+                "#outer button { padding:6px 14px !important; min-width:0 !important;"
                 " white-space:nowrap !important; }\n"
+                # Fullscreen: reveal Edit/More as equal side cells (keeps #middle centred).
+                "body.janki-fs #innertable > tbody > tr > td:first-child,\n"
+                "body.janki-fs #innertable > tbody > tr > td:last-child {\n"
+                "  display:flex !important; flex:0 0 96px !important; width:96px !important;\n"
+                "  min-width:96px !important; align-items:center !important; }\n"
+                "body.janki-fs #innertable > tbody > tr > td:first-child {\n"
+                "  justify-content:flex-start !important; }\n"
+                "body.janki-fs #innertable > tbody > tr > td:last-child {\n"
+                "  justify-content:flex-end !important; }\n"
+                # Fullscreen answer side: hide them again so ease buttons fill.
+                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]) > td:first-child,\n"
+                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]) > td:last-child {\n"
+                "  display:none !important; }\n"
                 "</style>\n"
             )
         parts.append(bottom_round)
@@ -256,16 +479,13 @@ def _build_css(cfg, context):
             # Anki's own stylesheet can't add unexpected space.
             "html, html body { margin:0 !important; padding:0 !important; }\n"
             "html { height:100%; overflow-y:auto !important; }\n"
-            # flex column on body; ::before spacer absorbs top space up to 60px
-            # so content centers in tall windows but stays near the top in short ones.
+            # flex column on body, vertically centred; 'safe center' falls back to
+            # top-aligned (no crop) when the content is taller than the window.
             "html body {\n"
             "  min-height:100% !important; display:flex !important;\n"
             "  flex-direction:column !important; align-items:center !important;\n"
-            "  justify-content:flex-start !important; text-align:center !important;\n"
-            "  padding:0 12px 16px !important; box-sizing:border-box !important; }\n"
-            "html body::before {\n"
-            "  content:'' !important; display:block !important;\n"
-            "  flex:1 1 0 !important; max-height:60px !important; min-height:2px !important; }\n"
+            "  justify-content:safe center !important; text-align:center !important;\n"
+            "  padding:16px 12px !important; box-sizing:border-box !important; }\n"
             "html body center h1, html body h1 {\n"
             "  margin:0 0 10px !important; padding:0 !important; }\n"
             "html body > center {\n"
@@ -346,14 +566,12 @@ def _build_css(cfg, context):
                      "  display: inline-block !important; text-align: left !important; }\n"
                      "#qa li, .card li { text-align: left !important; }\n"
                      "</style>\n")
-        # Default card font = the Anthropic serif we use elsewhere. Applied to the
-        # card text (kbd/shortcut keys left alone).
-        _rc = _cfg()
-        _font = _rc.get("card_font", "Anthropic Serif Text")
+        # Card font = the same system-wide font stack (default bundled Lora).
+        # Applied to the card text (kbd/shortcut keys left alone).
         parts.append("<style>\n"
                      "#qa, .card, #qa *:not(kbd) {\n"
-                     "  font-family: \"%s\", -apple-system, Georgia, serif !important;\n}\n"
-                     "</style>\n" % _font)
+                     "  font-family: %s !important;\n}\n"
+                     "</style>\n" % ui_font_stack(cfg))
         # Hide the AnKing note-type countdown timer (#s2/.timer). Its text renders
         # black (unreadable on glass) and isn't wanted — timing is handled at the
         # system level. Scoped to the reviewer, so the pomodoro HUD .timer is safe.
@@ -604,8 +822,10 @@ def _stats_head() -> str:
             "SELECT sum(time) FROM revlog WHERE id>=?", today_cutoff_ms) or 0
         mins_today = round(time_today_ms / 60000, 1)
         spc = round(time_today_ms / 1000 / cards_today, 2) if cards_today else 0
+        all_reviews = mw.col.db.scalar("SELECT count(*) FROM revlog") or 0
         studied_str = (f"Studied {cards_today} cards in {mins_today} minutes today ({spc}s/card)"
                        if cards_today else "No cards studied today")
+        studied_str += f" · {all_reviews:,} total reviews"
     except Exception:
         day_counts, today_day, week_total, total_reviews = {}, 0, 0, 0
         studied_str = ""
@@ -641,16 +861,19 @@ def _stats_head() -> str:
         "}\n"
         "function fmt(n){return n.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g,',');}\n"
         # heatmap geometry shared with tooltip handler
-        "var WEEKS=17,CELL=13,GAP=3,LBL=14,ROWS=5;\n"
+        # LBL is the shared left margin used by BOTH the calendar (day labels) and
+        # the plot (y-axis), so their grids/months line up when toggled.
+        "var WEEKS=17,CELL=17,GAP=3,LBL=30,ROWS=5;\n"
         "var HM_W=LBL+WEEKS*(CELL+GAP)-GAP;\n"
-        "var HM_H=ROWS*(CELL+GAP)-GAP+14;\n"
+        "var HM_H=ROWS*(CELL+GAP)-GAP+19;\n"
         "var hmStart=0;\n"
         "function drawHeatmap(c){\n"
         "  var ctx=setup(c,HM_W,HM_H);\n"
-        "  ctx.font='9px -apple-system,ui-sans-serif,sans-serif';\n"
+        "  ctx.font='11px -apple-system,ui-sans-serif,sans-serif';\n"
         "  var dl=['','M','T','W','T','F',''];\n"
-        "  ctx.fillStyle='rgba(255,255,255,0.28)';\n"
-        "  for(var r=1;r<=5;r++) ctx.fillText(dl[r],0,(r-1)*(CELL+GAP)+CELL-2);\n"
+        "  ctx.fillStyle='rgba(255,255,255,0.28)';ctx.textAlign='right';\n"
+        "  for(var r=1;r<=5;r++) ctx.fillText(dl[r],LBL-8,(r-1)*(CELL+GAP)+CELL-2);\n"
+        "  ctx.textAlign='left';\n"
         "  var todayDow=new Date().getDay();\n"
         "  hmStart=(TODAY-todayDow)-(WEEKS-1)*7;\n"
         "  var maxV=1;\n"
@@ -663,7 +886,7 @@ def _stats_head() -> str:
         "    var m=new Date(colDay*86400000).getMonth();\n"
         "    if(m!==lastM){\n"
         "      if(col>0){ctx.fillStyle='rgba(255,255,255,0.32)';\n"
-        "        ctx.fillText(months[m],LBL+col*(CELL+GAP),HM_H-1);}\n"
+        "        ctx.fillText(months[m],LBL+col*(CELL+GAP),HM_H-5);}\n"
         "      lastM=m;\n"
         "    }\n"
         "    for(var row=1;row<=5;row++){\n"
@@ -674,28 +897,34 @@ def _stats_head() -> str:
         "      if(v===0){ctx.fillStyle='rgba(255,255,255,0.06)';}\n"
         "      else{var g=Math.round(90+t*130);\n"
         "        ctx.fillStyle='rgba(40,'+g+',65,'+(0.2+t*0.8).toFixed(2)+')';}\n"
-        "      rRect(ctx,x,y,CELL,CELL,2);ctx.fill();\n"
+        "      rRect(ctx,x,y,CELL,CELL,3);ctx.fill();\n"
         "    }\n"
         "  }\n"
         "}\n"
-        "function drawLine(c){\n"
-        "  var YLBL=22,H=80;\n"
+        "function drawLine(c,anim){\n"
+        "  var YLBL=LBL,H=116;\n"
+        # same width/coordinate system as the calendar so the x-axes align
         "  var W=HM_W;\n"
         "  var ctx=setup(c,W,H);\n"
+        # span the SAME window as the calendar (last WEEKS weeks) so the month
+        # labels line up between the two views.
+        "  var _dow=new Date().getDay();\n"
+        "  var _st=(TODAY-_dow)-(WEEKS-1)*7;\n"
         "  var raw=[],i;\n"
-        "  for(i=364;i>=0;i--) raw.push(DAY[TODAY-i]||0);\n"
+        "  for(i=_st;i<=TODAY;i++) raw.push(DAY[i]||0);\n"
         "  var sm=raw.map(function(v,idx){\n"
         "    var s=0,n=0;\n"
         "    for(var j=Math.max(0,idx-3);j<=Math.min(raw.length-1,idx+3);j++){s+=raw[j];n++;}\n"
         "    return s/n;\n"
         "  });\n"
         "  var mx=Math.max.apply(null,sm)||1;\n"
-        "  var N=sm.length,PAD=2,PH=H-PAD*2-6;\n"
+        "  var N=sm.length,PAD=8,BM=16,PH=H-PAD-BM-6;\n"
         "  var PLOT_X=YLBL;\n"
         "  var PLOT_W=W-YLBL-PAD;\n"
-        "  function px(i){return PLOT_X+(i/(N-1))*PLOT_W;}\n"
+        # week-based x (same scale as the calendar columns): day i -> week i/7
+        "  function px(i){return LBL+(i/7)*(CELL+GAP);}\n"
         "  function py(v){return PAD+PH-(v/mx)*PH;}\n"
-        "  var animate=_GA;\n"
+        "  var animate=(typeof anim==='boolean')?anim:_GA;\n"
         # draw static y-axis ticks and labels before animation
         "  ctx.font='8px -apple-system,ui-sans-serif,sans-serif';\n"
         "  ctx.textAlign='right';\n"
@@ -709,6 +938,21 @@ def _stats_head() -> str:
         "    ctx.moveTo(YLBL,ty);ctx.lineTo(W-PAD,ty);\n"
         "    ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;ctx.stroke();\n"
         "  }\n"
+        # rotated vertical-axis label (Lora, to match the UI font)
+        "  ctx.save();ctx.translate(10,PAD+PH/2);ctx.rotate(-Math.PI/2);\n"
+        "  ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,0.42)';\n"
+        "  ctx.font='10px \"Lora\",Georgia,serif';\n"
+        "  ctx.fillText('Reviews',0,0);ctx.restore();\n"
+        # x-axis month labels along the bottom (drawn once; clearRect below leaves them)
+        # month labels drawn with the SAME size/formula/baseline as the calendar's
+        # (per week column, from the same start day) so they line up exactly.
+        "  var moN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];\n"
+        "  ctx.font='11px -apple-system,ui-sans-serif,sans-serif';\n"
+        "  ctx.textAlign='left';ctx.fillStyle='rgba(255,255,255,0.32)';\n"
+        "  var _lm=-1;\n"
+        "  for(var _c=0;_c<WEEKS;_c++){var _cd=_st+_c*7;\n"
+        "    var _mo=new Date(_cd*86400000).getMonth();\n"
+        "    if(_mo!==_lm){if(_c>0)ctx.fillText(moN[_mo],LBL+_c*(CELL+GAP),H-5);_lm=_mo;}}\n"
         "  var t0=null,DUR=animate?2000:0;\n"
         "  function frame(ts){\n"
         "    if(!t0)t0=ts;\n"
@@ -716,7 +960,7 @@ def _stats_head() -> str:
         "    var e=p<0.5?2*p*p:1-Math.pow(-2*p+2,2)/2;\n"
         "    var n=Math.max(2,Math.round(e*(N-1)));\n"
         # clear only the plot area, preserving y-axis labels
-        "    ctx.clearRect(YLBL,0,W-YLBL,H);\n"
+        "    ctx.clearRect(YLBL,0,W-YLBL,PAD+PH+4);\n"
         # redraw grid lines over cleared area
         "    for(var ti=0;ti<ticks.length;ti++){\n"
         "      var tv=ticks[ti],ty=py(tv*mx);\n"
@@ -760,41 +1004,27 @@ def _stats_head() -> str:
         # root wrapper — starts transparent, fades in after layout settles
         "  var wrap=document.createElement('div');wrap.id='glass-stats';\n"
         "  wrap.style.opacity='0';\n"
-        # big stats header row: CUMULATIVE | DAILY
-        "  var hdr=document.createElement('div');hdr.id='gs-hdr';\n"
-        "  function makeStatBox(num,lbl){\n"
-        "    var box=document.createElement('div');box.className='gs-statbox';\n"
-        "    var nb=document.createElement('div');nb.className='gs-bignum';\n"
-        "    nb.textContent=fmt(num);\n"
-        "    nb.style.setProperty('font-weight','100','important');\n"
-        "    var lb=document.createElement('div');lb.className='gs-lbl';\n"
-        "    lb.textContent=lbl;\n"
-        "    box.appendChild(nb);box.appendChild(lb);return box;\n"
-        "  }\n"
-        "  hdr.appendChild(makeStatBox(TOTAL,'CUMULATIVE'));\n"
-        "  hdr.appendChild(makeStatBox(DAY[TODAY]||0,'DAILY'));\n"
-        "  wrap.appendChild(hdr);\n"
-        # heatmap
+        # Shared chart area (calendar & plot overlapped, one shown at a time) with a
+        # tiny vertical switch pinned to its top-right corner.
+        "  var chartc=document.createElement('div');chartc.id='gs-chart';\n"
         "  var hc=document.createElement('canvas');hc.id='gs-hmap';\n"
-        "  wrap.appendChild(hc);\n"
-        # line chart (always visible, below heatmap)
         "  var lc=document.createElement('canvas');lc.id='gs-line';\n"
-        "  wrap.appendChild(lc);\n"
-        # studied text — declared outside if so ref is always in scope.
-        # NOTE: transitions are intentionally NOT set yet — the FIRST layout must
-        # collapse over-tall layers instantly (no visible shrink-from-200px
-        # flicker on load). Transitions are enabled after the first update().
-        "  var TRANS='opacity 0.12s,max-height 0.15s,margin 0.15s';\n"
+        "  chartc.appendChild(hc);chartc.appendChild(lc);\n"
+        "  var tog=document.createElement('div');tog.id='gs-toggle';\n"
+        "  var bCal=document.createElement('button');bCal.className='gs-tbtn';bCal.title='Calendar';\n"
+        "  bCal.innerHTML=\"<svg width='12' height='12' viewBox='0 0 18 18' fill='none' stroke='currentColor' stroke-width='1.8'><rect x='1.5' y='1.5' width='6.5' height='6.5' rx='1.4'/><rect x='10' y='1.5' width='6.5' height='6.5' rx='1.4'/><rect x='1.5' y='10' width='6.5' height='6.5' rx='1.4'/><rect x='10' y='10' width='6.5' height='6.5' rx='1.4'/></svg>\";\n"
+        "  var bTrend=document.createElement('button');bTrend.className='gs-tbtn';bTrend.title='Trend';\n"
+        "  bTrend.innerHTML=\"<svg width='13' height='11' viewBox='0 0 20 16' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,12 6,6 10,9 14,3 19,7'/></svg>\";\n"
+        "  tog.appendChild(bCal);tog.appendChild(bTrend);\n"
+        "  chartc.appendChild(tog);\n"
+        "  wrap.appendChild(chartc);\n"
+        "  var TRANS='opacity 0.12s';\n"
         "  var st=null;\n"
         "  if(STUDIED){\n"
         "    st=document.createElement('div');st.id='gs-studied';\n"
         "    st.textContent=STUDIED;\n"
-        "    st.style.maxHeight='200px';\n"
         "    wrap.appendChild(st);\n"
         "  }\n"
-        "  lc.style.maxHeight='200px';\n"
-        "  hc.style.maxHeight='200px';\n"
-        "  hdr.style.maxHeight='200px';\n"
         # tooltip element (appended to body for fixed positioning)
         "  var tip=document.createElement('div');tip.id='gs-tip';\n"
         "  document.body.appendChild(tip);\n"
@@ -803,6 +1033,19 @@ def _stats_head() -> str:
         "  (center||document.body).appendChild(wrap);\n"
         "  drawHeatmap(hc);\n"
         "  drawLine(lc);\n"
+        # size the shared area to the larger of the two, then wire the selector
+        "  chartc.style.width=Math.max(hc.offsetWidth,lc.offsetWidth)+'px';\n"
+        "  chartc.style.height=Math.max(hc.offsetHeight,lc.offsetHeight)+'px';\n"
+        "  var CKEY='janki_gs_chart';\n"
+        "  function setChart(w){var cal=(w!=='trend');\n"
+        "    hc.style.display=cal?'':'none';lc.style.display=cal?'none':'';\n"
+        "    bCal.classList.toggle('on',cal);bTrend.classList.toggle('on',!cal);\n"
+        "    if(!cal)drawLine(lc,true);\n"          # replay the line-draw when showing Trend
+        "    try{localStorage.setItem(CKEY,cal?'cal':'trend');}catch(e){}}\n"
+        "  bCal.onclick=function(){setChart('cal');};\n"
+        "  bTrend.onclick=function(){setChart('trend');};\n"
+        "  var _cs='cal';try{_cs=localStorage.getItem(CKEY)||'cal';}catch(e){}\n"
+        "  setChart(_cs);\n"
         # hover tooltip on heatmap
         "  hc.addEventListener('mousemove',function(e){\n"
         "    var rect=hc.getBoundingClientRect();\n"
@@ -840,49 +1083,80 @@ def _stats_head() -> str:
         "  }\n"
         "  var _lastAvail=-1;\n"
         "  function update(){\n"
-        "    var tbl=document.querySelector('center > table');\n"
-        "    var topBound=tbl?tbl.getBoundingClientRect().bottom:0;\n"
-        "    var viewH=document.documentElement.clientHeight;\n"
-        "    var avail=Math.min(Math.max(viewH-topBound-16,20),CONTENT_MIN+220);\n"
+    # Always give the stats their full height. The old logic collapsed layers to fit
+    # above the fold on short windows, but with a short launch window + scroll that
+    # only caused the calendar/plot to animate open on first scroll (a jumpy "loading"
+    # feel). Full height = nothing to animate on scroll; they sit ready below the fold.
+        "    var avail=CONTENT_MIN+220;\n"
         # Break the ResizeObserver feedback loop: setting wrap.height changes body
         # height → re-fires the observer → tiny 1–2px oscillation. Ignore updates
         # whose available height barely changed.
         "    if(Math.abs(avail-_lastAvail)<2) return;\n"
         "    _lastAvail=avail;\n"
-        "    wrap.style.height=avail+'px';\n"
+        # Natural height (no fixed wrap height): a fixed height + space-evenly spread
+        # ~220px of slack as gaps, pushing the calendar away from the QBank box above.
         "    var shortage=(CONTENT_MIN+160)-avail;\n"
         "    layer(st,shortage,0);\n"
-        "    layer(lc,shortage,80);\n"
-        "    layer(hc,shortage,160);\n"
-        "    layer(hdr,shortage,240);\n"
         "  }\n"
         "  update();\n"
-        # First layout collapsed over-tall layers instantly (no transition set
-        # yet → no shrink-from-200px flash). Enable transitions now, then fade the
-        # whole block in, so only subsequent (resize) changes animate.
+        # Fold gate — fade each layer (counters, calendar, plot, studied) individually
+        # by its OWN position, so they cascade in one-by-one as each clears the fold
+        # while scrolling (and out in reverse). A layer shows once its bottom has
+        # cleared the fold by FGAP px; below the fold it stays hidden. Opacity only
+        # (no layout change) so it can't jank the scroll.
+        "  var FGAP=24;\n"
+        "  function foldGate(){\n"
+        "    var vh=document.documentElement.clientHeight;\n"
+        "    [chartc,st].forEach(function(el){\n"
+        "      if(!el)return;\n"
+        "      var show=el.getBoundingClientRect().bottom<=vh-FGAP;\n"
+        "      el.style.opacity=show?'1':'0';\n"
+        "      el.style.pointerEvents=show?'':'none';\n"
+        "    });\n"
+        "  }\n"
+        # First layout was instant (no transition). Enable transitions now, then run
+        # the fold gate so only subsequent changes animate.
         "  requestAnimationFrame(function(){\n"
-        "    [st,lc,hc,hdr].forEach(function(el){ if(el) el.style.transition=TRANS; });\n"
+        "    [st,chartc].forEach(function(el){ if(el) el.style.transition=TRANS; });\n"
         "    wrap.style.transition='opacity 0.2s ease-out';\n"
         "    wrap.style.opacity='1';\n"
+        "    foldGate();\n"
         "  });\n"
-        # Only re-layout on real window resizes. A ResizeObserver on document.body
-        # self-triggered (update writes wrap.height → body mutates → observer fires
-        # → update → …), causing a 1–2px down-flicker of the block below the deck
-        # list. window.resize covers genuine viewport changes without the loop.
-        "  window.addEventListener('resize',update);\n"
+        # Only re-layout on real window resizes (avoid a ResizeObserver feedback loop);
+        # the fold gate re-runs on resize and scroll.
+        "  window.addEventListener('resize',function(){update();foldGate();});\n"
+        "  window.addEventListener('scroll',foldGate,{passive:true});\n"
         "}\n"
         # Defer past the launch re-render burst so throwaway renders don't draw.
-        "ready(function(){ setTimeout(build, 450); });\n"
+        # Wait for Lora to load before drawing so the canvas 'Reviews' label renders
+        # in Lora rather than falling back to a system font.
+        "ready(function(){ setTimeout(function(){\n"
+        "  try{ document.fonts.load('10px \"Lora\"').then(build, build); }catch(e){ build(); }\n"
+        "}, 450); });\n"
         "})();\n"
     )
 
     css = (
         "<style>\n"
         "#glass-stats{display:inline-flex;flex-direction:column;align-items:center;"
-        "justify-content:space-evenly;padding:0 20px;margin:0 auto;"
+        "justify-content:flex-start;gap:24px;padding:0 20px;margin:0 auto;"
         "box-sizing:border-box;}\n"
         "#gs-hdr{display:flex;flex-direction:row;gap:36px;align-items:flex-end;"
         "justify-content:center;}\n"
+        # tiny vertical switch pinned to the chart's top-right; active option is green
+        "#gs-chart{position:relative;margin:0 auto;transform:translateX(-3px);}\n"
+        "#gs-chart canvas{position:absolute;top:0;left:50%;transform:translateX(-50%);}\n"
+        "#gs-chart #gs-hmap{transform:translateX(calc(-50% - 15px));}\n"
+        "#gs-chart #gs-line{transform:translateX(calc(-50% - 15px));}\n"
+        "#gs-toggle{position:absolute;top:-2px;right:-12px;z-index:2;"
+        "display:flex;flex-direction:column;gap:2px;padding:2px;border-radius:1px;"
+        "background:rgba(0,0,0,0.20);}\n"
+        ".gs-tbtn{padding:3px;border-radius:1px;line-height:0;"
+        "display:flex;align-items:center;justify-content:center;"
+        "border:none;background:transparent;color:rgba(255,255,255,0.45);"
+        "cursor:pointer;transition:background 0.15s,color 0.15s;}\n"
+        ".gs-tbtn:hover{color:rgba(255,255,255,0.80);}\n"
+        ".gs-tbtn.on{background:rgba(190,205,197,0.15);color:rgba(202,214,207,0.95);}\n"
         ".gs-statbox{display:flex;flex-direction:column;align-items:center;gap:3px;}\n"
         ".gs-bignum{font-size:34px;line-height:1;color:rgba(255,255,255,0.88);}\n"
         ".gs-bignum,.gs-lbl{font-family:inherit;}\n"
@@ -974,7 +1248,11 @@ _TEXT_CONTRAST_JS = (
     "var root=document.getElementById('qa')||document.querySelector('.card')||document.body;"
     "if(!root)return;var els=[root];var q=root.querySelectorAll('*');"
     "for(var i=0;i<q.length;i++)els.push(q[i]);"
-    "els.forEach(function(el){var c=P(getComputedStyle(el).color);"
+    "els.forEach(function(el){"
+    "var tn=el.tagName;"
+    "if(tn==='IMG'||tn==='CANVAS'||tn==='VIDEO'||tn==='PICTURE'||tn==='SVG'||tn==='svg')return;"
+    "if(el.closest&&el.closest('svg'))return;"   # never recolor inside an SVG (blanks diagrams)
+    "var c=P(getComputedStyle(el).color);"
     "if(!c||c.a===0)return;"
     "var gray=(Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b))<40;"
     "if(gray&&L(c)<140&&bg(el)<128){el.style.setProperty('color','#fff','important');}});"
@@ -982,10 +1260,43 @@ _TEXT_CONTRAST_JS = (
 )
 
 
+def _reviewer_is_fs():
+    try:
+        if mw.isFullScreen():
+            return True
+        scr = mw.screen() if hasattr(mw, "screen") else None
+        if scr is not None and mw.frameGeometry().height() >= scr.geometry().height() - 8:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _sync_reviewer_fs(*_):
+    """Toggle body.janki-fs on the reviewer bottom bar so Edit/More show only in
+    fullscreen (windowed = hidden, Show Answer spans the window)."""
+    bw = getattr(mw, "bottomWeb", None)
+    if bw is None:
+        return
+    add = "add" if _reviewer_is_fs() else "remove"
+    try:
+        bw.eval("(function(){if(document.body)document.body.classList.%s('janki-fs');})()" % add)
+    except Exception:
+        pass
+
+
 def _apply_text_contrast(*_):
     if not ACTIVE or not _cfg().get("text_black_to_white", True):
         return
-    try:
-        mw.web.eval(_TEXT_CONTRAST_JS)
-    except Exception:
-        pass
+
+    def _run():
+        try:
+            mw.web.eval(_TEXT_CONTRAST_JS)
+        except Exception:
+            pass
+
+    _run()
+    # The first render (especially the first card of a session) can finish AFTER
+    # this hook fires, leaving black text un-rescued — re-apply a couple times.
+    QTimer.singleShot(60, _run)
+    QTimer.singleShot(220, _run)

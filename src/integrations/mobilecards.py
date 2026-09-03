@@ -105,6 +105,41 @@ def _ensure_font_media() -> None:
         except Exception as exc:
             log("mobilecards font copy %s: %s" % (media_name, exc))
 
+def ensure_lora_media_face() -> str:
+    """Ensure the bundled Lora files exist in collection.media and return an
+    @font-face (family 'Lora') referencing them by media-relative filename — for
+    webviews whose base URL is the media dir (e.g. the caption HUD, which can't
+    reach the /_addons web-export URL). Returns '' if unavailable."""
+    if mw is None or mw.col is None:
+        return ""
+    try:
+        mdir = Path(mw.col.media.dir())
+    except Exception:
+        return ""
+    faces = [
+        ("_janki_Lora.ttf", "Lora.ttf", "400 700", "normal"),
+        ("_janki_Lora-Italic.ttf", "Lora-Italic.ttf", "400 700", "italic"),
+    ]
+    out = ""
+    for media_name, asset, weight, style in faces:
+        dst = mdir / media_name
+        if not dst.exists():
+            src = _ASSET_FONTS / asset
+            if not src.exists():
+                continue
+            try:
+                shutil.copyfile(src, dst)
+            except Exception as exc:
+                log("lora media copy %s: %s" % (media_name, exc))
+                continue
+        out += (
+            "@font-face{font-family:'Lora';src:url('" + media_name + "');"
+            "font-weight:" + weight + ";font-style:" + style
+            + ";font-display:swap;}\n"
+        )
+    return out
+
+
 # --- fenced blocks (markers make apply idempotent + remove exact) --------------
 
 _CSS_START = "/*janki-mobile-start*/"
@@ -297,6 +332,19 @@ _TPL_BLOCK = (
     "    jkFit(); setTimeout(jkFit,300); setTimeout(jkFit,1200); setTimeout(jkFit,3000);\n"
     "    if(!window.__jmFit){ window.__jmFit=1; window.addEventListener('resize',jkFit); }\n"
     "  }catch(e){}\n"
+    # Dark-text guard: the mobile bg is black, so black / very-dark text baked into a
+    # card as an explicit inline colour (common in imported/AnKing cards) is invisible.
+    # CSS can't test a colour value, so walk the elements and flip any whose text colour
+    # is dark AND whose effective (nearest set) background is also dark to white. Dark
+    # text on a light highlight is left alone. Runs before the reveal wraps text, so the
+    # per-char spans inherit the corrected colour.
+    "  try{ (function(){\n"
+    "    function lum(c){ var m=c&&c.match(/[\\d.]+/g); if(!m) return null; var a=(m[3]===undefined?1:+m[3]); if(!a) return null; return 0.2126*+m[0]+0.7152*+m[1]+0.0722*+m[2]; }\n"
+    "    function bgDark(el){ var p=el; while(p&&p.nodeType===1){ var l=lum(getComputedStyle(p).backgroundColor); if(l!==null) return l<80; p=p.parentNode; } return true; }\n"
+    "    var els=qa.querySelectorAll('*');\n"
+    "    for(var i=0;i<els.length;i++){ var el=els[i]; var l=lum(getComputedStyle(el).color);\n"
+    "      if(l!==null && l<90 && bgDark(el)) el.style.setProperty('color','#fff','important'); }\n"
+    "  })(); }catch(e){}\n"
     "  var SPEED=1.25;                                         // higher = faster\n"
     "  var marker=document.getElementById('answer');\n"
     # Underlined text is revealed as one whole span (below), not char-split: on

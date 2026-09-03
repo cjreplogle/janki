@@ -492,6 +492,10 @@ class _FullscreenWatcher(QObject):
                 if card_timer._card_timer_instance:          # realign the top timer bar after the frame settles
                     for d in (0, 450, 1000):
                         QTimer.singleShot(d, card_timer._card_timer_instance.reposition)
+                # Show/hide the reviewer Edit/More (only in fullscreen) as it settles.
+                from . import css as _css
+                for d in (0, 450, 1000):
+                    QTimer.singleShot(d, _css._sync_reviewer_fs)
                 # Reveal/hide AMBOSS term underlines as fullscreen settles.
                 for d in (0, 450, 1000):
                     QTimer.singleShot(d, amboss._apply_amboss_underlines)

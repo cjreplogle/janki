@@ -24,6 +24,12 @@ _tab_held = False        # True while Tab is physically held down
 _tab_used_combo = False  # True if Tab was used as a modifier this press
 _swallow_space_until_up = False  # after a hold-Space break skip, eat Space until released
 
+# Lockdown backtick(`)+Delete chord: engage lockdown, and (while locked) hold the
+# chord to contribute to the hold-to-exit alongside Space.
+_lk_bt_held = False              # backtick (kVK_ANSI_Grave = 50) currently down
+_lk_del_held = False             # Delete/Backspace (kVK_Delete = 51) currently down
+_lk_ignore_until_release = False  # after the chord engages lockdown, ignore it for exit until both keys lift
+
 # macOS virtual key codes to intercept when Tab is held
 _GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 31, 126, 125, 124, 123}  # Z X C V Space Escape Backslash F O ↑ ↓ → ←
 # Shift+Tab + '='/'-' → grow/shrink the caption font (only while the caption HUD
@@ -49,10 +55,33 @@ class _KeyBridge(QObject):
     send_key    = _pyqtSignal(int)  # macOS keycode
     send_key_rf = _pyqtSignal(int)  # keycode, reveal-first (two-press gamepad flow)
     pomo_space = _pyqtSignal(bool)  # True=press, False=release (Pomodoro bypass)
+    lockdown_space = _pyqtSignal(bool)  # True=press, False=release (lockdown hold-to-exit)
+    lockdown_chord = _pyqtSignal(bool)  # backtick+Delete chord held/released (hold-to-exit)
+    lockdown_enter = _pyqtSignal(bool)  # backtick+Delete pressed while unlocked → engage lockdown
+    lockdown_warn = _pyqtSignal(bool)   # during very-strict warning: True=skip (Space/Enter), False=cancel (Esc)
 
 _key_bridge = _KeyBridge()
 _key_bridge.send_key.connect(lambda kc: _send_key_to_anki(kc))
 _key_bridge.send_key_rf.connect(lambda kc: _send_key_to_anki(kc, reveal_first=True))
+
+def _lk_eval_chord() -> None:
+    """Re-evaluate the backtick+Delete chord from the tap thread and emit the
+    matching lockdown signal. Runs whenever either key changes state."""
+    global _lk_ignore_until_release
+    both = _lk_bt_held and _lk_del_held
+    if both:
+        if _lk_ignore_until_release:
+            return
+        if state._lockdown_on:
+            _key_bridge.lockdown_chord.emit(True)      # feed the hold-to-exit
+        else:
+            _lk_ignore_until_release = True            # don't let this same chord immediately exit
+            _key_bridge.lockdown_enter.emit(True)      # engage lockdown
+    else:
+        if not (_lk_bt_held or _lk_del_held):
+            _lk_ignore_until_release = False           # both lifted — arm the next chord
+        _key_bridge.lockdown_chord.emit(False)         # cancel any hold-to-exit in progress
+
 
 def _gtap_log(msg: str) -> None:
     try:
@@ -181,6 +210,20 @@ def _adjust_caption_font(delta: int) -> None:
         hud._coherence_hud.set_font_size(new, cur)
 
 
+def ax_trusted() -> bool:
+    """True if Anki has Accessibility permission (needed for the CGEventTap that
+    powers the lockdown hold-to-exit)."""
+    if sys.platform != 'darwin':
+        return False
+    try:
+        import ctypes
+        AX = ctypes.CDLL(
+            '/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        return bool(AX.AXIsProcessTrusted())
+    except Exception:
+        return False
+
+
 def _start_key_tap() -> None:
     global _key_tap_running
     if _key_tap_running or sys.platform != 'darwin':
@@ -249,10 +292,47 @@ def _start_key_tap() -> None:
 
         def _cb(proxy, etype, event, refcon):
             global _tab_held, _tab_used_combo, _swallow_space_until_up
-            if not _key_tap_enabled:
-                return event
+            global _lk_bt_held, _lk_del_held
             # etype: 10 = kCGEventKeyDown, 11 = kCGEventKeyUp
             kc = CG.CGEventGetIntegerValueField(event, 9)  # kCGKeyboardEventKeycode
+            # Lockdown hold-to-exit: watch Space regardless of the global-keys
+            # setting (the tap is started when locking). Never swallow a plain tap
+            # so normal reviewing still works; only eat Space once the hold has
+            # committed, so escaping doesn't flip the card underneath.
+            if state._lockdown_on and kc == 49:
+                _key_bridge.lockdown_space.emit(etype == 10)
+                return None if state._lockdown_hold_committed else event
+            # Very-strict pre-close warning: Space(49)/Return(36)/Enter(76) skip
+            # the countdown, Escape(53) cancels. Routed through the tap because the
+            # deck-browser webview eats plain Space/Enter before Qt shortcuts.
+            if state._lockdown_warn and kc in (49, 36, 76, 53):
+                if etype == 10:
+                    _key_bridge.lockdown_warn.emit(kc != 53)
+                return None
+            # Lockdown backtick(50)+Delete(51) chord: engage lockdown when
+            # unlocked, or (while locked) contribute to the hold-to-exit. Backtick
+            # passes through so it still types; Delete is swallowed only while it's
+            # part of the chord so it never deletes a card/note.
+            if kc == 50:
+                _lk_bt_held = (etype == 10)
+                _lk_eval_chord()
+                # A lone backtick still types; swallow it only while Delete is
+                # co-held (chord active) so a held chord doesn't spew backticks.
+                return None if _lk_del_held else event
+            if kc == 51:
+                if etype == 10:      # keydown
+                    if _lk_bt_held:
+                        _lk_del_held = True
+                        _lk_eval_chord()
+                        return None  # consume — it's the chord, not a delete
+                else:                # keyup
+                    if _lk_del_held:
+                        _lk_del_held = False
+                        _lk_eval_chord()
+                        return None  # consume the matching keyup
+                return event
+            if not _key_tap_enabled:
+                return event
             # After a hold-Space break skip, the Space is often still held when the
             # break ends — eat every Space event until it's released so it doesn't
             # leak to the reviewer (which would flip the just-revealed card).

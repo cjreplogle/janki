@@ -44,7 +44,7 @@ except Exception as _e:
 from .src.util.bridge import _bridge
 from .src.util.config import log, ACTIVE, GLASS, _cfg
 from .src.util import state
-from .src.features import card_timer, focus, pomodoro
+from .src.features import card_timer, focus, lockdown, pomodoro
 from .src.user import css, glass, hud
 from .src.system import settings_dialog, tray
 from .src.util import diagnostics, keytap
@@ -119,6 +119,28 @@ def _patch_tooltip():
     _aqtu.tooltip = _glass_tooltip
 
 
+def _warn_if_light_mode():
+    """Janki's glass tint + text-contrast rescues assume a DARK background; in
+    Light appearance mode some card/UI text renders poorly (near-invisible or
+    washed out). Nudge the user to switch to Dark. One tooltip, silenceable via
+    config "light_mode_warning". Also fires on live theme changes to Light."""
+    try:
+        if not _cfg().get("light_mode_warning", True):
+            return
+        from aqt.theme import theme_manager
+        if getattr(theme_manager, "night_mode", True):
+            return  # dark mode → glass looks correct
+        from aqt.utils import tooltip
+        tooltip(
+            "Janki: Anki is in Light mode. The glass theme is built for Dark "
+            "mode — some text may be hard to read. Switch appearance to Dark "
+            "(Preferences ▸ Appearance) for correct contrast.",
+            period=7000,
+        )
+    except Exception as exc:
+        log("light-mode warn: %s" % exc)
+
+
 def _startup():
     try:
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
@@ -127,9 +149,22 @@ def _startup():
         # unvalidated Anki version. See stock_selfheal.py.
         stock_selfheal.maybe_self_heal()
 
+        # Expose the bundled web assets (Lora font files) via Anki's media server
+        # so the desktop webviews' @font-face can load them at
+        # /_addons/janki/assets/fonts/… (see css.lora_face_css). Safe/no-op if the
+        # API is missing.
+        try:
+            mw.addonManager.setWebExports(__name__, r"assets/fonts/.*\.(ttf|otf)$")
+        except Exception as _we_exc:
+            log("web exports: %s" % _we_exc)
+
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
+
+        # Lockdown / kiosk focus mode (macOS) is a manual toggle reachable from the
+        # menu-bar (tray) icon and Cmd+Ctrl+L — kept off the Tools menu so it isn't
+        # a second "Janki:" entry next to Settings. Exit by holding Space.
 
         # Diagnostic helpers kept available programmatically, but off the menu.
         mw._glass_diagnose = diagnostics.glass_diagnose_live
@@ -166,18 +201,28 @@ def _startup():
             _zscs.append(_sc)
         mw._janki_zoom_scs = _zscs   # keep refs alive
 
-        # Open the window at a consistent default height for card content: a fraction
-        # of the available screen height (keeping width). Applied every launch after
-        # geometry is restored, so tuning `min_win_height_frac` takes effect and the
-        # open height is predictable.
+        # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
+        # create the manager now so its CGEventTap signal handlers are live —
+        # the backtick+Delete chord can then engage lockdown before any manual
+        # toggle (requires global keys / the key tap to be running).
+        if sys.platform == "darwin":
+            lockdown._get()
+            _lock_sc = QShortcut(QKeySequence("Ctrl+Meta+L"), mw)
+            _lock_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            _lock_sc.activated.connect(lambda: lockdown.toggle())
+            mw._janki_lock_sc = _lock_sc   # keep ref alive
+
+        # Open the window at a fixed default height (px) every launch, keeping width.
+        # Tune `open_win_height` in config to taste; clamped to the screen.
         def _ensure_height():
             try:
-                frac = float(_cfg().get("min_win_height_frac", 0.8))
+                target = int(_cfg().get("open_win_height", 400) or 0)
+                if target <= 0:
+                    return
                 scr = mw.screen() if hasattr(mw, "screen") else None
                 avail = scr.availableGeometry() if scr else None
-                if avail is None:
-                    return
-                target = int(avail.height() * max(0.5, min(1.0, frac)))
+                if avail is not None:
+                    target = max(300, min(target, avail.height()))
                 if mw.height() != target:
                     mw.resize(mw.width(), target)
             except Exception as _e:
@@ -217,11 +262,24 @@ def _startup():
 
         _patch_tooltip()
 
+        # Warn once at launch (and on live theme changes) if Anki is in Light
+        # appearance mode — the glass theme expects Dark. Delayed so it lands
+        # after the window/tooltip machinery is ready.
+        QTimer.singleShot(2500, _warn_if_light_mode)
+        if hasattr(gui_hooks, "theme_did_change"):
+            gui_hooks.theme_did_change.append(_warn_if_light_mode)
+
         # Quit cleanly: tear down the floating coherence HUD / XP bar when the
         # main window closes, so closing Anki (red button) quits everything
         # instead of leaving those windows keeping the app alive.
         try:
             mw.app.aboutToQuit.connect(tray._teardown_glass_windows)
+        except Exception:
+            pass
+
+        # Safety: never leave the Dock/menu bar hidden if Anki quits while locked.
+        try:
+            mw.app.aboutToQuit.connect(lockdown.unlock_if_locked)
         except Exception:
             pass
 
@@ -232,6 +290,7 @@ def _startup():
                 state._remote_active = True
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
+                css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 focus._apply_card_zoom()      # re-assert card zoom on the new card
                 amboss._start_amboss_size_watch()   # widen window while previews are up
                 amboss._apply_amboss_underlines()   # show term underlines (all modes)
@@ -243,6 +302,7 @@ def _startup():
                 state._remote_active = True
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
+                css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 amboss._apply_amboss_underlines(front=False)  # back: no fade, instant
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
 

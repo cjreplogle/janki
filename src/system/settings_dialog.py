@@ -7,7 +7,7 @@ from aqt.utils import tooltip
 
 from ..util.config import log, _cfg, SAFE
 from ..features import card_timer, focus, pomodoro
-from ..user import glass, hud
+from ..user import glass, hud, css
 from . import tray
 from ..util import diagnostics, keytap
 from ..integrations import gamepad
@@ -89,6 +89,36 @@ class GlassSettings(QDialog):
         col_row.addStretch()
         app_lay.addLayout(col_row)
 
+        # --- Interface font (system-wide UI + card font) --------------------
+        # Sets the font used across the whole app (deck list, toolbar, buttons,
+        # counters and the reviewer card). "Lora" ships with the add-on; the rest
+        # are system fonts. Stored in `card_font`; live-applies by reloading views.
+        from aqt.qt import QComboBox
+        _uifont_row = QHBoxLayout()
+        _uifont_name = QLabel("Interface font")
+        _uifont_name.setMinimumWidth(140)
+        self._ui_font = QComboBox()
+        for _lbl in css.UI_FONTS:
+            self._ui_font.addItem(_lbl, _lbl)
+        _cur_font = css.ui_font_label(self.cfg)
+        if self._ui_font.findData(_cur_font) < 0:      # a custom hand-typed family
+            self._ui_font.addItem(_cur_font, _cur_font)
+        self._ui_font.setCurrentIndex(max(0, self._ui_font.findData(_cur_font)))
+
+        def on_ui_font(_i):
+            self.cfg["card_font"] = self._ui_font.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._reload_all_webviews()   # re-inject CSS with the new font
+            except Exception:
+                pass
+
+        self._ui_font.currentIndexChanged.connect(on_ui_font)
+        _uifont_row.addWidget(_uifont_name)
+        _uifont_row.addWidget(self._ui_font)
+        _uifont_row.addStretch()
+        app_lay.addLayout(_uifont_row)
+
         # --- Opacity + Blur sliders -----------------------------------------
         for key, label, lo, hi, scale in [
             ("body_opacity", "Opacity", 0, 100, 100.0),
@@ -149,17 +179,75 @@ class GlassSettings(QDialog):
         # --- Card timer curve ------------------------------------------------
         # Show/hide the thin progress bar under the toolbar. Independent of the red
         # flare — unchecking hides the bar but the timer + flare still run.
-        self._ctbar = QCheckBox("Show timer bar under the toolbar")
-        self._ctbar.setChecked(bool(self.cfg.get("card_timer_show_bar", True)))
+        from aqt.qt import QComboBox as _QComboBox
+        style_row = QHBoxLayout()
+        style_name = QLabel("Card timer style")
+        style_name.setMinimumWidth(140)
+        self._ct_style = _QComboBox()
+        self._ct_style.addItem("Timer ring", "ring")
+        self._ct_style.addItem("Progress bar", "bar")
+        self._ct_style.addItem("Off", "off")
+        _cur_style = str(self.cfg.get("card_timer_style", "ring")).lower()
+        self._ct_style.setCurrentIndex(max(0, self._ct_style.findData(_cur_style)))
 
-        def on_ctbar(_state):
-            self.cfg["card_timer_show_bar"] = self._ctbar.isChecked()
+        def on_ct_style(_i):
+            self.cfg["card_timer_style"] = self._ct_style.currentData()
             mw.addonManager.writeConfig(__name__, self.cfg)
             if card_timer._card_timer_instance is not None:
                 card_timer._card_timer_instance.sync_bar_pref()
 
-        self._ctbar.stateChanged.connect(on_ctbar)
-        focus_lay.addWidget(self._ctbar)
+        self._ct_style.currentIndexChanged.connect(on_ct_style)
+        style_row.addWidget(style_name)
+        style_row.addWidget(self._ct_style)
+        focus_lay.addLayout(style_row)
+
+        # Timer ring position (top-right = the Sync-button row, or bottom-right).
+        ring_row = QHBoxLayout()
+        ring_name = QLabel("Timer ring position")
+        ring_name.setMinimumWidth(140)
+        self._ring_corner = _QComboBox()
+        self._ring_corner.addItem("Top", "top")
+        self._ring_corner.addItem("Tray", "tray")
+        self._ring_corner.addItem("Bottom", "bottom")
+        self._ring_corner.addItem("Bottom (Narrow)", "bottom_narrow")
+        _cur_corner = str(self.cfg.get("card_timer_ring_corner", "tray")).lower()
+        self._ring_corner.setCurrentIndex(max(0, self._ring_corner.findData(_cur_corner)))
+
+        def on_ring_corner(_i):
+            self.cfg["card_timer_ring_corner"] = self._ring_corner.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            if card_timer._card_timer_instance is not None:
+                card_timer._card_timer_instance._bar.reposition()
+
+        self._ring_corner.currentIndexChanged.connect(on_ring_corner)
+        ring_row.addWidget(ring_name)
+        ring_row.addWidget(self._ring_corner)
+        focus_lay.addLayout(ring_row)
+
+        # Transparency of the ring / bar (window opacity).
+        rop_row = QHBoxLayout()
+        rop_name = QLabel("Card timer transparency")
+        rop_name.setMinimumWidth(140)
+        rop_val = QLabel()
+        rop_s = QSlider(Qt.Orientation.Horizontal)
+        rop_s.setMinimum(10)     # 0.10 (very transparent)
+        rop_s.setMaximum(100)    # 1.00 (opaque)
+        rop_s.setValue(int(round(float(self.cfg.get("card_timer_ring_opacity", 0.58)) * 100)))
+
+        def _rop_cb(v):
+            self.cfg["card_timer_ring_opacity"] = v / 100.0
+            rop_val.setText(f"{v}%")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            inst = card_timer._card_timer_instance
+            if inst is not None and inst._bar.isVisible():
+                inst._bar.setWindowOpacity(v / 100.0)
+
+        rop_s.valueChanged.connect(_rop_cb)
+        rop_val.setText(f"{int(round(float(self.cfg.get('card_timer_ring_opacity', 0.58)) * 100))}%")
+        rop_row.addWidget(rop_name)
+        rop_row.addWidget(rop_s)
+        rop_row.addWidget(rop_val)
+        focus_lay.addLayout(rop_row)
 
         # Real seconds until the red flare for a ~1-sentence card; card length then
         # nudges it within a clamped band (see start_card). Range 1.0–60.0s
@@ -250,6 +338,56 @@ class GlassSettings(QDialog):
 
         self._green_flare.stateChanged.connect(on_green_flare)
         focus_lay.addWidget(self._green_flare)
+
+        # --- Lockdown / kiosk focus mode (macOS) -----------------------------
+        from aqt.qt import QComboBox as _QComboBox
+        ld_note = QLabel(
+            "Lockdown mode (menu Tools → Janki: Lockdown mode, or ⌘⌃L) hides the "
+            "Dock and menu bar and blocks app switching to keep you in Anki. "
+            "It's a soft focus aid, not tamper-proof. Exit by holding Space.")
+        ld_note.setWordWrap(True)
+        ld_note.setStyleSheet("color: gray; margin-top: 8px;")
+        focus_lay.addWidget(ld_note)
+
+        ld_row = QHBoxLayout()
+        ld_name = QLabel("Lockdown level")
+        ld_name.setMinimumWidth(140)
+        self._ld_level = _QComboBox()
+        self._ld_level.addItem("Standard — hide Dock/menu bar, block switching", "standard")
+        self._ld_level.addItem("Strict — also disable force-quit + logout", "strict")
+        self._ld_level.addItem("Very strict — also quit other apps + Wi-Fi off", "very_strict")
+        _cur_lvl = str(self.cfg.get("lockdown_level", "standard")).lower()
+        self._ld_level.setCurrentIndex(max(0, self._ld_level.findData(_cur_lvl)))
+
+        def on_ld_level(_i):
+            self.cfg["lockdown_level"] = self._ld_level.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        self._ld_level.currentIndexChanged.connect(on_ld_level)
+        ld_row.addWidget(ld_name)
+        ld_row.addWidget(self._ld_level)
+        focus_lay.addLayout(ld_row)
+
+        ldh_row = QHBoxLayout()
+        ldh_name = QLabel("Hold Space to exit")
+        ldh_name.setMinimumWidth(140)
+        ldh_val = QLabel()
+        ldh_s = QSlider(Qt.Orientation.Horizontal)
+        ldh_s.setMinimum(20)    # 2.0s
+        ldh_s.setMaximum(150)   # 15.0s
+        ldh_s.setValue(int(round(float(self.cfg.get("lockdown_hold_secs", 5.0)) * 10)))
+
+        def _ldh_cb(v):
+            self.cfg["lockdown_hold_secs"] = v / 10.0
+            ldh_val.setText(f"{v/10.0:.1f}s")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        ldh_s.valueChanged.connect(_ldh_cb)
+        ldh_val.setText(f"{float(self.cfg.get('lockdown_hold_secs', 5.0)):.1f}s")
+        ldh_row.addWidget(ldh_name)
+        ldh_row.addWidget(ldh_s)
+        ldh_row.addWidget(ldh_val)
+        focus_lay.addLayout(ldh_row)
 
         # === Caption (coherence HUD) =========================================
         cap_note = QLabel("Caption mode (Tab+\\) shows the current card in a "
@@ -506,6 +644,24 @@ class GlassSettings(QDialog):
         self._amtip.stateChanged.connect(on_amtip)
         gen_lay.addWidget(self._amtip)
 
+        # The AMBOSS QBank home widget half-clips on a narrow window; fade it out
+        # until the window is wide enough to show it whole. Applies on next deck-
+        # browser render (reactive thereafter), so nudge a refresh when toggled.
+        self._amqb = QCheckBox("Hide the AMBOSS QBank box when the window is too narrow")
+        self._amqb.setChecked(bool(self.cfg.get("amboss_qbank_autohide", True)))
+
+        def on_amqb(_state):
+            self.cfg["amboss_qbank_autohide"] = self._amqb.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                if mw.state == "deckBrowser":
+                    mw.deckBrowser.refresh()
+            except Exception:
+                pass
+
+        self._amqb.stateChanged.connect(on_amqb)
+        gen_lay.addWidget(self._amqb)
+
         # --- Glass patch / uninstall ----------------------------------------
         # On stock Anki the glass needs a small patch to Anki's own files (applied
         # automatically). This lets you cleanly REMOVE it: restore the original
@@ -524,6 +680,10 @@ class GlassSettings(QDialog):
             gen_lay.addWidget(_patch_note)
 
             self._patch_btn = QPushButton()
+            self._patch_btn.setStyleSheet(
+                "QPushButton{background-color:#6e5250;color:white;border:none;"
+                "padding:5px 12px;border-radius:5px;}"
+                "QPushButton:hover{background-color:#7c5d5b;}")
 
             def _refresh_patch_btn():
                 st = stock_selfheal.patch_state()
@@ -585,6 +745,10 @@ class GlassSettings(QDialog):
         gen_lay.addWidget(_upd_note)
         self._upd_btn = QPushButton("Check for updates now  (v%s)"
                                     % updater._current_version())
+        self._upd_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
         self._upd_btn.clicked.connect(lambda: updater.check(interactive=True))
         gen_lay.addWidget(self._upd_btn)
 
@@ -642,7 +806,16 @@ class GlassSettings(QDialog):
 
         _mob_row = QHBoxLayout()
         self._mob_apply = QPushButton("Apply UI theming to mobile cards")
+        self._mob_apply.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
         self._mob_revert = QPushButton("Revert mobile theming")
+        self._mob_revert.setStyleSheet(
+            "QPushButton{background-color:#6e5250;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#7c5d5b;}"
+            "QPushButton:disabled{background-color:#5a5a5a;color:#aaaaaa;}")
 
         def _refresh_mob():
             self._mob_revert.setEnabled(mobilecards.is_applied())
