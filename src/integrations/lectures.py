@@ -906,7 +906,10 @@ def _day_label(offset):
     return ("+%d days" % offset) if offset > 0 else ("%d days" % offset)
 
 
-def _open_today_dialog(day_offset=0):
+_import_dlg_open = False   # guards against stacking/looping the import settings dialog
+
+
+def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
         QComboBox, QPushButton, QHeaderView, QAbstractItemView, Qt as _Qt,
@@ -924,14 +927,21 @@ def _open_today_dialog(day_offset=0):
     _ak_index_reset()                  # …and rebuild the AnKing tag index (once)
     m, keys, opts = _get_map(families)  # cached by xlsx mtime + families
     if not m:
-        # Nothing to load (no tag map set, or the file is missing/empty) → send the
-        # user straight to the import/settings window to add one.
-        tooltip("Janki Lectures — no lectures loaded; opening settings to import a "
-                "tag map.", period=3500)
-        try:
-            _open_settings_dialog()
-        except Exception as e:
-            _log("open settings from empty lecture window failed: %s" % e)
+        global _import_dlg_open
+        # Nothing to load (no tag map set, or the file is missing/empty). On a
+        # MANUAL open, send the user to the import/settings window once. On
+        # auto-launch just notify — never auto-open (that could loop on relaunch /
+        # if the run-once state can't be written).
+        tooltip("Janki Lectures — no lectures loaded. Set a tag map in "
+                "Tools → Janki: Settings… → Lectures.", period=4000)
+        if not auto and not _import_dlg_open:
+            _import_dlg_open = True
+            try:
+                _open_settings_dialog()
+            except Exception as e:
+                _log("open settings from empty lecture window failed: %s" % e)
+            finally:
+                _import_dlg_open = False
         return
     aliases = _load_aliases()
 
@@ -985,12 +995,26 @@ def _open_today_dialog(day_offset=0):
     # so you can pull, say, only AnKing cards for a lecture. Counts/apply read
     # _selected_families(); toggling recounts live.
     _FAM_SHORT_UI = {"ak": "AnKing", "aj": "AJ", "huc": "hUtChCOM"}
+    # Families that ACTUALLY appear in the loaded tag map (so we only offer AJ if
+    # there are AJ tags, etc.). AnKing fragments lose their marker in the
+    # leaf→exact-tags resolution, so anything not AJ/hUtChCOM is AnKing.
+    present_fams = set()
+    for _nk in m:
+        for _frag in m[_nk]["searches"]:
+            if "AJ_UCCOM_keep" in _frag:
+                present_fams.add("aj")
+            elif "hUtChCOM" in _frag:
+                present_fams.add("huc")
+            else:
+                present_fams.add("ak")
     src_cbs = {}
     src_row = QHBoxLayout()
     src_row.addWidget(QLabel("Unsuspend from:"))
     for suffix, _match, label in TAG_FAMILIES:
         if suffix not in {s for s, m, l in TAG_FAMILIES
                           if m in families}:   # only globally-enabled families
+            continue
+        if suffix not in present_fams:          # only families present in the map
             continue
         cb = QCheckBox(_FAM_SHORT_UI.get(suffix, label))
         cb.setChecked(True)
@@ -999,6 +1023,14 @@ def _open_today_dialog(day_offset=0):
     src_row.addStretch(1)
     if len(src_cbs) > 1:
         v.addLayout(src_row)
+    elif len(src_cbs) == 1:
+        # Only one source in the map → no choice to make, but show it read-only so
+        # it's clear what's being pulled. (The hidden checkbox stays ticked, so
+        # _selected_families() still returns it and the apply works.)
+        only = next(iter(src_cbs))
+        one_lbl = QLabel("Source: %s" % _FAM_SHORT_UI.get(only, only))
+        one_lbl.setStyleSheet("color: gray;")
+        v.addWidget(one_lbl)
 
     def _selected_families():
         """Suffixes whose source checkbox is ticked (defaults to all enabled)."""
@@ -1579,7 +1611,7 @@ def _paths_ready() -> bool:
     return bool((c.get("xlsx_path") or "").strip())
 
 
-def run_today(interactive=True):
+def run_today(interactive=True, auto=False):
     if not _paths_ready():
         if interactive:
             showInfo(
@@ -1593,7 +1625,7 @@ def run_today(interactive=True):
         return
     try:
         if interactive:
-            _open_today_dialog()
+            _open_today_dialog(auto=auto)
             return
         # Non-interactive (auto-on-launch): only the calendar drives auto-matching.
         # With no calendar there's nothing to align, so never mass-unsuspend.
@@ -1640,7 +1672,7 @@ def _on_profile_open():
         return
     st["last_auto_date"] = today
     _save_state(st)
-    QTimer.singleShot(1500, lambda: run_today(interactive=True))
+    QTimer.singleShot(1500, lambda: run_today(interactive=True, auto=True))
 
 
 gui_hooks.main_window_did_init.append(_install_menu)

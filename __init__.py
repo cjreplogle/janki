@@ -212,22 +212,54 @@ def _startup():
             _lock_sc.activated.connect(lambda: lockdown.toggle())
             mw._janki_lock_sc = _lock_sc   # keep ref alive
 
-        # Open the window at a fixed default height (px) every launch, keeping width.
-        # Tune `open_win_height` in config to taste; clamped to the screen.
-        def _ensure_height():
+        # Window size: restore whatever it was last closed at (saved on quit by
+        # _save_size). On the FIRST launch (nothing saved yet) fall back to the
+        # configured default (open_win_width/height, 600x400). Clamped to screen.
+        def _restore_size():
             try:
-                target = int(_cfg().get("open_win_height", 400) or 0)
-                if target <= 0:
-                    return
+                c = _cfg()
+                w = int(c.get("last_win_w", 0) or 0)
+                h = int(c.get("last_win_h", 0) or 0)
+                saved = (w > 0 and h > 0)
+                if not saved:                              # first launch → default
+                    w = int(c.get("open_win_width", 600) or 600)
+                    h = int(c.get("open_win_height", 400) or 400)
                 scr = mw.screen() if hasattr(mw, "screen") else None
                 avail = scr.availableGeometry() if scr else None
                 if avail is not None:
-                    target = max(300, min(target, avail.height()))
-                if mw.height() != target:
-                    mw.resize(mw.width(), target)
+                    w = max(480, min(w, avail.width()))
+                    h = max(300, min(h, avail.height()))
+                mw.resize(w, h)
+                # Restore the last position too (clamped so it can't land off-screen
+                # if the display setup changed). Only when we have a saved geometry.
+                if saved and c.get("last_win_x") is not None and c.get("last_win_y") is not None:
+                    x = int(c.get("last_win_x")); y = int(c.get("last_win_y"))
+                    if avail is not None:
+                        x = max(avail.x(), min(x, avail.x() + avail.width() - 120))
+                        y = max(avail.y(), min(y, avail.y() + avail.height() - 80))
+                    mw.move(x, y)
             except Exception as _e:
-                log("win height ensure: %s" % _e)
-        QTimer.singleShot(300, _ensure_height)
+                log("win geom restore: %s" % _e)
+        QTimer.singleShot(300, _restore_size)
+
+        def _save_size():
+            # Remember the current window geometry so the next launch reopens at it.
+            try:
+                if mw.isFullScreen() or mw.isMaximized() or mw.isMinimized():
+                    return                                 # don't persist odd states
+                cur = mw.addonManager.getConfig(__name__) or {}
+                cur["last_win_w"] = int(mw.width())
+                cur["last_win_h"] = int(mw.height())
+                p = mw.pos()
+                cur["last_win_x"] = int(p.x())
+                cur["last_win_y"] = int(p.y())
+                mw.addonManager.writeConfig(__name__, cur)
+            except Exception as _e:
+                log("win geom save: %s" % _e)
+        try:
+            mw.app.aboutToQuit.connect(_save_size)
+        except Exception:
+            pass
 
         if tray._tray_should_show():
             tray._apply_tray(True)
