@@ -933,20 +933,39 @@ def _open_today_dialog(day_offset=0, auto=False):
     m, keys, opts = _get_map(families)  # cached by xlsx mtime + families
     if not m:
         global _import_dlg_open
-        # Nothing to load (no tag map set, or the file is missing/empty). On a
-        # MANUAL open, send the user to the import/settings window once. On
-        # auto-launch just notify — never auto-open (that could loop on relaunch /
-        # if the run-once state can't be written).
-        tooltip("Janki Lectures — no lectures loaded. Set a tag map in "
-                "Tools → Janki: Settings… → Lectures.", period=4000)
-        if not auto and not _import_dlg_open:
-            _import_dlg_open = True
-            try:
-                _open_settings_dialog()
-            except Exception as e:
-                _log("open settings from empty lecture window failed: %s" % e)
-            finally:
-                _import_dlg_open = False
+        # Nothing to load (no tag map set, or the file is missing/empty). On
+        # auto-launch just notify (never prompt — could loop on relaunch). On a
+        # MANUAL open, pop a file picker to choose the tag map right away, save it,
+        # and load it. Guarded against re-entry.
+        if auto:
+            tooltip("Janki Lectures — no tag map set. Tools → Load today's "
+                    "lectures to choose one.", period=4000)
+            return
+        if _import_dlg_open:
+            return
+        _import_dlg_open = True
+        try:
+            from aqt.qt import QFileDialog
+            start = os.path.dirname(_p(_cfg().get("xlsx_path", ""))) or ""
+            fn, _f = QFileDialog.getOpenFileName(
+                mw, "Choose your lecture → tag map (.xlsx or .txt)", start,
+                "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
+            if fn:
+                cur = mw.addonManager.getConfig(__name__) or {}
+                cur["xlsx_path"] = fn
+                mw.addonManager.writeConfig(__name__, cur)
+                _MAP_CACHE["key"] = None            # force a rebuild with the new path
+                m2, _k2, _o2 = _get_map(_enabled_families())
+                if m2:
+                    QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+                else:
+                    showInfo("Couldn't load any lectures from that file.\n\n"
+                             "Make sure it's a valid .xlsx spreadsheet or .txt tag "
+                             "map.", title="Janki Lectures")
+        except Exception as e:
+            _log("tag-map pick failed: %s" % e)
+        finally:
+            _import_dlg_open = False
         return
     aliases = _load_aliases()
 
