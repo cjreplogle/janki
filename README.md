@@ -126,9 +126,19 @@ These extra installs help tie together some theming:
 *If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features
 you think will be helpful to other people!* 
 
-FYI - this is very vibe coded and designed around my personal habits. This is not on AnkiWeb because the patcher is not able to be used on AnkiWeb plugins.
+Janki is an independent, unofficial project. It is **not affiliated with, endorsed
+by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
+"AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
+used here only nominatively — to describe compatibility with those products. No
+AnKing or AMBOSS content is bundled or redistributed; the add-on only operates on
+your own local collection.
 
-This is still experimental and mostly designed around my own study preferences. Source code state is not ideal but it does what I need it to, so I can live with it. Hopefully it helps you too.
+As Janki has functionalities that patch the original code of Anki to improve visuals 
+and stamp cards for mobile effects. Certain functionalities, such as Lockdown Mode, 
+may also ask for system level permissions to work properly. Mac OS makes this a requirement
+for programs which automatically closing apps / disabling Wi-Fi on the device. There 
+may be bugs/issues I have not identified yet. Please use the less invasive "load today's
+lectures" version if you have concerns about this.
 
 [cjre.pl/ogle](https://cjre.pl/ogle) 
 
@@ -138,11 +148,3 @@ Licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LIC
 Janki extends [Anki](https://github.com/ankitects/anki), which is also AGPL-3.0; the
 self-heal patches Anki's own files locally at runtime and does not redistribute
 Anki's source.
-
-Janki is an independent, unofficial project. It is **not affiliated with, endorsed
-by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
-"AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
-used here only nominatively — to describe compatibility with those products. No
-AnKing or AMBOSS content is bundled or redistributed; the add-on only operates on
-your own local collection.
-
