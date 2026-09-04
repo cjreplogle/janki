@@ -112,6 +112,11 @@ class GlassSettings(QDialog):
                 glass._reload_all_webviews()   # re-inject CSS with the new font
             except Exception:
                 pass
+            try:
+                from ..user import css as _css
+                _css.apply_native_ui_font(self.cfg)   # refresh native menu font too
+            except Exception:
+                pass
 
         self._ui_font.currentIndexChanged.connect(on_ui_font)
         _uifont_row.addWidget(_uifont_name)
@@ -574,7 +579,29 @@ class GlassSettings(QDialog):
         self._aot.stateChanged.connect(on_aot)
         gen_lay.addWidget(self._aot)
 
-        self._menubar = QCheckBox("Show menu-bar icon (Caption / Focus mode controls)")
+        self._deck_stats = QCheckBox(
+            "Show review history chart on the deck screen (Reviews plot)")
+        self._deck_stats.setChecked(bool(self.cfg.get("deck_stats", True)))
+
+        def on_deck_stats(_state):
+            self.cfg["deck_stats"] = self._deck_stats.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            # Re-RENDER the deck browser, not just reload the webview: a plain
+            # webview reload() re-shows the same HTML and never re-runs the
+            # webview_will_set_content hook where the stats block is added/removed,
+            # so the toggle appeared to "stick" only after a restart. refresh()
+            # calls stdHtml and re-fires the hook, applying the change live.
+            try:
+                db = getattr(mw, "deckBrowser", None)
+                if db is not None and getattr(mw, "state", None) == "deckBrowser":
+                    db.refresh()
+            except Exception:
+                pass
+
+        self._deck_stats.stateChanged.connect(on_deck_stats)
+        gen_lay.addWidget(self._deck_stats)
+
+        self._menubar = QCheckBox("Show menu-bar icon (Caption / Focus / Lockdown mode controls)")
         self._menubar.setChecked(bool(self.cfg.get("menubar_controls", True)))
 
         def on_menubar(_state):

@@ -1007,6 +1007,93 @@ def _open_today_dialog(day_offset=0, auto=False):
     if no_cal:                       # no calendar → no day navigation
         for _w in (btn_prev, btn_today, btn_next):
             _w.setVisible(False)
+        # Manual mode has no day alignment. Offer a one-click calendar import so the
+        # user can switch to day-aligned mode without digging through settings. The
+        # picker takes EITHER a local .ics file OR a calendar URL (http/https feed) —
+        # ics_path already accepts both (see _read_source_text). On accept we save it
+        # and reopen the window (now calendar-driven).
+        btn_import_cal = QPushButton("＋ Import calendar…")
+
+        def _do_import_cal():
+            from aqt.qt import (
+                QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                QFileDialog, QDialogButtonBox,
+            )
+            d = QDialog(dlg)
+            d.setWindowTitle("Import calendar")
+            lay = QVBoxLayout(d)
+            lay.addWidget(QLabel(
+                "Choose a calendar file (.ics) or paste a calendar URL\n"
+                "(http/https — e.g. a subscribed .ics feed)."))
+            row = QHBoxLayout()
+            edit = QLineEdit()
+            edit.setMinimumWidth(360)
+            edit.setPlaceholderText("https://…/calendar.ics   or   /path/to/file.ics")
+            edit.setText((_cfg().get("ics_path", "") or "").strip())
+            browse = QPushButton("Browse…")
+            row.addWidget(edit, 1)
+            row.addWidget(browse)
+            lay.addLayout(row)
+
+            # Inline validation notice: a yellow ⚠ line under the field (hidden until
+            # a check fails), instead of a modal popup. The dialog stays open so the
+            # user can fix the path/URL and retry.
+            warn = QLabel("")
+            warn.setWordWrap(True)
+            warn.setStyleSheet("color:#e0b000;")   # amber/yellow warning
+            warn.setVisible(False)
+            lay.addWidget(warn)
+
+            def _browse():
+                seed = edit.text().strip() or _cfg().get("ics_path", "")
+                start = "" if _is_url(seed) else (os.path.dirname(_p(seed)) or "")
+                fn, _f = QFileDialog.getOpenFileName(
+                    d, "Choose your calendar (.ics)", start,
+                    "Calendars (*.ics *.ical *.ifb);;All files (*)")
+                if fn:
+                    edit.setText(fn)
+
+            browse.clicked.connect(_browse)
+            bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                  | QDialogButtonBox.StandardButton.Cancel)
+            lay.addWidget(bb)
+
+            def _try_accept():
+                val = edit.text().strip()
+                if not val:
+                    warn.setText("⚠  Enter a calendar file path or URL.")
+                    warn.setVisible(True)
+                    return
+                # Validate before committing: read + parse the calendar and require
+                # at least one event. A bad path / dead URL / non-ICS file yields
+                # nothing — warn instead of silently saving an unusable calendar.
+                _ics_reset()
+                try:
+                    by_date = _parse_ics_all(val)
+                except Exception as e:
+                    _log("import calendar parse failed: %s" % e)
+                    by_date = {}
+                if not by_date:
+                    warn.setText("⚠  Couldn't read any events from that calendar. "
+                                 "Check the path or URL points to a valid .ics with "
+                                 "at least one event.")
+                    warn.setVisible(True)
+                    return
+                cur = mw.addonManager.getConfig(__name__) or {}
+                cur["ics_path"] = val
+                mw.addonManager.writeConfig(__name__, cur)
+                _ics_reset()
+                d.accept()
+                dlg.close()
+                QTimer.singleShot(0, lambda: _open_today_dialog(0))
+
+            bb.accepted.connect(_try_accept)
+            bb.rejected.connect(d.reject)
+            edit.returnPressed.connect(_try_accept)
+            d.exec()
+
+        btn_import_cal.clicked.connect(_do_import_cal)
+        nav.insertWidget(0, btn_import_cal)
 
     info_lbl = QLabel("")
     v.addWidget(info_lbl)
@@ -1526,7 +1613,16 @@ def build_settings_pages():
         "QPushButton:hover{background-color:#61646b;}")
     today_btn.clicked.connect(lambda: _open_today_dialog())
     g.addWidget(today_btn, 6, 1, 1, 2)
-    g.setRowStretch(7, 1)
+
+    # Link to the step-by-step tutorial on GitHub (tag-map format, calendar,
+    # manual mode, settings). blob/HEAD resolves to the repo's default branch.
+    help_lbl = QLabel(
+        '<a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
+        'load-todays-lectures.md">How to use this — tutorial &amp; tag-map format ↗</a>')
+    help_lbl.setOpenExternalLinks(True)
+    help_lbl.setStyleSheet("color: palette(mid);")
+    g.addWidget(help_lbl, 7, 1, 1, 2)
+    g.setRowStretch(8, 1)
 
     # ---- Pane 2: Behavior ----------------------------------------------------
     beh = QWidget()

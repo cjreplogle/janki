@@ -104,14 +104,16 @@ so nothing is left behind.
   to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
   `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
   (Apply / Remove — one-click reversible).
-- **Schedule sync** (optional) — reads a local `.ics` calendar (URL/file)
-  and a local `.xlsx` lecture→tag map, finds your classes for the day,
-  and adaptively unsuspends relevant tagged cards (AJ/Anking/Hutch decks tested)
+- **Schedule sync / Load today's lectures** (optional) — reads a local `.ics`
+  calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
+  classes for the day, and adaptively unsuspends relevant tagged cards
+  (AJ/Anking/Hutch decks tested). A calendar is optional — without one you pick
+  lectures manually. **→ [How to use it: Load Today's Lectures tutorial](docs/load-todays-lectures.md).**
 
-  *The schedule sync feature expects your own calendar export and tag spreadsheet;
-  set their paths on the Lectures → Sources tab. Nothing is uploaded — the
-  calendar is read locally (a URL source is optional and fetched only if
-  you enter one).*
+  *This feature expects your own calendar export and tag map; set their paths on
+  the Lectures → Sources tab (or just run **Tools → Load today's lectures** and
+  pick a tag map when prompted). Nothing is uploaded — the calendar is read
+  locally (a URL source is optional and fetched only if you enter one).*
 
 ## Suggested Add-Ons
 

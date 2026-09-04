@@ -158,6 +158,15 @@ def _startup():
         except Exception as _we_exc:
             log("web exports: %s" % _we_exc)
 
+        # Native Qt menus (menu bar dropdowns, context menus) aren't webviews, so
+        # the webview @font-face never reached them — on Windows/Linux they kept the
+        # default UI font. Register the bundled Lora with Qt and apply the chosen UI
+        # font to native menus so they match the rest of the chrome.
+        try:
+            css.apply_native_ui_font()
+        except Exception as _nf_exc:
+            log("native ui font: %s" % _nf_exc)
+
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
@@ -376,8 +385,19 @@ def _startup():
                 QTimer.singleShot(delay, glass._reapply_native)
             # reload ALL webviews (toolbar/main/bottom) so each re-injects the
             # transparency CSS — the cold launch can leave some opaque. Kept out of
-            # the first ~1s so it doesn't read as a flicker.
-            QTimer.singleShot(2600, glass._reload_all_webviews)
+            # the first ~1s so it doesn't read as a flicker. SKIP it if the user is
+            # already reviewing by then: reloading mw.web re-renders the current card
+            # and replays its typewriter reveal (a "double-load" of the first card).
+            # The reviewer already injected its glass CSS on render, so it's not
+            # needed there anyway.
+            def _delayed_glass_reload():
+                try:
+                    if getattr(mw, "state", None) == "review":
+                        return
+                except Exception:
+                    pass
+                glass._reload_all_webviews()
+            QTimer.singleShot(2600, _delayed_glass_reload)
             QTimer.singleShot(1000, glass._sync_oled)  # in case we start full-screen
             # Crash-guard: we've reached the add-on, so aqt init + window creation
             # (where the injected glass setup runs) survived. Give the first paint

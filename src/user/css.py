@@ -50,15 +50,83 @@ def ui_font_stack(cfg=None):
 
 
 def lora_face_css():
-    """@font-face for the bundled Lora (regular + italic), served from the add-on
-    via the media server. Included in every webview so 'Lora' resolves anywhere."""
+    """@font-face for the bundled Lora (regular + italic). Included in every webview
+    so 'Lora' resolves anywhere.
+
+    Each face lists TWO sources: the add-on web-export URL (/_addons/…) first, then
+    a copy served from collection.media as a fallback. The /_addons export is NOT
+    reliably reachable on every platform (notably Windows), which left card + chrome
+    text silently falling back off Lora even though the CSS injected fine. The media
+    copy is created on demand (same files the caption HUD uses) and resolves via the
+    webview's media base URL; the browser uses whichever source loads."""
+    # Ensure the media-served copy exists so the fallback url() resolves. Side-effect
+    # only here — we build our own combined src list below.
+    try:
+        from ..integrations import mobilecards as _mc
+        _mc.ensure_lora_media_face()
+    except Exception as _e:
+        log("lora media face: %s" % _e)
     return (
         "@font-face{font-family:'Lora';font-weight:400 700;font-style:normal;"
-        "font-display:swap;src:url('%s/Lora.ttf');}\n"
+        "font-display:swap;src:url('%s/Lora.ttf'), url('_janki_Lora.ttf');}\n"
         "@font-face{font-family:'Lora';font-weight:400 700;font-style:italic;"
-        "font-display:swap;src:url('%s/Lora-Italic.ttf');}\n"
+        "font-display:swap;src:url('%s/Lora-Italic.ttf'), url('_janki_Lora-Italic.ttf');}\n"
         % (_FONTS_URL, _FONTS_URL)
     )
+
+
+# The webview CSS above only reaches Anki's HTML chrome (toolbar/deck browser via
+# @font-face). Native Qt widgets — the menu bar and its dropdowns, right-click
+# context menus — are NOT webviews, so on Windows/Linux they kept the default UI
+# font while everything else was Lora. macOS hides this because its top menu bar
+# is the native OS bar. The two helpers below register the bundled Lora with Qt's
+# font DB (so it resolves without a system install) and apply the chosen UI font
+# to native menus via the app stylesheet.
+_NATIVE_FONT = {"registered": False}
+
+
+def _addon_root_dir():
+    import os
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _register_bundled_fonts():
+    """Load the bundled Lora .ttf into Qt's application font DB so native widgets
+    can render 'Lora' even when it isn't installed system-wide. Runs once."""
+    if _NATIVE_FONT["registered"]:
+        return
+    try:
+        import os
+        from aqt.qt import QFontDatabase
+        fonts = os.path.join(_addon_root_dir(), "assets", "fonts")
+        for fn in ("Lora.ttf", "Lora-Italic.ttf"):
+            p = os.path.join(fonts, fn)
+            if os.path.exists(p):
+                QFontDatabase.addApplicationFont(p)
+        _NATIVE_FONT["registered"] = True
+    except Exception as e:
+        log("register bundled fonts: %s" % e)
+
+
+def apply_native_ui_font(cfg=None):
+    """Apply the chosen UI font to native Qt menus so Windows/Linux dropdowns and
+    context menus match the Lora'd webview chrome. Appends a marked rule to the app
+    stylesheet (stripping any prior one) so it can refresh without stacking and
+    without clobbering Anki's / other add-ons' styles."""
+    try:
+        import re
+        from aqt.qt import QApplication
+        app = mw.app if (mw and hasattr(mw, "app")) else QApplication.instance()
+        if app is None:
+            return
+        _register_bundled_fonts()
+        stack = ui_font_stack(cfg)
+        rule = ("/*janki-ui-font*/ QMenuBar, QMenuBar::item, QMenu, QMenu::item "
+                "{ font-family: %s; }" % stack)
+        cur = re.sub(r"/\*janki-ui-font\*/[^\n]*\n?", "", app.styleSheet() or "")
+        app.setStyleSheet((cur.rstrip() + "\n" + rule + "\n"))
+    except Exception as e:
+        log("apply native ui font: %s" % e)
 
 
 # ---------------------------------------------------------------------------
@@ -1001,9 +1069,10 @@ def _stats_head() -> str:
         # gentle rather than a pop.
         "function build(){\n"
         "  if(document.getElementById('glass-stats')) return;\n"
-        # root wrapper — starts transparent, fades in after layout settles
+        # root wrapper — fully visible from the first paint (no fade-in: a fade
+        # replays on every launch re-render, reading as a flicker)
         "  var wrap=document.createElement('div');wrap.id='glass-stats';\n"
-        "  wrap.style.opacity='0';\n"
+        "  wrap.style.opacity='1';\n"
         # Shared chart area (calendar & plot overlapped, one shown at a time) with a
         # tiny vertical switch pinned to its top-right corner.
         "  var chartc=document.createElement('div');chartc.id='gs-chart';\n"
@@ -1099,40 +1168,29 @@ def _stats_head() -> str:
         "    layer(st,shortage,0);\n"
         "  }\n"
         "  update();\n"
-        # Fold gate — fade each layer (counters, calendar, plot, studied) individually
-        # by its OWN position, so they cascade in one-by-one as each clears the fold
-        # while scrolling (and out in reverse). A layer shows once its bottom has
-        # cleared the fold by FGAP px; below the fold it stays hidden. Opacity only
-        # (no layout change) so it can't jank the scroll.
-        "  var FGAP=24;\n"
-        "  function foldGate(){\n"
-        "    var vh=document.documentElement.clientHeight;\n"
-        "    [chartc,st].forEach(function(el){\n"
-        "      if(!el)return;\n"
-        "      var show=el.getBoundingClientRect().bottom<=vh-FGAP;\n"
-        "      el.style.opacity=show?'1':'0';\n"
-        "      el.style.pointerEvents=show?'':'none';\n"
-        "    });\n"
-        "  }\n"
-        # First layout was instant (no transition). Enable transitions now, then run
-        # the fold gate so only subsequent changes animate.
-        "  requestAnimationFrame(function(){\n"
-        "    [st,chartc].forEach(function(el){ if(el) el.style.transition=TRANS; });\n"
-        "    wrap.style.transition='opacity 0.2s ease-out';\n"
-        "    wrap.style.opacity='1';\n"
-        "    foldGate();\n"
-        "  });\n"
-        # Only re-layout on real window resizes (avoid a ResizeObserver feedback loop);
-        # the fold gate re-runs on resize and scroll.
-        "  window.addEventListener('resize',function(){update();foldGate();});\n"
-        "  window.addEventListener('scroll',foldGate,{passive:true});\n"
+        # Everything stays fully visible from the first paint — no fold-gate opacity
+        # toggling. The gate hid layers below the fold and re-showed them on scroll/
+        # resize; with the window resizing once on launch (geometry restore) that read
+        # as the plot vanishing then re-appearing. Keep only a resize re-layout.
+        "  chartc.style.opacity='1';if(st)st.style.opacity='1';\n"
+        # Repaint hook: the canvases are drawn now (possibly before Lora finished
+        # loading, so the axis label falls back); call this once fonts are ready.
+        "  window._gsRedraw=function(){try{drawHeatmap(hc);drawLine(lc,lc.style.display!=='none');}catch(e){}};\n"
+        "  window.addEventListener('resize',function(){update();});\n"
         "}\n"
-        # Defer past the launch re-render burst so throwaway renders don't draw.
-        # Wait for Lora to load before drawing so the canvas 'Reviews' label renders
-        # in Lora rather than falling back to a system font.
-        "ready(function(){ setTimeout(function(){\n"
-        "  try{ document.fonts.load('10px \"Lora\"').then(build, build); }catch(e){ build(); }\n"
-        "}, 450); });\n"
+        # Draw IMMEDIATELY so the block is part of the FIRST paint of every render,
+        # exactly like the deck list — which is why it no longer flickers. A deferred
+        # draw appeared late and could land on a throwaway launch document (2-3 quick
+        # re-renders), drawing then vanishing when that document was replaced. build()
+        # is guarded per-document, so a re-render just cheaply redraws the same block.
+        # The canvas 'Reviews' label may draw in a fallback font on the very first
+        # frame; repaint it once Lora finishes loading (no layout change, no flicker).
+        "ready(function(){\n"
+        "  build();\n"
+        "  try{ document.fonts.load('10px \"Lora\"').then(function(){\n"
+        "    if(window._gsRedraw) window._gsRedraw();\n"
+        "  }); }catch(e){}\n"
+        "});\n"
         "})();\n"
     )
 
@@ -1150,7 +1208,10 @@ def _stats_head() -> str:
         "#gs-chart #gs-line{transform:translateX(calc(-50% - 15px));}\n"
         "#gs-toggle{position:absolute;top:-2px;right:-12px;z-index:2;"
         "display:flex;flex-direction:column;gap:2px;padding:2px;border-radius:1px;"
-        "background:rgba(0,0,0,0.20);}\n"
+        # No container fill — the semi-opaque black square blends into the glass on
+        # macOS but showed as a dark box on Windows. The active button keeps its own
+        # .gs-tbtn.on highlight, so the toggle state is still clear.
+        "background:transparent;}\n"
         ".gs-tbtn{padding:3px;border-radius:1px;line-height:0;"
         "display:flex;align-items:center;justify-content:center;"
         "border:none;background:transparent;color:rgba(255,255,255,0.45);"
@@ -1183,8 +1244,9 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # Typewriter reveal on the reviewer card (independent of the glass theme).
         if isinstance(context, Reviewer) and _cfg().get("typewriter", True):
             web_content.head += "\n" + _typewriter_head(_cfg())
-        # Review history charts on the deck browser.
-        if isinstance(context, DeckBrowser):
+        # Review history charts (calendar heatmap + reviews plot) on the deck
+        # browser home screen. Optional — hidden via Settings → General.
+        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", True):
             web_content.head += "\n" + _stats_head()
         if GLASS:
             QTimer.singleShot(150, glass._clear_existing_webviews)
