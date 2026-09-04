@@ -9,11 +9,14 @@ standalone `load-todays-lectures.ankiaddon`).
 
 ---
 
-## 1. Make a tag map
+## 1. Make/download a tag map
 
-A **tag map** says which tag(s) belong to each lecture. Easiest form is a `.txt`
-file: separate lectures with a line of `====`, put the lecture name between two
-rules, then list its tags (lines starting with `#`, `tag:`, or `deck:`).
+A **tag map** says which tag(s) belong to each lecture. This can be read as a 
+`.txt`, `.json`, and `.xlsx`. Easiest form to make is a `.txt` and file: 
+separate lectures with a line of `====`, put the lecture name between two
+rules, then list its tags (lines starting with `#`, `tag:`, or `deck:`). 
+AnKing (`#AK…`) tags match on their **last segment** (the concept), so they 
+keep working across deck versions.
 
 ```text
 ========================================
@@ -22,10 +25,6 @@ Cardiac Cycle & Heart Sounds
 #AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds
 tag:AJ_UCCOM_keep::Cardiology::CardiacCycle
 ```
-
-AnKing (`#AK…`) tags match on their **last segment** (the concept), so they keep
-working across deck versions. `.json` and `.xlsx` maps also work — see the format
-notes at the bottom.
 
 <!-- ![A tag map in a text editor](images/tag-map.png) -->
 
@@ -77,17 +76,9 @@ matches only** checkbox are explained under Settings.
 
 ![Settings → Lectures: Sources](images/settings.png)
 
----
-
-## Troubleshooting
-
-- **"Couldn't load any lectures."** — check the `.txt` `====`/tag lines, or that
-  the `.json` is valid.
-- **Wrong match.** — fix with the row's dropdown, or raise **Fuzzy match cutoff**.
-- **Nothing on launch.** — auto-run needs a calendar and fires once/day; run it by
-  hand from the menu anytime.
-
-Details are logged to `janki-lectures.log` in the add-on folder.
+**Tools → Janki: Settings… → Behavior** (standalone: **… → Settings…**).
+- Lots of other controls to the search algorithm parameters here. Avoid touching
+  unless you know what you are doing.
 
 ---
 
