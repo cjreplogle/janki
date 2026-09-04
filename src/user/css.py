@@ -113,6 +113,13 @@ def apply_native_ui_font(cfg=None):
     context menus match the Lora'd webview chrome. Appends a marked rule to the app
     stylesheet (stripping any prior one) so it can refresh without stacking and
     without clobbering Anki's / other add-ons' styles."""
+    # On Windows the native-widget font override only lands on a few controls
+    # (e.g. file-dialog combo text) and leaves the rest mismatched, which looks
+    # worse than not touching it — so skip native UI fonts there entirely. The
+    # webview chrome/cards still get Lora via CSS.
+    import sys
+    if sys.platform.startswith("win"):
+        return
     try:
         import re
         from aqt.qt import QApplication

@@ -23,7 +23,8 @@ A **tag map** tells the tool *"for lecture X, unsuspend the cards with these
 tags."* It's a file you make once and update as your course gives you new tags.
 It can be either:
 
-- a plain-text **`.txt`** file (easiest — see below), or
+- a plain-text **`.txt`** file (easiest — see below),
+- a **`.json`** file (if you'd rather script it — see below), or
 - an **`.xlsx`** spreadsheet (if your school hands one out in that shape).
 
 A **calendar** (`.ics`) is *optional*:
@@ -66,13 +67,46 @@ Notes:
 > Tip: you don't have to be exhaustive. Start with a few lectures, run the tool,
 > and add more as you go.
 
+### `.json` tag map format
+
+Same idea as `.txt`, but structured — handy if you generate the map from a
+script. Two shapes are accepted.
+
+Object (lecture name → list of tag lines; a single string works too):
+
+```json
+{
+  "Cardiac Cycle & Heart Sounds": [
+    "#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds",
+    "tag:AJ_UCCOM_keep::Cardiology::CardiacCycle"
+  ],
+  "Intro to ECGs": "#AK_Step1_v12::#Physeo::Cardiology::ECG_Basics"
+}
+```
+
+List of objects (`lecture`/`title` also work for `name`; `tag`/`searches` for
+`tags`):
+
+```json
+[
+  {"name": "Cardiac Cycle & Heart Sounds",
+   "tags": ["#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds"]},
+  {"name": "Intro to ECGs",
+   "tags": ["#AK_Step1_v12::#Physeo::Cardiology::ECG_Basics"]}
+]
+```
+
+The tag lines use exactly the same syntax and matching rules as the `.txt`
+format above.
+
 ---
 
 ## First run
 
 1. In Anki, go to **Tools → Load today's lectures**.
-2. The first time, if no tag map is set yet, a **file picker opens** — choose your
-   `.txt` or `.xlsx` tag map. It's saved for next time.
+2. The first time, if no tag map is set yet, a short intro appears; click
+   **Choose file…** and pick your `.txt`, `.json`, or `.xlsx` tag map. It's saved
+   for next time.
 3. The **Lectures** window opens.
 
 That's it. If you picked a file that has no readable lectures, the tool tells you
@@ -111,7 +145,13 @@ Open **Tools → Janki: Settings… → Lectures** (full add-on), or, in the sta
 build, **Tools → Load today's lectures: Settings…**. Two panes:
 
 **Sources**
-- **Tag map** — the `.xlsx`/`.txt` file above.
+- **Base file** — the primary `.xlsx`/`.txt`/`.json` tag map above.
+- **`.txt/.json`** — add any number of additional `.txt`/`.json` tag lists on top
+  of the base with **Add file…** / **Remove**. They're *merged* into the base: a
+  lecture that appears in more than one file keeps all of its tags combined, and
+  lectures only in an extra file are added. Handy for keeping a school-wide
+  spreadsheet as the base and layering your own hand-written lists over it. (You
+  don't need a base at all — a build made only of `.txt`/`.json` files works too.)
 - **Calendar** — an `.ics` local file *or* an `http(s)` URL (optional).
 
 **Behavior**
@@ -131,7 +171,8 @@ build, **Tools → Load today's lectures: Settings…**. Two panes:
 
 - **"Couldn't load any lectures from that file."** — the tag map didn't parse.
   For `.txt`, check the `====` separators and that tag lines start with `#`,
-  `tag:`, or `deck:`.
+  `tag:`, or `deck:`. For `.json`, make sure it's valid JSON in one of the two
+  shapes above (a linter or `python -m json.tool yourfile.json` will flag typos).
 - **A calendar import shows a yellow ⚠ warning.** — the file/URL couldn't be read
   or had no events. Double-check the path or link.
 - **A lecture matched the wrong thing.** — fix it with the row's **Matched

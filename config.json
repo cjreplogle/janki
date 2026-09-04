@@ -2,6 +2,7 @@
   "enabled": true,
   "ics_path": "",
   "xlsx_path": "",
+  "txt_paths": [],
   "timezone": "America/New_York",
   "auto_on_launch": true,
   "unsuspend_aj": true,

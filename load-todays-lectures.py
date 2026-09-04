@@ -1,5 +1,5 @@
 # Load Today's Lectures — standalone edition of Janki's lecture card loader.
-# Offline: reads a lecture->tag map (.xlsx or .txt) and, if present, an .ics
+# Offline: reads a lecture->tag map (.xlsx, .txt or .json) and, if present, an .ics
 # calendar; unsuspends the day's (or hand-picked) lecture cards.
 # Generated from janki/src/integrations/lectures.py — keep in sync there.
 
@@ -87,6 +87,7 @@ def _cfg():
     cfg = mw.addonManager.getConfig(__name__) or {}
     cfg.setdefault("ics_path", "")
     cfg.setdefault("xlsx_path", "")
+    cfg.setdefault("txt_paths", [])
     cfg.setdefault("timezone", "America/New_York")
     cfg.setdefault("auto_on_launch", True)
     for suffix, _match, _label in TAG_FAMILIES:
@@ -222,14 +223,22 @@ def parse_ics_today(path, target=None):
 _MAP_CACHE = {"key": None, "val": None}
 
 
-def _get_map(families):
-    """(m, keys, opts) for the enabled families, cached by xlsx mtime + families."""
-    path = _cfg()["xlsx_path"]
+def _src_mtime(path):
     try:
-        mtime = os.path.getmtime(_p(path))
+        return os.path.getmtime(_p(path))
     except Exception:
-        mtime = 0
-    key = (path, mtime, tuple(families))
+        return 0
+
+
+def _get_map(families):
+    """(m, keys, opts) for the enabled families, cached by every source's mtime
+    (base spreadsheet + each extra .txt) + families."""
+    cfg = _cfg()
+    base = cfg.get("xlsx_path", "")
+    txts = tuple((cfg.get("txt_paths") or []))
+    key = (base, _src_mtime(base),
+           tuple((t, _src_mtime(t)) for t in txts),
+           tuple(families))
     if _MAP_CACHE["key"] != key:
         m = build_lecture_map(families)
         keys = list(m.keys())
@@ -661,8 +670,82 @@ def _build_lecture_map_txt(path, families):
     return m
 
 
-def build_lecture_map(families=None):
-    """norm_lecture_name -> {'display': str, 'searches': [str, ...]} across all sheets.
+def _build_lecture_map_json(path, families):
+    """Parse a JSON tag map into the same structure as the xlsx/txt paths.
+
+    Two shapes are accepted:
+      • an object mapping lecture name -> tag(s):
+            {"Connective Tissue": ["#AK_Step1::…::Connective_Tissue",
+                                   "tag:AJ_UCCOM_keep::…"], …}
+        (a single tag string instead of a list is fine)
+      • a list of objects:
+            [{"name": "Connective Tissue",
+              "tags": ["#AK_Step1::…::Connective_Tissue", …]}, …]
+        ("lecture"/"title" alias "name"; "tag"/"searches" alias "tags").
+
+    Tag lines use the same syntax as the .txt format (AnKing "#AK…::…" paths,
+    "tag:"/"deck:" lines, bare content-source paths).
+    """
+    m = {}
+    try:
+        data = json.loads(_read_source_text(path))
+    except Exception as e:
+        _log("json read failed: %s" % e)
+        return m
+
+    def _as_lines(tags):
+        if isinstance(tags, str):
+            return [tags]
+        if isinstance(tags, (list, tuple)):
+            return [str(t) for t in tags]
+        return []
+
+    def add(name, tags):
+        name = (name or "").strip()
+        lines = _as_lines(tags)
+        if not name or not lines:
+            return
+        searches = _extract_searches("\n".join(lines), families)
+        if not searches:
+            return
+        key = _norm(name)
+        if not key:
+            return
+        entry = m.setdefault(key, {"display": name, "searches": []})
+        for s in searches:
+            if s not in entry["searches"]:
+                entry["searches"].append(s)
+
+    if isinstance(data, dict):
+        for name, tags in data.items():
+            add(name, tags)
+    elif isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("lecture") or item.get("title")
+            tags = item.get("tags")
+            if tags is None:
+                tags = item.get("tag") or item.get("searches")
+            add(name, tags)
+    _log("build_lecture_map(json): %d lectures" % len(m))
+    return m
+
+
+def _merge_map(dst, src):
+    """Union src into dst (per normalized lecture). New lectures are added; ones
+    already present keep their display name and gain any new searches."""
+    for key, e in src.items():
+        entry = dst.setdefault(key, {"display": e["display"], "searches": []})
+        for s in e["searches"]:
+            if s not in entry["searches"]:
+                entry["searches"].append(s)
+    return dst
+
+
+def _build_map_from_source(path, families):
+    """norm_lecture_name -> {'display': str, 'searches': [str, ...]} for a SINGLE
+    source path (.xlsx workbook, .txt list, or URL). Empty/missing → {}.
 
     Each sheet is a course module (SFOM, MSK, …) and is laid out in horizontal
     biweekly blocks placed side by side. Every block carries its own
@@ -677,13 +760,16 @@ def build_lecture_map(families=None):
     """
     if families is None:
         families = _enabled_families()
-    path = (_cfg().get("xlsx_path") or "").strip()
+    path = (path or "").strip()
     # Not configured → empty map (never call zipfile on an empty/missing path).
     if not path:
         return {}
-    # A plain-text tag map (.txt) is parsed differently from an .xlsx workbook.
+    # A plain-text tag map (.txt) / JSON tag map (.json) is parsed differently
+    # from an .xlsx workbook.
     if path.lower().endswith(".txt"):
         return _build_lecture_map_txt(path, families)
+    if path.lower().endswith(".json"):
+        return _build_lecture_map_json(path, families)
     # Guard a missing local file so _load_xlsx never raises FileNotFoundError.
     try:
         if not _is_url(path) and not os.path.exists(_p(path)):
@@ -726,6 +812,25 @@ def build_lecture_map(families=None):
                         entry["searches"].append(s)
         _log("build_lecture_map: sheet %r anchors=%d lectures+=%d"
              % (name, len(anchors), len(m) - n_before))
+    return m
+
+
+def build_lecture_map(families=None):
+    """norm_lecture_name -> {'display': str, 'searches': [str, ...]}.
+
+    The BASE source is `xlsx_path` (an .xlsx workbook, a single .txt list, or a
+    URL). Any additional .txt files in `txt_paths` are then merged on top — union
+    of tags per lecture, new lectures added — so you can keep one spreadsheet as
+    the base and layer extra hand-written .txt lists over it, adding/removing them
+    without touching the base.
+    """
+    if families is None:
+        families = _enabled_families()
+    cfg = _cfg()
+    m = _build_map_from_source(cfg.get("xlsx_path", ""), families)
+    for tp in (cfg.get("txt_paths") or []):
+        if (tp or "").strip():
+            _merge_map(m, _build_map_from_source(tp, families))
     return m
 
 
@@ -914,35 +1019,86 @@ def _day_label(offset):
 _import_dlg_open = False   # guards against stacking/looping the import settings dialog
 
 
+def _pick_tag_map_file(day_offset=0):
+    """Pop the OS file picker for the lecture→tag map, save the chosen path to
+    config, then open the lecture window. Returns True if a valid map was loaded."""
+    from aqt.qt import QFileDialog
+    start = os.path.dirname(_p(_cfg().get("xlsx_path", ""))) or ""
+    fn, _f = QFileDialog.getOpenFileName(
+        mw, "Choose your lecture → tag map (.xlsx, .txt or .json)", start,
+        "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
+    if not fn:
+        return False
+    cur = mw.addonManager.getConfig(__name__) or {}
+    cur["xlsx_path"] = fn
+    mw.addonManager.writeConfig(__name__, cur)
+    _MAP_CACHE["key"] = None            # force a rebuild with the new path
+    m2, _k2, _o2 = _get_map(_enabled_families())
+    if m2:
+        QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+        return True
+    showInfo("Couldn't load any lectures from that file.\n\n"
+             "Make sure it's a valid .xlsx spreadsheet, .txt or .json tag map.",
+             title="Janki Lectures")
+    return False
+
+
 def _prompt_and_load_tag_map(day_offset=0):
-    """Pop a file picker for the lecture→tag map, save the chosen path to config,
-    then open the lecture window. Used both on a fresh install (no map set yet) and
-    when a configured map yields nothing. Guarded against re-entry / stacking."""
+    """Show a short intro explaining what a lecture→tag map is, with a
+    'Choose file…' button that opens the OS file picker. Used both on a fresh
+    install (no map set yet) and when a configured map yields nothing. Guarded
+    against re-entry / stacking."""
     global _import_dlg_open
     if _import_dlg_open:
         return
     _import_dlg_open = True
     try:
-        from aqt.qt import QFileDialog
-        start = os.path.dirname(_p(_cfg().get("xlsx_path", ""))) or ""
-        fn, _f = QFileDialog.getOpenFileName(
-            mw, "Choose your lecture → tag map (.xlsx or .txt)", start,
-            "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
-        if not fn:
-            return
-        cur = mw.addonManager.getConfig(__name__) or {}
-        cur["xlsx_path"] = fn
-        mw.addonManager.writeConfig(__name__, cur)
-        _MAP_CACHE["key"] = None            # force a rebuild with the new path
-        m2, _k2, _o2 = _get_map(_enabled_families())
-        if m2:
-            QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
-        else:
-            showInfo("Couldn't load any lectures from that file.\n\n"
-                     "Make sure it's a valid .xlsx spreadsheet or .txt tag map.",
-                     title="Janki Lectures")
+        from aqt.qt import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, Qt as _Qt,
+        )
+        d = QDialog(mw)
+        d.setWindowTitle("Janki — Load today's lectures")
+        lay = QVBoxLayout(d)
+
+        title = QLabel("Set up your lecture → tag map")
+        _tf = title.font()
+        _tf.setBold(True)
+        _tf.setPointSize(_tf.pointSize() + 2)
+        title.setFont(_tf)
+        lay.addWidget(title)
+
+        body = QLabel(
+            "To unsuspend today's cards, Janki needs a <b>lecture&nbsp;→&nbsp;tag "
+            "map</b>: a small file that says which Anki tag(s) belong to each "
+            "lecture.<br><br>"
+            "It can be an <b>.xlsx</b> spreadsheet (lecture names in one column, "
+            "tags in the next), a plain <b>.txt</b> file, or a <b>.json</b> file. "
+            "Nothing leaves your computer — the file is only read locally.<br><br>"
+            'See the <a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
+            'load-todays-lectures.md">quick tutorial &amp; format guide ↗</a> for '
+            "an example."
+        )
+        body.setWordWrap(True)
+        body.setOpenExternalLinks(True)
+        body.setTextInteractionFlags(_Qt.TextInteractionFlag.TextBrowserInteraction)
+        body.setMinimumWidth(420)
+        lay.addWidget(body)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(d.reject)
+        row.addWidget(cancel_btn)
+        choose_btn = QPushButton("Choose file…")
+        choose_btn.setDefault(True)
+        choose_btn.clicked.connect(d.accept)
+        row.addWidget(choose_btn)
+        lay.addLayout(row)
+
+        if d.exec():
+            _pick_tag_map_file(day_offset)
     except Exception as e:
-        _log("tag-map pick failed: %s" % e)
+        _log("tag-map prompt failed: %s" % e)
     finally:
         _import_dlg_open = False
 
@@ -1552,7 +1708,7 @@ def build_settings_pages():
     close, so lecture settings live in the same window as everything else."""
     from aqt.qt import (
         QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QDoubleSpinBox,
-        QFileDialog, QWidget,
+        QFileDialog, QWidget, QListWidget, QVBoxLayout,
     )
     cfg = _cfg()
 
@@ -1561,22 +1717,61 @@ def build_settings_pages():
     g = QGridLayout(src)
     g.setColumnStretch(1, 1)
 
-    g.addWidget(QLabel("<b>Tag map</b> (.xlsx spreadsheet or .txt lecture → tag list)"), 0, 0, 1, 3)
+    g.addWidget(QLabel("<b>Tag map</b> (.xlsx spreadsheet, .txt or .json lecture → tag list)"), 0, 0, 1, 3)
     xlsx_edit = QLineEdit(cfg.get("xlsx_path", ""))
-    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx  or  …_Tags_by_Lecture.txt")
+    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx  ·  …_Tags_by_Lecture.txt  ·  tags.json")
     xlsx_btn = QPushButton("Browse…")
 
     def _pick_xlsx():
         fn, _f = QFileDialog.getOpenFileName(
             src, "Choose tag map", os.path.dirname(_p(xlsx_edit.text())) or "",
-            "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
+            "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
         if fn:
             xlsx_edit.setText(fn)
 
     xlsx_btn.clicked.connect(_pick_xlsx)
-    g.addWidget(QLabel("File:"), 1, 0)
+    g.addWidget(QLabel("Base file:"), 1, 0)
     g.addWidget(xlsx_edit, 1, 1)
     g.addWidget(xlsx_btn, 1, 2)
+
+    # Extra .txt/.json tag lists, merged ON TOP of the base file (union of tags
+    # per lecture). Add/remove as many as you like without touching the base.
+    txt_lbl = QLabel(".txt/.json:")
+    g.addWidget(txt_lbl, 2, 0)
+    txt_list = QListWidget()
+    txt_list.setMaximumHeight(90)
+    txt_list.setToolTip("Additional .txt/.json tag lists merged on top of the base file.")
+    for _tp in (cfg.get("txt_paths") or []):
+        if (_tp or "").strip():
+            txt_list.addItem(_tp)
+    g.addWidget(txt_list, 2, 1)
+
+    txt_btns = QWidget()
+    _tbl = QVBoxLayout(txt_btns)
+    _tbl.setContentsMargins(0, 0, 0, 0)
+    add_txt_btn = QPushButton("Add file…")
+    rm_txt_btn = QPushButton("Remove")
+
+    def _add_txt():
+        fns, _f = QFileDialog.getOpenFileNames(
+            src, "Choose .txt/.json tag list(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
+            "Text/JSON tag maps (*.txt *.json);;All files (*)")
+        existing = {txt_list.item(i).text() for i in range(txt_list.count())}
+        for fn in fns:
+            if fn and fn not in existing:
+                txt_list.addItem(fn)
+                existing.add(fn)
+
+    def _rm_txt():
+        for it in txt_list.selectedItems():
+            txt_list.takeItem(txt_list.row(it))
+
+    add_txt_btn.clicked.connect(_add_txt)
+    rm_txt_btn.clicked.connect(_rm_txt)
+    _tbl.addWidget(add_txt_btn)
+    _tbl.addWidget(rm_txt_btn)
+    _tbl.addStretch(1)
+    g.addWidget(txt_btns, 2, 2)
 
     g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 3, 0, 1, 3)
     ics_edit = QLineEdit(cfg.get("ics_path", ""))
@@ -1684,6 +1879,9 @@ def build_settings_pages():
         # clobber changes the host (anki-glass) wrote live during this same dialog.
         cur = mw.addonManager.getConfig(__name__) or {}
         cur["xlsx_path"] = xlsx_edit.text().strip()
+        cur["txt_paths"] = [txt_list.item(i).text().strip()
+                            for i in range(txt_list.count())
+                            if txt_list.item(i).text().strip()]
         cur["ics_path"] = ics_edit.text().strip()
         cur["auto_on_launch"] = auto_cb.isChecked()
         for suffix, cb in fam_cbs.items():
@@ -1734,7 +1932,9 @@ def _paths_ready() -> bool:
     install the path is empty, so guard on this so the feature stays dormant until
     it's actually configured."""
     c = _cfg()
-    return bool((c.get("xlsx_path") or "").strip())
+    if (c.get("xlsx_path") or "").strip():
+        return True
+    return any((t or "").strip() for t in (c.get("txt_paths") or []))
 
 
 def run_today(interactive=True, auto=False):
