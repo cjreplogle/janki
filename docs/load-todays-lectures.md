@@ -20,10 +20,11 @@ keep working across deck versions.
 
 ```text
 ========================================
-Cardiac Cycle & Heart Sounds
+<lecture_name>
 ========================================
-#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds
-tag:AJ_UCCOM_keep::Cardiology::CardiacCycle
+<lecture_tag1>
+<lecture_tag2>
+<lecture_tag3>
 ```
 
 <!-- ![A tag map in a text editor](images/tag-map.png) -->
@@ -88,7 +89,7 @@ Object (lecture → tag(s)) or a list of `{name, tags}` objects — same tag syn
 as `.txt`:
 
 ```json
-{ "Cardiac Cycle": ["#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds"] }
+{ "<lecture>": ["<tag>"] }
 ```
 
 *Your schedule and collection stay on your machine; the network is only touched
