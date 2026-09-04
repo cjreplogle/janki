@@ -15,7 +15,7 @@ A **tag map** says which tag(s) belong to each lecture. This can be read as a
 `.txt`, `.json`, and `.xlsx`. Easiest form to make is a `.txt` and file: 
 separate lectures with a line of `====`, put the lecture name between two
 rules, then list its tags (lines starting with `#`, `tag:`, or `deck:`). 
-AnKing (`#AK…`) tags match on their **last segment** (the concept), so they 
+`#AK…` tags match on their **last segment** (the concept), so they 
 keep working across deck versions.
 
 ```text
@@ -72,7 +72,7 @@ matches only** checkbox are explained under Settings.
 - **Run automatically on launch** — once/day, silently loads today (needs a
   calendar).
 - **Exact matches only** — a checkbox by the amber ⚠ in the Lectures window. By
-  default an AnKing concept with no exact tag in your collection is matched
+  default an `#AK` concept with no exact tag in your collection is matched
   loosely (`tag:*concept*`); tick this to use exact tags only.
 
 ![Settings → Lectures: Sources](images/settings.png)

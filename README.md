@@ -106,7 +106,7 @@ so nothing is left behind.
 - **Schedule sync / [Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards
-  (AJ/Anking/Hutch decks tested). A calendar is optional — without one you pick
+  (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
   lectures manually. **→ [How to use it: Load Today's Lectures tutorial](docs/load-todays-lectures.md).**
 
   *This feature expects your own calendar export and tag map; set their paths on
@@ -138,4 +138,11 @@ Licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LIC
 Janki extends [Anki](https://github.com/ankitects/anki), which is also AGPL-3.0; the
 self-heal patches Anki's own files locally at runtime and does not redistribute
 Anki's source.
+
+Janki is an independent, unofficial project. It is **not affiliated with, endorsed
+by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
+"AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
+used here only nominatively — to describe compatibility with those products. No
+AnKing or AMBOSS content is bundled or redistributed; the add-on only operates on
+your own local collection.
 

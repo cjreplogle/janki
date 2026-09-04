@@ -55,7 +55,7 @@ _lectures_dlg = None
 # "#AK" also catches "#AK_Step1_v12", "hUtChCOM" catches its "deck:" form.
 TAG_FAMILIES = [
     ("aj",           "AJ_UCCOM_keep", "AJ_UCCOM_keep"),
-    ("ak",           "#AK",           "#AK (AnKing)"),
+    ("ak",           "#AK",           "#AK"),
     ("huc",          "hUtChCOM",      "hUtChCOM"),
     ("manki",        "Manki",         "Manki"),
     ("firstaid",     "FirstAid",      "FirstAid"),
@@ -1310,7 +1310,7 @@ def _open_today_dialog(day_offset=0, auto=False):
     exact_cb = QCheckBox("Exact matches only")
     exact_cb.setChecked(bool(cfg.get("ak_exact_only", False)))
     exact_cb.setToolTip(
-        "Skip AnKing concept tags that have no exact match in this collection "
+        "Skip #AK concept tags that have no exact match in this collection "
         "(no loose tag:*concept* matching). Fewer false positives, but a "
         "mismatched deck may then unsuspend nothing.")
     warn_row.addWidget(warn_lbl, 1)
@@ -1325,7 +1325,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             shown = ", ".join(ex[:12])
             more = ("  (+%d more)" % (len(ex) - 12)) if len(ex) > 12 else ""
             warn_lbl.setText(
-                "⚠ %d AnKing concept tag(s) had no exact match in this collection, "
+                "⚠ %d #AK concept tag(s) had no exact match in this collection, "
                 "so they're matched loosely by name (<code>tag:*concept*</code>) — "
                 "double-check these unsuspend the right cards: %s%s"
                 % (len(ex), shown, more))
@@ -1353,7 +1353,7 @@ def _open_today_dialog(day_offset=0, auto=False):
     # default. Unchecking a source excludes its tags from the counts AND the apply,
     # so you can pull, say, only AnKing cards for a lecture. Counts/apply read
     # _selected_families(); toggling recounts live.
-    _FAM_SHORT_UI = {"ak": "AnKing", "aj": "AJ", "huc": "hUtChCOM"}
+    _FAM_SHORT_UI = {"ak": "#AK", "aj": "AJ", "huc": "hUtChCOM"}
     # Families that ACTUALLY appear in the loaded tag map (so we only offer AJ if
     # there are AJ tags, etc.). AnKing fragments lose their marker in the
     # leaf→exact-tags resolution, so anything not AJ/hUtChCOM is AnKing.
@@ -1447,7 +1447,7 @@ def _open_today_dialog(day_offset=0, auto=False):
           "closed": False}
     dlg.finished.connect(lambda _r: st.__setitem__("closed", True))
 
-    _FAM_SHORT = {"ak": "AnKing", "aj": "AJ", "huc": "hUtChCOM"}
+    _FAM_SHORT = {"ak": "#AK", "aj": "AJ", "huc": "hUtChCOM"}
 
     def _family_of(frag):
         # AJ / hUtChCOM fragments always carry their family's tag path verbatim.
@@ -1505,7 +1505,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             return "AJ · %s" % _last_seg(s)
         if "hUtChCOM" in s:
             return "hUtChCOM · %s" % _last_seg(s)
-        return "AnKing · %s" % _last_seg(s)
+        return "#AK · %s" % _last_seg(s)
 
     def _resolve_event(ev):
         """Resolve a calendar event title to a lecture key (nk, is_fuzzy) via the
