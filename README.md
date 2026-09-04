@@ -14,13 +14,12 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 Runs as an Anki plugin on **normal, stock Anki** — no custom build or separate app.
 There are two builds on the [Releases](../../releases) page — pick one:
 
-- **`janki.ankiaddon` (Glass)** — the full frosted-glass experience. Adds a small,
+- **`janki.ankiaddon`** — the full frosted-glass experience. Adds a small,
   self-healing, reversible **patch layer** to Anki that enables the transparency
   (details below). I use this.
-- **`janki-safe.ankiaddon` (Safe / no-glass)** — **never touches Anki's files.**
-  Everything except the window transparency + OLED. Best if you're on a
-  managed device, on Windows, or just do not want the portions of this that
-  directly modify Anki's code.
+- **`load-todays-lectures.ankiaddon`** — a bare-bones version of the add-on that
+  simply has the lecture import functionality. Designed if you don't care about any of
+  the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
