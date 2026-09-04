@@ -909,6 +909,39 @@ def _day_label(offset):
 _import_dlg_open = False   # guards against stacking/looping the import settings dialog
 
 
+def _prompt_and_load_tag_map(day_offset=0):
+    """Pop a file picker for the lecture→tag map, save the chosen path to config,
+    then open the lecture window. Used both on a fresh install (no map set yet) and
+    when a configured map yields nothing. Guarded against re-entry / stacking."""
+    global _import_dlg_open
+    if _import_dlg_open:
+        return
+    _import_dlg_open = True
+    try:
+        from aqt.qt import QFileDialog
+        start = os.path.dirname(_p(_cfg().get("xlsx_path", ""))) or ""
+        fn, _f = QFileDialog.getOpenFileName(
+            mw, "Choose your lecture → tag map (.xlsx or .txt)", start,
+            "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
+        if not fn:
+            return
+        cur = mw.addonManager.getConfig(__name__) or {}
+        cur["xlsx_path"] = fn
+        mw.addonManager.writeConfig(__name__, cur)
+        _MAP_CACHE["key"] = None            # force a rebuild with the new path
+        m2, _k2, _o2 = _get_map(_enabled_families())
+        if m2:
+            QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+        else:
+            showInfo("Couldn't load any lectures from that file.\n\n"
+                     "Make sure it's a valid .xlsx spreadsheet or .txt tag map.",
+                     title="Janki Lectures")
+    except Exception as e:
+        _log("tag-map pick failed: %s" % e)
+    finally:
+        _import_dlg_open = False
+
+
 def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -927,40 +960,13 @@ def _open_today_dialog(day_offset=0, auto=False):
     _ak_index_reset()                  # …and rebuild the AnKing tag index (once)
     m, keys, opts = _get_map(families)  # cached by xlsx mtime + families
     if not m:
-        global _import_dlg_open
-        # Nothing to load (no tag map set, or the file is missing/empty). On
-        # auto-launch just notify (never prompt — could loop on relaunch). On a
-        # MANUAL open, pop a file picker to choose the tag map right away, save it,
-        # and load it. Guarded against re-entry.
+        # Nothing to load (configured map is missing/empty). Auto-launch just
+        # notifies (never prompt → no loop); a manual open offers the file picker.
         if auto:
-            tooltip("Janki Lectures — no tag map set. Tools → Load today's "
-                    "lectures to choose one.", period=4000)
+            tooltip("Janki Lectures — no lectures found. Tools → Load today's "
+                    "lectures to choose a tag map.", period=4000)
             return
-        if _import_dlg_open:
-            return
-        _import_dlg_open = True
-        try:
-            from aqt.qt import QFileDialog
-            start = os.path.dirname(_p(_cfg().get("xlsx_path", ""))) or ""
-            fn, _f = QFileDialog.getOpenFileName(
-                mw, "Choose your lecture → tag map (.xlsx or .txt)", start,
-                "Tag maps (*.xlsx *.xlsm *.txt);;All files (*)")
-            if fn:
-                cur = mw.addonManager.getConfig(__name__) or {}
-                cur["xlsx_path"] = fn
-                mw.addonManager.writeConfig(__name__, cur)
-                _MAP_CACHE["key"] = None            # force a rebuild with the new path
-                m2, _k2, _o2 = _get_map(_enabled_families())
-                if m2:
-                    QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
-                else:
-                    showInfo("Couldn't load any lectures from that file.\n\n"
-                             "Make sure it's a valid .xlsx spreadsheet or .txt tag "
-                             "map.", title="Janki Lectures")
-        except Exception as e:
-            _log("tag-map pick failed: %s" % e)
-        finally:
-            _import_dlg_open = False
+        _prompt_and_load_tag_map(day_offset)
         return
     aliases = _load_aliases()
 
@@ -1632,15 +1638,10 @@ def _paths_ready() -> bool:
 
 def run_today(interactive=True, auto=False):
     if not _paths_ready():
-        if interactive:
-            showInfo(
-                "Janki Lectures isn't set up yet.\n\n"
-                "Add your lecture→tag map (.xlsx or .txt) under Tools → Janki: "
-                "Settings… → Lectures → Sources, then try again. A calendar (.ics) "
-                "is optional — with one, lectures align to the day; without one, "
-                "you pick lectures to unsuspend manually.",
-                title="Janki Lectures",
-            )
+        # No tag map configured yet. A manual open pops a file picker to choose one
+        # right away (then loads it); auto-launch stays silent (no dialog on boot).
+        if interactive and not auto:
+            _prompt_and_load_tag_map()
         return
     try:
         if interactive:
