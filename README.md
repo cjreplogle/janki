@@ -123,7 +123,7 @@ These extra installs help tie together some theming:
 
 
 ## Support
-*If I sent this to you for testing. Just text me if there are any issues/features
+*If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features
 you think will be helpful to other people!* 
 
 FYI - this is very vibe coded and designed around my personal habits. This is not on AnkiWeb because the patcher is not able to be used on AnkiWeb plugins.
