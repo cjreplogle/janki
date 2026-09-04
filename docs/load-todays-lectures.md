@@ -1,44 +1,19 @@
-# Load Today's Lectures — a quick tutorial
+# Load Today's Lectures
 
 *Unsuspend the Anki cards for today's lectures, offline, in one click.*
 
-This tool matches your class schedule to your Anki cards and **unsuspends** the
-cards tied to the lectures you have today — so the deck you actually study only
-contains what you've been taught. Everything runs **locally**: it never uploads
-your collection, and a calendar is optional.
-
-It ships two ways:
-
-- Built into the full **Janki** add-on (`janki.ankiaddon`).
-- As a tiny **standalone** add-on (`load-todays-lectures.ankiaddon`) if you only
-  want this feature and none of Janki's visual/glass stuff.
-
-Both add a **Tools → Load today's lectures** menu item and work identically.
+It matches your schedule to your cards and **unsuspends** the ones for today's
+lectures. Everything runs **locally** — nothing is uploaded, and a calendar is
+optional. Adds **Tools → Load today's lectures** (in the full Janki add-on or the
+standalone `load-todays-lectures.ankiaddon`).
 
 ---
 
-## The one thing you need: a *tag map*
+## 1. Make a tag map
 
-A **tag map** tells the tool *"for lecture X, unsuspend the cards with these
-tags."* It's a file you make once and update as your course gives you new tags.
-It can be either:
-
-- a plain-text **`.txt`** file (easiest — see below),
-- a **`.json`** file (if you'd rather script it — see below), or
-- an **`.xlsx`** spreadsheet (if your school hands one out in that shape).
-
-A **calendar** (`.ics`) is *optional*:
-
-- **With** a calendar → the tool figures out which lectures are *today* and
-  pre-selects them.
-- **Without** a calendar → it lists *every* lecture in your tag map and you tick
-  the ones you want ("manual mode").
-
-### `.txt` tag map format
-
-Separate each lecture with a line of equals signs (`====`, four or more). Put the
-**lecture name** between two such lines, then list its **tags**, one per line.
-Tag lines start with `#`, `tag:`, or `deck:`. Blank lines are ignored.
+A **tag map** says which tag(s) belong to each lecture. Easiest form is a `.txt`
+file: separate lectures with a line of `====`, put the lecture name between two
+rules, then list its tags (lines starting with `#`, `tag:`, or `deck:`).
 
 ```text
 ========================================
@@ -46,145 +21,84 @@ Cardiac Cycle & Heart Sounds
 ========================================
 #AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds
 tag:AJ_UCCOM_keep::Cardiology::CardiacCycle
-
-========================================
-Intro to ECGs
-========================================
-#AK_Step1_v12::#Physeo::Cardiology::ECG_Basics
-tag:hUtChCOM::Cardio::ECG
 ```
 
-Notes:
+AnKing (`#AK…`) tags match on their **last segment** (the concept), so they keep
+working across deck versions. `.json` and `.xlsx` maps also work — see the format
+notes at the bottom.
 
-- **AnKing tags** (anything with `#AK…` or a `::` path in the AnKing column) are
-  matched by their **last segment** (the concept, e.g. `ECG_Basics`), so they
-  keep working even when AnKing renames the parent path between deck versions.
-- **AJ / hUtChCOM tags** are matched only if the line contains that family's
-  marker (`AJ_UCCOM_keep`, `hUtChCOM`), so turning a source off drops its tags
-  everywhere.
-- Trailing human notes in parentheses — `… (see note)` — are ignored.
-
-> Tip: you don't have to be exhaustive. Start with a few lectures, run the tool,
-> and add more as you go.
-
-### `.json` tag map format
-
-Same idea as `.txt`, but structured — handy if you generate the map from a
-script. Two shapes are accepted.
-
-Object (lecture name → list of tag lines; a single string works too):
-
-```json
-{
-  "Cardiac Cycle & Heart Sounds": [
-    "#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds",
-    "tag:AJ_UCCOM_keep::Cardiology::CardiacCycle"
-  ],
-  "Intro to ECGs": "#AK_Step1_v12::#Physeo::Cardiology::ECG_Basics"
-}
-```
-
-List of objects (`lecture`/`title` also work for `name`; `tag`/`searches` for
-`tags`):
-
-```json
-[
-  {"name": "Cardiac Cycle & Heart Sounds",
-   "tags": ["#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds"]},
-  {"name": "Intro to ECGs",
-   "tags": ["#AK_Step1_v12::#Physeo::Cardiology::ECG_Basics"]}
-]
-```
-
-The tag lines use exactly the same syntax and matching rules as the `.txt`
-format above.
+<!-- ![A tag map in a text editor](images/tag-map.png) -->
 
 ---
 
-## First run
+## 2. First run
 
-1. In Anki, go to **Tools → Load today's lectures**.
-2. The first time, if no tag map is set yet, a short intro appears; click
-   **Choose file…** and pick your `.txt`, `.json`, or `.xlsx` tag map. It's saved
-   for next time.
-3. The **Lectures** window opens.
+**Tools → Load today's lectures** → click **Choose file…** and pick your map.
+It's saved for next time.
 
-That's it. If you picked a file that has no readable lectures, the tool tells you
-so you can fix it.
+![Tools → Load today's lectures](images/menu.png)
+
+![First run — choose your tag map](images/first-run.png)
 
 ---
 
-## Using the Lectures window
+## 3. Pick and apply
 
-**With a calendar** you'll see each of today's calendar events matched to a
-lecture, with the number of currently-suspended cards it would unsuspend. Use
-**◀ Prev day / Today / Next day ▶** to move around; toggle any row's **Use**
-checkbox to include/exclude it; the **Matched lecture** dropdown lets you correct
-a wrong guess.
+The **Lectures** window opens.
 
-**Without a calendar** (manual mode) you'll see the full list of lectures from
-your tag map — just tick the ones you want. There's also a **➕ Import calendar…**
-button at the top: point it at an `.ics` **file or a URL** (e.g. a subscribed
-feed) and, once it verifies the calendar has events, the window reopens in
-day-aligned mode.
+**With a calendar** — today's events are pre-matched; use **◀ Prev / Today /
+Next ▶** to change day, **Use** to include a row, and the **Matched lecture**
+dropdown to fix a wrong guess (`~` = fuzzy auto-guess).
 
-Common controls:
+![Lectures window with a calendar](images/lectures-calendar.png)
 
-- **Unsuspend from:** — when a lecture's cards come from more than one source
-  (AnKing / AJ / hUtChCOM), tick which sources to pull. If there's only one
-  source it's shown as a read-only label.
-- **Apply** — unsuspend the selected cards.
-- **Re-suspend day** — undo: re-suspend the cards for the shown day.
-- **Close** — done.
+**Without a calendar** — every lecture is listed; just tick what you want. Use
+**➕ Import calendar…** (an `.ics` file *or* URL) to switch to day mode.
+
+![Lectures window, manual mode](images/lectures-manual.png)
+
+Also: **+** on a row opens its tags to enable/disable individual ones; **Apply**
+unsuspends; **Re-suspend day** undoes the shown day. The amber ⚠ and the **Exact
+matches only** checkbox are explained under Settings.
 
 ---
 
 ## Settings
 
-Open **Tools → Janki: Settings… → Lectures** (full add-on), or, in the standalone
-build, **Tools → Load today's lectures: Settings…**. Two panes:
+**Tools → Janki: Settings… → Lectures** (standalone: **… → Settings…**).
 
-**Sources**
-- **Base file** — the primary `.xlsx`/`.txt`/`.json` tag map above.
-- **`.txt/.json`** — add any number of additional `.txt`/`.json` tag lists on top
-  of the base with **Add file…** / **Remove**. They're *merged* into the base: a
-  lecture that appears in more than one file keeps all of its tags combined, and
-  lectures only in an extra file are added. Handy for keeping a school-wide
-  spreadsheet as the base and layering your own hand-written lists over it. (You
-  don't need a base at all — a build made only of `.txt`/`.json` files works too.)
-- **Calendar** — an `.ics` local file *or* an `http(s)` URL (optional).
+- **Base file** + extra **`.txt/.json`** lists (merged on top of the base).
+- **Calendar** — optional `.ics` file or URL.
+- **Run automatically on launch** — once/day, silently loads today (needs a
+  calendar).
+- **Exact matches only** — a checkbox by the amber ⚠ in the Lectures window. By
+  default an AnKing concept with no exact tag in your collection is matched
+  loosely (`tag:*concept*`); tick this to use exact tags only.
 
-**Behavior**
-- **Run automatically on launch** — once per day, on the first time you open Anki
-  that day, it silently unsuspends the calendar-matched lectures (needs a
-  calendar; does nothing in manual mode). Manual **Load today's lectures** still
-  works anytime.
-- **Fuzzy match cutoff** — how close a calendar title must be to a tag-map
-  lecture name to count as a match (higher = stricter).
-- **Match coverage** — how much of a title's keywords must line up.
-- **Source toggles** — globally enable/disable whole tag families (AnKing, AJ,
-  hUtChCOM, and others).
+![Settings → Lectures: Sources](images/settings.png)
 
 ---
 
 ## Troubleshooting
 
-- **"Couldn't load any lectures from that file."** — the tag map didn't parse.
-  For `.txt`, check the `====` separators and that tag lines start with `#`,
-  `tag:`, or `deck:`. For `.json`, make sure it's valid JSON in one of the two
-  shapes above (a linter or `python -m json.tool yourfile.json` will flag typos).
-- **A calendar import shows a yellow ⚠ warning.** — the file/URL couldn't be read
-  or had no events. Double-check the path or link.
-- **A lecture matched the wrong thing.** — fix it with the row's **Matched
-  lecture** dropdown, or raise the **Fuzzy match cutoff** in settings.
-- **Nothing happens on launch.** — auto-run needs a calendar *and* only fires once
-  per calendar day. Use **Tools → Load today's lectures** to run it by hand.
+- **"Couldn't load any lectures."** — check the `.txt` `====`/tag lines, or that
+  the `.json` is valid.
+- **Wrong match.** — fix with the row's dropdown, or raise **Fuzzy match cutoff**.
+- **Nothing on launch.** — auto-run needs a calendar and fires once/day; run it by
+  hand from the menu anytime.
 
-Details get logged to `janki-lectures.log` inside the add-on's folder if you need
-to dig in.
+Details are logged to `janki-lectures.log` in the add-on folder.
 
 ---
 
-*Your schedule and collection stay on your machine — this tool reads your files
-locally and only ever touches the network if you give it an `http(s)` calendar
-URL.*
+### `.json` format
+
+Object (lecture → tag(s)) or a list of `{name, tags}` objects — same tag syntax
+as `.txt`:
+
+```json
+{ "Cardiac Cycle": ["#AK_Step1_v12::#B&B::05_Cardiovascular::Heart_Sounds"] }
+```
+
+*Your schedule and collection stay on your machine; the network is only touched
+if you give it an `http(s)` calendar URL.*

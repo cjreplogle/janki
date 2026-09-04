@@ -18,8 +18,8 @@ There are two builds on the [Releases](../../releases) page — pick one:
   self-healing, reversible **patch layer** to Anki that enables the transparency
   (details below). I use this.
 - **`load-todays-lectures.ankiaddon`** — a bare-bones version of the add-on that
-  simply has the lecture import functionality. Designed if you don't care about any of
-  the other features.
+  simply has the [Load today's lectures](docs/load-todays-lectures.md) import
+  functionality. Designed if you don't care about any of the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
@@ -103,7 +103,7 @@ so nothing is left behind.
   to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
   `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
   (Apply / Remove — one-click reversible).
-- **Schedule sync / Load today's lectures** (optional) — reads a local `.ics`
+- **Schedule sync / [Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards
   (AJ/Anking/Hutch decks tested). A calendar is optional — without one you pick

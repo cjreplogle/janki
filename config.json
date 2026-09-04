@@ -9,6 +9,7 @@
   "unsuspend_ak": true,
   "ak_leaf_only": true,
   "ak_leaf_strip_num": true,
+  "ak_exact_only": false,
   "unsuspend_huc": true,
   "unsuspend_manki": false,
   "unsuspend_firstaid": false,

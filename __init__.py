@@ -326,6 +326,9 @@ def _startup():
 
         # Keep coherence HUD in sync with reviewer state changes.
         # _remote_active gates the 8bitdo focus-bypass: on while a card is up.
+        # Last question content hash we FADED underlines for — so a re-render of the
+        # same card shows them instantly instead of re-fading (flicker).
+        _QA_FADE_LAST = {"qh": None}
         if hasattr(gui_hooks, 'reviewer_did_show_question'):
             def _on_show_question(_r):
                 state._remote_active = True
@@ -334,7 +337,19 @@ def _startup():
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 focus._apply_card_zoom()      # re-assert card zoom on the new card
                 amboss._start_amboss_size_watch()   # widen window while previews are up
-                amboss._apply_amboss_underlines()   # show term underlines (all modes)
+                # Show term underlines (all modes). Fade them in on a genuinely new
+                # question, but INSTANTLY when this is a re-render of the same card
+                # (e.g. AMBOSS re-set the content to mark terms) so the underlined
+                # words don't fade a second time (flicker). Dedup on the question's
+                # content hash — a real new card differs; intervening cards reset it.
+                _dup = False
+                try:
+                    _qh = hash(_r.card.question())
+                    _dup = (_qh == _QA_FADE_LAST.get("qh"))
+                    _QA_FADE_LAST["qh"] = _qh
+                except Exception:
+                    pass
+                amboss._apply_amboss_underlines(front=not _dup)
                 if pomodoro._pomo_instance:
                     pomodoro._pomo_instance.enter_review()
             gui_hooks.reviewer_did_show_question.append(_on_show_question)

@@ -705,10 +705,15 @@ def _build_css(cfg, context):
     return "\n".join(parts)
 
 
-def _typewriter_head(cfg) -> str:
+def _typewriter_head(cfg, prev_hash: str = "") -> str:
     """Rapid 'typing out' reveal of card text (anti shape-memory). Reveals text
     nodes char-by-char over a fixed duration, leaving images/formatting/MathJax
-    intact, and re-fires on every card and on Show Answer."""
+    intact, and re-fires on every card and on Show Answer.
+
+    `prev_hash` is the content hash of the LAST card we actually animated (tracked
+    on the Python side across renders). If this render's content hashes to the same
+    value — e.g. AMBOSS re-renders the card to mark terms — we reveal instantly
+    instead of replaying the reveal, no matter how much later that re-render lands."""
     wpm = int(cfg.get("typewriter_wpm", 550))       # reading speed (200–800 typical)
     min_ms = int(cfg.get("typewriter_min_ms", 300))  # floor for short cards
     max_ms = int(cfg.get("typewriter_max_ms", 2600))  # cap for very long cards
@@ -727,7 +732,13 @@ def _typewriter_head(cfg) -> str:
         "<style>#qa{visibility:hidden;}</style>\n"
         "<script>\n"
         "(function(){\n"
+        # Idempotency: if this script is injected twice into the SAME document
+        # (some content-set paths do), the second copy must not spin up its own
+        # observer/animation. A fresh document (reload) resets this, so the card
+        # still animates once per real render.
+        "  if(window.__jkTwLoaded) return; window.__jkTwLoaded=1;\n"
         f"  var WPM={wpm}, MIN_MS={min_ms}, MAX_MS={max_ms}, STATIC={static}, SPEED={speed};\n"
+        f'  var PREV_HASH="{prev_hash}";\n'
         "  function ready(fn){ if(document.readyState!='loading') fn();\n"
         "    else document.addEventListener('DOMContentLoaded', fn); }\n"
         "  ready(function(){\n"
@@ -836,6 +847,17 @@ def _typewriter_head(cfg) -> str:
         "        if(ni<nodes.length) requestAnimationFrame(step); else done(); }\n"
         "      requestAnimationFrame(step); }\n"
         "    var lastSig=null;\n"
+        # Persist the last-animated card signature across webview RELOADS/re-renders.
+        # A plain reload (cold-launch glass reload, mw.reset() after a lecture apply,
+        # etc.) builds a fresh document → a per-document lastSig would reset and the
+        # SAME card would replay its reveal (the 'plays twice on first open' bug).
+        # window.name survives navigation/reload within the same window AND needs no
+        # web-storage permission (Anki's webview may not grant sessionStorage), yet
+        # resets on a fresh launch — so the first card of a session animates once.
+        # Store a short hash, not the card text.
+        "    function jkHash(t){ var h=0,i; for(i=0;i<t.length;i++){ h=((h<<5)-h)+t.charCodeAt(i); h|=0; } return String(h); }\n"
+        "    function getSig(){ try{ var n=String(window.name||''); if(n.indexOf('jkTw:')===0) return n.slice(5); }catch(e){} return lastSig; }\n"
+        "    function setSig(v){ lastSig=v; try{ window.name='jkTw:'+v; }catch(e){} }\n"
         "    // Is this the ANSWER side of a cloze card? Per-render, no cross-render state:\n"
         "    // Anki renders each active .cloze as '[...]' / '[hint]' on the FRONT and the\n"
         "    // real answer text on the BACK. So an active .cloze whose text is NOT bracketed\n"
@@ -850,12 +872,19 @@ def _typewriter_head(cfg) -> str:
         # spaces around block tags (div/p/br/li) with no despacify, which would look
         # like a new card and re-fire the reveal (double animation on the first,
         # slow-to-mark card). Stripping whitespace makes the card identity stable.
-        "      var s=raw.replace(/\\s+/g,'');\n"
-        "      if(s===lastSig){ reveal(); return; }  // already showing this card\n"
-        "      lastSig=s; window.__jkAmbPhr=null; jkAmbHook();\n"
+        "      var s=jkHash(raw.replace(/\\s+/g,''));\n"
+        # PREV_HASH = last card Python actually animated (survives a full re-render/
+        # new document, unlike window.name). getSig() = same-document/reload guard.
+        # Either match → this exact card content already animated → just reveal.
+        "      if(s===PREV_HASH || s===getSig()){ reveal(); return; }\n"
+        "      setSig(s); window.__jkAmbPhr=null; jkAmbHook();\n"
         "      // Cloze reveal → show instantly, no animation. Front of cloze (and basic\n"
         "      // cards) fall through and animate normally.\n"
         "      if(qa.querySelector('.cloze') && isClozeBack()){ reveal(); return; }\n"
+        # Tell Python which card content we're animating, so a later re-render of
+        # the same card (e.g. AMBOSS re-marking) can be injected with it as
+        # PREV_HASH and reveal instantly instead of replaying.
+        "      try{ if(window.pycmd) pycmd('jktwanim:'+s); }catch(e){}\n"
         "      animating=true;\n"
         "      if(observer) observer.disconnect();\n"
         "      typeOut(false, function(){ animating=false;\n"
@@ -871,6 +900,12 @@ def _typewriter_head(cfg) -> str:
         "</script>\n"
     )
 
+
+# The last-animated card content hash is stored on the mw singleton
+# (mw._janki_tw_jh), set by _on_js_message and read by _on_will_set_content — NOT
+# in a module global, because this add-on can run with more than one module
+# instance (confirmed: id(module globals) differs between the two hooks), so a
+# global here isn't shared. mw is the one object both instances agree on.
 
 _stats_last_render: float = 0.0
 
@@ -1250,7 +1285,15 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             web_content.head += "\n" + css
         # Typewriter reveal on the reviewer card (independent of the glass theme).
         if isinstance(context, Reviewer) and _cfg().get("typewriter", True):
-            web_content.head += "\n" + _typewriter_head(_cfg())
+            # A card can be RENDERED more than once (notably AMBOSS re-sets the
+            # content to mark its terms), which replays the reveal. We can't tell
+            # front from back reliably at this point (reviewer.state is often None),
+            # so instead we inject the content hash of the last card we actually
+            # animated (persisted across renders via the JS→Python ping below). If
+            # this render's content hashes to the same value, the JS reveals it
+            # instantly instead of re-typing — regardless of the gap between renders.
+            prev = getattr(mw, "_janki_tw_jh", "") or ""
+            web_content.head += "\n" + _typewriter_head(_cfg(), prev_hash=prev)
         # Review history charts (calendar heatmap + reviews plot) on the deck
         # browser home screen. Optional — hidden via Settings → General.
         if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", True):
@@ -1263,6 +1306,27 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
 
 if hasattr(gui_hooks, "webview_will_set_content"):
     gui_hooks.webview_will_set_content.append(_on_will_set_content)
+
+
+def _on_js_message(handled, message, context):
+    """Catch the typewriter's animation ping: record (on the mw singleton, which
+    every add-on module instance shares — a module global here does NOT) the
+    content hash it just animated, so the NEXT render of the same card (e.g. an
+    AMBOSS re-mark re-render) is injected with it as PREV_HASH and reveals
+    instantly instead of replaying the reveal."""
+    try:
+        if isinstance(message, str) and message.startswith("jktwanim:"):
+            parts = message.split(":", 1)
+            if len(parts) == 2:
+                setattr(mw, "_janki_tw_jh", parts[1])
+            return (True, None)
+    except Exception:
+        pass
+    return handled
+
+
+if hasattr(gui_hooks, "webview_did_receive_js_message"):
+    gui_hooks.webview_did_receive_js_message.append(_on_js_message)
 
 
 # The "Congratulations! You have finished this deck for now." page is loaded via

@@ -89,6 +89,7 @@ def _cfg():
         cfg.setdefault("unsuspend_%s" % suffix, suffix in _DEFAULT_ON)
     cfg.setdefault("fuzzy_cutoff", 0.72)
     cfg.setdefault("match_coverage", 0.6)
+    cfg.setdefault("ak_exact_only", False)
     return cfg
 
 
@@ -438,6 +439,12 @@ def _fuzzy_match(display, key, keys, m, cutoff):
 _AK_TAG_INDEX = {"map": None}
 _AK_PREFIXES = ("#AK_Step1", "#AK_Step2", "#AK_Step3", "#AK_Other")
 
+# Concept leaves that resolved only via the loose `tag:*leaf*` fallback (no exact
+# AnKing tag in THIS collection — e.g. the deck is named/versioned differently on
+# another machine). Filled during build_lecture_map; surfaced as a UI warning so
+# the user can sanity-check those looser matches. {leaf: display_leaf}.
+_AK_LOOSE = {}
+
 
 def _ak_index_reset():
     """Drop the cached AnKing tag index so the next lookup rebuilds it (call on a
@@ -506,9 +513,10 @@ def _ak_leaf_search(leaf, source=None):
     back to the leaf across all sources. Offline (no collection) → loose
     `tag:*leaf*`. Returns None if nothing resolves (caller drops it)."""
     idx = _ak_tag_index()
-    if not idx:
-        return "tag:*%s*" % leaf              # offline: best-effort substring
     key = _leaf_key(leaf)
+    if not idx:
+        _AK_LOOSE[key] = leaf                  # offline → loose (note it)
+        return "tag:*%s*" % key                # best-effort substring
     tags = None
     if source:
         tags = idx["by_src_leaf"].get((_norm_source(source), key))
@@ -516,8 +524,21 @@ def _ak_leaf_search(leaf, source=None):
         # No source (or that source has no such leaf) → any-source leaf match.
         tags = idx["by_leaf"].get(key)
     if not tags:
-        return None
+        # Nothing in THIS collection has this leaf as an exact ::-segment — the
+        # AnKing deck is likely named/versioned differently here. Match by leaf
+        # anywhere in a tag (works across decks) and flag it so the UI can warn.
+        # The map always keeps this loose fragment; 'exact matches only' filters
+        # it out downstream (see _is_loose_search) so the toggle needs no rebuild.
+        _AK_LOOSE[key] = leaf
+        return "tag:*%s*" % key
     return "(" + " OR ".join('"tag:%s"' % t for t in tags) + ")"
+
+
+def _is_loose_search(s):
+    """True for a loose AnKing leaf fragment (tag:*concept*) — the ones produced
+    when no exact tag matched. 'Exact matches only' drops these. AJ/hUtChCOM and
+    resolved AnKing fragments never start with 'tag:*'."""
+    return isinstance(s, str) and s.startswith("tag:*")
 
 
 def _extract_searches(cell, families, ak_column=False):
@@ -821,6 +842,7 @@ def build_lecture_map(families=None):
     """
     if families is None:
         families = _enabled_families()
+    _AK_LOOSE.clear()   # recomputed as this build resolves AnKing leaves
     cfg = _cfg()
     m = _build_map_from_source(cfg.get("xlsx_path", ""), families)
     for tp in (cfg.get("txt_paths") or []):
@@ -859,6 +881,12 @@ def match_today(families=None):
     m = build_lecture_map(families)
     aliases = _load_aliases()
     cutoff = float(_cfg().get("fuzzy_cutoff", 0.72))
+    exact_only = _cfg().get("ak_exact_only", False)
+
+    def _srch(k):
+        ss = m[k]["searches"]
+        return [s for s in ss if not _is_loose_search(s)] if exact_only else ss
+
     keys = list(m.keys())
     matched, unmatched = [], []
     for lec in lectures:
@@ -866,11 +894,11 @@ def match_today(families=None):
         if key in aliases:
             key = _norm(aliases[key])
         if key in m:
-            matched.append((lec, m[key]["display"], m[key]["searches"], False))
+            matched.append((lec, m[key]["display"], _srch(key), False))
             continue
         mk = _fuzzy_match(lec, key, keys, m, cutoff)
         if mk:
-            matched.append((lec, m[mk]["display"], m[mk]["searches"], True))
+            matched.append((lec, m[mk]["display"], _srch(mk), True))
         else:
             unmatched.append(lec)
     return matched, unmatched
@@ -1102,7 +1130,8 @@ def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
         QComboBox, QPushButton, QHeaderView, QAbstractItemView, Qt as _Qt,
-        QStandardItemModel, QStandardItem, QCheckBox,
+        QStandardItemModel, QStandardItem, QCheckBox, QProgressBar,
+        QPropertyAnimation, QEasingCurve, QToolButton,
     )
     cfg = _cfg()
     families = _enabled_families(cfg)
@@ -1126,11 +1155,18 @@ def _open_today_dialog(day_offset=0, auto=False):
         return
     aliases = _load_aliases()
 
-    # Per-(lecture, family) SUSPENDED card-id sets: {(nk, fam_suffix): set(cids)}.
-    # Filled by the background _recount (find_cards is the slow part). Caching id
-    # SETS (not counts) makes row totals, the grand total, the per-deck breakdown,
-    # and source-toggles pure set math — no re-querying. Cleared after an apply.
-    id_cache = {}
+    # Per-FRAGMENT suspended card-id sets: {search_fragment: set(cids)}. Filled by
+    # the background _recount (find_cards is the slow part). Caching per fragment
+    # (not per lecture/family) makes every filter — row totals, the grand total,
+    # the per-deck breakdown, source toggles, 'exact only', and the per-lecture
+    # +tag enable/disable — pure set math over cached sets, so nothing re-queries.
+    # Cleared after an apply (suspended state changed).
+    frag_ids = {}
+
+    # Per-lecture DISABLED fragments (session-only), toggled from each row's +tag
+    # menu: {nk: set(fragment_strings)}. A disabled fragment is dropped from that
+    # lecture's counts and its unsuspend.
+    disabled_frags = {}
 
     # ONE shared combo model (every lecture option) built once and reused by every
     # row's combo, instead of re-inserting hundreds of items into N combos per day.
@@ -1257,6 +1293,56 @@ def _open_today_dialog(day_offset=0, auto=False):
     state_lbl.setWordWrap(True)
     v.addWidget(state_lbl)
 
+    # Heads-up when some AnKing concept tags had no exact match in this collection
+    # and fell back to a loose `tag:*concept*` search (deck named/versioned
+    # differently here). Loose matches can be over-broad, so flag them for review —
+    # with a checkbox right beside the warning to switch to exact-only matching.
+    warn_row = QHBoxLayout()
+    warn_lbl = QLabel("")
+    warn_lbl.setWordWrap(True)
+    warn_lbl.setStyleSheet("color:#e0b000;")   # amber warning
+    warn_lbl.setVisible(False)
+    exact_cb = QCheckBox("Exact matches only")
+    exact_cb.setChecked(bool(cfg.get("ak_exact_only", False)))
+    exact_cb.setToolTip(
+        "Skip AnKing concept tags that have no exact match in this collection "
+        "(no loose tag:*concept* matching). Fewer false positives, but a "
+        "mismatched deck may then unsuspend nothing.")
+    warn_row.addWidget(warn_lbl, 1)
+    warn_row.addWidget(exact_cb, 0, _Qt.AlignmentFlag.AlignTop | _Qt.AlignmentFlag.AlignRight)
+    v.addLayout(warn_row)
+
+    def _update_warn():
+        # The loose warning only applies when loose matches are actually in use —
+        # i.e. not in exact-only mode. (The checkbox itself stays visible.)
+        if _AK_LOOSE and not exact_cb.isChecked():
+            ex = sorted(_AK_LOOSE.values(), key=str.lower)
+            shown = ", ".join(ex[:12])
+            more = ("  (+%d more)" % (len(ex) - 12)) if len(ex) > 12 else ""
+            warn_lbl.setText(
+                "⚠ %d AnKing concept tag(s) had no exact match in this collection, "
+                "so they're matched loosely by name (<code>tag:*concept*</code>) — "
+                "double-check these unsuspend the right cards: %s%s"
+                % (len(ex), shown, more))
+            warn_lbl.setVisible(True)
+        else:
+            warn_lbl.setVisible(False)
+
+    _update_warn()
+
+    def _on_exact_toggled(_checked):
+        # Instant, no re-query: exact and loose id-sets are cached separately, so
+        # toggling just changes which portions the counts include (set math). We
+        # persist the flag, refresh the warning, and repaint via _recount (which
+        # finds everything already cached → no find_cards, no progress bar).
+        cur = mw.addonManager.getConfig(__name__) or {}
+        cur["ak_exact_only"] = exact_cb.isChecked()
+        mw.addonManager.writeConfig(__name__, cur)
+        _update_warn()
+        _recount()
+
+    exact_cb.toggled.connect(_on_exact_toggled)
+
     # ── Source selector: unsuspend from only some of the enabled decks ──────────
     # One checkbox per globally-enabled family (AJ / hUtChCOM / AnKing); all ON by
     # default. Unchecking a source excludes its tags from the counts AND the apply,
@@ -1305,9 +1391,10 @@ def _open_today_dialog(day_offset=0, auto=False):
         sel = {suf for suf, cb in src_cbs.items() if cb.isChecked()}
         return sel or set(src_cbs.keys())   # never let an empty selection zero-out
 
-    table = QTableWidget(0, 4, dlg)
+    table = QTableWidget(0, 5, dlg)
     table.setHorizontalHeaderLabels(
-        ["Use", "Lecture" if no_cal else "Calendar event", "Matched lecture", "Cards"])
+        ["Use", "Lecture" if no_cal else "Calendar event", "Matched lecture",
+         "Cards", "Tags"])
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -1316,17 +1403,36 @@ def _open_today_dialog(day_offset=0, auto=False):
     hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
     hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
     hh.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+    hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
     if no_cal:                       # the "Matched lecture" combo is redundant here
         table.setColumnHidden(2, True)
     v.addWidget(table)
 
     total_lbl = QLabel("")
+    # Thin determinate bar next to the total, filled as _recount's card-count
+    # queries finish in the background. A fine 0–1000 range + a short eased value
+    # animation makes each step glide rather than jump. Hidden when idle.
+    count_bar = QProgressBar()
+    count_bar.setRange(0, 1000)
+    count_bar.setMaximumWidth(140)
+    count_bar.setMaximumHeight(14)
+    count_bar.setTextVisible(False)
+    count_bar.setVisible(False)
+    count_anim = QPropertyAnimation(count_bar, b"value", dlg)
+    count_anim.setDuration(240)
+    count_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def _anim_bar_to(target):
+        count_anim.stop()
+        count_anim.setStartValue(count_bar.value())
+        count_anim.setEndValue(int(target))
+        count_anim.start()
     hb = QHBoxLayout()
     btn_resusp = QPushButton("Re-suspend day")
     btn_unsusp = QPushButton("Apply")
     btn_unsusp.setDefault(True)
     btn_close = QPushButton("Close")
-    hb.addWidget(total_lbl); hb.addStretch(1)
+    hb.addWidget(total_lbl); hb.addWidget(count_bar); hb.addStretch(1)
     hb.addWidget(btn_resusp); hb.addWidget(btn_close); hb.addWidget(btn_unsusp)
     v.addLayout(hb)
 
@@ -1349,103 +1455,220 @@ def _open_today_dialog(day_offset=0, auto=False):
         # remaining fragment in this pipeline is AnKing.
         return "ak"
 
-    def _lec_fams(nk):
-        """Families present in a lecture's searches (for grouping id-set queries)."""
-        return {_family_of(s) for s in m[nk]["searches"]}
+    def _enabled_frags(nk):
+        """The search fragments actually used for a lecture right now: family
+        source ticked, not loose-when-exact-only, and not disabled in its +tag
+        menu. Every filter funnels through here, so counts stay pure set math."""
+        sel = _selected_families()
+        ex_only = exact_cb.isChecked()
+        off = disabled_frags.get(nk) or ()
+        out = []
+        for s in m[nk]["searches"]:
+            if s in off:
+                continue
+            if _family_of(s) not in sel:
+                continue
+            if ex_only and _is_loose_search(s):
+                continue
+            out.append(s)
+        return out
 
-    def _row_ids(nk, sel):
-        """Union of cached suspended-id sets for a lecture over selected families,
-        or None if any needed family set isn't cached yet."""
+    def _row_ids(nk):
+        """Union of cached suspended-id sets over a lecture's enabled fragments,
+        or None if any enabled fragment isn't cached yet."""
         ids = set()
-        for f in _lec_fams(nk) & sel:
-            s = id_cache.get((nk, f))
-            if s is None:
+        for s in _enabled_frags(nk):
+            cs = frag_ids.get(s)
+            if cs is None:
                 return None
-            ids |= s
+            ids |= cs
         return ids
 
-    def _recount():
-        """Recompute per-row card counts + the headline total OFF the main thread
-        (find_cards is slow on a large collection and freezes the dialog if run
-        inline). Snapshot the current selections, run all queries in ONE QueryOp,
-        then update the labels/cells when it finishes. A token coalesces rapid
-        recounts (day switch, checkbox/combo edits) — only the latest applies."""
-        from aqt.operations import QueryOp
-        st["rc"] = st.get("rc", 0) + 1
-        tok = st["rc"]
+    def _last_seg(s):
+        """Readable last ::-segment of the first tag path inside a fragment."""
+        mt = re.search(r'tag:"?\*?([^"\)\s]+)', s)
+        if not mt:
+            return (s[:40] + "…") if len(s) > 40 else s
+        path = mt.group(1).rstrip('*"')
+        return path.split("::")[-1] or path
+
+    def _frag_label(s):
+        """Short human label for a search fragment, shown in the +tag menu."""
+        if _is_loose_search(s):
+            return "≈ %s  (loose)" % _last_seg(s)
+        if "AJ_UCCOM_keep" in s:
+            return "AJ · %s" % _last_seg(s)
+        if "hUtChCOM" in s:
+            return "hUtChCOM · %s" % _last_seg(s)
+        return "AnKing · %s" % _last_seg(s)
+
+    def _resolve_event(ev):
+        """Resolve a calendar event title to a lecture key (nk, is_fuzzy) via the
+        alias table, exact match, then fuzzy match — the same rules the rows use."""
+        nkey = _norm(ev)
+        if nkey in aliases:
+            nkey = _norm(aliases[nkey])
+        if nkey in m:
+            return nkey, False
+        mk = _fuzzy_match(ev, nkey, keys, m, cutoff)
+        return (mk, True) if mk else (None, False)
+
+    _COUNT_CHUNK = 24   # fragments per background query batch
+
+    def _snapshot():
+        """(row, nk, checked) for every row, captured on the main thread."""
         events, combos = st["events"], st["combos"]
-        snap = []  # (row, nk, checked) captured on the main thread
+        snap = []
         for r in range(len(events)):
             it0 = table.item(r, 0)
             combo = combos[r] if r < len(combos) else None
             nk = combo.currentData() if combo else None
             checked = bool(it0 and it0.checkState() == _Qt.CheckState.Checked)
             snap.append((r, nk, checked))
-        sel = _selected_families()          # which sources (AJ/hUtChCOM/AnKing) are on
+        return snap
 
-        # Only query the (lecture, family) id-sets we don't already have cached —
-        # everything else (row counts, total, breakdown, source-toggles) is set
-        # math on the cache. This is the whole speedup: no giant combined query,
-        # and re-counts after a toggle / day revisit issue zero find_cards.
-        need = []
+    def _repaint():
+        """Paint row counts + the headline total from whatever's cached now. While
+        the current day is still being counted, the total keeps the 'Counting…'
+        note (rows still fill in as their fragments arrive)."""
+        snap = st.get("snap", [])
+        for (r, nk, _checked) in snap:
+            it3 = table.item(r, 3)
+            if it3:
+                ids = _row_ids(nk) if nk else None
+                it3.setText(str(len(ids)) if ids is not None else ("—" if not nk else "…"))
+        totals = set(); fam_ids = {}
         for (r, nk, checked) in snap:
-            if not nk:
+            if not (checked and nk):
                 continue
-            for f in _lec_fams(nk):
-                key = (nk, f)
-                if key not in id_cache and key not in [n[0] for n in need]:
-                    need.append((key, [s for s in m[nk]["searches"]
-                                       if _family_of(s) == f]))
-
-        def _repaint():
-            for (r, nk, _checked) in snap:
-                it3 = table.item(r, 3)
-                if it3:
-                    ids = _row_ids(nk, sel) if nk else None
-                    it3.setText(str(len(ids)) if ids is not None else ("—" if not nk else "…"))
-            totals = set(); fam_ids = {}
-            for (r, nk, checked) in snap:
-                if not (checked and nk):
+            for s in _enabled_frags(nk):
+                cs = frag_ids.get(s)
+                if not cs:
                     continue
-                for f in _lec_fams(nk) & sel:
-                    s = id_cache.get((nk, f))
-                    if not s:
-                        continue
-                    totals |= s
-                    fam_ids.setdefault(f, set()).update(s)
-            parts = []
-            for suffix, _match, label in TAG_FAMILIES:
-                if fam_ids.get(suffix):
-                    parts.append("%s %d" % (_FAM_SHORT.get(suffix, label),
-                                            len(fam_ids[suffix])))
-            breakdown = ("&nbsp;&nbsp;—&nbsp;&nbsp;" + " · ".join(parts)) if parts else ""
+                totals |= cs
+                fam_ids.setdefault(_family_of(s), set()).update(cs)
+        parts = []
+        for suffix, _match, label in TAG_FAMILIES:
+            if fam_ids.get(suffix):
+                parts.append("%s %d" % (_FAM_SHORT.get(suffix, label),
+                                        len(fam_ids[suffix])))
+        breakdown = ("&nbsp;&nbsp;—&nbsp;&nbsp;" + " · ".join(parts)) if parts else ""
+        if not st.get("cur_pending"):
             total_lbl.setText("<b>%d</b> cards will be unsuspended%s"
                               % (len(totals), breakdown))
 
-        if not need:
-            _repaint()             # fully cached → instant, no background query
+    def _neighbor_frags(have):
+        """Uncached fragments of the ±1/±2 days (calendar mode) to pre-warm."""
+        if no_cal:
+            return []
+        base = st.get("target")
+        if not base:
+            return []
+        have = set(have)
+        out = []
+        for d in (-1, 1, -2, 2):
+            day = base + datetime.timedelta(days=d)
+            for ev in _ics_by_date(ics_path).get(day, []):
+                nk, _fz = _resolve_event(ev)
+                if not nk:
+                    continue
+                for s in m[nk]["searches"]:
+                    if s in frag_ids or s in have:
+                        continue
+                    have.add(s); out.append(s)
+        return out
+
+    def _update_count_bar():
+        """Drive the progress bar off how much of the CURRENT day is still
+        uncached (neighbour pre-warming runs with the bar hidden)."""
+        total = st.get("cur_total", 0)
+        remaining = sum(1 for s in (st.get("cur_needed") or ()) if s not in frag_ids)
+        st["cur_pending"] = bool(total) and remaining > 0
+        if not total or remaining <= 0:
+            count_anim.stop()
+            count_bar.setVisible(False)
+        else:
+            count_bar.setVisible(True)
+            _anim_bar_to(round((total - remaining) * 1000 / total))
+
+    def _pump():
+        """Drain the fragment queue one batch at a time in a SINGLE background
+        QueryOp — so collection queries never overlap. Re-invokes itself until the
+        queue empties. The current day sits at the front (see _recount), so it's
+        always counted next; neighbours trail behind and warm silently."""
+        if st.get("busy") or st.get("closed"):
             return
-        total_lbl.setText("<i>Counting…</i>")
+        queue = st.setdefault("queue", [])
+        if not queue:
+            return
+        st["busy"] = True
+        cgen = st.get("cgen", 0)
+        batch = queue[:_COUNT_CHUNK]
+        del queue[:_COUNT_CHUNK]
+        from aqt.operations import QueryOp
 
         def op(col):
             res = {}
-            for (key, searches) in need:
-                if not searches:
-                    res[key] = set(); continue
-                q = "(%s) is:suspended" % " OR ".join("(%s)" % s for s in searches)
+            for s in batch:
                 try:
-                    res[key] = set(col.find_cards(q))
+                    res[s] = set(col.find_cards("(%s) is:suspended" % s))
                 except Exception:
-                    res[key] = set()
+                    res[s] = set()
             return res
 
         def done(res):
-            if tok != st.get("rc") or st.get("closed"):
+            st["busy"] = False
+            if st.get("closed"):
                 return
-            id_cache.update(res)
+            if cgen == st.get("cgen", 0):   # else a suspend/unsuspend invalidated it
+                frag_ids.update(res)
+            _update_count_bar()
             _repaint()
+            _pump()
 
         QueryOp(parent=dlg, op=op, success=done).run_in_background()
+
+    def _recount():
+        """Rebuild the current day's count and (re)prioritise the query queue: the
+        day now on screen jumps to the FRONT (counted next), anything previously
+        queued stays behind it, and neighbouring days are appended to pre-warm. A
+        single worker (_pump) drains the queue, so queries never overlap and the
+        visible day always resolves first."""
+        snap = _snapshot()
+        st["snap"] = snap
+
+        cur, seen = [], set()
+        for (r, nk, _ck) in snap:
+            if not nk:
+                continue
+            for s in m[nk]["searches"]:
+                if s in frag_ids or s in seen:
+                    continue
+                seen.add(s); cur.append(s)
+        st["cur_needed"] = set(cur)
+        st["cur_total"] = len(cur)
+
+        queue = st.setdefault("queue", [])
+        curset = set(cur)
+        rest = [x for x in queue if x not in curset]
+        new_queue = cur + rest                       # current day → front
+        have = set(new_queue)
+        for s in _neighbor_frags(have):              # neighbours → back
+            new_queue.append(s); have.add(s)
+        queue[:] = new_queue
+
+        if cur:
+            st["cur_pending"] = True
+            total_lbl.setText("<i>Counting…</i>")
+            count_anim.stop()
+            count_bar.setValue(0)
+            count_bar.setVisible(True)
+            _repaint()                               # fill cached rows now
+        else:
+            st["cur_pending"] = False
+            _update_count_bar()
+            _repaint()
+        _pump()
 
     def _refresh_row(row):
         nk = st["combos"][row].currentData()
@@ -1454,9 +1677,49 @@ def _open_today_dialog(day_offset=0, auto=False):
             it0.setCheckState(_Qt.CheckState.Checked if nk else _Qt.CheckState.Unchecked)
         it3 = table.item(row, 3)
         if it3:
-            ids = _row_ids(nk, _selected_families()) if nk else None
+            ids = _row_ids(nk) if nk else None
             it3.setText(str(len(ids)) if ids is not None else ("…" if nk else "—"))
         _recount()
+
+    def _show_tag_menu(row):
+        """Dropdown for a row's lecture: one checkable entry per tag, letting you
+        enable/disable individual tags for just that lecture. Uses the current
+        combo selection so it follows a corrected 'Matched lecture'."""
+        from aqt.qt import QMenu, QWidgetAction, QCheckBox as _MCheckBox
+        nk = st["combos"][row].currentData() if row < len(st["combos"]) else None
+        if not nk:
+            return
+        frags = m[nk]["searches"]
+        off = disabled_frags.setdefault(nk, set())
+        menu = QMenu(dlg)
+        if not frags:
+            a = menu.addAction("(no tags for this lecture)")
+            a.setEnabled(False)
+        else:
+            all_a = menu.addAction("Enable all")
+            none_a = menu.addAction("Disable all")
+            all_a.triggered.connect(lambda: (off.clear(), _recount()))
+            none_a.triggered.connect(lambda: (off.update(frags), _recount()))
+            menu.addSeparator()
+            for s in frags:
+                cb = _MCheckBox(_frag_label(s), menu)
+                cb.setChecked(s not in off)
+                cb.setToolTip(s)
+
+                def _tog(checked, s=s):
+                    if checked:
+                        off.discard(s)
+                    else:
+                        off.add(s)
+                    _recount()
+
+                cb.toggled.connect(_tog)
+                wa = QWidgetAction(menu)
+                wa.setDefaultWidget(cb)
+                menu.addAction(wa)
+        btn = table.cellWidget(row, 4)
+        if btn is not None:
+            menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _populate(offset):
         st["offset"] = offset
@@ -1504,7 +1767,6 @@ def _open_today_dialog(day_offset=0, auto=False):
                 "re-suspends its cards (only cards Janki unsuspended).</i>"
                 % len(active_set))
 
-        _sel = _selected_families()
         table.blockSignals(True)
         table.setRowCount(0)
         table.setRowCount(len(events))
@@ -1513,16 +1775,7 @@ def _open_today_dialog(day_offset=0, auto=False):
         for r, ev in enumerate(events):
             chk = QTableWidgetItem()
             chk.setFlags(_Qt.ItemFlag.ItemIsUserCheckable | _Qt.ItemFlag.ItemIsEnabled)
-            nkey = _norm(ev)
-            if nkey in aliases:
-                nkey = _norm(aliases[nkey])
-            resolved, fuzzy = None, False
-            if nkey in m:
-                resolved = nkey
-            else:
-                mk = _fuzzy_match(ev, nkey, keys, m, cutoff)
-                if mk:
-                    resolved, fuzzy = mk, True
+            resolved, fuzzy = _resolve_event(ev)
             st["auto_keys"].append(resolved)
 
             evi = QTableWidgetItem(ev + ("   (~)" if fuzzy else ""))
@@ -1547,15 +1800,26 @@ def _open_today_dialog(day_offset=0, auto=False):
             if not resolved:
                 cell = "—"
             else:
-                _ids = _row_ids(resolved, _sel)
+                _ids = _row_ids(resolved)
                 cell = str(len(_ids)) if _ids is not None else "…"
             table.setItem(r, 3, QTableWidgetItem(cell))
+            # "+" → dropdown to enable/disable this lecture's individual tags.
+            if resolved:
+                plus = QToolButton()
+                plus.setText("+")
+                plus.setAutoRaise(True)
+                plus.setToolTip("Enable/disable individual tags for this lecture")
+                plus.clicked.connect(lambda _c=False, row=r: _show_tag_menu(row))
+                table.setCellWidget(r, 4, plus)
+            else:
+                table.removeCellWidget(r, 4)
             st["combos"].append(combo)
             combo.currentIndexChanged.connect(lambda _i, row=r: _refresh_row(row))
         table.blockSignals(False)
 
-        # Window is already built with cached/"…" counts — kick off the real counts
-        # in the background (QueryOp) so the dialog never stalls on find_cards.
+        # Window is already built with cached/"…" counts. _recount queues this
+        # day's fragments at the FRONT and neighbours behind; the single _pump
+        # worker counts the visible day first, then pre-warms neighbours.
         _recount()
 
     def _goto(new_offset):
@@ -1572,7 +1836,6 @@ def _open_today_dialog(day_offset=0, auto=False):
         target = st["target"]
         events, combos, auto_keys = st["events"], st["combos"], st["auto_keys"]
         raw = _load_aliases_raw()
-        sel = _selected_families()   # only pull from ticked sources (AJ/hUtChCOM/AnKing)
         changed = False
         to_unsusp = set()        # suspended cards in checked lectures → unsuspend
         checked_cards = set()    # ALL cards in checked lectures (for re-suspend calc)
@@ -1583,7 +1846,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             nk = combos[r].currentData()
             if not nk:
                 continue
-            searches = [s for s in m[nk]["searches"] if _family_of(s) in sel]
+            searches = _enabled_frags(nk)   # honors source / exact-only / +tag toggles
             if not searches:
                 continue
             to_unsusp |= _suspended_ids(searches)
@@ -1616,7 +1879,9 @@ def _open_today_dialog(day_offset=0, auto=False):
         _save_day_active(new_owned, active_lectures, target)
         if to_unsusp or resuspend:
             mw.reset()
-        id_cache.clear()   # suspended state changed → cached id-sets are stale
+        frag_ids.clear()   # suspended state changed → cached id-sets are stale
+        st["cgen"] = st.get("cgen", 0) + 1   # invalidate any in-flight count batch
+        st["queue"] = []                     # rebuilt fresh by the next _recount
 
         # Feedback: a persistent tooltip AND an in-dialog banner (the window stays
         # open, so the user sees confirmation without it vanishing).
@@ -1649,7 +1914,9 @@ def _open_today_dialog(day_offset=0, auto=False):
         _save_day_active(set(), [], target)   # day now owns nothing (entry dropped)
         if resuspend:
             mw.reset()
-        id_cache.clear()
+        frag_ids.clear()
+        st["cgen"] = st.get("cgen", 0) + 1   # invalidate any in-flight count batch
+        st["queue"] = []                     # rebuilt fresh by the next _recount
         msg = "Re-suspended %s: −%d card(s)" % (_day_label(st["offset"]), len(resuspend))
         tooltip("Janki Lectures — " + msg, period=4000)
         _populate(st["offset"])
