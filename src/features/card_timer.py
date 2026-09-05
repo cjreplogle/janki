@@ -965,9 +965,18 @@ def _make_card_timer():
             # main window — so only show it when its host is actually on screen
             # (never against a minimized main window).
             host_on_screen = caption_up or hud._main_on_screen()
+            # When the flare rides the MAIN window (not the caption HUD), only show
+            # it while Anki is actually frontmost. Otherwise showing the overlay
+            # re-attaches it as a child of the main window, and addChildWindow pulls
+            # the parent window (and the app) to the front — stealing focus from
+            # whatever the user was in. The glow wouldn't be visible behind that app
+            # anyway. The caption HUD is a nonactivating float built for cross-app
+            # visibility, so it's exempt. The ~150ms AMBOSS poll re-runs this, so the
+            # flare hides/re-shows within a beat as focus changes.
+            front_ok = caption_up or state._anki_focused
             show = (self._red_wanted and not self._tip_open and now >= self._cooldown_until
                     and not state._break_tint_active and not state._pomo_on_break
-                    and host_on_screen)
+                    and host_on_screen and front_ok)
             if show:
                 self._overlay._max_a = self._flare_alpha()   # boost in fullscreen/focus
                 if not self._overlay.isVisible():

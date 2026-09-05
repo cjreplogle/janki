@@ -394,6 +394,20 @@ class GlassSettings(QDialog):
         ldh_row.addWidget(ldh_val)
         focus_lay.addLayout(ldh_row)
 
+        # --- Global hotkeys (drive the reviewer while unfocused) -------------
+        self._gkeys = QCheckBox(
+            "Pass Tab+Z/X/C/V/Space to Anki when not focused — hold Tab as modifier (requires Accessibility permission)"
+        )
+        self._gkeys.setChecked(bool(self.cfg.get("global_keys", False)))
+
+        def on_gkeys(_state):
+            self.cfg["global_keys"] = self._gkeys.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            keytap._apply_global_keys(self._gkeys.isChecked())
+
+        self._gkeys.stateChanged.connect(on_gkeys)
+        focus_lay.addWidget(self._gkeys)
+
         # === Caption (coherence HUD) =========================================
         cap_note = QLabel("Caption mode (Tab+\\) shows the current card in a "
                           "floating bar that stays on top of other apps. "
@@ -625,19 +639,6 @@ class GlassSettings(QDialog):
         self._tray.stateChanged.connect(on_tray)
         gen_lay.addWidget(self._tray)
 
-        self._gkeys = QCheckBox(
-            "Pass Tab+Z/X/C/V/Space to Anki when not focused — hold Tab as modifier (requires Accessibility permission)"
-        )
-        self._gkeys.setChecked(bool(self.cfg.get("global_keys", False)))
-
-        def on_gkeys(_state):
-            self.cfg["global_keys"] = self._gkeys.isChecked()
-            mw.addonManager.writeConfig(__name__, self.cfg)
-            keytap._apply_global_keys(self._gkeys.isChecked())
-
-        self._gkeys.stateChanged.connect(on_gkeys)
-        gen_lay.addWidget(self._gkeys)
-
         # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
         # caption mode even when another app is focused/fullscreen.
         self._hid = QCheckBox(
@@ -778,6 +779,17 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         self._upd_btn.clicked.connect(lambda: updater.check(interactive=True))
         gen_lay.addWidget(self._upd_btn)
+
+        # --- Documentation --------------------------------------------------
+        # Opens the Janki docs (README + guides) on GitHub in the browser.
+        _doc_link = QLabel(
+            '<a href="https://github.com/cjreplogle/janki#readme" '
+            'style="color:#6ab0ff; text-decoration:none;">📖 Documentation</a>')
+        _doc_link.setOpenExternalLinks(True)
+        _doc_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        _doc_link.setToolTip("Open the Janki documentation on GitHub")
+        _doc_link.setStyleSheet("margin-top: 8px;")
+        gen_lay.addWidget(_doc_link)
 
         # --- Mobile cards (iPad / iPhone) -----------------------------------
         # AnkiMobile can't run add-ons, so this bakes Janki's look into your note
