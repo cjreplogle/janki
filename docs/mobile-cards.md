@@ -11,10 +11,10 @@ normal sync to the phone/iPad — no add-on needed on the device.*
 
 1. Set `"mobile_cards": true` in the add-on config (or it's already on if you
    enabled it), which reveals the menu entry.
-2. **Tools → Janki: Mobile cards → Apply** — this rewrites every note type's
-   styling. Your originals are saved locally first; **Remove** restores them
-   exactly.
-3. **Sync.** The new look reaches your devices on their next sync.
+2. **Tools → Janki: Settings → Appearace → Apply UI theming to mobile cards**
+   — this rewrites every note type's styling. Your originals are saved locally
+   first; **Revert mobile theming** restores them as they were originally.
+4. **Sync.** The new look reaches your devices on their next sync.
 
 Font and the tap-feedback ripple are configurable under
 **Settings → Appearance** (Mobile card font / Tap feedback).
@@ -35,7 +35,7 @@ toolbar/answer-bar chrome so the OLED-dark card fills the screen.
 **Show Answer** (tap anywhere to flip). Once the answer is shown, the zones map
 to grades by position — so you rate a card by *where* you tap:
 
-![Settings → Review → Taps](images/mobile-taps.png)
+<img src="images/mobile-taps.png" alt="Settings → Review → Taps" width="150">
 
 - **Before answer (all zones):** Show Answer
 - **When answer shown:** Top Left = Again · Top Right = Easy · Mid Left = Hard ·
