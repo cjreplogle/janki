@@ -97,14 +97,14 @@ so nothing is left behind.
   or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
-- **Mobile cards** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
+- **[Mobile cards](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
   add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
   animation into your note types (scoped to mobile) so the look rides your normal sync
   to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
   `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
   (Apply / Remove — one-click reversible).
   **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md).**
-- **Schedule sync / [Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
+- **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards
   (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
