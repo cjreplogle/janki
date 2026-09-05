@@ -132,5 +132,7 @@
   "lockdown_hold_secs": 5.0,
   "lockdown_unlock_on_break": true,
   "mobile_tap_feedback": true,
-  "match_coverage": 0.3
+  "match_coverage": 0.3,
+  "practice_num_questions": 5,
+  "practice_shortcut": "Ctrl+Shift+Q"
 }

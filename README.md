@@ -103,6 +103,7 @@ so nothing is left behind.
   to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
   `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
   (Apply / Remove — one-click reversible).
+  **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md).**
 - **Schedule sync / [Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards

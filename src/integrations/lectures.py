@@ -2156,7 +2156,7 @@ def build_settings_pages():
         except Exception as e:
             _log("writeConfig failed: %s" % e)
 
-    return [("Lectures: Sources", src), ("Lectures: Behavior", beh)], _save
+    return [("Sources", src), ("Behavior", beh)], _save
 
 
 def _open_settings_dialog():

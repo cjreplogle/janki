@@ -31,7 +31,7 @@ _lk_del_held = False             # Delete/Backspace (kVK_Delete = 51) currently 
 _lk_ignore_until_release = False  # after the chord engages lockdown, ignore it for exit until both keys lift
 
 # macOS virtual key codes to intercept when Tab is held
-_GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 31, 126, 125, 124, 123}  # Z X C V Space Escape Backslash F O ↑ ↓ → ←
+_GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 31, 12, 126, 125, 124, 123}  # Z X C V Space Escape Backslash F O Q ↑ ↓ → ←
 # Shift+Tab + '='/'-' → grow/shrink the caption font (only while the caption HUD
 # is up). Shift-gated so plain Tab+= / Tab+- stay free for anything else.
 _CAP_FONT_KC = {24, 27}  # 24 = '='(+), 27 = '-'
@@ -125,6 +125,15 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
     if kc == 31:  # O — open the last-studied deck
         _gtap_log("O hit → _open_last_deck")
         focus._open_last_deck()
+        return
+
+    if kc == 12:  # Q — practice quiz: next related question for the current card
+        _gtap_log("Q hit → practice.open_practice")
+        try:
+            from ..features import practice
+            practice.open_practice()
+        except Exception as e:
+            _gtap_log(f"practice open error: {e}")
         return
 
     key  = _KC_TO_KEY.get(kc)

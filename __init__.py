@@ -171,6 +171,12 @@ def _startup():
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
 
+        # Practice questions are bound to Tab+Q, handled by the global key tap
+        # (src/util/keytap.py, keycode 12) so it rides the Tab modifier like the
+        # other reviewer binds — each press asks the next related question for the
+        # current card. Import + bank management live in Settings → Practice.
+        # (Requires global keys / Accessibility permission to be enabled.)
+
         # Lockdown / kiosk focus mode (macOS) is a manual toggle reachable from the
         # menu-bar (tray) icon and Cmd+Ctrl+L — kept off the Tools menu so it isn't
         # a second "Janki:" entry next to Settings. Exit by holding Space.

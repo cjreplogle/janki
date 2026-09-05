@@ -11,7 +11,7 @@ from ..user import glass, hud, css
 from . import tray
 from ..util import diagnostics, keytap
 from ..integrations import gamepad
-from ..integrations import amboss, mobilecards
+from ..integrations import amboss, mobilecards, qbank
 from . import stock_selfheal, updater
 
 class GlassSettings(QDialog):
@@ -44,34 +44,53 @@ class GlassSettings(QDialog):
             )
             lay.addWidget(_warn)
 
-        # Three tabbed panels. Each page has its own vertical layout; the section
-        # builders below append to app_lay / focus_lay / pomo_lay accordingly.
+        # Tabbed panels. Focus and Lectures are NESTED tab groups; the section
+        # builders below append to the appropriate page layout.
         from aqt.qt import (QTabWidget, QWidget, QComboBox, QGridLayout,
                             QPushButton, QButtonGroup)
         tabs = QTabWidget()
         app_page = QWidget();   app_lay = QVBoxLayout(app_page)
-        focus_page = QWidget(); focus_lay = QVBoxLayout(focus_page)
+        prac_page = QWidget();  prac_lay = QVBoxLayout(prac_page)
+        gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
+
+        # Focus → subtabs: Flare / Timer / Caption / Pomodoro / Lockdown.
+        focus_page = QWidget(); _focus_outer = QVBoxLayout(focus_page)
+        _focus_outer.setContentsMargins(0, 0, 0, 0)
+        focus_tabs = QTabWidget()
+        _focus_outer.addWidget(focus_tabs)
+        flare_page = QWidget(); flare_lay = QVBoxLayout(flare_page)
+        timer_page = QWidget(); timer_lay = QVBoxLayout(timer_page)
         cap_page = QWidget();   cap_lay = QVBoxLayout(cap_page)
         pomo_page = QWidget();  pomo_lay = QVBoxLayout(pomo_page)
-        gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
+        lock_page = QWidget();  lock_lay = QVBoxLayout(lock_page)
+        focus_tabs.addTab(flare_page, "Flare")
+        focus_tabs.addTab(timer_page, "Timer")
+        focus_tabs.addTab(cap_page, "Caption")
+        focus_tabs.addTab(pomo_page, "Pomodoro")
+        focus_tabs.addTab(lock_page, "Lockdown")
+
         tabs.addTab(app_page, "Appearance")
         tabs.addTab(focus_page, "Focus")
-        tabs.addTab(cap_page, "Caption")
-        tabs.addTab(pomo_page, "Pomodoro")
-        tabs.addTab(gen_page, "General")
 
-        # Lecture panes (Sources / Behavior) hosted from the lectures submodule so
+        # Lectures → subtabs (Sources / Behavior) from the lectures submodule so
         # everything lives in ONE settings window. Their save fns run on Close.
         self._lecture_savers = []
         try:
             from ..integrations import lectures as _lectures
             _pages, _lsave = _lectures.build_settings_pages()
+            lec_page = QWidget(); _lec_outer = QVBoxLayout(lec_page)
+            _lec_outer.setContentsMargins(0, 0, 0, 0)
+            lec_tabs = QTabWidget(); _lec_outer.addWidget(lec_tabs)
             for _title, _widget in _pages:
-                tabs.addTab(_widget, _title)
+                lec_tabs.addTab(_widget, _title)
+            tabs.addTab(lec_page, "Lectures")
             if _lsave:
                 self._lecture_savers.append(_lsave)
         except Exception as _e:
             log("lecture settings tabs failed: %s" % _e)
+
+        tabs.addTab(prac_page, "Practice")
+        tabs.addTab(gen_page, "General")
 
         lay.addWidget(tabs)
 
@@ -204,7 +223,7 @@ class GlassSettings(QDialog):
         self._ct_style.currentIndexChanged.connect(on_ct_style)
         style_row.addWidget(style_name)
         style_row.addWidget(self._ct_style)
-        focus_lay.addLayout(style_row)
+        timer_lay.addLayout(style_row)
 
         # Timer ring position (top-right = the Sync-button row, or bottom-right).
         ring_row = QHBoxLayout()
@@ -227,7 +246,7 @@ class GlassSettings(QDialog):
         self._ring_corner.currentIndexChanged.connect(on_ring_corner)
         ring_row.addWidget(ring_name)
         ring_row.addWidget(self._ring_corner)
-        focus_lay.addLayout(ring_row)
+        timer_lay.addLayout(ring_row)
 
         # Transparency of the ring / bar (window opacity).
         rop_row = QHBoxLayout()
@@ -252,7 +271,7 @@ class GlassSettings(QDialog):
         rop_row.addWidget(rop_name)
         rop_row.addWidget(rop_s)
         rop_row.addWidget(rop_val)
-        focus_lay.addLayout(rop_row)
+        timer_lay.addLayout(rop_row)
 
         # Real seconds until the red flare for a ~1-sentence card; card length then
         # nudges it within a clamped band (see start_card). Range 1.0–60.0s
@@ -283,7 +302,7 @@ class GlassSettings(QDialog):
         ct_row.addWidget(ct_name)
         ct_row.addWidget(ct_s)
         ct_row.addWidget(ct_val)
-        focus_lay.addLayout(ct_row)
+        timer_lay.addLayout(ct_row)
 
         # Red edge-flare when the card timer fills (time to move on).
         self._red_flare = QCheckBox("Red flare when the card timer runs out")
@@ -298,7 +317,7 @@ class GlassSettings(QDialog):
                 card_timer._card_timer_instance._overlay.set_active(False)
 
         self._red_flare.stateChanged.connect(on_red_flare)
-        focus_lay.addWidget(self._red_flare)
+        flare_lay.addWidget(self._red_flare)
 
         # Red flare transparency: peak edge alpha (lower = more transparent). One
         # slider governs both windowed and Focus-Mode flares (Focus keeps a +10
@@ -330,7 +349,7 @@ class GlassSettings(QDialog):
         rf_row.addWidget(rf_name)
         rf_row.addWidget(rf_s)
         rf_row.addWidget(rf_val)
-        focus_lay.addLayout(rf_row)
+        flare_lay.addLayout(rf_row)
 
         # Green edge-flare when a card is answered such that it's finished for today
         # (review cards, or inter-day learning graduating past today).
@@ -342,17 +361,17 @@ class GlassSettings(QDialog):
             mw.addonManager.writeConfig(__name__, self.cfg)
 
         self._green_flare.stateChanged.connect(on_green_flare)
-        focus_lay.addWidget(self._green_flare)
+        flare_lay.addWidget(self._green_flare)
 
         # --- Lockdown / kiosk focus mode (macOS) -----------------------------
         from aqt.qt import QComboBox as _QComboBox
         ld_note = QLabel(
-            "Lockdown mode (menu Tools → Janki: Lockdown mode, or ⌘⌃L) hides the "
-            "Dock and menu bar and blocks app switching to keep you in Anki. "
-            "It's a soft focus aid, not tamper-proof. Exit by holding Space.")
+            "Lockdown mode (menu Tools → Janki: Lockdown mode, ⌘⌃L, or `+Delete) "
+            "hides the Dock and menu bar and blocks app switching to keep you in "
+            "Anki. It's a soft focus aid, not tamper-proof. Exit by holding Space.")
         ld_note.setWordWrap(True)
         ld_note.setStyleSheet("color: gray; margin-top: 8px;")
-        focus_lay.addWidget(ld_note)
+        lock_lay.addWidget(ld_note)
 
         ld_row = QHBoxLayout()
         ld_name = QLabel("Lockdown level")
@@ -371,7 +390,7 @@ class GlassSettings(QDialog):
         self._ld_level.currentIndexChanged.connect(on_ld_level)
         ld_row.addWidget(ld_name)
         ld_row.addWidget(self._ld_level)
-        focus_lay.addLayout(ld_row)
+        lock_lay.addLayout(ld_row)
 
         ldh_row = QHBoxLayout()
         ldh_name = QLabel("Hold Space to exit")
@@ -392,7 +411,7 @@ class GlassSettings(QDialog):
         ldh_row.addWidget(ldh_name)
         ldh_row.addWidget(ldh_s)
         ldh_row.addWidget(ldh_val)
-        focus_lay.addLayout(ldh_row)
+        lock_lay.addLayout(ldh_row)
 
         # --- Global hotkeys (drive the reviewer while unfocused) -------------
         self._gkeys = QCheckBox(
@@ -406,7 +425,7 @@ class GlassSettings(QDialog):
             keytap._apply_global_keys(self._gkeys.isChecked())
 
         self._gkeys.stateChanged.connect(on_gkeys)
-        focus_lay.addWidget(self._gkeys)
+        gen_lay.addWidget(self._gkeys)
 
         # === Caption (coherence HUD) =========================================
         cap_note = QLabel("Caption mode (Tab+\\) shows the current card in a "
@@ -569,6 +588,124 @@ class GlassSettings(QDialog):
         _pomo_spin("pomodoro_long_break_every", "Long break every", 4, 0, 20,
                    " breaks", special_zero="Off (no long breaks)")
 
+        # === Practice ========================================================
+        # Pulls related questions for the card being reviewed from imported .qb
+        # banks. Opened during review with the hotkey; banks are managed here.
+        prac_note = QLabel(
+            "Practice questions shows questions related to the card you're "
+            "reviewing, drawn from imported question banks (.qb). Open it during "
+            "review with %s." % str(self.cfg.get("practice_shortcut", "Ctrl+Shift+Q")))
+        prac_note.setWordWrap(True)
+        prac_note.setStyleSheet("color: gray; margin-bottom: 4px;")
+        prac_lay.addWidget(prac_note)
+
+        pn_row = QHBoxLayout()
+        pn_name = QLabel("Questions per card")
+        pn_name.setMinimumWidth(140)
+        pn_sb = QSpinBox()
+        pn_sb.setRange(1, 50)
+        pn_sb.setValue(int(self.cfg.get("practice_num_questions", 5)))
+
+        def _pn_cb(v):
+            self.cfg["practice_num_questions"] = v
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        pn_sb.valueChanged.connect(_pn_cb)
+        pn_row.addWidget(pn_name)
+        pn_row.addWidget(pn_sb)
+        pn_row.addStretch()
+        prac_lay.addLayout(pn_row)
+
+        _imp_btn = QPushButton("Import question bank (.qb)…")
+        _imp_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+        prac_lay.addWidget(_imp_btn)
+
+        _docx_btn = QPushButton("Estimate .qb from .docx…")
+        _docx_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+        _docx_btn.clicked.connect(
+            lambda: qbank.docx_estimate_dialog(on_done=_refresh_banks))
+        prac_lay.addWidget(_docx_btn)
+
+        _banks_label = QLabel("Installed banks")
+        _banks_label.setStyleSheet("color: gray; margin-top: 8px;")
+        prac_lay.addWidget(_banks_label)
+
+        _banks_box = QWidget()
+        _banks_v = QVBoxLayout(_banks_box)
+        _banks_v.setContentsMargins(0, 0, 0, 0)
+        prac_lay.addWidget(_banks_box)
+
+        def _refresh_banks():
+            while _banks_v.count():
+                _it = _banks_v.takeAt(0)
+                _w = _it.widget()
+                if _w is not None:
+                    _w.setParent(None)
+            banks = qbank.list_banks()
+            if not banks:
+                _empty = QLabel("No banks imported yet.")
+                _empty.setStyleSheet("color: gray;")
+                _banks_v.addWidget(_empty)
+                return
+            for bid, meta in banks.items():
+                cb = QCheckBox("%s  (%s)" % (meta.get("name", bid),
+                                             meta.get("count", "?")))
+                cb.setChecked(bool(meta.get("enabled", True)))
+
+                def _on_toggle(_s, _bid=bid, _cb=cb):
+                    reg = qbank._load_registry()
+                    if _bid in reg["banks"]:
+                        reg["banks"][_bid]["enabled"] = _cb.isChecked()
+                        qbank._save_registry(reg)
+
+                cb.stateChanged.connect(_on_toggle)
+                pv = QPushButton("+")
+                pv.setFixedWidth(28)
+                pv.setToolTip("Preview the questions in this bank")
+                pv.setStyleSheet(
+                    "QPushButton{background-color:#55585e;color:white;border:none;"
+                    "padding:3px 8px;border-radius:5px;}"
+                    "QPushButton:hover{background-color:#61646b;}")
+
+                def _on_preview(_c=False, _bid=bid, _name=meta.get("name", bid)):
+                    from ..features import practice
+                    practice.preview_bank(_bid, _name)
+
+                pv.clicked.connect(_on_preview)
+                rm = QPushButton("Remove")
+                rm.setStyleSheet(
+                    "QPushButton{background-color:#6e5250;color:white;border:none;"
+                    "padding:3px 10px;border-radius:5px;}"
+                    "QPushButton:hover{background-color:#7c5d5b;}")
+
+                def _on_remove(_c=False, _bid=bid):
+                    qbank.remove_bank(_bid)
+                    _refresh_banks()
+
+                rm.clicked.connect(_on_remove)
+                row_w = QWidget()
+                row = QHBoxLayout(row_w)
+                row.setContentsMargins(0, 0, 0, 0)
+                row.addWidget(cb)
+                row.addStretch()
+                row.addWidget(pv)
+                row.addWidget(rm)
+                _banks_v.addWidget(row_w)
+
+        def _on_import():
+            qbank.import_dialog()
+            _refresh_banks()
+
+        _imp_btn.clicked.connect(_on_import)
+
+        _refresh_banks()
+
         # === Appearance (cont.) / General ===================================
         # --- OLED mode -------------------------------------------------------
         self._oled = QCheckBox("OLED mode in full-screen (solid black background)")
@@ -658,37 +795,28 @@ class GlassSettings(QDialog):
         self._hid.stateChanged.connect(on_hid)
         gen_lay.addWidget(self._hid)
 
-        # Frosting the AMBOSS hover tip alters its geometry/stacking, which makes
-        # some tippy configs flicker on/off — this lets you turn just that off
-        # (the side-panel frost stays on) and restore the native tooltip live.
-        self._amtip = QCheckBox("Frost the AMBOSS hover tip (uncheck if it flickers)")
-        self._amtip.setChecked(bool(self.cfg.get("amboss_tooltip_frost", True)))
+        # AMBOSS integrations: frost the hover tip and auto-hide the QBank box when
+        # the window is too narrow. One toggle governs both effects; uncheck it if
+        # the AMBOSS tooltip flickers on your setup.
+        self._amboss = QCheckBox(
+            "AMBOSS integrations (frost hover tip + auto-hide QBank box)")
+        self._amboss.setChecked(bool(self.cfg.get("amboss_tooltip_frost", True))
+                                or bool(self.cfg.get("amboss_qbank_autohide", True)))
 
-        def on_amtip(_state):
-            self.cfg["amboss_tooltip_frost"] = self._amtip.isChecked()
+        def on_amboss(_state):
+            on = self._amboss.isChecked()
+            self.cfg["amboss_tooltip_frost"] = on
+            self.cfg["amboss_qbank_autohide"] = on
             mw.addonManager.writeConfig(__name__, self.cfg)
-            amboss._frost_amboss_tooltip()   # apply or fully remove immediately
-
-        self._amtip.stateChanged.connect(on_amtip)
-        gen_lay.addWidget(self._amtip)
-
-        # The AMBOSS QBank home widget half-clips on a narrow window; fade it out
-        # until the window is wide enough to show it whole. Applies on next deck-
-        # browser render (reactive thereafter), so nudge a refresh when toggled.
-        self._amqb = QCheckBox("Hide the AMBOSS QBank box when the window is too narrow")
-        self._amqb.setChecked(bool(self.cfg.get("amboss_qbank_autohide", True)))
-
-        def on_amqb(_state):
-            self.cfg["amboss_qbank_autohide"] = self._amqb.isChecked()
-            mw.addonManager.writeConfig(__name__, self.cfg)
+            amboss._frost_amboss_tooltip()          # apply or remove the tip frost
             try:
                 if mw.state == "deckBrowser":
-                    mw.deckBrowser.refresh()
+                    mw.deckBrowser.refresh()         # re-apply/clear QBank autohide
             except Exception:
                 pass
 
-        self._amqb.stateChanged.connect(on_amqb)
-        gen_lay.addWidget(self._amqb)
+        self._amboss.stateChanged.connect(on_amboss)
+        gen_lay.addWidget(self._amboss)
 
         # --- Glass patch / uninstall ----------------------------------------
         # On stock Anki the glass needs a small patch to Anki's own files (applied
@@ -881,7 +1009,8 @@ class GlassSettings(QDialog):
         app_lay.addWidget(hint)
 
         # Push each page's controls to the top.
-        for pl in (app_lay, focus_lay, pomo_lay, gen_lay):
+        for pl in (app_lay, flare_lay, timer_lay, cap_lay, pomo_lay, lock_lay,
+                   prac_lay, gen_lay):
             pl.addStretch()
 
         close = QPushButton("Close")
