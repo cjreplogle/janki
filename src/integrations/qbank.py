@@ -1438,13 +1438,64 @@ def lo_docx_lectures(path):
     return [(t, objs) for t, objs in out if objs]   # drop stray title-less caps
 
 
+def _relevant_concept_leaves(lectures, extra_titles=None, coverage=None):
+    """Narrow the ~1.9k #Subjects concept candidates to only what the COURSE covers.
+
+    Keep a concept leaf only if enough of its distinctive words appear in the
+    lecture content — the LO titles + objectives we're mapping, plus any lecture
+    titles already in the configured tag map (calendar/spreadsheet) when available.
+    Reuses the lecture engine's own tokenizer (_match_tokens / _key_tokens) and the
+    `match_coverage` knob, so it behaves like every other match in Janki. Falls back
+    to the full list if the engine or a vocabulary isn't available."""
+    all_leaves = sorted({t.split("::")[-1] for t in _concept_tags()})
+    lec = _lectures()
+    if lec is None:
+        return all_leaves
+    if coverage is None:
+        try:
+            coverage = float(_cfg().get("match_coverage", 0.6))
+        except Exception:
+            coverage = 0.6
+    # Course vocabulary: distinctive tokens from every title + objective (+ any
+    # external lecture titles). One flat set → O(1) membership per concept token.
+    vocab = set()
+    for title, objs in lectures:
+        vocab.update(lec._key_tokens(lec._match_tokens(title)))
+        for o in objs:
+            vocab.update(lec._key_tokens(lec._match_tokens(o)))
+    for t in (extra_titles or []):
+        vocab.update(lec._key_tokens(lec._match_tokens(t)))
+    if not vocab:
+        return all_leaves
+    kept = []
+    for leaf in all_leaves:
+        toks = lec._key_tokens(lec._match_tokens(leaf.strip("*")))
+        if not toks:                      # acronym/short leaf → can't judge; keep it
+            kept.append(leaf)
+            continue
+        if sum(1 for t in toks if t in vocab) / len(toks) >= coverage:
+            kept.append(leaf)
+    return kept
+
+
 def build_lo_tagmap_prompt(lectures, branches=None, hutch_on=True, aj_on=True,
+                           concepts=True, narrow=True, extra_titles=None,
                            max_objectives=12):
-    """Prompt that maps each lecture (title + objectives) to local tags. Concepts
-    are offered as #Subjects leaf names (compact; expanded back on apply); AJ/Hutch
-    as full lecture-tag paths (often a 1:1 match for a lecture). Returns
-    (prompt, stats)."""
-    if branches is None:
+    """Prompt that maps each lecture (title + objectives) to local tags. Each
+    candidate family is toggleable to trade coverage for tokens: concepts (AnKing
+    #Subjects leaf names, compact + expanded back on apply), AJ, Hutch (full
+    lecture-tag paths, often a 1:1 match for a lecture). When `narrow` is on the
+    concept list is pruned to only what the course content covers (see
+    _relevant_concept_leaves). Returns (prompt, stats)."""
+    if not concepts:
+        concept_leaves = []
+    elif narrow:
+        concept_leaves = _relevant_concept_leaves(lectures, extra_titles)
+        if branches is not None:          # optional extra branch filter on top
+            bmap = _concept_branches()
+            allowed = {l for b, v in bmap.items() if b in set(branches) for l in v}
+            concept_leaves = [l for l in concept_leaves if l in allowed]
+    elif branches is None:
         concept_leaves = sorted({t.split("::")[-1] for t in _concept_tags()})
     else:
         bmap = _concept_branches()
@@ -1507,12 +1558,14 @@ def build_lo_tagmap_prompt(lectures, branches=None, hutch_on=True, aj_on=True,
     return "\n".join(out), stats
 
 
-def write_lo_tagmap(reply_path):
-    """Read the AI's lecture→tag JSON reply, expand concept-leaf names to full
-    collection tags, and write a proper lecture→tag map JSON into user_files.
-    Returns (map_path, lectures_written, tags_kept, tags_dropped)."""
-    with open(reply_path, encoding="utf-8") as f:
-        raw = f.read().strip()
+def write_lo_tagmap(reply_path=None, raw=None):
+    """Turn the AI's lecture→tag JSON reply (a file path OR pasted `raw` text) into
+    a proper lecture→tag map: expand concept-leaf names to full collection tags and
+    write it into user_files. Returns (map_path, lectures_written, kept, dropped)."""
+    if raw is None:
+        with open(reply_path, encoding="utf-8") as f:
+            raw = f.read()
+    raw = (raw or "").strip()
     if raw.startswith("```"):                       # tolerate ```json fences
         raw = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", raw).strip()
     data = json.loads(raw)

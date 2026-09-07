@@ -1080,19 +1080,29 @@ def _pick_tag_map_file(day_offset=0):
     return False
 
 
-def _generate_map_from_los(day_offset=0):
+def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
+                           open_after=True):
     """Build a lecture→tag map from a course learning-objectives .docx: parse the
     lectures, copy an AI prompt to the clipboard, then (after the user pastes it
     into their own AI and saves the JSON reply) expand + install that reply as the
-    map. Local except for the user's own paste."""
+    map. Local except for the user's own paste.
+
+    `parent`      — dialog parent (so it centers over the Settings window when
+                    launched from there).
+    `on_map_ready(path)` — called with the written map path after a successful
+                    build (lets the Settings pane sync its field so its own save
+                    doesn't overwrite the fresh map).
+    `open_after`  — jump to the today's-lectures window afterwards (off when run
+                    from Settings, which is already modal)."""
     from aqt.qt import (
         QFileDialog, QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-        QPushButton,
+        QPushButton, QCheckBox, QPlainTextEdit, QFrame,
     )
     from aqt.utils import showWarning, tooltip
     from . import qbank
+    par = parent or mw
     path, _f = QFileDialog.getOpenFileName(
-        mw, "Choose a learning-objectives .docx", "",
+        par, "Choose a learning-objectives .docx", "",
         "Word documents (*.docx)")
     if not path:
         return
@@ -1106,48 +1116,112 @@ def _generate_map_from_los(day_offset=0):
                     "learning-objectives format (ALL-CAPS lecture titles followed "
                     "by their objectives).")
         return
-    prompt, stats = qbank.build_lo_tagmap_prompt(lectures)
-    QApplication.clipboard().setText(prompt)
 
-    d = QDialog(mw)
+    # Candidate-family counts, so each checkbox shows what it adds (the concept
+    # list is by far the biggest — the main lever on prompt size).
+    n_concepts = len({t.split("::")[-1] for t in qbank._concept_tags()})
+    n_aj = len(qbank._family_tags("AJ_UCCOM_keep"))
+    n_hutch = len(qbank._family_tags("hUtChCOM"))
+
+    # Extra lecture titles from an already-configured tag map (spreadsheet/.txt/
+    # .json — NOT the .ics, which we never read) to sharpen the concept narrowing.
+    extra_titles = []
+    try:
+        _m, _k, _o = _get_map(_enabled_families())
+        extra_titles = [_m[k]["display"] for k in _m]
+    except Exception:
+        extra_titles = []
+
+    d = QDialog(par)
     d.setWindowTitle("Generate tag map from objectives")
     lay = QVBoxLayout(d)
-    info = QLabel(
-        "Copied a prompt for <b>%d lectures</b> (%d candidate tags) to your "
-        "clipboard.<br><br>"
-        "1.&nbsp;Paste it into your AI (Claude/ChatGPT).<br>"
-        "2.&nbsp;Save its JSON reply to a file.<br>"
-        "3.&nbsp;Click <b>Load AI reply…</b> to build your tag map.<br><br>"
-        "Nothing is sent anywhere by Janki — only your own paste leaves this "
-        "computer." % (stats["lectures"], stats["candidates"]))
-    info.setWordWrap(True)
-    info.setMinimumWidth(420)
-    lay.addWidget(info)
+    lay.addWidget(QLabel(
+        "Parsed <b>%d lectures</b> from “%s”." %
+        (len(lectures), os.path.basename(path))))
 
-    row = QHBoxLayout()
-    row.addStretch(1)
-    close_btn = QPushButton("Close")
-    close_btn.clicked.connect(d.reject)
-    row.addWidget(close_btn)
-    load_btn = QPushButton("Load AI reply…")
-    load_btn.setDefault(True)
-    row.addWidget(load_btn)
-    lay.addLayout(row)
+    lay.addWidget(QLabel("<b>Include candidate tags:</b> (fewer = shorter prompt)"))
+    # How many concepts the smart-match keeps — computed once (it depends only on
+    # the course content, not the other toggles) so it can preview on the label.
+    try:
+        n_narrowed = len(qbank._relevant_concept_leaves(lectures, extra_titles))
+    except Exception:
+        n_narrowed = n_concepts
 
-    def _load():
-        rp, _r = QFileDialog.getOpenFileName(
-            mw, "Load AI reply (.json)", os.path.dirname(path),
-            "AI reply (*.json *.txt);;All files (*)")
-        if not rp:
-            return
+    cb_concepts = QCheckBox("AnKing concepts — #Subjects (%d)" % n_concepts)
+    cb_concepts.setChecked(n_concepts > 0)
+    lay.addWidget(cb_concepts)
+
+    # Smart-match is a SUB-option of AnKing concepts: indented, and only shown when
+    # concepts are enabled. Label previews how many concepts it narrows down to.
+    cb_narrow = QCheckBox("Smart-match to this course's content → %d of %d concepts"
+                          % (n_narrowed, n_concepts))
+    cb_narrow.setChecked(True)
+    cb_narrow.setStyleSheet("margin-left: 22px;")
+    cb_narrow.setToolTip("Keep only #Subjects concepts whose terms appear in the "
+                         "lecture titles/objectives%s — a much shorter, more "
+                         "relevant list." %
+                         (" and your configured tag map"
+                          if extra_titles else ""))
+    lay.addWidget(cb_narrow)
+
+    cb_aj = QCheckBox("AJ deck tags — AJ_UCCOM_keep (%d)" % n_aj)
+    cb_aj.setChecked(n_aj > 0)
+    cb_hutch = QCheckBox("Hutch deck tags — hUtChCOM (%d)" % n_hutch)
+    cb_hutch.setChecked(n_hutch > 0)
+    for _cb in (cb_aj, cb_hutch):
+        lay.addWidget(_cb)
+
+    est = QLabel("")
+    est.setStyleSheet("color: palette(mid);")
+    lay.addWidget(est)
+
+    def _current_prompt():
+        return qbank.build_lo_tagmap_prompt(
+            lectures, concepts=cb_concepts.isChecked(),
+            aj_on=cb_aj.isChecked(), hutch_on=cb_hutch.isChecked(),
+            narrow=cb_narrow.isChecked(), extra_titles=extra_titles)
+
+    def _refresh(*_):
         try:
-            map_path, n, kept, dropped = qbank.write_lo_tagmap(rp)
-        except Exception as e:
-            showWarning("Could not parse the reply:\n\n%s" % e)
-            return
-        if not n:
-            showWarning("No usable lecture → tag mappings were found in the reply.")
-            return
+            cb_narrow.setVisible(cb_concepts.isChecked())   # sub-option of AnKing
+            p, s = _current_prompt()
+            est.setText("≈ %s characters · ~%s tokens · %d candidate tags "
+                        "(%d concepts)"
+                        % (f"{len(p):,}", f"{len(p)//4:,}", s["candidates"],
+                           s["concepts"]))
+        except Exception:
+            est.setText("")
+    for _cb in (cb_concepts, cb_aj, cb_hutch, cb_narrow):
+        _cb.stateChanged.connect(_refresh)
+    _refresh()
+
+    copy_btn = QPushButton("Copy prompt to clipboard")
+    copy_btn.setStyleSheet(
+        "QPushButton{background-color:#55585e;color:white;border:none;"
+        "padding:5px 12px;border-radius:5px;}"
+        "QPushButton:hover{background-color:#61646b;}")
+
+    def _copy():
+        p, _s = _current_prompt()
+        QApplication.clipboard().setText(p)
+        tooltip("Prompt copied — paste it into your AI.", period=2500)
+    copy_btn.clicked.connect(_copy)
+    lay.addWidget(copy_btn)
+
+    _hr = QFrame()
+    _hr.setFrameShape(QFrame.Shape.HLine)
+    _hr.setStyleSheet("color: palette(mid);")
+    lay.addWidget(_hr)
+
+    lay.addWidget(QLabel(
+        "Paste the AI's JSON reply here, then click <b>Build tag map</b> — no need "
+        "to save a file:"))
+    reply_box = QPlainTextEdit()
+    reply_box.setPlaceholderText('{ "Lecture title": ["#AK_Step1_v12::…", …], … }')
+    reply_box.setMinimumSize(460, 150)
+    lay.addWidget(reply_box)
+
+    def _finish(map_path, n, kept, dropped):
         cur = mw.addonManager.getConfig(__name__) or {}
         cur["xlsx_path"] = map_path
         mw.addonManager.writeConfig(__name__, cur)
@@ -1155,9 +1229,59 @@ def _generate_map_from_los(day_offset=0):
         d.accept()
         tooltip("Tag map ready: %d lectures, %d tags (%d dropped)."
                 % (n, kept, dropped), period=4000)
-        QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+        if on_map_ready:
+            try:
+                on_map_ready(map_path)
+            except Exception:
+                pass
+        if open_after:
+            QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
 
-    load_btn.clicked.connect(_load)
+    def _build():
+        raw = reply_box.toPlainText().strip()
+        if not raw:
+            showWarning("Paste the AI's JSON reply first (or use “Load from file…”).")
+            return
+        try:
+            map_path, n, kept, dropped = qbank.write_lo_tagmap(raw=raw)
+        except Exception as e:
+            showWarning("Could not parse the reply:\n\n%s" % e)
+            return
+        if not n:
+            showWarning("No usable lecture → tag mappings were found in the reply.")
+            return
+        _finish(map_path, n, kept, dropped)
+
+    def _load_file():
+        rp, _r = QFileDialog.getOpenFileName(
+            par, "Load AI reply (.json)", os.path.dirname(path),
+            "AI reply (*.json *.txt);;All files (*)")
+        if not rp:
+            return
+        try:
+            map_path, n, kept, dropped = qbank.write_lo_tagmap(reply_path=rp)
+        except Exception as e:
+            showWarning("Could not parse the reply:\n\n%s" % e)
+            return
+        if not n:
+            showWarning("No usable lecture → tag mappings were found in the reply.")
+            return
+        _finish(map_path, n, kept, dropped)
+
+    row = QHBoxLayout()
+    close_btn = QPushButton("Close")
+    close_btn.clicked.connect(d.reject)
+    row.addWidget(close_btn)
+    row.addStretch(1)
+    file_btn = QPushButton("Load from file…")
+    file_btn.clicked.connect(_load_file)
+    row.addWidget(file_btn)
+    build_btn = QPushButton("Build tag map")
+    build_btn.setDefault(True)
+    build_btn.clicked.connect(_build)
+    row.addWidget(build_btn)
+    lay.addLayout(row)
+
     d.exec()
 
 
@@ -2145,7 +2269,22 @@ def build_settings_pages():
     _tbl.addStretch(1)
     g.addWidget(txt_btns, 2, 2)
 
-    g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 3, 0, 1, 3)
+    # Build a tag map from a course learning-objectives .docx via a one-time AI
+    # round-trip (prompt to clipboard → paste → load the JSON reply). On success
+    # it writes a .json map and points the Base file at it.
+    gen_btn = QPushButton("Generate tag map from objectives (.docx)…")
+    gen_btn.setStyleSheet(
+        "QPushButton{background-color:#55585e;color:white;border:none;"
+        "padding:5px 12px;border-radius:5px;}"
+        "QPushButton:hover{background-color:#61646b;}")
+    gen_btn.setToolTip("Parse a learning-objectives .docx and build a lecture → "
+                       "tag map with your own AI session. Fills in the Base file "
+                       "above.")
+    gen_btn.clicked.connect(lambda: _generate_map_from_los(
+        parent=src, on_map_ready=lambda p: xlsx_edit.setText(p), open_after=False))
+    g.addWidget(gen_btn, 3, 1, 1, 2)
+
+    g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 4, 0, 1, 3)
     ics_edit = QLineEdit(cfg.get("ics_path", ""))
     ics_edit.setPlaceholderText("~/Downloads/lectures.ics   or   https://…/basic.ics")
     ics_btn = QPushButton("Browse…")
@@ -2158,9 +2297,9 @@ def build_settings_pages():
             ics_edit.setText(fn)
 
     ics_btn.clicked.connect(_pick_ics)
-    g.addWidget(QLabel("File/URL:"), 4, 0)
-    g.addWidget(ics_edit, 4, 1)
-    g.addWidget(ics_btn, 4, 2)
+    g.addWidget(QLabel("File/URL:"), 5, 0)
+    g.addWidget(ics_edit, 5, 1)
+    g.addWidget(ics_btn, 5, 2)
 
     ics_note = QLabel("")
     ics_note.setWordWrap(True)
@@ -2175,7 +2314,7 @@ def build_settings_pages():
 
     ics_edit.textChanged.connect(_update_ics_note)
     _update_ics_note()
-    g.addWidget(ics_note, 5, 1, 1, 2)
+    g.addWidget(ics_note, 6, 1, 1, 2)
 
     # Jump straight to the unsuspend window to add/remove today's lectures.
     today_btn = QPushButton("Open today's lecture window…")
@@ -2184,7 +2323,7 @@ def build_settings_pages():
         "padding:5px 12px;border-radius:5px;}"
         "QPushButton:hover{background-color:#61646b;}")
     today_btn.clicked.connect(lambda: _open_today_dialog())
-    g.addWidget(today_btn, 6, 1, 1, 2)
+    g.addWidget(today_btn, 7, 1, 1, 2)
 
     # Link to the step-by-step tutorial on GitHub (tag-map format, calendar,
     # manual mode, settings). blob/HEAD resolves to the repo's default branch.
@@ -2193,8 +2332,8 @@ def build_settings_pages():
         'load-todays-lectures.md">How to use this — tutorial &amp; tag-map format ↗</a>')
     help_lbl.setOpenExternalLinks(True)
     help_lbl.setStyleSheet("color: palette(mid);")
-    g.addWidget(help_lbl, 7, 1, 1, 2)
-    g.setRowStretch(8, 1)
+    g.addWidget(help_lbl, 8, 1, 1, 2)
+    g.setRowStretch(9, 1)
 
     # ---- Pane 2: Behavior ----------------------------------------------------
     beh = QWidget()
