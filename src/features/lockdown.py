@@ -780,7 +780,19 @@ class Lockdown:
         self._cancel_hold()
         self._caption.hide()
         self._guard.stop()
-        _set_presentation_options(0)   # NSApplicationPresentationDefault
+        # Restore presentation options. If we're LEAVING the window in the user's
+        # own fullscreen (lockdown didn't enter it, so we won't exit it below),
+        # forcing PresentationDefault(0) fights the fullscreen space and kills the
+        # menu-bar reveal-on-hover — the red exit button never drops down when you
+        # push the mouse to the top of the screen. Use the fullscreen auto-hide
+        # behaviour in that case so the menu bar slides back on hover.
+        keep_fs = False
+        try:
+            keep_fs = mw.isFullScreen() and not self._made_fs
+        except Exception:
+            pass
+        _set_presentation_options(
+            (_AUTO_HIDE_DOCK | _AUTO_HIDE_MENUBAR) if keep_fs else 0)
         try:
             _qapp().removeEventFilter(self._filter)
         except Exception:

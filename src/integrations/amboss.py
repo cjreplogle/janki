@@ -21,31 +21,47 @@ _amboss_frost_timer = None
 # background colours — no page text is read or sent anywhere.
 _AMBOSS_FROST_JS = (
     "(function(){var ID='__janki_amboss_frost';"
-    "function base(){if(!document.documentElement)return;"
-    "var s=document.getElementById(ID);"
-    "if(!s){s=document.createElement('style');s.id=ID;"
-    "(document.head||document.documentElement).appendChild(s);}"
-    "s.textContent='html,body,#root,#app,#__next,main{background:transparent!important;"
-    "background-color:transparent!important;}';}"
+    # Also neutralise AMBOSS's own inner content card(s) by class — its SPA paints
+    # a light card behind the text that the computed-colour scan can miss when it's
+    # a light *gray* rather than pure white.
+    "var BASE='html,body,#root,#app,#__next,main{background:transparent!important;"
+    "background-color:transparent!important;}"
+    ".amboss-card,[class*=\"amboss-card\"],[class^=\"Card\"],[class*=\" Card\"]{"
+    "background:transparent!important;background-color:transparent!important;}';"
+    # Inject the base style into a document OR a shadow root (shadow roots have no
+    # <head>, so append to the root node itself). Scoped by a data attr, since an
+    # element id is only unique per-root.
+    "function inject(root){try{"
+    "if(root.querySelector&&root.querySelector('style[data-jkid=\"'+ID+'\"]'))return;"
+    "var s=document.createElement('style');s.setAttribute('data-jkid',ID);s.textContent=BASE;"
+    "(root.head||root.body||root.documentElement||root).appendChild(s);}catch(e){}}"
     "function light(bg){var m=bg&&bg.match(/rgba?\\(([^)]+)\\)/);if(!m)return false;"
     "var p=m[1].split(',');var r=parseFloat(p[0]),g=parseFloat(p[1]),b=parseFloat(p[2]),"
     "a=(p.length>3?parseFloat(p[3]):1);"
     "if(a<0.05)return false;"                 # already transparent
-    "return (r>228&&g>228&&b>228);}"          # near-white opaque slab
-    "function scan(){var els=document.querySelectorAll('body *');"
-    "for(var i=0;i<els.length;i++){var el=els[i];if(el.id===ID)continue;"
-    "if(el.getAttribute('data-jkf')==='1')continue;"
-    "try{var bg=getComputedStyle(el).backgroundColor;"
-    "if(light(bg)){el.style.setProperty('background-color','transparent','important');"
-    "el.setAttribute('data-jkf','1');}}catch(e){}}}"
-    "base();scan();"
-    # Trailing 250ms debounce (was rAF = every frame) so a burst of inserts during
-    # an AMBOSS preview coalesces into ONE scan instead of re-scanning the whole DOM
-    # per animation frame. Observe childList only (NOT style/class) — attribute
-    # mutations fire on every transition/hover/scroll tick, which was the lag; new
-    # opaque slabs arrive as inserted nodes, and the 2s Python sweep is the backstop.
+    # near-white OR light-gray opaque slab: all channels light and near-neutral
+    # (max-min small) so we don't clear tinted/coloured UI (buttons, badges).
+    "var mx=Math.max(r,g,b),mn=Math.min(r,g,b);"
+    "return (mn>=218&&(mx-mn)<=14);}"
+    # Recursive walk that PIERCES shadow roots — AMBOSS renders panel content inside
+    # web-component shadow DOM, which querySelectorAll('body *') cannot see (that's
+    # why an opaque card can survive the scan). We inject the base style into each
+    # shadow root and clear light slabs at every level.
+    "function walk(root){inject(root);var els;"
+    "try{els=root.querySelectorAll('*');}catch(e){return;}"
+    "for(var i=0;i<els.length;i++){var el=els[i];"
+    "if(!(el.getAttribute&&el.getAttribute('data-jkf')==='1')){"
+    "try{if(light(getComputedStyle(el).backgroundColor)){"
+    "el.style.setProperty('background-color','transparent','important');"
+    "el.setAttribute('data-jkf','1');}}catch(e){}}"
+    "if(el.shadowRoot)walk(el.shadowRoot);}}"
+    "function run(){if(document.documentElement)walk(document);}run();"
+    # Trailing 250ms debounce so a burst of inserts during an AMBOSS preview
+    # coalesces into ONE walk. Observe childList only (attribute mutations fire on
+    # every transition/hover/scroll and caused lag); the 2s Python sweep re-runs
+    # this whole script as the backstop, which also re-walks shadow roots.
     "var pend=false;function sched(){if(pend)return;pend=true;"
-    "setTimeout(function(){pend=false;if(!document.getElementById(ID))base();scan();},250);}"
+    "setTimeout(function(){pend=false;run();},250);}"
     "try{if(window.__janki_amboss_obs)window.__janki_amboss_obs.disconnect();"
     "window.__janki_amboss_obs=new MutationObserver(sched);"
     "window.__janki_amboss_obs.observe(document.documentElement,"
@@ -259,7 +275,34 @@ _AMBOSS_TOOLTIP_JS = (
     "p.style.setProperty('filter','none','important');"
     "p.style.setProperty('padding','0','important');"
     "p=p.parentNode;n++;}}"
-    "function all(){css();var e=document.querySelectorAll('amboss-tooltip-content');"
+    # Robust fallback: AMBOSS may render the card OUTSIDE the amboss-tooltip-content
+    # shadow root (light DOM, or a differently-named/nested component), so the shadow
+    # `*` rule never reaches it and a white box shows behind the text. Walk the whole
+    # tippy subtree — piercing shadow roots — and clear any near-white/light-gray
+    # neutral slab (colour-tinted UI is left alone).
+    "function light(bg){var m=bg&&bg.match(/rgba?\\(([^)]+)\\)/);if(!m)return false;"
+    "var p=m[1].split(','),r=parseFloat(p[0]),g=parseFloat(p[1]),b=parseFloat(p[2]),"
+    "a=(p.length>3?parseFloat(p[3]):1);if(a<0.05)return false;"
+    "var mx=Math.max(r,g,b),mn=Math.min(r,g,b);return (mn>=218&&(mx-mn)<=14);}"
+    "function scrub(root){var els;try{els=root.querySelectorAll('*');}catch(e){return;}"
+    "for(var i=0;i<els.length;i++){var el=els[i];"
+    "if(!(el.getAttribute&&el.getAttribute('data-jkf')==='1')){"
+    "try{if(light(getComputedStyle(el).backgroundColor)){"
+    "el.style.setProperty('background-color','transparent','important');"
+    "el.setAttribute('data-jkf','1');}}catch(e){}}"
+    # Same-origin iframe: its own document has a white background nothing above can
+    # reach, so inject a transparent base into contentDocument and scrub inside.
+    "if(el.tagName==='IFRAME'){try{el.style.setProperty('background','transparent','important');"
+    "var d=el.contentDocument;if(d){if(!d.getElementById('__jkifr')){"
+    "var si=d.createElement('style');si.id='__jkifr';"
+    "si.textContent='html,body{background:transparent!important;background-color:transparent!important;}';"
+    "(d.head||d.documentElement).appendChild(si);}scrub(d);}}catch(e){}}"
+    "if(el.shadowRoot)scrub(el.shadowRoot);}}"
+    "function all(){css();"
+    "var roots=document.querySelectorAll('[data-tippy-root],.tippy-popper,.tippy-box,"
+    ".tippy-tooltip,amboss-tooltip-content');"
+    "for(var j=0;j<roots.length;j++){scrub(roots[j]);}"
+    "var e=document.querySelectorAll('amboss-tooltip-content');"
     "for(var i=0;i<e.length;i++){shadow(e[i]);ancestors(e[i]);}}"
     "all();try{if(!window.__janki_tippy_obs){window.__janki_tippy_obs="
     "new MutationObserver(all);window.__janki_tippy_obs.observe("
@@ -281,6 +324,42 @@ _AMBOSS_TOOLTIP_OFF_JS = (
 )
 
 
+# Diagnostic (gated on amboss_qbank_debug): when a hover tooltip shows, list every
+# non-transparent node inside the popup subtree — piercing shadow roots, flagging
+# iframes — into a fixed on-screen overlay, so the offending white box can be
+# identified WITHOUT DevTools. Purely reads computed styles; sends nothing anywhere.
+_AMBOSS_TOOLTIP_PROBE_JS = (
+    "(function(){"
+    "function nt(bg){var m=bg&&bg.match(/rgba?\\(([^)]+)\\)/);if(!m)return false;"
+    "var p=m[1].split(',');var a=(p.length>3?parseFloat(p[3]):1);return a>0.05;}"
+    "function cn(el){var c=el.className;if(c&&c.baseVal!==undefined)c=c.baseVal;"
+    "return (''+(c||'')).trim().replace(/\\s+/g,'.');}"
+    "function pad(d){return Array(d+1).join('  ');}"
+    "function scan(root,out,d){var els;try{els=root.querySelectorAll('*');}catch(e){return;}"
+    "for(var i=0;i<els.length;i++){var el=els[i];"
+    "try{var bg=getComputedStyle(el).backgroundColor;"
+    "if(nt(bg))out.push(pad(d)+el.tagName.toLowerCase()+(cn(el)?'.'+cn(el):'')+'  '+bg);}catch(e){}"
+    "if(el.tagName==='IFRAME')out.push(pad(d)+'<IFRAME src='+(el.src||'(none)')+'>');"
+    "if(el.shadowRoot){out.push(pad(d)+'#shadow('+el.tagName.toLowerCase()+')');"
+    "scan(el.shadowRoot,out,d+1);}}}"
+    "function run(){var roots=document.querySelectorAll('[data-tippy-root],.tippy-popper,"
+    ".tippy-box,.tippy-tooltip,amboss-tooltip-content,[role=tooltip]');"
+    "if(!roots.length)return;var out=[];"
+    "for(var j=0;j<roots.length;j++){out.push('== '+roots[j].tagName.toLowerCase()"
+    "+(cn(roots[j])?'.'+cn(roots[j]):'')+' ==');scan(roots[j],out,1);}"
+    "var o=document.getElementById('__janki_probe');if(!o){o=document.createElement('div');"
+    "o.id='__janki_probe';o.style.cssText='position:fixed;top:8px;left:8px;max-width:72vw;"
+    "max-height:86vh;overflow:auto;z-index:2147483647;background:rgba(0,0,0,0.92);color:#4f8;"
+    "font:11px/1.4 monospace;padding:10px;white-space:pre;border:1px solid #4f8;border-radius:6px;';"
+    "document.documentElement.appendChild(o);}"
+    "o.textContent='AMBOSS tooltip probe — '+out.length+' non-transparent node(s):\\n\\n'"
+    "+out.join('\\n');}"
+    "if(!window.__janki_probe_obs){window.__janki_probe_obs=new MutationObserver("
+    "function(){setTimeout(run,120);});window.__janki_probe_obs.observe("
+    "document.documentElement,{childList:true,subtree:true});}run();})()"
+)
+
+
 def _frost_amboss_tooltip():
     w = getattr(mw, "web", None)
     if w is None:
@@ -292,6 +371,11 @@ def _frost_amboss_tooltip():
     except Exception:
         try:
             w.page().runJavaScript(js)
+        except Exception:
+            pass
+    if bool(_cfg().get("amboss_qbank_debug", False)):
+        try:
+            w.eval(_AMBOSS_TOOLTIP_PROBE_JS)
         except Exception:
             pass
 
@@ -351,6 +435,7 @@ def _amboss_ul_js(front: bool) -> str:
     return (
         "(function(){"
         "var old=document.getElementById('__janki_amboss_ul');if(old)old.remove();"  # drop legacy hide-style
+        "var ph=document.getElementById('__janki_amboss_hide');if(ph)ph.remove();"  # un-suppress after a practice card
         "var ID='__janki_amboss_ul_fade';if(!document.getElementById(ID)){"
         "var s=document.createElement('style');s.id=ID;"
         # `backwards` fill so each marker stays transparent during its stagger delay
@@ -374,13 +459,47 @@ def _amboss_ul_js(front: bool) -> str:
     )
 
 
+def _is_practice_card() -> bool:
+    """True if the reviewer is showing a converted question-bank card (note type
+    'Janki Practice')."""
+    try:
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        if card is None:
+            return False
+        nt = card.note_type()
+        return bool(nt) and nt.get("name") == "Janki Practice"
+    except Exception:
+        return False
+
+
+def _amboss_hide_js() -> str:
+    """Fully neutralize AMBOSS term markers on practice cards: drop the underline
+    AND make them inert. pointer-events:none means hover/click never reach AMBOSS's
+    handlers (per-span or document-delegated), so no tooltip/popup windows open —
+    the term just renders as normal text."""
+    return (
+        "(function(){var ID='__janki_amboss_hide';"
+        "if(!document.getElementById(ID)){var s=document.createElement('style');"
+        "s.id=ID;s.textContent='span.amboss-marker,span.amboss-marker *{"
+        "border-bottom:none!important;cursor:inherit!important;"
+        "pointer-events:none!important;}';"
+        "(document.head||document.documentElement).appendChild(s);}"
+        "try{document.documentElement.classList.remove('jk-ul-fade');}catch(e){}"
+        "})()"
+    )
+
+
 def _apply_amboss_underlines(front: bool = True):
     """Show AMBOSS term underlines in every mode; fade them in on the front only
-    (instant on the back)."""
+    (instant on the back). Suppressed on practice-bank cards when the user opts in."""
     web = getattr(mw, "web", None)
     if web is None:
         return
     try:
+        if _cfg().get("practice_no_amboss", True) and _is_practice_card():
+            web.eval(_amboss_hide_js())
+            return
         web.eval(_amboss_ul_js(front))
     except Exception:
         pass

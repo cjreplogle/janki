@@ -1284,7 +1284,18 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         if css:
             web_content.head += "\n" + css
         # Typewriter reveal on the reviewer card (independent of the glass theme).
-        if isinstance(context, Reviewer) and _cfg().get("typewriter", True):
+        # Skip it entirely on Janki Practice (MCQ) cards: they have their own
+        # per-choice reveal animation, and the typewriter's hide-then-reveal of
+        # #qa fights it (choice boxes animate while hidden → first/last render
+        # out of order) and its post-reveal AMBOSS re-mark causes underline flicker.
+        _is_practice = False
+        try:
+            _c = mw.reviewer.card
+            if _c is not None and _c.note_type()["name"] == "Janki Practice":
+                _is_practice = True
+        except Exception:
+            _is_practice = False
+        if isinstance(context, Reviewer) and _cfg().get("typewriter", True) and not _is_practice:
             # A card can be RENDERED more than once (notably AMBOSS re-sets the
             # content to mark its terms), which replays the reveal. We can't tell
             # front from back reliably at this point (reviewer.state is often None),

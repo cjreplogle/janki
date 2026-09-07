@@ -584,10 +584,20 @@ def _make_pomodoro():
                 self._in_review = True
                 self._xp.reposition()
                 self._xp.show()
+                # A stray Space can leak to the reviewer as the break begins (the
+                # app isn't yet frontmost, so keytap's break-bypass doesn't catch
+                # the first press), flipping the card underneath to its answer. If
+                # that happened, force it back to the question so the break never
+                # reveals the back of the next card.
+                r = getattr(mw, "reviewer", None)
+                if r is not None and getattr(r, "state", None) == "answer":
+                    try:
+                        r._showQuestion()
+                    except Exception:
+                        pass
                 # Now that the break is deactivated, start the card timer fresh for
                 # the revealed card (its start was suppressed during the break).
                 if card_timer._card_timer_instance is not None:
-                    r = getattr(mw, "reviewer", None)
                     card = getattr(r, "card", None) if r else None
                     if card is not None and getattr(r, "state", None) == "question":
                         card_timer._card_timer_instance._on_q(card)

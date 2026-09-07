@@ -3,8 +3,32 @@
 import sys
 from aqt import mw
 from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
+from aqt.utils import saveGeom
 
 from ..util.config import log, _cfg
+
+
+def _save_main_geom() -> None:
+    """Persist the main window's size/position under Anki's own "mainWindow" key
+    so it is restored on next launch. Anki normally does this in its closeEvent,
+    but tray-minimize swallows the Close event (so that path never runs) — without
+    this, closing to tray or quitting from the tray loses the window size."""
+    try:
+        saveGeom(mw, "mainWindow")
+        mw.pm.save()
+    except Exception as exc:
+        log(f"save main geom: {exc}")
+
+
+def _quit_from_tray() -> None:
+    """Fully exit Anki from the tray. mw.close() would be swallowed by the tray
+    filter (turned into a hide), so drive Anki's real shutdown directly — which
+    also saves the window geometry via _unloadProfile."""
+    try:
+        _save_main_geom()
+        mw.unloadProfileAndExit()
+    except Exception as exc:
+        log(f"tray quit: {exc}")
 from ..features import focus, lockdown, pomodoro
 from ..user import hud
 from ..integrations import gamepad
@@ -60,7 +84,7 @@ def _apply_tray(on: bool) -> None:
             restore_action = QAction("Open Anki", mw)
             restore_action.triggered.connect(lambda: (mw.showNormal(), mw.activateWindow()))
             quit_action = QAction("Quit", mw)
-            quit_action.triggered.connect(mw.close)
+            quit_action.triggered.connect(lambda: _quit_from_tray())
             menu.addAction(restore_action)
             menu.addSeparator()
             menu.addAction(quit_action)
@@ -105,10 +129,14 @@ class _TrayFilter(QObject):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj is mw and _cfg().get("tray_minimize", False) and _tray_icon and _tray_icon.isVisible():
             if event.type() == QEvent.Type.Close:
+                # Anki's closeEvent (which saves geometry) never runs when we
+                # swallow the Close, so persist the size ourselves before hiding.
+                _save_main_geom()
                 mw.hide()
                 return True
             if event.type() == QEvent.Type.WindowStateChange:
                 if mw.windowState() & Qt.WindowState.WindowMinimized:
+                    _save_main_geom()
                     QTimer.singleShot(0, mw.hide)
         return False
 

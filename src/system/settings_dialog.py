@@ -616,6 +616,18 @@ class GlassSettings(QDialog):
         pn_row.addStretch()
         prac_lay.addLayout(pn_row)
 
+        self._prac_no_amboss = QCheckBox(
+            "Hide AMBOSS term underlines on practice cards")
+        self._prac_no_amboss.setChecked(bool(self.cfg.get("practice_no_amboss", True)))
+
+        def _on_prac_amboss():
+            self.cfg["practice_no_amboss"] = self._prac_no_amboss.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            amboss._apply_amboss_underlines(front=True)   # re-apply to current card
+
+        self._prac_no_amboss.stateChanged.connect(_on_prac_amboss)
+        prac_lay.addWidget(self._prac_no_amboss)
+
         _imp_btn = QPushButton("Import question bank (.qb)…")
         _imp_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
@@ -631,6 +643,36 @@ class GlassSettings(QDialog):
         _docx_btn.clicked.connect(
             lambda: qbank.docx_estimate_dialog(on_done=_refresh_banks))
         prac_lay.addWidget(_docx_btn)
+
+        # AI-assisted tagging (offline round-trip): copy a prompt to paste into
+        # your own Claude/ChatGPT, then apply its JSON reply back onto the banks.
+        _prompt_btn = QPushButton("Copy AI tag-matching prompt…")
+        _prompt_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+        _prompt_btn.clicked.connect(
+            lambda: qbank.copy_tagging_prompt_dialog(on_done=_refresh_banks))
+        prac_lay.addWidget(_prompt_btn)
+
+        _apply_btn = QPushButton("Apply AI tag results (.json)…")
+        _apply_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+        _apply_btn.clicked.connect(
+            lambda: qbank.apply_tag_results_dialog(on_done=_refresh_banks))
+        prac_lay.addWidget(_apply_btn)
+
+        # Convert banks into a real, syncable "Practice" deck (subdeck per bank).
+        _deck_btn = QPushButton("Convert to Practice deck…")
+        _deck_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+        _deck_btn.clicked.connect(
+            lambda: qbank.convert_to_deck_dialog(on_done=_refresh_banks))
+        prac_lay.addWidget(_deck_btn)
 
         _banks_label = QLabel("Installed banks")
         _banks_label.setStyleSheet("color: gray; margin-top: 8px;")
@@ -1042,4 +1084,12 @@ class GlassSettings(QDialog):
 
 
 def _open_settings():
-    GlassSettings().show()
+    d = GlassSettings()
+    # "Always in front" carries WindowStaysOnTopHint on the main window, which
+    # would float above this child dialog — match it so settings stays visible.
+    if _cfg().get("always_on_top", False):
+        from aqt.qt import Qt
+        d.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+    d.show()
+    d.raise_()
+    d.activateWindow()

@@ -134,5 +134,6 @@
   "mobile_tap_feedback": true,
   "match_coverage": 0.3,
   "practice_num_questions": 5,
-  "practice_shortcut": "Ctrl+Shift+Q"
+  "practice_shortcut": "Ctrl+Shift+Q",
+  "practice_no_amboss": true
 }

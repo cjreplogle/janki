@@ -361,10 +361,24 @@ _MATCH_STOP = {
 _ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8}
 
 
+# Split run-together titles into words at camelCase/PascalCase, acronym, and
+# letter↔digit boundaries: 'GeneticRBCDisorders' -> 'Genetic RBC Disorders',
+# 'BoneMarrowDevelopment' -> 'Bone Marrow Development'. Question-bank lecture
+# titles are often spaceless (no calendar spacing), which otherwise collapses to a
+# single opaque token and defeats the keyword-coverage guard below. Underscores
+# already split via the final [a-z0-9]+ pass; this handles the case boundaries.
+_CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
+
+
+def _split_camel(s):
+    return " ".join(_CAMEL.findall(s or ""))
+
+
 def _match_tokens(s):
-    s = (s or "").lower().replace("&", " and ")
-    s = _PARENS.sub("", s)
-    s = _apply_synonyms(s)
+    s = _PARENS.sub("", s or "")           # strip "(...)" while case is intact
+    s = s.replace("&", " and ")
+    s = _split_camel(s)                     # break spaceless titles into words
+    s = _apply_synonyms(s.lower())
     return re.findall(r"[a-z0-9]+", s)
 
 
@@ -1066,6 +1080,87 @@ def _pick_tag_map_file(day_offset=0):
     return False
 
 
+def _generate_map_from_los(day_offset=0):
+    """Build a lecture→tag map from a course learning-objectives .docx: parse the
+    lectures, copy an AI prompt to the clipboard, then (after the user pastes it
+    into their own AI and saves the JSON reply) expand + install that reply as the
+    map. Local except for the user's own paste."""
+    from aqt.qt import (
+        QFileDialog, QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+        QPushButton,
+    )
+    from aqt.utils import showWarning, tooltip
+    from . import qbank
+    path, _f = QFileDialog.getOpenFileName(
+        mw, "Choose a learning-objectives .docx", "",
+        "Word documents (*.docx)")
+    if not path:
+        return
+    try:
+        lectures = qbank.lo_docx_lectures(path)
+    except Exception as e:
+        showWarning("Could not read .docx:\n\n%s" % e)
+        return
+    if not lectures:
+        showWarning("No lecture titles found — the .docx isn't in the expected "
+                    "learning-objectives format (ALL-CAPS lecture titles followed "
+                    "by their objectives).")
+        return
+    prompt, stats = qbank.build_lo_tagmap_prompt(lectures)
+    QApplication.clipboard().setText(prompt)
+
+    d = QDialog(mw)
+    d.setWindowTitle("Generate tag map from objectives")
+    lay = QVBoxLayout(d)
+    info = QLabel(
+        "Copied a prompt for <b>%d lectures</b> (%d candidate tags) to your "
+        "clipboard.<br><br>"
+        "1.&nbsp;Paste it into your AI (Claude/ChatGPT).<br>"
+        "2.&nbsp;Save its JSON reply to a file.<br>"
+        "3.&nbsp;Click <b>Load AI reply…</b> to build your tag map.<br><br>"
+        "Nothing is sent anywhere by Janki — only your own paste leaves this "
+        "computer." % (stats["lectures"], stats["candidates"]))
+    info.setWordWrap(True)
+    info.setMinimumWidth(420)
+    lay.addWidget(info)
+
+    row = QHBoxLayout()
+    row.addStretch(1)
+    close_btn = QPushButton("Close")
+    close_btn.clicked.connect(d.reject)
+    row.addWidget(close_btn)
+    load_btn = QPushButton("Load AI reply…")
+    load_btn.setDefault(True)
+    row.addWidget(load_btn)
+    lay.addLayout(row)
+
+    def _load():
+        rp, _r = QFileDialog.getOpenFileName(
+            mw, "Load AI reply (.json)", os.path.dirname(path),
+            "AI reply (*.json *.txt);;All files (*)")
+        if not rp:
+            return
+        try:
+            map_path, n, kept, dropped = qbank.write_lo_tagmap(rp)
+        except Exception as e:
+            showWarning("Could not parse the reply:\n\n%s" % e)
+            return
+        if not n:
+            showWarning("No usable lecture → tag mappings were found in the reply.")
+            return
+        cur = mw.addonManager.getConfig(__name__) or {}
+        cur["xlsx_path"] = map_path
+        mw.addonManager.writeConfig(__name__, cur)
+        _MAP_CACHE["key"] = None
+        d.accept()
+        tooltip("Tag map ready: %d lectures, %d tags (%d dropped)."
+                % (n, kept, dropped), period=4000)
+        QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+
+    load_btn.clicked.connect(_load)
+    d.exec()
+
+
 def _prompt_and_load_tag_map(day_offset=0):
     """Show a short intro explaining what a lecture→tag map is, with a
     'Choose file…' button that opens the OS file picker. Used both on a fresh
@@ -1108,6 +1203,10 @@ def _prompt_and_load_tag_map(day_offset=0):
         lay.addWidget(body)
 
         row = QHBoxLayout()
+        gen_btn = QPushButton("Generate from objectives…")
+        gen_btn.setToolTip("Build a tag map from a course learning-objectives .docx "
+                           "using your own AI session.")
+        row.addWidget(gen_btn)
         row.addStretch(1)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(d.reject)
@@ -1118,7 +1217,12 @@ def _prompt_and_load_tag_map(day_offset=0):
         row.addWidget(choose_btn)
         lay.addLayout(row)
 
-        if d.exec():
+        # "2" == generate-from-LOs; "1"/accept == file picker; "0"/reject == cancel.
+        gen_btn.clicked.connect(lambda: d.done(2))
+        result = d.exec()
+        if result == 2:
+            _generate_map_from_los(day_offset)
+        elif result:
             _pick_tag_map_file(day_offset)
     except Exception as e:
         _log("tag-map prompt failed: %s" % e)
@@ -1954,6 +2058,12 @@ def _open_today_dialog(day_offset=0, auto=False):
     # both windows interactive; a module-level ref stops Qt from GC'ing it.
     from aqt.qt import Qt
     dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    # "Always in front" puts WindowStaysOnTopHint on the MAIN window, which would
+    # otherwise float ABOVE this child dialog (so the loader opens hidden behind
+    # Anki on launch). Match the flag so the loader stays above the also-on-top
+    # main window.
+    if _cfg().get("always_on_top", False):
+        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     global _lectures_dlg
     _lectures_dlg = dlg
     dlg.show()
