@@ -1116,21 +1116,33 @@ def apply_tag_results_dialog(on_done=None):
 # Idempotent: re-converting upserts by a stored QID (keeps scheduling history).
 # ---------------------------------------------------------------------------
 _MODEL_NAME = "Janki Practice"
-# Clicking a choice on the FRONT reacts within that box: green if it is the
-# correct answer, red if not (and the correct one is outlined green so a wrong
-# pick still teaches). The correct choice is marked with .jp-correct in the
-# markup (the same class the BACK uses for its blue highlight), so the handler
-# just reads it. Locks after the first pick.
+# Clicking a choice on the FRONT tints the WHOLE card green (correct) / red
+# (wrong), and marks the picked choice (plus the correct one, if the pick was
+# wrong). The result is stashed in sessionStorage so the BACK/explanation side can
+# re-apply the same full-card tint after the flip (a fresh render loses JS state).
+# The correct choice carries .jp-correct in the markup (same class the BACK uses
+# for its blue highlight), so the handler just reads it. Locks after one pick.
 _FRONT_JS = (
-    "(function(){var box=document.getElementById('jp-choices');if(!box)return;"
+    "(function(){if(document.querySelector('.jp-answered'))return;"  # back re-runs this; skip it
+    "var box=document.getElementById('jp-choices');if(!box)return;"
+    "try{sessionStorage.removeItem('jp_result');}catch(e){}"          # fresh question
     "var cs=box.querySelectorAll('.jp-choice');var done=false;"
     "cs.forEach(function(el){el.classList.add('jp-clickable');"
     "el.addEventListener('click',function(){if(done)return;done=true;"
     "box.classList.add('jp-locked');"
     "var ok=el.classList.contains('jp-correct');el.classList.add('jp-picked');"
     "el.classList.add(ok?'jp-right':'jp-wrong');"
+    "var card=el.closest('.card')||document.body;"
+    "card.classList.add(ok?'jp-fill-right':'jp-fill-wrong');"
+    "try{sessionStorage.setItem('jp_result',ok?'right':'wrong');}catch(e){}"
     "if(!ok){var r=box.querySelector('.jp-choice.jp-correct');"
     "if(r)r.classList.add('jp-reveal');}});});})();"
+)
+# On the back, re-apply the tint from the front pick (if any).
+_BACK_JS = (
+    "(function(){var r;try{r=sessionStorage.getItem('jp_result');}catch(e){}"
+    "if(!r)return;var card=document.querySelector('.card')||document.body;"
+    "card.classList.add(r==='right'?'jp-fill-right':'jp-fill-wrong');})();"
 )
 _FRONT_TMPL = ('<div class="jp-stem">{{Question}}</div>\n'
                '<div class="jp-choices" id="jp-choices">{{Choices}}</div>\n'
@@ -1138,30 +1150,33 @@ _FRONT_TMPL = ('<div class="jp-stem">{{Question}}</div>\n'
 _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
               '{{#Explanation}}<div class="jp-explain">'
               '<div class="jp-explain-h">Explanation / Rationale</div>'
-              '{{Explanation}}</div>{{/Explanation}}')
+              '{{Explanation}}</div>{{/Explanation}}\n'
+              '<script>' + _BACK_JS + '</script>')
 # Choice boxes fade/slide in one-by-one on the FRONT (a reveal touch that matches
 # the text-scroll); on the BACK (.jp-answered) the animation is disabled so the
 # highlighted answer is visible immediately.
 _CARD_CSS = (
     ".card{font-family:\"Anthropic Serif Text\",Georgia,serif;font-size:20px;"
     "text-align:left;color:#ececec;background-color:#1c1d21;max-width:760px;"
-    "margin:0 auto;padding:26px;}"
+    "margin:0 auto;padding:26px;transition:background-color .25s ease;}"
     ".jp-stem{margin-bottom:18px;line-height:1.5;}"
     ".jp-stem img{max-width:100%;border-radius:8px;margin-top:10px;}"
     ".jp-choice{padding:8px 12px;margin:6px 0;border-radius:8px;"
     "border:1px solid rgba(255,255,255,0.08);}"
     ".jp-answered .jp-choice.jp-correct{background:rgba(74,144,255,0.28);"
     "border-color:rgba(74,144,255,0.6);color:#dbe8ff;font-weight:600;}"
-    # Interactive front: click a choice to react green (right) / red (wrong).
-    ".jp-choice.jp-clickable{cursor:pointer;transition:background .15s,border-color .15s;}"
+    # Interactive front: clicking a choice tints the WHOLE card fill green
+    # (correct) / red (wrong) — the back re-applies the same tint. The picked
+    # choice (and the correct one, on a miss) gets a light matching fill so it's
+    # still identifiable against the tinted card; no outline/border emphasis.
+    ".jp-choice.jp-clickable{cursor:pointer;transition:background .15s;}"
     ".jp-choices:not(.jp-locked) .jp-choice:hover{background:rgba(255,255,255,0.06);}"
     ".jp-locked .jp-choice{cursor:default;}"
-    ".jp-choice.jp-right{background:rgba(56,178,102,0.30);"
-    "border-color:rgba(56,178,102,0.75);color:#d6f5e0;font-weight:600;}"
-    ".jp-choice.jp-wrong{background:rgba(224,74,74,0.30);"
-    "border-color:rgba(224,74,74,0.75);color:#ffdede;font-weight:600;}"
-    ".jp-choice.jp-reveal{border-color:rgba(56,178,102,0.75);"
-    "box-shadow:inset 0 0 0 1px rgba(56,178,102,0.55);}"
+    ".jp-choice.jp-right{background:rgba(56,178,102,0.22);color:#d6f5e0;font-weight:600;}"
+    ".jp-choice.jp-wrong{background:rgba(224,74,74,0.22);color:#ffdede;font-weight:600;}"
+    ".jp-choice.jp-reveal{background:rgba(56,178,102,0.22);color:#d6f5e0;}"
+    ".card.jp-fill-right{background-color:#18271d;}"
+    ".card.jp-fill-wrong{background-color:#2b181b;}"
     # Opacity-only (no transform): a translate creates a composited layer whose
     # collapse at animation end repaints the region and re-triggers the AMBOSS
     # underline fade (visible flicker). Fading opacity avoids that entirely.

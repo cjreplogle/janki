@@ -3,29 +3,71 @@
 import sys
 from aqt import mw
 from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
-from aqt.utils import saveGeom
 
 from ..util.config import log, _cfg
 
 
-def _save_main_geom() -> None:
-    """Persist the main window's size/position under Anki's own "mainWindow" key
-    so it is restored on next launch. Anki normally does this in its closeEvent,
-    but tray-minimize swallows the Close event (so that path never runs) — without
-    this, closing to tray or quitting from the tray loses the window size."""
+def _remember_state(prev_state=None) -> None:
+    """Record whether the window is fullscreen/maximized right now (or was, per
+    `prev_state` from a WindowStateChange) so restoring from the tray can bring it
+    back the SAME way. Without this, restore uses showNormal() and a fullscreen
+    window comes back as a default-sized window — looking like it 'forgot' its
+    position/state."""
     try:
-        saveGeom(mw, "mainWindow")
-        mw.pm.save()
+        st = prev_state if prev_state is not None else mw.windowState()
+        mw._janki_win_fs = bool(st & Qt.WindowState.WindowFullScreen)
+        mw._janki_win_max = bool(st & Qt.WindowState.WindowMaximized)
+    except Exception:
+        pass
+
+
+def _persist_geom() -> None:
+    """Save geometry + fullscreen/maximized to Janki's own last_win_* config keys
+    (the ones __init__._restore_size reads on launch — the SINGLE source of truth,
+    since it overrides Anki's native restore). Called while the window is still
+    VISIBLE, right before a tray hide, so it captures the true state — a hidden or
+    minimized window reports neither fullscreen nor a useful size."""
+    try:
+        if not mw.isVisible() or mw.isMinimized():
+            return
+        fs = bool(mw.isFullScreen())
+        mx = bool(mw.isMaximized())
+        cur = mw.addonManager.getConfig(__name__) or {}
+        cur["last_win_fs"] = fs
+        cur["last_win_max"] = mx
+        if not (fs or mx):
+            cur["last_win_w"] = int(mw.width())
+            cur["last_win_h"] = int(mw.height())
+            p = mw.pos()
+            cur["last_win_x"] = int(p.x())
+            cur["last_win_y"] = int(p.y())
+        mw.addonManager.writeConfig(__name__, cur)
     except Exception as exc:
-        log(f"save main geom: {exc}")
+        log(f"persist geom: {exc}")
+
+
+def _restore_window() -> None:
+    """Bring mw back from the tray in the state it was hidden in (fullscreen /
+    maximized / normal), then raise + focus it."""
+    try:
+        if getattr(mw, "_janki_win_fs", False):
+            mw.showFullScreen()
+        elif getattr(mw, "_janki_win_max", False):
+            mw.showMaximized()
+        else:
+            mw.showNormal()
+        mw.raise_()
+        mw.activateWindow()
+    except Exception as exc:
+        log(f"restore window: {exc}")
 
 
 def _quit_from_tray() -> None:
     """Fully exit Anki from the tray. mw.close() would be swallowed by the tray
-    filter (turned into a hide), so drive Anki's real shutdown directly — which
-    also saves the window geometry via _unloadProfile."""
+    filter (turned into a hide), so drive Anki's real shutdown directly. Geometry
+    was already persisted before the hide (_persist_geom), and __init__._save_size
+    skips while hidden, so the saved state isn't clobbered."""
     try:
-        _save_main_geom()
         mw.unloadProfileAndExit()
     except Exception as exc:
         log(f"tray quit: {exc}")
@@ -82,7 +124,7 @@ def _apply_tray(on: bool) -> None:
             menu.addAction(last_deck_action)
             menu.addSeparator()
             restore_action = QAction("Open Anki", mw)
-            restore_action.triggered.connect(lambda: (mw.showNormal(), mw.activateWindow()))
+            restore_action.triggered.connect(lambda: _restore_window())
             quit_action = QAction("Quit", mw)
             quit_action.triggered.connect(lambda: _quit_from_tray())
             menu.addAction(restore_action)
@@ -115,9 +157,7 @@ def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
         # come back blank, so it looked un-unhideable. The menu's "Open Anki" /
         # close-to-tray handle hiding.
         if not mw.isVisible() or mw.isMinimized():
-            mw.showNormal()
-            mw.raise_()
-            mw.activateWindow()
+            _restore_window()
             try:
                 from ..user import glass
                 glass._wake_main_webviews()   # repaint the transparent window
@@ -130,13 +170,20 @@ class _TrayFilter(QObject):
         if obj is mw and _cfg().get("tray_minimize", False) and _tray_icon and _tray_icon.isVisible():
             if event.type() == QEvent.Type.Close:
                 # Anki's closeEvent (which saves geometry) never runs when we
-                # swallow the Close, so persist the size ourselves before hiding.
-                _save_main_geom()
+                # swallow the Close, so remember the state + persist the size
+                # ourselves before hiding.
+                _remember_state()
+                _persist_geom()
                 mw.hide()
                 return True
             if event.type() == QEvent.Type.WindowStateChange:
                 if mw.windowState() & Qt.WindowState.WindowMinimized:
-                    _save_main_geom()
+                    # Remember the state we're minimizing FROM (oldState), not the
+                    # minimized state, so restore returns to fullscreen/maximized.
+                    try:
+                        _remember_state(event.oldState())
+                    except Exception:
+                        _remember_state()
                     QTimer.singleShot(0, mw.hide)
         return False
 

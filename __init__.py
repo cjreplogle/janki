@@ -253,21 +253,37 @@ def _startup():
                         x = max(avail.x(), min(x, avail.x() + avail.width() - 120))
                         y = max(avail.y(), min(y, avail.y() + avail.height() - 80))
                     mw.move(x, y)
+                # Re-apply fullscreen/maximized LAST, on top of the normal geometry
+                # above (so exiting fullscreen returns to the saved windowed size).
+                # Without this the window always reopened windowed even if it was
+                # closed fullscreen/maximized.
+                if c.get("last_win_fs"):
+                    mw.showFullScreen()
+                elif c.get("last_win_max"):
+                    mw.showMaximized()
             except Exception as _e:
                 log("win geom restore: %s" % _e)
         QTimer.singleShot(300, _restore_size)
 
         def _save_size():
-            # Remember the current window geometry so the next launch reopens at it.
+            # Remember the current window geometry + fullscreen/maximized state so
+            # the next launch reopens exactly as left. Skipped while hidden (closed
+            # to the tray) — the tray persists the true state before hiding, and a
+            # hidden window reports neither fullscreen nor a useful size.
             try:
-                if mw.isFullScreen() or mw.isMaximized() or mw.isMinimized():
-                    return                                 # don't persist odd states
+                if not mw.isVisible():
+                    return
+                fs = bool(mw.isFullScreen())
+                mx = bool(mw.isMaximized())
                 cur = mw.addonManager.getConfig(__name__) or {}
-                cur["last_win_w"] = int(mw.width())
-                cur["last_win_h"] = int(mw.height())
-                p = mw.pos()
-                cur["last_win_x"] = int(p.x())
-                cur["last_win_y"] = int(p.y())
+                cur["last_win_fs"] = fs
+                cur["last_win_max"] = mx
+                if not (fs or mx or mw.isMinimized()):     # keep last NORMAL geometry
+                    cur["last_win_w"] = int(mw.width())
+                    cur["last_win_h"] = int(mw.height())
+                    p = mw.pos()
+                    cur["last_win_x"] = int(p.x())
+                    cur["last_win_y"] = int(p.y())
                 mw.addonManager.writeConfig(__name__, cur)
             except Exception as _e:
                 log("win geom save: %s" % _e)
