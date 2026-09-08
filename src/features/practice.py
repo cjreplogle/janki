@@ -60,6 +60,228 @@ def open_practice():
     _panel.raise_()
 
 
+_PRACTICE_PARENT = "Practice"
+
+
+def _practice_dids():
+    """The Practice parent deck id + all its children (the question banks)."""
+    dids = set()
+    try:
+        for nid in mw.col.decks.all_names_and_ids():
+            name = nid.name
+            if name == _PRACTICE_PARENT or name.startswith(_PRACTICE_PARENT + "::"):
+                dids.add(int(nid.id))
+    except Exception as e:
+        log("practice dids: %s" % e)
+    return dids
+
+
+def _practice_banks():
+    """List of (did, display_name, total) for each question-bank deck, sorted."""
+    out = []
+    try:
+        for nid in mw.col.decks.all_names_and_ids():
+            name = nid.name
+            if not name.startswith(_PRACTICE_PARENT + "::"):
+                continue
+            disp = name.split("::", 1)[1]
+            try:
+                total = len(mw.col.find_cards('deck:"%s"' % name))
+            except Exception:
+                total = 0
+            out.append((int(nid.id), disp, total))
+    except Exception as e:
+        log("practice banks: %s" % e)
+    out.sort(key=lambda t: t[1].lower())
+    return out
+
+
+# When True, the NEXT deck-browser render shows ONLY the practice banks (inverted
+# filter), then re-arms to normal. Set by the Practice toolbar button.
+_practice_view = False
+
+
+def open_practice_hub():
+    """Toolbar 'Practice' button: show the question banks right where the deck list
+    lives, using Anki's own deck rows so it looks identical. It's the same deck
+    browser, filtered to only the Practice banks (which are hidden from the normal
+    list). Click a bank row to study it; click Decks (or navigate) for the normal
+    list again."""
+    global _practice_view
+    _practice_view = True
+    # The umbrella row is hidden in this view, so make sure it's expanded — otherwise
+    # its banks (its children) wouldn't render at all.
+    try:
+        d = mw.col.decks.by_name(_PRACTICE_PARENT)
+        if d and d.get("browserCollapsed"):
+            d["browserCollapsed"] = False
+            mw.col.decks.save(d)
+    except Exception:
+        pass
+    try:
+        if getattr(mw, "state", None) != "deckBrowser":
+            mw.moveToState("deckBrowser")   # renders → fires the filter hook
+        else:
+            mw.deckBrowser.refresh()        # already here → re-render
+    except Exception as e:
+        log("practice hub: %s" % e)
+
+
+def install_practice_toolbar(links, toolbar):
+    """top_toolbar_did_init_links hook: add a light-green 'Practice' link (appears after
+    Stats, next to Sync)."""
+    try:
+        # Plain text label — create_link puts it into aria-label="{label}" AND as the
+        # visible text, so any quotes/HTML in it break the markup. Colour it green via a
+        # <style> block appended alongside (targets the link id).
+        link = toolbar.create_link(
+            cmd="janki_practice",
+            label="Practice",
+            func=open_practice_hub,
+            tip="Practice question banks",
+            id="janki_practice")
+        # Insert BEFORE the sync link so Practice sits inside Sync (Sync stays the
+        # outermost item). Fall back to just-before-last, then append.
+        idx = next((i for i, s in enumerate(links)
+                    if isinstance(s, str) and ("pycmd('sync')" in s or 'id="sync"' in s)),
+                   None)
+        if idx is None:
+            idx = max(len(links) - 1, 0)
+        links.insert(idx, link)
+        links.append("<style>#janki_practice{color:#90ee90 !important;"
+                     "font-weight:600;}</style>")
+        # Leaving the Practice view is an explicit "Decks" click — wrap that handler to
+        # clear the flag (once), so collapse/expand and other refreshes keep the banks
+        # up but Decks returns to the normal list.
+        try:
+            lh = getattr(toolbar, "link_handlers", None)
+            if isinstance(lh, dict) and "decks" in lh and not getattr(
+                    lh["decks"], "_janki_wrapped", False):
+                _orig = lh["decks"]
+
+                def _decks_wrap(*a, **k):
+                    global _practice_view
+                    _practice_view = False
+                    return _orig(*a, **k)
+
+                _decks_wrap._janki_wrapped = True
+                lh["decks"] = _decks_wrap
+        except Exception as e:
+            log("practice decks wrap: %s" % e)
+    except Exception as e:
+        log("practice toolbar: %s" % e)
+
+
+def _acc_pct(did, names):
+    """Score for a bank/subbank (this deck + its descendants): the share of the cards
+    you've ATTEMPTED that you've RETIRED (suspended). Binary practice suspends a card on
+    a correct answer, so this reads as 'of what I've attempted, how much I've gotten
+    right / cleared'. = suspended cards / attempted cards.
+
+    Both counts come from the card's CURRENT queue (not the review log), so a card that
+    is Forgotten/reset — returning to the new queue — drops back out of the denominator.
+    (The old revlog-based count kept every card that was EVER answered forever, since a
+    reset doesn't delete revlog history, which made the score read far too low.)
+
+    Attempted = queue in (-1 suspended, 1 learning, 2 review, 3 day-relearn): everything
+    that's been answered at least once and not reset. Excludes new (0, incl. reset cards)
+    and buried (-2/-3, i.e. skips). Returns an int 0..100, or None when nothing's been
+    attempted yet."""
+    try:
+        this = names.get(did)
+        if this is None:
+            return None
+        sub = [d for d, nm in names.items()
+               if nm == this or nm.startswith(this + "::")]
+        if not sub:
+            return None
+        ph = ",".join("?" * len(sub))
+        row = mw.col.db.first(
+            "select "
+            "sum(case when queue=-1 then 1 else 0 end),"
+            "sum(case when queue in (-1,1,2,3) then 1 else 0 end) "
+            "from cards where did in (%s)" % ph, *sub)
+        suspended, attempted = (row or [0, 0])
+        suspended = suspended or 0
+        attempted = attempted or 0
+        if not attempted:
+            return None
+        return max(0, min(100, int(round(100.0 * suspended / attempted))))
+    except Exception as e:
+        log("acc pct: %s" % e)
+        return None
+
+
+def hide_practice_rows(deck_browser, content):
+    """deck_browser_will_render_content hook.
+
+    Normal render: strip the Practice parent + bank rows from the main deck list, so
+    banks live only under the Practice button.
+
+    Practice view (just after clicking Practice): INVERT — keep only the Practice bank
+    rows so the same deck browser shows the banks where the decks normally are. The
+    flag is consumed after one render (navigating/refreshing returns to normal)."""
+    global _practice_view
+    import re
+    try:
+        dids = _practice_dids()
+        html = content.tree
+        if _practice_view:
+            # Drop the "Practice" umbrella deck itself — show its banks as the top
+            # decks (each expandable by lecture).
+            parent_did = None
+            try:
+                d = mw.col.decks.by_name(_PRACTICE_PARENT)
+                if d:
+                    parent_did = int(d["id"])
+            except Exception:
+                pass
+            keep = dids - {parent_did} if parent_did is not None else dids
+            names = {int(n.id): n.name for n in mw.col.decks.all_names_and_ids()}
+            hdr = iter(["To-Do", "Review", "Score"])   # New / Learn / Due columns
+
+            def _row(m):
+                row = m.group(0)
+                if "<th" in row:                    # column header row
+                    row = re.sub(r"(<th colspan=5[^>]*>).*?(</th>)", r"\1Bank\2",
+                                 row, count=1, flags=re.DOTALL)
+                    row = re.sub(r"(<th class=count>).*?(</th>)",
+                                 lambda mm: mm.group(1) + next(hdr, "") + mm.group(2),
+                                 row, flags=re.DOTALL)
+                    return row
+                if "top-level-drag-row" in row:     # spacer → same top gap as normal
+                    return row
+                idm = re.search(r"<tr[^>]*id='(\d+)'", row)
+                if not idm:
+                    return ""
+                did = int(idm.group(1))
+                if not any(("open:%d" % d) in row for d in keep):
+                    return ""
+                # De-indent one level: banks were Practice::Bank (level 2), so strip the
+                # leading 6× &nbsp; so banks read as top-level and lectures nest under.
+                row = re.sub(r"(<td class=decktd colspan=5>)(?:&nbsp;){6}", r"\1",
+                             row, count=1)
+                # Replace the Due count with % accuracy for this bank/subbank subtree.
+                pct = _acc_pct(did, names)
+                label = ("%d%%" % pct) if pct is not None else "—"
+                cells = list(re.finditer(r"<td align=end>.*?</td>", row, re.DOTALL))
+                if len(cells) >= 3:
+                    c = cells[2]
+                    row = (row[:c.start()]
+                           + '<td align=end><span class="review-count">%s</span></td>' % label
+                           + row[c.end():])
+                return row
+            html = re.sub(r"<tr[^>]*>.*?</tr>", _row, html, flags=re.DOTALL)
+        else:
+            for did in dids:
+                html = re.sub(
+                    r"<tr[^>]*>(?:(?!</tr>).)*?open:%d\b.*?</tr>" % did,
+                    "", html, flags=re.DOTALL)
+        content.tree = html
+    except Exception as e:
+        log("hide practice rows: %s" % e)
+
+
 def _close_panel():
     global _panel
     try:

@@ -471,6 +471,7 @@ class _FullscreenWatcher(QObject):
     def __init__(self):
         super().__init__()
         self._restore_pending = False  # True between minimize and first WindowActivate
+        self._reclear_pending = False  # debounce for re-clearing webview bg on resize
 
     def eventFilter(self, obj, ev):
         try:
@@ -542,6 +543,18 @@ class _FullscreenWatcher(QObject):
                 if card_timer._card_timer_instance:
                     card_timer._card_timer_instance.reposition()
                     QTimer.singleShot(120, card_timer._card_timer_instance.reposition)
+                # A fullscreen slide (or any resize) can leave the top toolbar / bottom
+                # bar webviews with their opaque theme background instead of transparent
+                # — they then show as grey bars along the top/bottom. The WindowStateChange
+                # re-assert runs at fixed delays that can fire BEFORE the macOS transition
+                # settles; keying off the actual geometry change catches the final frame
+                # regardless of timing. Debounced so the animation's resize storm coalesces.
+                if t == QEvent.Type.Resize and not self._reclear_pending:
+                    self._reclear_pending = True
+                    def _reclear():
+                        self._reclear_pending = False
+                        _clear_existing_webviews()
+                    QTimer.singleShot(200, _reclear)
         except Exception:
             pass
         return False

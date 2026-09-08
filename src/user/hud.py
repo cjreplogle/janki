@@ -937,6 +937,30 @@ def _toggle_coherence():
         pass
 
 
+_caption_practice_hidden = False
+
+
+def caption_practice_gate():
+    """Disable the caption HUD while a Janki Practice card is on screen, and restore it
+    (only if WE hid it) once a non-practice card / no card shows. The user's manual
+    Tab+\\ state is preserved — we auto-hide, never auto-enable."""
+    global _caption_practice_hidden
+    if sys.platform != "darwin" or _coherence_hud is None:
+        return
+    try:
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        is_prac = bool(card and (card.note_type() or {}).get("name") == "Janki Practice")
+        if is_prac and _coherence_hud.isVisible():
+            _coherence_hud.hide()
+            _caption_practice_hidden = True
+        elif not is_prac and _caption_practice_hidden:
+            _coherence_hud.show()
+            _caption_practice_hidden = False
+    except Exception:
+        pass
+
+
 def _coherence_refresh(animate_text=True):
     if _coherence_hud and _coherence_hud.isVisible():
         _coherence_hud.refresh(animate_text=animate_text)

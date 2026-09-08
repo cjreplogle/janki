@@ -1309,6 +1309,40 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # browser home screen. Optional — hidden via Settings → General.
         if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", True):
             web_content.head += "\n" + _stats_head()
+        # In the Practice view, relabel the deck browser's bottom "Import File" button
+        # to "Import Bank" (its click is redirected to the bank importer — see
+        # _on_js_message). Only while the Practice panel is open.
+        if isinstance(context, DeckBrowserBottomBar):
+            try:
+                from ..features import practice
+                if getattr(practice, "_practice_view", False):
+                    import re as _re
+                    body = web_content.body.replace("Import File", "Import Bank")
+                    # Drop the Get Shared + Create Deck buttons (not relevant to banks).
+                    for _cmd in ("shared", "create"):
+                        body = _re.sub(
+                            r"<button[^>]*pycmd\(&quot;%s&quot;\)[^>]*>.*?</button>" % _cmd,
+                            "", body, flags=_re.DOTALL)
+                        body = _re.sub(
+                            r"<button[^>]*pycmd\(\"%s\"\)[^>]*>.*?</button>" % _cmd,
+                            "", body, flags=_re.DOTALL)
+                    web_content.body = body
+                else:
+                    # Normal Decks screen: add a "Load Lectures" button that opens the
+                    # Lectures section of Janki settings (click handled in _on_js_message).
+                    web_content.body += (
+                        "<button title='Open Janki Lecture settings' "
+                        "onclick='pycmd(\"janki-load-lectures\");'>Load Lectures</button>")
+            except Exception:
+                pass
+        # Binary-grade practice: hide the native Again/Hard/Good/Easy buttons from the
+        # FIRST paint by baking the rule into the bottom bar's initial HTML. Doing it
+        # via JS after render (sync_practice_bottom) left a flicker of the ease buttons
+        # before they were hidden; this kills that. The Continue button is still added
+        # by sync_practice_bottom (additive, so no flicker).
+        if isinstance(context, ReviewerBottomBar) and _is_practice \
+                and _cfg().get("practice_binary_grade", True):
+            web_content.head += "\n<style>button[data-ease]{display:none!important;}</style>"
         if GLASS:
             QTimer.singleShot(150, glass._clear_existing_webviews)
     except Exception as exc:
@@ -1317,6 +1351,110 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
 
 if hasattr(gui_hooks, "webview_will_set_content"):
     gui_hooks.webview_will_set_content.append(_on_will_set_content)
+
+
+def _jp_apply_grade(ease, correct):
+    """Grade the current practice card + advance. Correct → also suspend it so the
+    card is retired from the queue (in addition to being graded Easy). Sets the
+    _janki_grading flag so the _answerCard wrapper lets THIS (our own) grade through
+    instead of redirecting it back into the resolver.
+
+    The suspend can't happen synchronously here: _answerCard runs answer_card() in a
+    BACKGROUND thread, and that op rewrites the card's queue when it commits — a
+    suspend fired now races it and usually gets overwritten (card stays unsuspended).
+    So stash the cid; _on_reviewer_answered suspends it once the op has committed."""
+    r = getattr(mw, "reviewer", None)
+    card = getattr(r, "card", None) if r else None
+    if r and card and getattr(r, "state", None) == "answer":
+        mw._janki_suspend_cid = card.id if correct else None
+        mw._janki_grading = True
+        try:
+            r._answerCard(ease)
+        finally:
+            mw._janki_grading = False
+
+
+def _on_reviewer_answered(reviewer, card, ease):
+    """Suspend a correctly-answered practice card AFTER its answer op has committed
+    (see _jp_apply_grade). Fires for every answer; no-ops unless a suspend was queued."""
+    cid = getattr(mw, "_janki_suspend_cid", None)
+    if cid is None:
+        return
+    mw._janki_suspend_cid = None
+    def _do():
+        try:
+            mw.col.sched.suspend_cards([cid])
+        except Exception:
+            pass
+    QTimer.singleShot(0, _do)
+
+
+if hasattr(gui_hooks, "reviewer_did_answer_card"):
+    gui_hooks.reviewer_did_answer_card.append(_on_reviewer_answered)
+
+
+def _jp_bury():
+    """Set the current practice card aside for this session with no judgement — used
+    when advancing without a pick. Bury records no review and doesn't touch
+    scheduling; the card returns next session."""
+    r = getattr(mw, "reviewer", None)
+    card = getattr(r, "card", None) if r else None
+    if r and card and getattr(r, "state", None) == "answer":
+        try:
+            r.bury_current_card()
+        except Exception:
+            pass
+
+
+def _jp_resolve():
+    """The SINGLE authority for advancing a binary-grade practice card. Applies the
+    outcome the FRONT pick decided (correct → Easy + suspend, wrong → Hard) or buries
+    if no answer was picked. Latched per card id so a stray/duplicate trigger — e.g.
+    Anki's native answer shortcut firing alongside our own Continue — can't act twice
+    (the second call sees the card already resolved and no-ops). The latch is cleared
+    on each question render (see apply_practice_prefs) so a card that legitimately
+    returns later in the session can be resolved again."""
+    r = getattr(mw, "reviewer", None)
+    card = getattr(r, "card", None) if r else None
+    if not (r and card and getattr(r, "state", None) == "answer"):
+        return
+    cid = card.id
+    if getattr(mw, "_janki_last_resolved", None) == cid:
+        return
+    mw._janki_last_resolved = cid
+    pend = getattr(mw, "_janki_pending_grade", None)
+    mw._janki_pending_grade = None
+    if pend and len(pend) >= 3 and pend[2]:
+        _jp_apply_grade(pend[0], pend[1])
+    else:
+        _jp_bury()
+
+
+# Redirect ALL grade attempts on a binary-grade practice card through _jp_resolve, so
+# the front pick is the only judge. This closes the gap where Anki's native answer
+# shortcuts (1/2/3/4, spacebar rating) reached _answerCard directly — bypassing our
+# binary logic and grading the card Good regardless of the pick (which lit the green
+# flare even on wrong/blank answers). Our own grade passes through via _janki_grading.
+_janki_orig_answer_card = Reviewer._answerCard
+
+
+def _janki_answer_card(self, ease):
+    if getattr(mw, "_janki_grading", False):
+        return _janki_orig_answer_card(self, ease)
+    try:
+        card = getattr(self, "card", None)
+        if (card is not None
+                and (card.note_type() or {}).get("name") == "Janki Practice"
+                and _cfg().get("practice_binary_grade", True)
+                and getattr(self, "state", None) == "answer"):
+            _jp_resolve()
+            return
+    except Exception:
+        pass
+    return _janki_orig_answer_card(self, ease)
+
+
+Reviewer._answerCard = _janki_answer_card
 
 
 def _on_js_message(handled, message, context):
@@ -1330,6 +1468,51 @@ def _on_js_message(handled, message, context):
             parts = message.split(":", 1)
             if len(parts) == 2:
                 setattr(mw, "_janki_tw_jh", parts[1])
+            return (True, None)
+        # In the Practice view, the deck browser's "Import File" button imports a
+        # question bank instead (opens Janki ▸ Practice ▸ Question Bank). Only while the
+        # Practice panel is open — normal deck browser keeps native file import.
+        if isinstance(message, str) and message == "import":
+            try:
+                from ..features import practice
+                from aqt.deckbrowser import DeckBrowser, DeckBrowserBottomBar
+                # The Import File button lives in the deck browser's BOTTOM bar, whose
+                # bridge context is DeckBrowserBottomBar (not DeckBrowser).
+                if getattr(practice, "_practice_view", False) and isinstance(
+                        context, (DeckBrowser, DeckBrowserBottomBar)):
+                    from ..system import settings_dialog
+                    settings_dialog._open_settings(section="practice_qbank")
+                    return (True, None)
+            except Exception:
+                pass
+        # "Load Lectures" button on the normal Decks screen → open Janki ▸ Lectures.
+        if isinstance(message, str) and message == "janki-load-lectures":
+            try:
+                from ..system import settings_dialog
+                settings_dialog._open_settings(section="lectures")
+            except Exception:
+                pass
+            return (True, None)
+        # The back side reports the decided grade + whether an answer was picked, so the
+        # resolver knows the front pick's outcome (correct→Easy+suspend, wrong→Hard, or
+        # no pick→bury). Stashed on mw because the bottom-bar Continue button lives in a
+        # separate webview that can't read the card's sessionStorage.
+        if isinstance(message, str) and message.startswith("jp-ready:"):
+            try:
+                parts = message.split(":")
+                answered = len(parts) <= 3 or parts[3] == "1"
+                mw._janki_pending_grade = (int(parts[1]), len(parts) > 2 and parts[2] == "1", answered)
+            except Exception:
+                pass
+            return (True, None)
+        # Continue (bottom-bar button / Space / Enter / controller) → resolve the card
+        # via the single authority. _jp_resolve is latched so this can't double-fire
+        # with Anki's native answer shortcut.
+        if isinstance(message, str) and message == "jp-continue":
+            try:
+                _jp_resolve()
+            except Exception:
+                pass
             return (True, None)
     except Exception:
         pass

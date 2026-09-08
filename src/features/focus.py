@@ -223,6 +223,49 @@ def _reassert_web_focus() -> None:
         pass
 
 
+def _set_central_margins(collapse: bool) -> None:
+    """Zero the central layout's margins/spacing while Focus Mode hides the chrome, and
+    restore the originals on exit. The hidden toolbar otherwise leaves a thin top strip/
+    line (the layout's top margin + inter-widget spacing) that shows when the card
+    scrolls under it."""
+    try:
+        cw = mw.centralWidget()
+        lay = cw.layout() if cw is not None else None
+        if lay is None:
+            return
+        if collapse:
+            if not hasattr(lay, "_janki_margins"):
+                m = lay.contentsMargins()
+                lay._janki_margins = (m.left(), m.top(), m.right(), m.bottom())
+                lay._janki_spacing = lay.spacing()
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+        elif hasattr(lay, "_janki_margins"):
+            lay.setContentsMargins(*lay._janki_margins)
+            lay.setSpacing(lay._janki_spacing)
+            del lay._janki_margins
+    except Exception:
+        pass
+
+
+def _reclaim_central_layout() -> None:
+    """Recompute the central widget's layout so a just-hidden (or just-shown) chrome
+    webview's space is reclaimed/restored immediately — mw.web fills to the top edge
+    with no leftover gap."""
+    try:
+        _set_central_margins(_focus_hidden)
+        cw = mw.centralWidget()
+        lay = cw.layout() if cw is not None else None
+        if lay is not None:
+            lay.invalidate()
+            lay.activate()
+        web = getattr(mw, "web", None)
+        if web is not None:
+            web.updateGeometry()
+    except Exception:
+        pass
+
+
 def _focus_set_hidden(hidden: bool) -> None:
     global _focus_hidden
     # Set state FIRST so it can never get stuck (a stuck _focus_hidden=True leaves
@@ -257,8 +300,21 @@ def _focus_set_hidden(hidden: bool) -> None:
                     wv.hide()
                 except Exception:
                     pass
+            # Force the central layout to reclaim the space the hidden chrome left,
+            # so mw.web fills to the very TOP. In fullscreen the vacated toolbar
+            # strip could otherwise linger as an empty band, and the card centres
+            # within the lowered region (looks un-centred, pushed down by the gap).
+            _reclaim_central_layout()
             _focus_apply_card(True, off)     # +toolbar_h: card jumped up, slide down
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
+            # QWebEngine geometry can settle a frame late; re-reclaim + re-centre
+            # once the resize has actually landed so no top gap survives.
+            def _settle():
+                if not _focus_hidden:
+                    return
+                _reclaim_central_layout()
+                _focus_apply_card(True, 0)   # already in place — just re-assert centring
+            QTimer.singleShot(0, _settle)
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
@@ -268,6 +324,7 @@ def _focus_set_hidden(hidden: bool) -> None:
                 wv.show()
             except Exception:
                 pass
+        _reclaim_central_layout()
         _focus_apply_card(False, -toolbar_h)  # -toolbar_h: card jumped down, slide up
         for wv in chrome:
             _fade_chrome(wv, True)

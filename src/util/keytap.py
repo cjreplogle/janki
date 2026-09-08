@@ -54,6 +54,7 @@ from PyQt6.QtCore import QObject, pyqtSignal as _pyqtSignal
 class _KeyBridge(QObject):
     send_key    = _pyqtSignal(int)  # macOS keycode
     send_key_rf = _pyqtSignal(int)  # keycode, reveal-first (two-press gamepad flow)
+    practice_or_rate = _pyqtSignal(int, bool)  # rating keycode + whether the focus gate would forward it
     pomo_space = _pyqtSignal(bool)  # True=press, False=release (Pomodoro bypass)
     lockdown_space = _pyqtSignal(bool)  # True=press, False=release (lockdown hold-to-exit)
     lockdown_chord = _pyqtSignal(bool)  # backtick+Delete chord held/released (hold-to-exit)
@@ -63,6 +64,7 @@ class _KeyBridge(QObject):
 _key_bridge = _KeyBridge()
 _key_bridge.send_key.connect(lambda kc: _send_key_to_anki(kc))
 _key_bridge.send_key_rf.connect(lambda kc: _send_key_to_anki(kc, reveal_first=True))
+_key_bridge.practice_or_rate.connect(lambda kc, fwd: _practice_or_rate(kc, fwd))
 
 def _lk_eval_chord() -> None:
     """Re-evaluate the backtick+Delete chord from the tap thread and emit the
@@ -195,6 +197,92 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
 
     except Exception as e:
         _gtap_log(f"_send_key_to_anki error: {e}")
+
+
+def _practice_remote_pick(kc: int) -> bool:
+    """If the current card is a Janki Practice question and remote mode is live, use
+    face button kc (18/19/20/21 = A/B/C/D) to pick the matching answer choice in the
+    webview — instead of grading. Returns True if it handled the press. Runs on the
+    main thread, so it works while Anki is focused (unlike the normal forward gate)."""
+    try:
+        if not _cfg().get("practice_remote_mode", False):
+            return False
+        from ..integrations import gamepad
+        if not gamepad.is_controller_connected():
+            return False
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        if card is None or getattr(r, "state", None) != "question":
+            return False
+        nt = card.note_type() or {}
+        if nt.get("name") != "Janki Practice":
+            return False
+        n = kc - 18                       # 18->0 (A) .. 21->3 (D)
+        if n < 0 or n > 3:
+            return False
+        web = getattr(r, "web", None) or mw.web
+        web.eval("if(window.jankiPickVisible)window.jankiPickVisible(%d);" % n)
+        _gtap_log(f"practice remote pick choice {n} (kc={kc})")
+        return True
+    except Exception as e:
+        _gtap_log(f"practice remote pick: {e}")
+        return False
+
+
+def _practice_remote_grade(kc: int) -> bool:
+    """If the current card is a Janki Practice card showing its ANSWER (back) side and
+    remote mode is live, use face button kc (18/19/20/21 = A/B/C/D) to grade
+    Again/Hard/Good/Easy (ease 1/2/3/4) — even while Anki is focused. Returns True if
+    it handled the press. This is the second phase of the remote flow: front picks an
+    answer, back grades the card, so the whole deck is driveable from the remote."""
+    try:
+        if not _cfg().get("practice_remote_mode", False):
+            return False
+        from ..integrations import gamepad
+        if not gamepad.is_controller_connected():
+            return False
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        if card is None or getattr(r, "state", None) != "answer":
+            return False
+        nt = card.note_type() or {}
+        if nt.get("name") != "Janki Practice":
+            return False
+        # Binary grading: the pick already decided the ease — ANY face button just
+        # continues (grades with the stashed ease + advances) via the card's Continue.
+        if _cfg().get("practice_binary_grade", True):
+            web = getattr(r, "web", None) or mw.web
+            web.eval("if(window.jankiContinue)window.jankiContinue();")
+            _gtap_log(f"practice remote continue (kc={kc})")
+            return True
+        ease = _KC_TO_EASE.get(kc)
+        if ease is None:
+            return False
+        for m in ("_answerCard", "answer_card"):
+            fn = getattr(r, m, None)
+            if fn:
+                fn(ease)
+                _gtap_log(f"practice remote grade ease={ease} (kc={kc})")
+                return True
+        return False
+    except Exception as e:
+        _gtap_log(f"practice remote grade: {e}")
+        return False
+
+
+def _practice_or_rate(kc: int, fwd: bool) -> None:
+    """Main-thread router for the four rating buttons. On a Janki Practice question
+    (remote mode) a button PICKS the matching answer choice; on its answer side a
+    button GRADES Again/Hard/Good/Easy — both even while Anki is focused. Otherwise
+    fall back to the normal reveal-first forward — but only when the focus gate would
+    have forwarded it, so ordinary cards behave exactly as before (no double-fire with
+    Contanki while Anki is focused)."""
+    if _practice_remote_pick(kc):
+        return
+    if _practice_remote_grade(kc):
+        return
+    if fwd:
+        _send_key_to_anki(kc, reveal_first=True)
 
 
 def _adjust_caption_font(delta: int) -> None:

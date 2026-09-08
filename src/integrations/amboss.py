@@ -498,6 +498,12 @@ def _apply_amboss_underlines(front: bool = True):
         return
     try:
         if _cfg().get("practice_no_amboss", True) and _is_practice_card():
+            # AMBOSS is normally suppressed on practice cards. Optionally re-enable
+            # it on the BACK (explanation/rationale) so terms there are clickable —
+            # the question side stays clean so it can't spoil the answer.
+            if not front and _cfg().get("practice_amboss_on_back", False):
+                web.eval(_amboss_ul_js(front))   # also drops the front's hide-style
+                return
             web.eval(_amboss_hide_js())
             return
         web.eval(_amboss_ul_js(front))

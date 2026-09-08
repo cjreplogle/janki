@@ -187,7 +187,29 @@ _hid_last = {}                # button usage -> last integer value (edge detect)
 _hid_axis_last = {}           # d-pad axis usage -> last quantized pos (0/127/255)
 _hid_runloop = None           # bg thread's CFRunLoop (so teardown can stop it)
 _hid_cf = None                # CoreFoundation handle (for CFRunLoopStop at exit)
+_hid_device_count = 0         # live count of matched controllers (match/removal cbs)
+_hid_match_cb = None          # keep the device-matching CFUNCTYPE alive
+_hid_remove_cb = None         # keep the device-removal CFUNCTYPE alive
+_hid_iokit = None             # IOKit handle (for IOHIDManagerCopyDevices)
 _HID_USAGE_PAGE_BUTTON = 0x09
+
+
+def is_controller_connected():
+    """True if a matched gamepad/remote is currently connected. Prefers an
+    authoritative live query of the IOHIDManager (IOHIDManagerCopyDevices), falling
+    back to the device match/removal callback counter. False when the HID monitor
+    isn't running (non-macOS, flag off, or permission denied)."""
+    mgr, iokit, cf = _hid_manager, _hid_iokit, _hid_cf
+    if mgr and iokit and cf and not _hid_shutting_down:
+        try:
+            devs = iokit.IOHIDManagerCopyDevices(mgr)
+            if devs:
+                n = int(cf.CFSetGetCount(devs))
+                cf.CFRelease(devs)
+                return n > 0
+        except Exception:
+            pass
+    return _hid_device_count > 0
 
 
 def _hid_button_map():
@@ -215,7 +237,7 @@ def _start_hid_monitor():
     """Open an IOHIDManager matching gamepads/joysticks and forward their button
     presses to the reviewer from a background CFRunLoop thread. No-op unless the
     `hid_controller` config flag is on."""
-    global _hid_manager, _hid_cb_ref, _hid_thread, _hid_shutting_down, _hid_cf
+    global _hid_manager, _hid_cb_ref, _hid_thread, _hid_shutting_down, _hid_cf, _hid_iokit
     if sys.platform != 'darwin' or _hid_thread is not None:
         return
     if not _cfg().get("hid_controller", False):
@@ -234,6 +256,10 @@ def _start_hid_monitor():
         IOKit.IOHIDManagerCreate.argtypes = [c_void_p, ctypes.c_uint32]
         IOKit.IOHIDManagerSetDeviceMatchingMultiple.argtypes = [c_void_p, c_void_p]
         IOKit.IOHIDManagerRegisterInputValueCallback.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerRegisterDeviceMatchingCallback.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerRegisterDeviceRemovalCallback.argtypes = [c_void_p, c_void_p, c_void_p]
+        IOKit.IOHIDManagerCopyDevices.restype = c_void_p
+        IOKit.IOHIDManagerCopyDevices.argtypes = [c_void_p]
         IOKit.IOHIDManagerScheduleWithRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
         IOKit.IOHIDManagerOpen.restype = ctypes.c_uint32
         IOKit.IOHIDManagerOpen.argtypes = [c_void_p, ctypes.c_uint32]
@@ -258,6 +284,9 @@ def _start_hid_monitor():
         CF.CFArrayCreate.argtypes = [c_void_p, ctypes.POINTER(c_void_p), c_long, c_void_p]
         CF.CFRunLoopGetCurrent.restype = c_void_p
         CF.CFRunLoopStop.argtypes = [c_void_p]
+        CF.CFSetGetCount.restype = c_long
+        CF.CFSetGetCount.argtypes = [c_void_p]
+        CF.CFRelease.argtypes = [c_void_p]
         IOKit.IOHIDManagerUnscheduleFromRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
         IOKit.IOHIDManagerClose.restype = ctypes.c_uint32
         IOKit.IOHIDManagerClose.argtypes = [c_void_p, ctypes.c_uint32]
@@ -360,22 +389,45 @@ def _start_hid_monitor():
                     return
                 if ival == 1 and last != 1:   # rising edge = button down
                     fwd = bool(state._remote_active and not state._anki_focused)
-                    keytap._gtap_log(f"[hid] button {usage} press fwd={fwd} "
+                    kc = _hid_button_map().get(usage)
+                    keytap._gtap_log(f"[hid] button {usage} press kc={kc} fwd={fwd} "
                               f"remote={state._remote_active} focused={state._anki_focused}")
-                    if fwd:
-                        kc = _hid_button_map().get(usage)
-                        if kc is not None:
-                            # Rating keys use the reveal-first two-press flow (a
-                            # question-side press flips the card, the next rates);
-                            # everything else (e.g. caption toggle) sends plain.
-                            sig = (keytap._key_bridge.send_key_rf if kc in (18, 19, 20, 21)
-                                   else keytap._key_bridge.send_key)
-                            sig.emit(kc)   # -> main thread
+                    if kc in (18, 19, 20, 21):
+                        # Rating buttons: route through the main-thread practice
+                        # router. On a Janki Practice question in remote mode it picks
+                        # the matching answer choice even while Anki is FOCUSED; on any
+                        # other card it forwards (reveal-first) only when the focus gate
+                        # allows, so ordinary cards behave exactly as before.
+                        keytap._key_bridge.practice_or_rate.emit(kc, fwd)
+                    elif fwd and kc is not None:
+                        # Non-rating buttons (e.g. caption toggle) send plain, gated.
+                        keytap._key_bridge.send_key.emit(kc)
             except Exception as e:
                 keytap._gtap_log(f"[hid] cb: {e}")
 
         _hid_cb_ref = HIDCB(_on_value)
         IOKit.IOHIDManagerRegisterInputValueCallback(mgr, _hid_cb_ref, None)
+
+        # Track how many controllers are connected so is_controller_connected() can
+        # gate features (e.g. Practice "remote mode") live. Registered before Open, so
+        # the matching callback also fires for any device already paired at launch.
+        global _hid_match_cb, _hid_remove_cb, _hid_device_count
+        DEVCB = ctypes.CFUNCTYPE(None, c_void_p, ctypes.c_uint32, c_void_p, c_void_p)
+
+        def _on_match(context, result, sender, device):
+            global _hid_device_count
+            _hid_device_count += 1
+
+        def _on_remove(context, result, sender, device):
+            global _hid_device_count
+            if _hid_device_count > 0:
+                _hid_device_count -= 1
+
+        _hid_match_cb = DEVCB(_on_match)
+        _hid_remove_cb = DEVCB(_on_remove)
+        IOKit.IOHIDManagerRegisterDeviceMatchingCallback(mgr, _hid_match_cb, None)
+        IOKit.IOHIDManagerRegisterDeviceRemovalCallback(mgr, _hid_remove_cb, None)
+
         _prevent_app_nap()   # keep the bg runloop alive while Anki is backgrounded
 
         def _run():
@@ -403,6 +455,7 @@ def _start_hid_monitor():
 
         _hid_manager = mgr
         _hid_cf = CF
+        _hid_iokit = IOKit
         _hid_shutting_down = False
         _hid_thread = threading.Thread(target=_run, daemon=True)
         _hid_thread.start()
@@ -428,8 +481,9 @@ def _stop_hid_monitor():
     IOKit can fire the callback (or get torn down under one) mid-shutdown = the
     bus error. So we also stop the bg runloop and join it; _run then unschedules
     and closes the manager on its own thread before returning."""
-    global _hid_shutting_down
+    global _hid_shutting_down, _hid_device_count
     _hid_shutting_down = True
+    _hid_device_count = 0
     rl, cf, th = _hid_runloop, _hid_cf, _hid_thread
     # CFRunLoopStop only wakes CFRunLoopRun if the loop is *currently* inside it;
     # issued a hair too early (between callouts, or before Run starts) it's a

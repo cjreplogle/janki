@@ -1067,7 +1067,15 @@ def _pick_tag_map_file(day_offset=0):
     if not fn:
         return False
     cur = mw.addonManager.getConfig(__name__) or {}
-    cur["xlsx_path"] = fn
+    # The base slot is reserved for a spreadsheet; a .txt/.json is always a
+    # complementary layer (still resolves on its own with an empty base).
+    if fn.lower().endswith((".txt", ".json")):
+        extras = list(cur.get("txt_paths") or [])
+        if fn not in extras:
+            extras.append(fn)
+        cur["txt_paths"] = extras
+    else:
+        cur["xlsx_path"] = fn
     mw.addonManager.writeConfig(__name__, cur)
     _MAP_CACHE["key"] = None            # force a rebuild with the new path
     m2, _k2, _o2 = _get_map(_enabled_families())
@@ -1214,36 +1222,55 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
     lay.addWidget(_hr)
 
     lay.addWidget(QLabel(
-        "Paste the AI's JSON reply here, then click <b>Build tag map</b> — no need "
-        "to save a file:"))
+        "Paste the AI's JSON reply here, then click <b>Build tag map</b> — you'll be "
+        "asked where to save it (.json or .txt):"))
     reply_box = QPlainTextEdit()
     reply_box.setPlaceholderText('{ "Lecture title": ["#AK_Step1_v12::…", …], … }')
     reply_box.setMinimumSize(460, 150)
     lay.addWidget(reply_box)
 
     def _finish(map_path, n, kept, dropped):
-        cur = mw.addonManager.getConfig(__name__) or {}
-        cur["xlsx_path"] = map_path
-        mw.addonManager.writeConfig(__name__, cur)
         _MAP_CACHE["key"] = None
-        d.accept()
-        tooltip("Tag map ready: %d lectures, %d tags (%d dropped)."
-                % (n, kept, dropped), period=4000)
         if on_map_ready:
+            # Host (Settings pane) wires the file into its .txt/.json list itself.
             try:
                 on_map_ready(map_path)
             except Exception:
                 pass
+        else:
+            # Standalone (first-launch) use: add it to the complementary
+            # .txt/.json list, NOT the base. The base slot is reserved for an
+            # .xlsx spreadsheet; a generated map is always a layer on top. With
+            # no base present it still resolves on its own (build_lecture_map
+            # merges txt_paths over an empty base), so it reads independently.
+            cur = mw.addonManager.getConfig(__name__) or {}
+            extras = list(cur.get("txt_paths") or [])
+            if map_path not in extras:
+                extras.append(map_path)
+            cur["txt_paths"] = extras
+            mw.addonManager.writeConfig(__name__, cur)
+        d.accept()
+        tooltip("Tag map saved: %d lectures, %d tags (%d dropped).\n%s"
+                % (n, kept, dropped, map_path), period=5000)
         if open_after:
             QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
 
-    def _build():
-        raw = reply_box.toPlainText().strip()
-        if not raw:
-            showWarning("Paste the AI's JSON reply first (or use “Load from file…”).")
-            return
+    def _ask_out_path():
+        """Where to save the produced map. Defaults next to the .docx so it's easy
+        to find; user picks .json or .txt."""
+        default = os.path.splitext(path)[0] + "_tagmap.json"
+        op, _s = QFileDialog.getSaveFileName(
+            par, "Save tag map", default,
+            "JSON tag map (*.json);;Text tag map (*.txt)")
+        return op
+
+    def _do_build(raw=None, reply_path=None):
+        out_path = _ask_out_path()
+        if not out_path:
+            return                        # cancelled the save
         try:
-            map_path, n, kept, dropped = qbank.write_lo_tagmap(raw=raw)
+            map_path, n, kept, dropped = qbank.write_lo_tagmap(
+                raw=raw, reply_path=reply_path, out_path=out_path)
         except Exception as e:
             showWarning("Could not parse the reply:\n\n%s" % e)
             return
@@ -1251,6 +1278,13 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
             showWarning("No usable lecture → tag mappings were found in the reply.")
             return
         _finish(map_path, n, kept, dropped)
+
+    def _build():
+        raw = reply_box.toPlainText().strip()
+        if not raw:
+            showWarning("Paste the AI's JSON reply first (or use “Load from file…”).")
+            return
+        _do_build(raw=raw)
 
     def _load_file():
         rp, _r = QFileDialog.getOpenFileName(
@@ -1258,15 +1292,7 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
             "AI reply (*.json *.txt);;All files (*)")
         if not rp:
             return
-        try:
-            map_path, n, kept, dropped = qbank.write_lo_tagmap(reply_path=rp)
-        except Exception as e:
-            showWarning("Could not parse the reply:\n\n%s" % e)
-            return
-        if not n:
-            showWarning("No usable lecture → tag mappings were found in the reply.")
-            return
-        _finish(map_path, n, kept, dropped)
+        _do_build(reply_path=rp)
 
     row = QHBoxLayout()
     close_btn = QPushButton("Close")
@@ -1667,7 +1693,7 @@ def _open_today_dialog(day_offset=0, auto=False):
     # Mutable per-day state (repopulated by _populate; read by _update_total/_apply).
     st = {"offset": None, "target": None, "events": [], "combos": [],
           "auto_keys": [], "has_day_state": False, "active_set": set(),
-          "closed": False}
+          "closed": False, "resolve": {}}
     dlg.finished.connect(lambda _r: st.__setitem__("closed", True))
 
     _FAM_SHORT = {"ak": "#AK", "aj": "AJ", "huc": "hUtChCOM"}
@@ -1732,14 +1758,25 @@ def _open_today_dialog(day_offset=0, auto=False):
 
     def _resolve_event(ev):
         """Resolve a calendar event title to a lecture key (nk, is_fuzzy) via the
-        alias table, exact match, then fuzzy match — the same rules the rows use."""
+        alias table, exact match, then fuzzy match — the same rules the rows use.
+        Memoized per dialog: the fuzzy match (difflib over every lecture key) is the
+        single most repeated cost — the same titles recur across the visible day,
+        neighbour pre-warming (±2 days) and every re-populate — so caching it makes
+        the biggest difference to the load screen on slow devices."""
+        cache = st["resolve"]
+        hit = cache.get(ev)
+        if hit is not None:
+            return hit
         nkey = _norm(ev)
         if nkey in aliases:
             nkey = _norm(aliases[nkey])
         if nkey in m:
-            return nkey, False
-        mk = _fuzzy_match(ev, nkey, keys, m, cutoff)
-        return (mk, True) if mk else (None, False)
+            res = (nkey, False)
+        else:
+            mk = _fuzzy_match(ev, nkey, keys, m, cutoff)
+            res = (mk, True) if mk else (None, False)
+        cache[ev] = res
+        return res
 
     _COUNT_CHUNK = 24   # fragments per background query batch
 
@@ -1786,7 +1823,10 @@ def _open_today_dialog(day_offset=0, auto=False):
                               % (len(totals), breakdown))
 
     def _neighbor_frags(have):
-        """Uncached fragments of the ±1/±2 days (calendar mode) to pre-warm."""
+        """Uncached fragments of the ±1 days (calendar mode) to pre-warm, so a
+        single Prev/Next step is instant. Kept to ±1 (not ±2) to halve the trailing
+        background count load on slow devices — the visible day is always counted
+        first regardless (see _recount), so this only fills idle time after."""
         if no_cal:
             return []
         base = st.get("target")
@@ -1794,7 +1834,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             return []
         have = set(have)
         out = []
-        for d in (-1, 1, -2, 2):
+        for d in (-1, 1):
             day = base + datetime.timedelta(days=d)
             for ev in _ics_by_date(ics_path).get(day, []):
                 nk, _fz = _resolve_event(ev)
@@ -1950,6 +1990,8 @@ def _open_today_dialog(day_offset=0, auto=False):
             menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _populate(offset):
+        if st.get("closed"):                     # a queued nav-debounce fired post-close
+            return
         st["offset"] = offset
         if no_cal:
             # Manual mode: every lecture in the map, tracked under today's key.
@@ -2050,11 +2092,27 @@ def _open_today_dialog(day_offset=0, auto=False):
         # worker counts the visible day first, then pre-warms neighbours.
         _recount()
 
-    def _goto(new_offset):
-        _populate(new_offset)
+    # Debounced day navigation. Each click only updates the INTENDED offset + the
+    # header, and (re)arms a short timer; the heavy _populate (rebuilds the table,
+    # recreates every combo, spawns count queries) runs once, for the final day,
+    # after the burst settles. Rapid seeking used to fire a full rebuild per click,
+    # and the pile-up of widget teardown/deleteLater crashed slower devices.
+    _nav_timer = QTimer(dlg)
+    _nav_timer.setSingleShot(True)
+    _nav_timer.setInterval(150)
+    _nav_timer.timeout.connect(lambda: _populate(st.get("offset", 0)))
 
-    btn_prev.clicked.connect(lambda: _goto(st["offset"] - 1))
-    btn_next.clicked.connect(lambda: _goto(st["offset"] + 1))
+    def _goto(new_offset):
+        st["offset"] = new_offset                # accumulates across a click burst
+        if not no_cal:                           # cheap immediate feedback
+            _tgt = _today() + datetime.timedelta(days=new_offset)
+            day_hdr.setText("<b>%s — %s</b>"
+                            % (_day_label(new_offset), _tgt.strftime("%a %b %d, %Y")))
+        btn_today.setEnabled(new_offset != 0)
+        _nav_timer.start()                       # restart → coalesce the burst
+
+    btn_prev.clicked.connect(lambda: _goto(st.get("offset", 0) - 1))
+    btn_next.clicked.connect(lambda: _goto(st.get("offset", 0) + 1))
     btn_today.clicked.connect(lambda: _goto(0))
     table.itemChanged.connect(lambda _it: _recount())
     for _cb in src_cbs.values():                   # toggling a source recounts live
@@ -2213,15 +2271,17 @@ def build_settings_pages():
     g = QGridLayout(src)
     g.setColumnStretch(1, 1)
 
-    g.addWidget(QLabel("<b>Tag map</b> (.xlsx spreadsheet, .txt or .json lecture → tag list)"), 0, 0, 1, 3)
+    g.addWidget(QLabel("<b>Tag map</b> — base spreadsheet (.xlsx), plus optional .txt/.json layers"), 0, 0, 1, 3)
     xlsx_edit = QLineEdit(cfg.get("xlsx_path", ""))
-    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx  ·  …_Tags_by_Lecture.txt  ·  tags.json")
+    xlsx_edit.setPlaceholderText("~/Downloads/lectures.xlsx  (base spreadsheet)")
     xlsx_btn = QPushButton("Browse…")
 
     def _pick_xlsx():
+        # Base file is spreadsheet-only; .txt/.json go in the complementary list
+        # below (they still resolve on their own when no base is set).
         fn, _f = QFileDialog.getOpenFileName(
-            src, "Choose tag map", os.path.dirname(_p(xlsx_edit.text())) or "",
-            "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
+            src, "Choose base spreadsheet", os.path.dirname(_p(xlsx_edit.text())) or "",
+            "Spreadsheet (*.xlsx *.xlsm);;All files (*)")
         if fn:
             xlsx_edit.setText(fn)
 
@@ -2280,8 +2340,15 @@ def build_settings_pages():
     gen_btn.setToolTip("Parse a learning-objectives .docx and build a lecture → "
                        "tag map with your own AI session. Fills in the Base file "
                        "above.")
+    def _add_generated_map(p):
+        # Add the produced map into the .txt/.json list (merged on top of the base),
+        # de-duped. The pane's _save() persists txt_paths on close.
+        existing = {txt_list.item(i).text() for i in range(txt_list.count())}
+        if p and p not in existing:
+            txt_list.addItem(p)
+
     gen_btn.clicked.connect(lambda: _generate_map_from_los(
-        parent=src, on_map_ready=lambda p: xlsx_edit.setText(p), open_after=False))
+        parent=src, on_map_ready=_add_generated_map, open_after=False))
     g.addWidget(gen_btn, 3, 1, 1, 2)
 
     g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 4, 0, 1, 3)
@@ -2490,7 +2557,24 @@ def _install_menu():
     mw.form.menuTools.addAction(act)
 
 
+def _warm_map():
+    """Pre-build the lecture-map cache off the critical path so the first "Load
+    today's lectures" open is instant instead of a cold build (parsing the
+    spreadsheet + resolving ~1k AnKing leaves is the slow part, and it's cached
+    afterwards). No-op if a map is already cached or nothing is configured."""
+    try:
+        if _paths_ready():
+            _get_map(_enabled_families())
+    except Exception as e:
+        _log("map warm: %s" % e)
+
+
 def _on_profile_open():
+    # Warm the map in the background a few seconds after launch, regardless of the
+    # auto-open setting, so a later manual open is snappy on slow devices. Cached,
+    # so it's a no-op if auto-open below already built it.
+    if _paths_ready():
+        QTimer.singleShot(4000, _warm_map)
     # Auto-open only on the FIRST launch of each calendar day. Subsequent
     # launches the same day don't re-pop the dialog (Tools > Load today's
     # lectures still works manually anytime).

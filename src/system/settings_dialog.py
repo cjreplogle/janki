@@ -49,9 +49,20 @@ class GlassSettings(QDialog):
         from aqt.qt import (QTabWidget, QWidget, QComboBox, QGridLayout,
                             QPushButton, QButtonGroup)
         tabs = QTabWidget()
+        self._tabs = tabs
         app_page = QWidget();   app_lay = QVBoxLayout(app_page)
-        prac_page = QWidget();  prac_lay = QVBoxLayout(prac_page)
         gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
+
+        # Practice → subtabs: Appearance (how practice cards look/behave in review)
+        # and Question Bank (import/build/manage the .qb banks + Practice deck).
+        prac_page = QWidget(); _prac_outer = QVBoxLayout(prac_page)
+        _prac_outer.setContentsMargins(0, 0, 0, 0)
+        prac_tabs = QTabWidget(); _prac_outer.addWidget(prac_tabs)
+        self._prac_tabs = prac_tabs
+        prac_app_page = QWidget(); prac_app_lay = QVBoxLayout(prac_app_page)
+        prac_qb_page = QWidget();  prac_qb_lay = QVBoxLayout(prac_qb_page)
+        prac_tabs.addTab(prac_app_page, "Appearance")
+        prac_tabs.addTab(prac_qb_page, "Question Bank")
 
         # Focus → subtabs: Flare / Timer / Caption / Pomodoro / Lockdown.
         focus_page = QWidget(); _focus_outer = QVBoxLayout(focus_page)
@@ -303,6 +314,38 @@ class GlassSettings(QDialog):
         ct_row.addWidget(ct_s)
         ct_row.addWidget(ct_val)
         timer_lay.addLayout(ct_row)
+
+        # Practice cards (Janki Practice) get their own flat flare window — a
+        # vignette + MCQ needs real reasoning time. Range 10–300s (whole seconds).
+        cp_row = QHBoxLayout()
+        cp_name = QLabel("Practice: seconds to flare")
+        cp_name.setMinimumWidth(140)
+        cp_val = QLabel()
+        cp_s = QSlider(Qt.Orientation.Horizontal)
+        cp_s.setMinimum(10)     # 10s
+        cp_s.setMaximum(300)    # 5 min
+        cp_s.setValue(int(round(float(self.cfg.get("card_timer_practice_seconds", 90.0)))))
+
+        def _cp_cb(v):
+            self.cfg["card_timer_practice_seconds"] = float(v)
+            cp_val.setText(f"{v}s")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            # start_card reads this live — restart the current card's timer if it's
+            # a practice card so the change is visible immediately.
+            r = getattr(mw, "reviewer", None)
+            card = getattr(r, "card", None) if r else None
+            inst = card_timer._card_timer_instance
+            if (card is not None and inst is not None
+                    and getattr(r, "state", None) == "question"
+                    and inst._is_practice_card()):
+                inst._on_q(card)
+
+        cp_s.valueChanged.connect(_cp_cb)
+        cp_val.setText(f"{int(round(float(self.cfg.get('card_timer_practice_seconds', 90.0))))}s")
+        cp_row.addWidget(cp_name)
+        cp_row.addWidget(cp_s)
+        cp_row.addWidget(cp_val)
+        timer_lay.addLayout(cp_row)
 
         # Red edge-flare when the card timer fills (time to move on).
         self._red_flare = QCheckBox("Red flare when the card timer runs out")
@@ -597,7 +640,7 @@ class GlassSettings(QDialog):
             "review with %s." % str(self.cfg.get("practice_shortcut", "Ctrl+Shift+Q")))
         prac_note.setWordWrap(True)
         prac_note.setStyleSheet("color: gray; margin-bottom: 4px;")
-        prac_lay.addWidget(prac_note)
+        prac_app_lay.addWidget(prac_note)
 
         pn_row = QHBoxLayout()
         pn_name = QLabel("Questions per card")
@@ -614,26 +657,103 @@ class GlassSettings(QDialog):
         pn_row.addWidget(pn_name)
         pn_row.addWidget(pn_sb)
         pn_row.addStretch()
-        prac_lay.addLayout(pn_row)
+        prac_app_lay.addLayout(pn_row)
 
         self._prac_no_amboss = QCheckBox(
             "Hide AMBOSS term underlines on practice cards")
         self._prac_no_amboss.setChecked(bool(self.cfg.get("practice_no_amboss", True)))
 
+        # Sub-option: even when hidden on the question, still show AMBOSS on the
+        # BACK (explanation/rationale) so terms there stay clickable.
+        self._prac_amboss_back = QCheckBox(
+            "…but show AMBOSS on the back (explanation)")
+        self._prac_amboss_back.setStyleSheet("margin-left: 22px;")
+        self._prac_amboss_back.setChecked(bool(self.cfg.get("practice_amboss_on_back", False)))
+        self._prac_amboss_back.setEnabled(self._prac_no_amboss.isChecked())
+
         def _on_prac_amboss():
             self.cfg["practice_no_amboss"] = self._prac_no_amboss.isChecked()
             mw.addonManager.writeConfig(__name__, self.cfg)
+            self._prac_amboss_back.setEnabled(self._prac_no_amboss.isChecked())
             amboss._apply_amboss_underlines(front=True)   # re-apply to current card
 
+        def _on_prac_amboss_back():
+            self.cfg["practice_amboss_on_back"] = self._prac_amboss_back.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            # Re-apply to the current card at its actual side, so the change shows now.
+            r = getattr(mw, "reviewer", None)
+            front = getattr(r, "state", None) != "answer"
+            amboss._apply_amboss_underlines(front=front)
+
         self._prac_no_amboss.stateChanged.connect(_on_prac_amboss)
-        prac_lay.addWidget(self._prac_no_amboss)
+        self._prac_amboss_back.stateChanged.connect(_on_prac_amboss_back)
+        prac_app_lay.addWidget(self._prac_no_amboss)
+        prac_app_lay.addWidget(self._prac_amboss_back)
+
+        # Clicking a choice both grades AND flips the card to the explanation.
+        self._prac_click_flips = QCheckBox(
+            "Clicking an answer flips the card to the explanation")
+        self._prac_click_flips.setChecked(bool(self.cfg.get("practice_click_flips", True)))
+
+        def _on_prac_click_flips():
+            self.cfg["practice_click_flips"] = self._prac_click_flips.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            qbank.apply_practice_prefs()   # applies to the current card immediately
+
+        self._prac_click_flips.stateChanged.connect(_on_prac_click_flips)
+        prac_app_lay.addWidget(self._prac_click_flips)
+
+        # Remote mode: drive practice questions with a 4-button Anki remote. Drops one
+        # wrong choice so exactly four remain; A/B/C/D (Again/Hard/Good/Easy) pick the
+        # answers and visualise the press like a click.
+        self._prac_remote = QCheckBox(
+            "Remote mode when a remote is connected (drops one wrong choice; "
+            "A/B/C/D pick answers)")
+        self._prac_remote.setToolTip(
+            "Only takes effect while a controller/remote is actually connected — "
+            "unplug it and the next card shows the full choice set again. No deck "
+            "rebuild needed; just check or uncheck this box.")
+        self._prac_remote.setChecked(bool(self.cfg.get("practice_remote_mode", False)))
+
+        def _on_prac_remote():
+            self.cfg["practice_remote_mode"] = self._prac_remote.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            qbank.apply_practice_prefs()   # applies to the next card
+            try:
+                qbank.sync_contanki_for_card()  # suspend/resume Contanki right away
+            except Exception:
+                pass
+
+        self._prac_remote.stateChanged.connect(_on_prac_remote)
+        prac_app_lay.addWidget(self._prac_remote)
+
+        # Default show/hide of the back's explanation and the non-picked answers.
+        self._prac_show_exp = QCheckBox("Show explanation by default")
+        self._prac_show_exp.setChecked(bool(self.cfg.get("practice_show_explanation", True)))
+        self._prac_show_all = QCheckBox("Show all answers by default")
+        self._prac_show_all.setChecked(bool(self.cfg.get("practice_show_all_answers", False)))
+
+        def _on_prac_show_exp():
+            self.cfg["practice_show_explanation"] = self._prac_show_exp.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            qbank.apply_practice_prefs(persist=True)   # new default overrides card state
+
+        def _on_prac_show_all():
+            self.cfg["practice_show_all_answers"] = self._prac_show_all.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            qbank.apply_practice_prefs(persist=True)
+
+        self._prac_show_exp.stateChanged.connect(_on_prac_show_exp)
+        self._prac_show_all.stateChanged.connect(_on_prac_show_all)
+        prac_app_lay.addWidget(self._prac_show_exp)
+        prac_app_lay.addWidget(self._prac_show_all)
 
         _imp_btn = QPushButton("Import question bank (.qb)…")
         _imp_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
             "padding:5px 12px;border-radius:5px;}"
             "QPushButton:hover{background-color:#61646b;}")
-        prac_lay.addWidget(_imp_btn)
+        prac_qb_lay.addWidget(_imp_btn)
 
         _docx_btn = QPushButton("Estimate .qb from .docx…")
         _docx_btn.setStyleSheet(
@@ -642,7 +762,7 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         _docx_btn.clicked.connect(
             lambda: qbank.docx_estimate_dialog(on_done=_refresh_banks))
-        prac_lay.addWidget(_docx_btn)
+        prac_qb_lay.addWidget(_docx_btn)
 
         # AI-assisted tagging (offline round-trip): copy a prompt to paste into
         # your own Claude/ChatGPT, then apply its JSON reply back onto the banks.
@@ -653,7 +773,7 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         _prompt_btn.clicked.connect(
             lambda: qbank.copy_tagging_prompt_dialog(on_done=_refresh_banks))
-        prac_lay.addWidget(_prompt_btn)
+        prac_qb_lay.addWidget(_prompt_btn)
 
         _apply_btn = QPushButton("Apply AI tag results (.json)…")
         _apply_btn.setStyleSheet(
@@ -662,26 +782,26 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         _apply_btn.clicked.connect(
             lambda: qbank.apply_tag_results_dialog(on_done=_refresh_banks))
-        prac_lay.addWidget(_apply_btn)
+        prac_qb_lay.addWidget(_apply_btn)
 
         # Convert banks into a real, syncable "Practice" deck (subdeck per bank).
-        _deck_btn = QPushButton("Convert to Practice deck…")
+        # Added to the layout at the very bottom of the page (after the stretch below).
+        _deck_btn = QPushButton("Load Question Banks to Anki")
         _deck_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
             "padding:5px 12px;border-radius:5px;}"
             "QPushButton:hover{background-color:#61646b;}")
         _deck_btn.clicked.connect(
             lambda: qbank.convert_to_deck_dialog(on_done=_refresh_banks))
-        prac_lay.addWidget(_deck_btn)
 
         _banks_label = QLabel("Installed banks")
         _banks_label.setStyleSheet("color: gray; margin-top: 8px;")
-        prac_lay.addWidget(_banks_label)
+        prac_qb_lay.addWidget(_banks_label)
 
         _banks_box = QWidget()
         _banks_v = QVBoxLayout(_banks_box)
         _banks_v.setContentsMargins(0, 0, 0, 0)
-        prac_lay.addWidget(_banks_box)
+        prac_qb_lay.addWidget(_banks_box)
 
         def _refresh_banks():
             while _banks_v.count():
@@ -1052,8 +1172,12 @@ class GlassSettings(QDialog):
 
         # Push each page's controls to the top.
         for pl in (app_lay, flare_lay, timer_lay, cap_lay, pomo_lay, lock_lay,
-                   prac_lay, gen_lay):
+                   prac_app_lay, prac_qb_lay, gen_lay):
             pl.addStretch()
+
+        # Pin "Load Question Banks to Anki" to the bottom of the Question Bank page
+        # (after the stretch, so it sits below the installed-banks list).
+        prac_qb_lay.addWidget(_deck_btn)
 
         close = QPushButton("Close")
 
@@ -1083,13 +1207,33 @@ class GlassSettings(QDialog):
             diagnostics._live_apply(self.cfg)
 
 
-def _open_settings():
+def _open_settings(section=None):
     d = GlassSettings()
     # "Always in front" carries WindowStaysOnTopHint on the main window, which
     # would float above this child dialog — match it so settings stays visible.
     if _cfg().get("always_on_top", False):
         from aqt.qt import Qt
         d.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+    if section == "practice_qbank":
+        try:
+            for i in range(d._tabs.count()):
+                if d._tabs.tabText(i) == "Practice":
+                    d._tabs.setCurrentIndex(i)
+                    break
+            for j in range(d._prac_tabs.count()):
+                if d._prac_tabs.tabText(j) == "Question Bank":
+                    d._prac_tabs.setCurrentIndex(j)
+                    break
+        except Exception:
+            pass
+    elif section == "lectures":
+        try:
+            for i in range(d._tabs.count()):
+                if d._tabs.tabText(i) == "Lectures":
+                    d._tabs.setCurrentIndex(i)
+                    break
+        except Exception:
+            pass
     d.show()
     d.raise_()
     d.activateWindow()

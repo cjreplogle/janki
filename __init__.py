@@ -185,6 +185,14 @@ def _startup():
         mw._glass_diagnose = diagnostics.glass_diagnose_live
         mw._amboss_diagnose = amboss._amboss_diagnose
 
+        # Keep the Janki Practice note type's CSS/template current so styling fixes
+        # reach already-converted decks on launch (no manual re-convert needed).
+        try:
+            from .src.integrations import qbank
+            qbank.sync_practice_model_if_present()
+        except Exception as _qb_exc:
+            log("practice model sync: %s" % _qb_exc)
+
         # In-app updater: throttled once-a-day background check on launch (Janki
         # isn't on AnkiWeb, so this replaces manual GitHub reinstalls). The manual
         # "Check for updates now" trigger lives in Janki: Settings… → General.
@@ -354,6 +362,7 @@ def _startup():
         if hasattr(gui_hooks, 'reviewer_did_show_question'):
             def _on_show_question(_r):
                 state._remote_active = True
+                hud.caption_practice_gate()   # disable caption on practice cards
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
@@ -372,17 +381,56 @@ def _startup():
                 except Exception:
                     pass
                 amboss._apply_amboss_underlines(front=not _dup)
+                try:
+                    from .src.integrations import qbank
+                    qbank.apply_practice_prefs()   # click-to-flip + back show/hide defaults
+                    qbank.sync_contanki_for_card() # suspend Contanki on remote practice cards
+                    qbank.sync_practice_bottom()   # question side: restore native buttons
+                except Exception:
+                    pass
                 if pomodoro._pomo_instance:
                     pomodoro._pomo_instance.enter_review()
             gui_hooks.reviewer_did_show_question.append(_on_show_question)
         if hasattr(gui_hooks, 'reviewer_did_show_answer'):
             def _on_show_answer(_r):
                 state._remote_active = True
+                hud.caption_practice_gate()   # keep caption off on the practice back
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 amboss._apply_amboss_underlines(front=False)  # back: no fade, instant
+                try:
+                    from .src.integrations import qbank
+                    qbank.sync_contanki_for_card()  # keep Contanki suspended on the back
+                    qbank.sync_practice_bottom()    # hide native ease buttons (binary grade)
+                except Exception:
+                    pass
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
+
+        # Practice hub: a light-green "Practice" toolbar link (next to Sync) that opens
+        # the question-bank deck list, and a filter that keeps those banks OUT of the
+        # main deck list (they live under the Practice button instead).
+        try:
+            from .src.features import practice as _practice
+            if hasattr(gui_hooks, "top_toolbar_did_init_links"):
+                gui_hooks.top_toolbar_did_init_links.append(_practice.install_practice_toolbar)
+            if hasattr(gui_hooks, "deck_browser_will_render_content"):
+                gui_hooks.deck_browser_will_render_content.append(_practice.hide_practice_rows)
+            # The toolbar already drew during main-window init (before this hook
+            # registered), so redraw it now to pick up the Practice link. Same for the
+            # deck browser if it's the current screen.
+            try:
+                if getattr(mw, "toolbar", None):
+                    mw.toolbar.draw()
+            except Exception:
+                pass
+            try:
+                if getattr(mw, "deckBrowser", None) and getattr(mw, "state", None) == "deckBrowser":
+                    mw.deckBrowser.refresh()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         # Re-glass any mw.web page that skipped webview_will_set_content — notably
         # the deck-finished "Congratulations" page (loaded via load_sveltekit_page).
@@ -399,6 +447,12 @@ def _startup():
                 if new_state != 'review':
                     focus._focus_restore_for_nav()
                     amboss._stop_amboss_size_watch()
+                    try:
+                        from .src.integrations import qbank
+                        qbank.resume_contanki()  # never leave Contanki suspended off-reviewer
+                    except Exception:
+                        pass
+                    hud.caption_practice_gate()  # restore caption when leaving practice
                 if pomodoro._pomo_instance and new_state != 'review':
                     pomodoro._pomo_instance.leave_review()
                 if new_state == 'overview' or (

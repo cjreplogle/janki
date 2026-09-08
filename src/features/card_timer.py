@@ -996,6 +996,14 @@ def _make_card_timer():
                 return int(_c.get("card_timer_pulse_alpha_focus", 24))
             return int(_c.get("card_timer_pulse_alpha", PULSE_MAX_A))
 
+        def _is_practice_card(self):
+            """True if the card in the reviewer is a Janki Practice question."""
+            try:
+                c = mw.reviewer.card
+                return c is not None and c.note_type()["name"] == "Janki Practice"
+            except Exception:
+                return False
+
         def start_card(self, text_len):
             # Read the shape params LIVE so settings changes apply to the very next
             # card with no rebuild (the closure values are just fallbacks).
@@ -1012,6 +1020,11 @@ def _make_card_timer():
             floor_s = float(_c.get("card_timer_min_s", MIN_S))
             len_mult = max(len_lo, min(len_hi, max(0, text_len) / sentence_chars))
             dur_s = base_secs * len_mult
+            # Practice cards (Janki Practice) get their own, longer flare window: a
+            # vignette + MCQ needs real reasoning time, so it uses a FLAT "seconds
+            # until flare" (no length scaling) — default 90s, its own slider.
+            if self._is_practice_card():
+                dur_s = float(_c.get("card_timer_practice_seconds", 90.0))
             dur_s = min(cap_s, max(floor_s, dur_s))
             self._dur = dur_s * 1000.0
             self._elapsed = 0.0
@@ -1215,6 +1228,18 @@ def _make_card_timer():
 
     def _on_answered(reviewer, card, ease):
         try:
+            # Practice cards don't get the generic per-card "done for today" flare
+            # (it'd fire on every card). Instead, a CORRECT answer (front pick →
+            # graded Easy) earns a soft green celebration as we advance; wrong (Hard)
+            # or buried cards get nothing.
+            try:
+                is_practice = (card.note_type() or {}).get("name") == "Janki Practice"
+            except Exception:
+                is_practice = False
+            if is_practice:
+                if int(ease) >= 3:
+                    mgr.card_done_flash()
+                return
             if _done_for_today(card):
                 mgr.card_done_flash()
         except Exception:

@@ -84,6 +84,7 @@
   "card_timer_chars_for_max": 900,
   "card_timer_curve": 0.1,
   "card_timer_seconds": 15.0,
+  "card_timer_practice_seconds": 90.0,
   "card_timer_len_min_mult": 0.5,
   "card_timer_len_max_mult": 1.5,
   "card_timer_sentence_chars": 80,
@@ -135,5 +136,13 @@
   "match_coverage": 0.3,
   "practice_num_questions": 5,
   "practice_shortcut": "Ctrl+Shift+Q",
-  "practice_no_amboss": true
+  "practice_no_amboss": true,
+  "practice_amboss_on_back": false,
+  "practice_click_flips": true,
+  "practice_click_flip_delay_ms": 600,
+  "practice_show_explanation": true,
+  "practice_show_all_answers": false,
+  "practice_remote_mode": false,
+  "practice_binary_grade": true,
+  "practice_wrong_ease": 2
 }

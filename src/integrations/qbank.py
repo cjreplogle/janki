@@ -1122,35 +1122,331 @@ _MODEL_NAME = "Janki Practice"
 # re-apply the same full-card tint after the flip (a fresh render loses JS state).
 # The correct choice carries .jp-correct in the markup (same class the BACK uses
 # for its blue highlight), so the handler just reads it. Locks after one pick.
+# Inline-style tinting of a choice box (green/red/blue). Set as inline styles so the
+# fill is robust to a stale/older note-type CSS (inline beats a non-!important rule).
+_JP_TINT_JS = (
+    "if(!window.jankiTint){window.jankiTint=function(el,k){if(!el)return;"
+    "if(k==='right'){el.style.background='#2f7d52';el.style.borderColor='#3fae72';"
+    "el.style.color='#eafff1';}"
+    "else if(k==='wrong'){el.style.background='#a33a3a';el.style.borderColor='#d05a5a';"
+    "el.style.color='#ffecec';}"
+    "else if(k==='blue'){el.style.background='rgba(74,144,255,0.30)';"
+    "el.style.borderColor='rgba(74,144,255,0.65)';el.style.color='#dbe8ff';}"
+    "el.style.fontWeight='600';};}"
+)
+# MOBILE only: if every visible choice fits on a single line, bump the choice font a
+# little for readability (short A/B/C/D answers look cramped at the base size on a
+# phone). Guarded so it never wraps: if the larger size pushes any choice onto a
+# second line, it reverts. Desktop (add-on sets jankiPracticeAutoFlip) is untouched.
+_JP_SIZE_JS = (
+    "if(!window.jankiSizeChoices){window.jankiSizeChoices=function(){"
+    "if(typeof window.jankiPracticeAutoFlip!=='undefined')return;"       # desktop → skip
+    "var box=document.getElementById('jp-choices');if(!box)return;"
+    "box.classList.remove('jp-big');"
+    "var cs=box.querySelectorAll('.jp-choice');"
+    "var vis=function(el){return el.offsetParent!==null"
+    "&&!el.classList.contains('jp-dropped')&&!el.classList.contains('jp-collapsed');};"
+    "var one=function(el){var st=getComputedStyle(el);var lh=parseFloat(st.lineHeight);"
+    "if(isNaN(lh))lh=parseFloat(st.fontSize)*1.3;"
+    "var pt=parseFloat(st.paddingTop)||0,pb=parseFloat(st.paddingBottom)||0;"
+    "return (el.clientHeight-pt-pb)<=lh*1.6;};"
+    "var any=false,all=true,i;"
+    "for(i=0;i<cs.length;i++){if(!vis(cs[i]))continue;any=true;if(!one(cs[i])){all=false;break;}}"
+    "if(any&&all){box.classList.add('jp-big');"
+    "for(i=0;i<cs.length;i++){if(!vis(cs[i]))continue;if(!one(cs[i])){box.classList.remove('jp-big');break;}}}"
+    "};}"
+)
 _FRONT_JS = (
     "(function(){if(document.querySelector('.jp-answered'))return;"  # back re-runs this; skip it
     "var box=document.getElementById('jp-choices');if(!box)return;"
+    # Tint a choice box via INLINE styles (not just a class) so the fill shows even
+    # when an older/stale note-type CSS is deployed — inline beats a non-!important
+    # stylesheet rule, so the box always colours in step with the whole-card tint.
+    + _JP_TINT_JS +
+    _JP_SIZE_JS +
     "try{sessionStorage.removeItem('jp_result');}catch(e){}"          # fresh question
+    "try{sessionStorage.removeItem('jp_pick');}catch(e){}"            # fresh question
+    "try{sessionStorage.removeItem('jp_dropped');}catch(e){}"         # remote-mode drop
+    "window.__jpRemoteDone=false;"                                     # arm remote setup for this card
+    # Drop any remote-mode key handler left over from the previous card (the document
+    # persists across reviewer cards, so a stale keydown listener would accumulate).
+    "if(window.__jpRemoteKey){document.removeEventListener('keydown',window.__jpRemoteKey,true);"
+    "window.__jpRemoteKey=null;}"
+    # Drop the previous card's binary-grade Continue key handler (document persists), so
+    # Space on this question can't grade the card that just left.
+    "if(window.__jpContKey){document.removeEventListener('keydown',window.__jpContKey,true);"
+    "window.__jpContKey=null;}"
     "var cs=box.querySelectorAll('.jp-choice');var done=false;"
-    "cs.forEach(function(el){el.classList.add('jp-clickable');"
-    "el.addEventListener('click',function(){if(done)return;done=true;"
+    "cs.forEach(function(el,idx){el.classList.add('jp-clickable');"
+    "var pick=function(){if(done)return;done=true;"
     "box.classList.add('jp-locked');"
     "var ok=el.classList.contains('jp-correct');el.classList.add('jp-picked');"
-    "el.classList.add(ok?'jp-right':'jp-wrong');"
+    "el.classList.add(ok?'jp-right':'jp-wrong');window.jankiTint(el,ok?'right':'wrong');"
     "var card=el.closest('.card')||document.body;"
+    # Whole-card fill only on DESKTOP (the add-on sets jankiPracticeAutoFlip). On a
+    # full-screen mobile card it becomes a full-screen wash, so there we tint just the
+    # answer boxes.
+    "if(typeof window.jankiPracticeAutoFlip!=='undefined')"
     "card.classList.add(ok?'jp-fill-right':'jp-fill-wrong');"
-    "try{sessionStorage.setItem('jp_result',ok?'right':'wrong');}catch(e){}"
+    "try{sessionStorage.setItem('jp_result',ok?'right':'wrong');"
+    "sessionStorage.setItem('jp_pick',idx);"
+    # Binary grading: the pick IS the grade — stash the ease the back's Continue will
+    # apply (correct → Easy 4, wrong → jankiPracticeWrongEase, default 2 = Hard).
+    "if(window.jankiPracticeBinaryGrade!==false){"
+    "sessionStorage.setItem('jp_autoease',ok?4:(window.jankiPracticeWrongEase||2));}"
+    # Record the stem's on-screen position at flip time so the back can glide the
+    # card from here to its new (re-centred) spot instead of jumping.
+    "var _stp=document.querySelector('.jp-stem');"
+    "if(_stp)sessionStorage.setItem('jp_stem_top',_stp.getBoundingClientRect().top);}catch(e){}"
     "if(!ok){var r=box.querySelector('.jp-choice.jp-correct');"
-    "if(r)r.classList.add('jp-reveal');}});});})();"
+    "if(r){r.classList.add('jp-reveal-blue');window.jankiTint(r,'blue');}}"
+    # After the pick registers, optionally flip to the back (explanation) so a
+    # tap/click both grades AND reveals. Gated on window.jankiPracticeAutoFlip (set
+    # by the add-on from config; default ON when unset, so it also works on synced
+    # devices). Small delay lets the green/red tint show before the flip.
+    # Flip to the back if auto-flip is on OR binary grading is on (binary needs the
+    # back so its Continue can grade with the stashed ease).
+    "if((window.jankiPracticeAutoFlip!==false||window.jankiPracticeBinaryGrade!==false)"
+    "&&typeof pycmd!=='undefined'){"
+    "var dly=(typeof window.jankiPracticeFlipDelay==='number')?window.jankiPracticeFlipDelay:600;"
+    "setTimeout(function(){try{pycmd('ans');}catch(e){}},dly);}};"
+    # Register click (desktop) AND touch (AnkiMobile — a `click` on a plain <div>
+    # is unreliable in iOS WebKit, which is why taps 'don't read'). preventDefault
+    # on touchend suppresses the synthesized ghost click; the `done` flag guards
+    # against any double-fire regardless.
+    "el.__jpPick=pick;"                                    # remote/keyboard can trigger it
+    "el.addEventListener('click',pick);"
+    "el.addEventListener('touchend',function(ev){"
+    "if(ev&&ev.cancelable)ev.preventDefault();pick();},false);"
+    "});"
+    # Remote mode: with a 4-button Anki remote, drop one random WRONG choice so exactly
+    # four remain, and let A/B/C/D (or 1/2/3/4) pick them — the button-press runs the
+    # SAME pick() as a click, so it visualises identically (box tint + card fill + flip).
+    "var setupRemote=function(){"
+    "if(window.__jpRemoteDone)return;window.__jpRemoteDone=true;"      # idempotent per card
+    "var arr=Array.prototype.slice.call(cs);var wrong=[];"
+    "for(var i=0;i<arr.length;i++){if(!arr[i].classList.contains('jp-correct'))wrong.push(i);}"
+    # never drop the correct answer; remember which one so the BACK hides the same box
+    # (front/back choice indices stay aligned).
+    "if(arr.length>4&&wrong.length){var drop=wrong[Math.floor(Math.random()*wrong.length)];"
+    "arr[drop].classList.add('jp-dropped');arr[drop].style.display='none';"
+    "try{sessionStorage.setItem('jp_dropped',drop);}catch(e){}}"
+    # relabel the still-visible choices A,B,C,D and collect them in visible order
+    "var vis=[],L=0;for(var j=0;j<arr.length;j++){"
+    "if(arr[j].classList.contains('jp-dropped'))continue;"
+    "var lt=arr[j].querySelector('.jp-letter');if(lt)lt.textContent=String.fromCharCode(65+L)+'.';"
+    "vis.push(arr[j]);L++;}"
+    # Hook the add-on calls from Python when a controller/remote face button is
+    # pressed (the 8bitdo drives Anki via Python, not DOM keys): pick the n-th
+    # visible choice, running the SAME pick() a click/keypress would.
+    "window.jankiPickVisible=function(n){if(vis[n]&&vis[n].__jpPick)vis[n].__jpPick();};"
+    # A/1 -> 1st visible, B/2 -> 2nd, C/3 -> 3rd, D/4 -> 4th. Question side only (on the
+    # back, keys 1-4 must stay Anki's native grading).
+    "var onKey=function(ev){if(done)return;"
+    "if(document.querySelector('.jp-answered'))return;"
+    "var k=(ev.key||'').toLowerCase();var n=-1;"
+    "if(k>='1'&&k<='4')n=k.charCodeAt(0)-49;else if(k>='a'&&k<='d')n=k.charCodeAt(0)-97;"
+    "if(n<0||n>=vis.length)return;"
+    "if(ev.preventDefault)ev.preventDefault();if(ev.stopPropagation)ev.stopPropagation();"
+    "if(vis[n].__jpPick)vis[n].__jpPick();};"
+    "if(window.__jpRemoteKey)document.removeEventListener('keydown',window.__jpRemoteKey,true);"
+    "window.__jpRemoteKey=onKey;document.addEventListener('keydown',onKey,true);};"
+    # Expose setupRemote so apply_practice_prefs can call it DIRECTLY (deterministic)
+    # once it knows a remote is connected — no longer relying on the poll race below.
+    "window.jankiSetupRemote=setupRemote;"
+    # The add-on pushes window.jankiPracticeRemoteMode via apply_practice_prefs, which
+    # may land a frame or two after this template script runs — so if it's not set yet,
+    # poll (up to ~2s) as a fallback. On mobile (flag never set) this just times out.
+    "if(window.jankiPracticeRemoteMode===true){setupRemote();}"
+    "else if(window.jankiPracticeRemoteMode===undefined){var tr=0;var iv=setInterval(function(){"
+    "tr++;if(window.jankiPracticeRemoteMode===true){clearInterval(iv);setupRemote();}"
+    "else if(window.jankiPracticeRemoteMode===false||tr>50){clearInterval(iv);}},40);}"
+    # Mobile: size up single-line choices once layout settles.
+    "if(window.requestAnimationFrame){requestAnimationFrame(function(){"
+    "requestAnimationFrame(window.jankiSizeChoices);});}else{setTimeout(window.jankiSizeChoices,60);}"
+    "})();"
 )
-# On the back, re-apply the tint from the front pick (if any).
+# On the back, re-apply the front pick (the back is a fresh render of FrontSide, so
+# the click-applied classes are gone): re-tint the whole card AND re-mark the
+# choices. The correct answer always shows green; on a miss the choice you picked
+# shows red too, so you see both your answer and the right one.
 _BACK_JS = (
-    "(function(){var r;try{r=sessionStorage.getItem('jp_result');}catch(e){}"
-    "if(!r)return;var card=document.querySelector('.card')||document.body;"
-    "card.classList.add(r==='right'?'jp-fill-right':'jp-fill-wrong');})();"
+    "(function(){"
+    + _JP_TINT_JS +
+    _JP_SIZE_JS +
+    # Tap helper: bind an action to BOTH touch (AnkiMobile) and click (desktop)
+    # without double-firing OR triggering AnkiMobile's tap-to-advance gesture. We
+    # swallow touchstart+touchend (preventDefault + stopPropagation) so the tap never
+    # reaches Anki's native gesture (which was flipping to the next card); the
+    # time-guard drops any ghost click that slips through right after a tap.
+    "if(!window.jankiTap){window.jankiTap=function(el,fn){var t=0;"
+    "var eat=function(ev){if(ev){if(ev.cancelable)ev.preventDefault();ev.stopPropagation();}};"
+    "el.addEventListener('touchstart',eat,{passive:false});"
+    "el.addEventListener('touchend',function(ev){eat(ev);t=Date.now();fn();},{passive:false});"
+    "el.addEventListener('click',function(ev){if(ev)ev.stopPropagation();"
+    "if(Date.now()-t<500)return;fn();});};}"
+    # Explanation show/hide toggle (works regardless of whether a choice was
+    # clicked, so it's wired before the answer-state check below).
+    "var tb=document.getElementById('jp-explain-toggle');"
+    "var eb=document.getElementById('jp-explain-body');"
+    "var eh=document.querySelector('.jp-explain-h');"
+    "if(eb&&!eb.__jkw){eb.__jkw=1;"
+    # FLIP: run a layout change (fn) and glide the prompt/answers block (.jp-answered)
+    # from its old position to the new one — so when the explanation appears/hides and
+    # the (centred) content re-flows, the prompt/answers slide smoothly instead of
+    # jumping. No-op when top-aligned (delta 0).
+    "var flip=function(fn){var ans=document.querySelector('.jp-answered');"
+    "var first=ans?ans.getBoundingClientRect().top:0;fn();"
+    "if(ans){var last=ans.getBoundingClientRect().top;var dy=first-last;"
+    "if(dy){try{ans.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
+    "{duration:320,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}}};"
+    "var tog=function(){"
+    "var hidden=eb.style.display==='none';"
+    "if(hidden){flip(function(){eb.style.display='';});"
+    "eb.style.animation='none';void eb.offsetHeight;"
+    "eb.style.animation='jpSlideUp .3s ease-out';}"               # slide/fade in
+    "else{eb.style.animation='jpSlideDown .25s ease-in forwards';" # slide/fade out
+    "setTimeout(function(){flip(function(){eb.style.display='none';});"
+    "eb.style.animation='';},240);}"
+    "if(tb){tb.textContent=hidden?'\\u2212':'+';"
+    "tb.setAttribute('aria-expanded',hidden?'true':'false');}"
+    "try{sessionStorage.setItem('jp_show_exp',hidden?'1':'0');}catch(e){}};"  # remember across cards
+    # clicking/tapping ANYWHERE in the header row (title or +/- button) toggles it
+    "if(eh)window.jankiTap(eh,tog);}"
+    # Default show/hide for the explanation: the remembered per-session state if set,
+    # else the config default.
+    "var showExp;try{var _se=sessionStorage.getItem('jp_show_exp');"
+    "showExp=(_se===null)?(window.jankiPracticeShowExplanation!==false):(_se==='1');}"
+    "catch(e){showExp=window.jankiPracticeShowExplanation!==false;}"
+    "if(eb)eb.style.display=showExp?'':'none';"
+    "if(tb){tb.textContent=showExp?'\\u2212':'+';"
+    "tb.setAttribute('aria-expanded',showExp?'true':'false');}"
+    "var r,pk;try{r=sessionStorage.getItem('jp_result');"
+    "pk=parseInt(sessionStorage.getItem('jp_pick'),10);}catch(e){}"
+    "if(!r)return;"
+    "var card=document.querySelector('.card')||document.body;"
+    # Whole-card fill only on DESKTOP (see front) — mobile tints just the boxes.
+    "if(typeof window.jankiPracticeAutoFlip!=='undefined')"
+    "card.classList.add(r==='right'?'jp-fill-right':'jp-fill-wrong');"
+    "var box=document.getElementById('jp-choices');if(!box)return;"
+    "box.classList.add('jp-locked');"
+    "var cs=box.querySelectorAll('.jp-choice');"
+    # Remote mode: hide the SAME wrong choice the front dropped and relabel the visible
+    # boxes A,B,C,D so the back matches the four-option front. Keyed off jp_dropped (set
+    # by the front only in remote mode) so it's independent of any window-flag race.
+    "var _drp=-1;try{_drp=parseInt(sessionStorage.getItem('jp_dropped'),10);}catch(e){}"
+    "var _rem=(!isNaN(_drp)&&_drp>=0);"
+    "if(_rem&&cs[_drp]){cs[_drp].classList.add('jp-dropped');cs[_drp].style.display='none';}"
+    "if(_rem){var _bl=0;for(var _bi=0;_bi<cs.length;_bi++){"
+    "if(cs[_bi].classList.contains('jp-dropped'))continue;"
+    "var _blt=cs[_bi].querySelector('.jp-letter');"
+    "if(_blt)_blt.textContent=String.fromCharCode(65+_bl)+'.';_bl++;}}"
+    "var cor=box.querySelector('.jp-choice.jp-correct');"
+    # correct answer: green when you got it right, BLUE when you got it wrong
+    "if(cor){cor.classList.add(r==='right'?'jp-reveal':'jp-reveal-blue','jp-picked');"
+    "window.jankiTint(cor,r==='right'?'right':'blue');}"
+    "if(!isNaN(pk)&&cs[pk]){cs[pk].classList.add('jp-picked');" # your pick → green if right, red if wrong
+    "cs[pk].classList.add(r==='right'?'jp-right':'jp-wrong');"
+    "window.jankiTint(cs[pk],r==='right'?'right':'wrong');}"
+    # Collapse/expand helpers (on window so a settings toggle can reuse them). Each
+    # measures the element's height so max-height can actually transition (auto→0
+    # would snap). Collapse = fade out + shrink; the remaining choices reflow up.
+    "if(!window.jankiCollapse){window.jankiCollapse=function(el){"
+    "el.style.maxHeight=el.scrollHeight+'px';void el.offsetHeight;"
+    "el.classList.add('jp-collapsed');};}"
+    "if(!window.jankiExpand){window.jankiExpand=function(el){"
+    "el.style.maxHeight='0px';el.classList.remove('jp-collapsed');void el.offsetHeight;"
+    "el.style.maxHeight=el.scrollHeight+'px';"
+    "setTimeout(function(){if(!el.classList.contains('jp-collapsed'))el.style.maxHeight='';},420);};}"
+    # Mark the irrelevant choices (neither your pick nor the correct answer) and add
+    # an "Other answers" toggle. Default state from config.
+    "var others=[];for(var i=0;i<cs.length;i++){"
+    "if(!cs[i].classList.contains('jp-picked')&&!cs[i].classList.contains('jp-dropped')){"
+    "cs[i].classList.add('jp-other');others.push(cs[i]);}}"
+    # remembered per-session state if set, else the config default
+    "var showAll;try{var _sa=sessionStorage.getItem('jp_show_all');"
+    "showAll=(_sa===null)?(window.jankiPracticeShowAllAnswers===true):(_sa==='1');}"
+    "catch(e){showAll=window.jankiPracticeShowAllAnswers===true;}"
+    "if(showAll){box.classList.add('jp-show-others');}"
+    # A beat after the back appears, fade the non-relevant out + slide the remaining
+    # choices up (animated collapse). The choices sit BELOW the stem, so in the normal
+    # top-aligned layout the stem doesn't move — only the answers animate.
+    "else{setTimeout(function(){others.forEach(window.jankiCollapse);},220);}"
+    "if(others.length&&!document.getElementById('jp-others-toggle')){"
+    "var ob=document.createElement('div');ob.className='jp-others-link';"
+    "ob.id='jp-others-toggle';ob.setAttribute('role','button');"
+    "ob.textContent=showAll?'Hide other answers':'Other answers';"
+    "ob.setAttribute('aria-expanded',showAll?'true':'false');"
+    "box.parentNode.insertBefore(ob,box.nextSibling);"    # below the visible answers
+    "window.jankiTap(ob,function(){"
+    "var shown=box.classList.toggle('jp-show-others');"
+    "others.forEach(shown?window.jankiExpand:window.jankiCollapse);"
+    "ob.textContent=shown?'Hide other answers':'Other answers';"
+    "ob.setAttribute('aria-expanded',shown?'true':'false');"
+    "try{sessionStorage.setItem('jp_show_all',shown?'1':'0');}catch(e){}});}"  # remember across cards
+    # Cross-flip glide: the back's layout (collapsed choices + explanation) centres
+    # differently from the front, so the prompt would JUMP on the flip. Start the
+    # card at the front's stem position and animate it to its new spot — one smooth
+    # move. No-op when top-aligned (delta ~0). Runs after the layout is final.
+    "try{var _ft=parseFloat(sessionStorage.getItem('jp_stem_top'));"
+    "var _bs=document.querySelector('.jp-stem');"
+    "if(!isNaN(_ft)&&_bs){var _dy=_ft-_bs.getBoundingClientRect().top;"
+    "if(Math.abs(_dy)>1){var _cd=document.querySelector('.card')||document.body;"
+    "try{_cd.animate([{transform:'translateY('+_dy+'px)'},{transform:'translateY(0)'}],"
+    "{duration:300,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}}"
+    "sessionStorage.removeItem('jp_stem_top');}catch(e){}"
+    # Binary grading: the pick already decided the grade. Add a single Continue that
+    # applies the stashed ease (correct→Easy 4, wrong→Hard 2) and advances — the native
+    # Again/Hard/Good/Easy buttons are hidden Python-side (see set_practice_bottom_hidden).
+    "if(window.jankiPracticeBinaryGrade!==false){window.__jpCont=false;"
+    "var _ae=4;try{_ae=parseInt(sessionStorage.getItem('jp_autoease'),10)||4;}catch(e){}"
+    "var _ok=0;try{_ok=(sessionStorage.getItem('jp_result')==='right')?1:0;}catch(e){}"
+    # Did they actually pick an answer? _FRONT_JS clears jp_result on every fresh
+    # question, so an absent value means they revealed/skipped without choosing. In
+    # that case Continue BURIES the card (set aside for the session, no judgement)
+    # instead of grading it wrong.
+    "var _ans=1;try{_ans=(sessionStorage.getItem('jp_result')!=null)?1:0;}catch(e){}"
+    # Continue just asks Python to resolve the card; the outcome (grade from the pick,
+    # or bury if none) is decided Python-side from the jp-ready report below.
+    "window.jankiContinue=function(){if(window.__jpCont)return;window.__jpCont=true;"
+    "try{if(typeof pycmd!=='undefined')pycmd('jp-continue');}catch(e){}};"
+    # The visible Continue button lives in the bottom bar (a separate webview) so it
+    # sits in the space the Again/Hard/Good/Easy buttons occupy — no scrolling. Report
+    # the decided grade (and whether answered) to Python so that button can resolve it.
+    "try{if(typeof pycmd!=='undefined')pycmd('jp-ready:'+_ae+':'+_ok+':'+_ans);}catch(e){}"
+    # DESKTOP (add-on sets jankiPracticeAutoFlip): no judgement comes from the back —
+    # the front pick already decided it. Any key that would normally grade on the answer
+    # side — Space/Enter AND the ease shortcuts 1/2/3/4 — is captured and routed to
+    # Continue instead (capture + preventDefault so Anki's own grade never fires).
+    "if(typeof window.jankiPracticeAutoFlip!=='undefined'){"
+    "if(window.__jpContKey)document.removeEventListener('keydown',window.__jpContKey,true);"
+    "window.__jpContKey=function(ev){var k=ev.key;"
+    "if(k===' '||k==='Spacebar'||k==='Enter'||k==='1'||k==='2'||k==='3'||k==='4'){"
+    "if(ev.preventDefault)ev.preventDefault();if(ev.stopPropagation)ev.stopPropagation();"
+    "window.jankiContinue();}};"
+    "document.addEventListener('keydown',window.__jpContKey,true);}"
+    # MOBILE has no on-card grade button: AnkiMobile blocks grading a card from card
+    # JavaScript, so there's no way to advance/grade from here. On mobile the pick still
+    # shows the right/wrong tint + explanation; grading is done with AnkiMobile's own
+    # Again/Hard/Good/Easy buttons.
+    "}"                                                     # close binary-grade block
+    # Mobile: size up single-line choices once the back's collapse layout settles.
+    "if(window.requestAnimationFrame){requestAnimationFrame(function(){"
+    "requestAnimationFrame(window.jankiSizeChoices);});}else{setTimeout(window.jankiSizeChoices,60);}"
+    "})();"
 )
 _FRONT_TMPL = ('<div class="jp-stem">{{Question}}</div>\n'
                '<div class="jp-choices" id="jp-choices">{{Choices}}</div>\n'
                '<script>' + _FRONT_JS + '</script>')
 _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
               '{{#Explanation}}<div class="jp-explain">'
-              '<div class="jp-explain-h">Explanation / Rationale</div>'
-              '{{Explanation}}</div>{{/Explanation}}\n'
+              '<div class="jp-explain-h">'
+              '<span class="jp-explain-title">Explanation / Rationale</span>'
+              '<button type="button" class="jp-explain-toggle" '
+              'id="jp-explain-toggle" aria-expanded="true">−</button>'
+              '</div>'
+              '<div class="jp-explain-body" id="jp-explain-body">{{Explanation}}</div>'
+              '</div>{{/Explanation}}\n'
               '<script>' + _BACK_JS + '</script>')
 # Choice boxes fade/slide in one-by-one on the FRONT (a reveal touch that matches
 # the text-scroll); on the BACK (.jp-answered) the animation is disabled so the
@@ -1159,44 +1455,114 @@ _CARD_CSS = (
     ".card{font-family:\"Anthropic Serif Text\",Georgia,serif;font-size:20px;"
     "text-align:left;color:#ececec;background-color:#1c1d21;max-width:760px;"
     "margin:0 auto;padding:26px;transition:background-color .25s ease;}"
-    ".jp-stem{margin-bottom:18px;line-height:1.5;}"
+    ".jp-stem{margin-bottom:18px;line-height:1.5;"
+    "animation:jpSlideUp .35s ease-out both;}"
+    ".jp-answered .jp-stem{animation:none;}"   # don't re-animate on the flip
     ".jp-stem img{max-width:100%;border-radius:8px;margin-top:10px;}"
     ".jp-choice{padding:8px 12px;margin:6px 0;border-radius:8px;"
-    "border:1px solid rgba(255,255,255,0.08);}"
+    "border:1px solid rgba(255,255,255,0.08);overflow:hidden;"
+    # transition drives the fade-out + collapse of hidden choices (and the reflow
+    # that slides the remaining ones up), plus a quick fade-in of the answer tint
+    # (background/border/text colour) instead of it snapping.
+    "transition:opacity .3s ease,max-height .35s ease,margin .3s ease,"
+    "padding .3s ease,border-width .3s ease,background-color .25s ease,"
+    "border-color .25s ease,color .25s ease;}"
+    ".jp-letter{font-weight:700;}"   # bold the A./B./C. prefix
+    # Mobile single-line choices: a little larger for readability (class added by
+    # window.jankiSizeChoices only when every choice fits on one line).
+    ".jp-choices.jp-big .jp-choice{font-size:1.09em;}"
     ".jp-answered .jp-choice.jp-correct{background:rgba(74,144,255,0.28);"
     "border-color:rgba(74,144,255,0.6);color:#dbe8ff;font-weight:600;}"
     # Interactive front: clicking a choice tints the WHOLE card fill green
     # (correct) / red (wrong) — the back re-applies the same tint. The picked
     # choice (and the correct one, on a miss) gets a light matching fill so it's
     # still identifiable against the tinted card; no outline/border emphasis.
-    ".jp-choice.jp-clickable{cursor:pointer;transition:background .15s;}"
+    ".jp-choice.jp-clickable{cursor:pointer;transition:background-color .2s ease,"
+    "border-color .2s ease,color .2s ease;}"
     ".jp-choices:not(.jp-locked) .jp-choice:hover{background:rgba(255,255,255,0.06);}"
     ".jp-locked .jp-choice{cursor:default;}"
-    ".jp-choice.jp-right{background:rgba(56,178,102,0.22);color:#d6f5e0;font-weight:600;}"
-    ".jp-choice.jp-wrong{background:rgba(224,74,74,0.22);color:#ffdede;font-weight:600;}"
-    ".jp-choice.jp-reveal{background:rgba(56,178,102,0.22);color:#d6f5e0;}"
+    # Picked/revealed choice fills: OPAQUE so the button interior reads clearly
+    # against the whole-card green/red tint (a low-alpha wash blended into it and
+    # looked like the button wasn't tinting). Matching border reinforces the edge.
+    # color is !important too so it beats the back's higher-specificity blue
+    # ".jp-answered .jp-choice.jp-correct" rule (green/red must win on the back).
+    ".jp-choice.jp-right{background:#2f7d52!important;border-color:#3fae72!important;"
+    "color:#eafff1!important;font-weight:600;}"
+    ".jp-choice.jp-wrong{background:#a33a3a!important;border-color:#d05a5a!important;"
+    "color:#ffecec!important;font-weight:600;}"
+    ".jp-choice.jp-reveal{background:#2f7d52!important;border-color:#3fae72!important;"
+    "color:#eafff1!important;font-weight:600;}"
+    # Correct answer when you were WRONG: highlighted blue (distinct from the red
+    # of your own wrong pick, and from the green of a correct pick).
+    ".jp-choice.jp-reveal-blue{background:rgba(74,144,255,0.30)!important;"
+    "border-color:rgba(74,144,255,0.65)!important;color:#dbe8ff!important;font-weight:600;}"
     ".card.jp-fill-right{background-color:#18271d;}"
     ".card.jp-fill-wrong{background-color:#2b181b;}"
     # Opacity-only (no transform): a translate creates a composited layer whose
     # collapse at animation end repaints the region and re-triggers the AMBOSS
     # underline fade (visible flicker). Fading opacity avoids that entirely.
     "@keyframes jpIn{from{opacity:0;}to{opacity:1;}}"
-    ".jp-choices .jp-choice{animation:jpIn .3s ease-out backwards;}"
-    ".jp-choices .jp-choice:nth-child(1){animation-delay:.18s;}"
-    ".jp-choices .jp-choice:nth-child(2){animation-delay:.34s;}"
-    ".jp-choices .jp-choice:nth-child(3){animation-delay:.50s;}"
-    ".jp-choices .jp-choice:nth-child(4){animation-delay:.66s;}"
-    ".jp-choices .jp-choice:nth-child(5){animation-delay:.82s;}"
-    ".jp-choices .jp-choice:nth-child(6){animation-delay:.98s;}"
-    ".jp-choices .jp-choice:nth-child(7){animation-delay:1.14s;}"
-    ".jp-choices .jp-choice:nth-child(8){animation-delay:1.30s;}"
+    # explanation entrance / toggle-in: fade + slide up; toggle-out: fade + slide down
+    "@keyframes jpSlideUp{from{opacity:0;transform:translateY(14px);}"
+    "to{opacity:1;transform:translateY(0);}}"
+    "@keyframes jpSlideDown{from{opacity:1;transform:translateY(0);}"
+    "to{opacity:0;transform:translateY(14px);}}"
+    ".jp-choices .jp-choice{animation:jpIn .2s ease-out backwards;}"
+    ".jp-choices .jp-choice:nth-child(1){animation-delay:.06s;}"
+    ".jp-choices .jp-choice:nth-child(2){animation-delay:.13s;}"
+    ".jp-choices .jp-choice:nth-child(3){animation-delay:.20s;}"
+    ".jp-choices .jp-choice:nth-child(4){animation-delay:.27s;}"
+    ".jp-choices .jp-choice:nth-child(5){animation-delay:.34s;}"
+    ".jp-choices .jp-choice:nth-child(6){animation-delay:.41s;}"
+    ".jp-choices .jp-choice:nth-child(7){animation-delay:.48s;}"
+    ".jp-choices .jp-choice:nth-child(8){animation-delay:.55s;}"
     ".jp-answered .jp-choices .jp-choice{animation:none;}"
-    # Explanation / rationale at the bottom of the back.
+    # Explanation / rationale at the bottom of the back — fades in (opacity-only,
+    # same jpIn keyframe as the choices) a beat after the flip so it eases in
+    # rather than snapping.
     ".jp-explain{margin-top:22px;padding-top:16px;line-height:1.5;"
     "border-top:1px solid rgba(255,255,255,0.12);white-space:pre-line;"
-    "color:#cfd3da;font-size:0.94em;}"
-    ".jp-explain-h{font-weight:600;color:#9fb4d8;margin-bottom:8px;"
+    "color:#cfd3da;font-size:0.94em;"
+    "animation:jpSlideUp .4s ease-out both;animation-delay:.15s;}"
+    # Explanation body text: a bit smaller than the header row, and italicized.
+    ".jp-explain-body{font-size:0.86em;font-style:italic;}"
+    # the whole header row is clickable to show/hide the explanation
+    ".jp-explain-h{display:flex;align-items:center;justify-content:space-between;"
+    "font-weight:600;color:#9fb4d8;margin-bottom:8px;cursor:pointer;"
     "letter-spacing:.02em;text-transform:uppercase;font-size:0.78em;}"
+    # +/- toggle at the header's top-right to show/hide the explanation body.
+    ".jp-explain-toggle{cursor:pointer;flex:0 0 auto;width:22px;height:22px;"
+    "padding:0;margin-left:12px;border-radius:6px;text-transform:none;"
+    "background:transparent;border:none;outline:none;"
+    "color:#cfd3da;font-size:19px;font-weight:700;line-height:1;"
+    "display:flex;align-items:center;justify-content:center;}"
+    ".jp-explain-toggle:hover{color:#ffffff;}"
+    # Irrelevant choices collapse (fade out + slide up) on the back until the
+    # "Other answers" toggle reveals them. The collapse itself is driven by JS
+    # (max-height measured per element so it can transition); this is the end state.
+    ".jp-choice.jp-collapsed{opacity:0;max-height:0!important;"
+    "margin-top:0!important;margin-bottom:0!important;padding-top:0!important;"
+    "padding-bottom:0!important;border-width:0!important;}"
+    # Remote mode: a wrong choice removed to leave four options for a 4-button remote.
+    ".jp-choice.jp-dropped{display:none!important;}"
+    # Understated text link below the visible answers, aligned to the right edge
+    # of the answer box.
+    ".jp-others-link{display:block;margin:10px 0 2px;cursor:pointer;"
+    "color:#ffffff;opacity:0.7;font-size:0.72em;text-align:right;}"
+    ".jp-others-link:hover{opacity:1;text-decoration:underline;}"
+    # Binary-grade Continue button (replaces the hidden Again/Hard/Good/Easy row).
+    ".jp-continue{display:block;margin:26px auto 6px;max-width:280px;text-align:center;"
+    "padding:11px 20px;border-radius:11px;cursor:pointer;font-size:0.9em;font-weight:600;"
+    "color:#eafff0;background:rgba(80,200,130,0.16);"
+    "border:1px solid rgba(120,230,160,0.5);transition:background .15s,transform .05s;}"
+    ".jp-continue:hover{background:rgba(80,200,130,0.28);}"
+    ".jp-continue:active{transform:scale(0.98);}"
+    # Phone-width screens: shrink the answer + rationale text so the card isn't
+    # crowded (a bit tighter choice padding too).
+    "@media (max-width:520px){"
+    ".jp-choice{font-size:0.82em;padding:7px 10px;}"
+    ".jp-explain-body{font-size:0.78em;}"
+    "}"
 )
 
 
@@ -1239,6 +1605,229 @@ def _ensure_model():
     return m
 
 
+def apply_practice_prefs(persist=False):
+    """Push the Practice card preferences into the reviewer webview as window flags
+    the templates read: click-to-flip, and the default show/hide of the explanation
+    and 'other answers'. Called on each question render (so a change applies to the
+    next card) and on a settings toggle — where it ALSO updates the currently shown
+    back immediately (no-op on the front).
+
+    The explanation/'other answers' show-hide state is remembered per session in
+    sessionStorage so it carries between cards. persist=True (a settings toggle)
+    rewrites that remembered state from config, so an explicit settings change wins
+    over whatever was toggled on a card; the per-render call leaves it untouched."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    # Clear the resolver's per-card latch each render so a card that legitimately
+    # returns later this session can be resolved again (see css._jp_resolve).
+    try:
+        mw._janki_last_resolved = None
+    except Exception:
+        pass
+    try:
+        from ..util.config import _cfg
+        c = _cfg()
+        flip = "true" if bool(c.get("practice_click_flips", True)) else "false"
+        delay = int(c.get("practice_click_flip_delay_ms", 600))
+        show_all = "true" if bool(c.get("practice_show_all_answers", False)) else "false"
+        show_exp = "true" if bool(c.get("practice_show_explanation", True)) else "false"
+        # Remote mode is live: on only when the setting is checked AND a controller/
+        # remote is actually connected right now (so unplugging it drops back to the
+        # full choice set on the next card — no deck rebuild). Re-evaluated per render.
+        remote_on = bool(c.get("practice_remote_mode", False))
+        if remote_on:
+            try:
+                from . import gamepad
+                remote_on = gamepad.is_controller_connected()
+            except Exception:
+                remote_on = False
+        remote = "true" if remote_on else "false"
+        # Binary grading: picking an answer IS the grade — correct → Easy (4),
+        # wrong → practice_wrong_ease (default 2 = Hard). The native Again/Hard/Good/
+        # Easy buttons are hidden and replaced by a single Continue on the back.
+        binary = "true" if bool(c.get("practice_binary_grade", True)) else "false"
+        wrong_ease = int(c.get("practice_wrong_ease", 2))
+        remember = (
+            "try{sessionStorage.setItem('jp_show_exp',%s?'1':'0');"
+            "sessionStorage.setItem('jp_show_all',%s?'1':'0');}catch(e){}"
+            % (show_exp, show_all)) if persist else ""
+        # NOTE: build the full template string FIRST, then apply % — otherwise Python's
+        # operator precedence (% binds tighter than +) would apply the format only to
+        # the fragment after "+ remember +", raising "not all arguments converted" and
+        # (silently, via the except below) leaving the window.jankiPractice* flags
+        # unset — which is exactly what stopped remote mode from ever activating.
+        tmpl = (
+            "window.jankiPracticeAutoFlip=%s;window.jankiPracticeFlipDelay=%d;"
+            "window.jankiPracticeRemoteMode=%s;"
+            "window.jankiPracticeBinaryGrade=%s;window.jankiPracticeWrongEase=%d;"
+            # Deterministic activation: the moment we know a remote is connected, run
+            # setupRemote() directly (the front template exposes it) instead of waiting
+            # on its poll — this is what drops to 4 choices and defines jankiPickVisible.
+            "if(%s===true&&window.jankiSetupRemote){window.jankiSetupRemote();}"
+            "window.jankiPracticeShowAllAnswers=%s;window.jankiPracticeShowExplanation=%s;"
+            + remember +
+            # Apply to the current back right away (all getElementById are no-ops on
+            # the front / a non-practice card).
+            "(function(){var eb=document.getElementById('jp-explain-body'),"
+            "tb=document.getElementById('jp-explain-toggle');"
+            "if(eb)eb.style.display=%s?'':'none';"
+            "if(tb)tb.textContent=%s?'\\u2212':'+';"
+            "var box=document.getElementById('jp-choices');"
+            "if(box){var oth=box.querySelectorAll('.jp-choice.jp-other');var i;"
+            "if(%s){box.classList.add('jp-show-others');"
+            "if(window.jankiExpand)for(i=0;i<oth.length;i++)window.jankiExpand(oth[i]);}"
+            "else{box.classList.remove('jp-show-others');"
+            "if(window.jankiCollapse)for(i=0;i<oth.length;i++)window.jankiCollapse(oth[i]);}}"
+            "var ob=document.getElementById('jp-others-toggle');"
+            "if(ob)ob.textContent=%s?'Hide other answers':'Other answers';})();"
+        )
+        js = tmpl % (flip, delay, remote, binary, wrong_ease, remote, show_all, show_exp,
+                     show_exp, show_exp, show_all, show_all)
+        web.eval(js)
+    except Exception as e:
+        log("practice prefs: %s" % e)
+
+
+# --- Contanki hand-off -------------------------------------------------------
+# The Contanki add-on reads the SAME physical controller (via the browser Gamepad
+# API in its own webview) and, while Anki is focused, grades Again/Hard/Good/Easy
+# on the four face buttons — the very buttons Janki drives for remote practice.
+# That double-fires (Janki grades AND Contanki grades). To let Janki fully own the
+# remote on a practice card, suspend Contanki while such a card is up (in remote
+# mode) and resume it everywhere else. Janki's own input is IOKit HID, independent
+# of Contanki's webview, so suspending Contanki never affects Janki.
+_contanki_suspended_by_us = False
+
+
+def _practice_card_active():
+    """True if the reviewer is currently on a Janki Practice card AND remote mode is
+    live (setting on + a controller actually connected)."""
+    try:
+        from ..util.config import _cfg
+        if not _cfg().get("practice_remote_mode", False):
+            return False
+        from . import gamepad
+        if not gamepad.is_controller_connected():
+            return False
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        if card is None:
+            return False
+        nt = card.note_type() or {}
+        return nt.get("name") == _MODEL_NAME
+    except Exception:
+        return False
+
+
+def sync_contanki_for_card():
+    """Suspend Contanki while a Janki Practice card is up in remote mode (so it can't
+    double-grade the four face buttons), and resume it on any other card. No-op if
+    Contanki isn't installed. Called on each question/answer render."""
+    global _contanki_suspended_by_us
+    con = getattr(mw, "contanki", None)
+    if con is None:
+        return
+    want_suspend = _practice_card_active()
+    try:
+        if want_suspend and not _contanki_suspended_by_us:
+            con.suspend()
+            _contanki_suspended_by_us = True
+            log("contanki suspended for practice card")
+        elif not want_suspend and _contanki_suspended_by_us:
+            con.resume()
+            _contanki_suspended_by_us = False
+            log("contanki resumed")
+    except Exception as e:
+        log("contanki sync: %s" % e)
+
+
+def resume_contanki():
+    """Force-resume Contanki if Janki suspended it (call when leaving the reviewer, so
+    it never gets stuck suspended)."""
+    global _contanki_suspended_by_us
+    con = getattr(mw, "contanki", None)
+    if con is not None and _contanki_suspended_by_us:
+        try:
+            con.resume()
+        except Exception as e:
+            log("contanki resume: %s" % e)
+    _contanki_suspended_by_us = False
+
+
+def set_practice_bottom_hidden(hide):
+    """Hide/show Anki's native Again/Hard/Good/Easy buttons (they carry data-ease) in
+    the bottom bar — used by binary-grade practice so the pick is the only grade."""
+    bw = getattr(mw, "bottomWeb", None)
+    if bw is None:
+        return
+    try:
+        if hide:
+            bw.eval("(function(){"
+                    # Hide the native Again/Hard/Good/Easy buttons.
+                    "var s=document.getElementById('jp-hide-ease');"
+                    "if(!s){s=document.createElement('style');s.id='jp-hide-ease';"
+                    "s.textContent='button[data-ease]{display:none!important;}';"
+                    "(document.head||document.documentElement).appendChild(s);}"
+                    # Drop a single Continue button into the same row the ease buttons
+                    # sat in, so it occupies that space and needs no scrolling. Clicking
+                    # it pycmds jp-continue; Python applies the stashed grade.
+                    "if(!document.getElementById('jp-continue-style')){"
+                    "var cs=document.createElement('style');cs.id='jp-continue-style';"
+                    "cs.textContent='#jp-continue-bar{display:block;margin:0 auto;padding:8px 30px;"
+                    "min-width:220px;font-size:15px;font-weight:600;color:#8ff0b0;cursor:pointer;"
+                    "border:1px solid rgba(80,200,130,0.55);border-radius:9px;"
+                    "background:rgba(80,200,130,0.16);}"
+                    "#jp-continue-bar:hover{background:rgba(80,200,130,0.28);}"
+                    "#jp-continue-bar:active{transform:scale(0.98);}';"
+                    "(document.head||document.documentElement).appendChild(cs);}"
+                    "if(!document.getElementById('jp-continue-bar')){"
+                    "var b=document.createElement('button');b.id='jp-continue-bar';"
+                    "b.textContent='Continue \\u2192';"
+                    "b.onclick=function(){try{pycmd('jp-continue');}catch(e){}};"
+                    "var ref=document.querySelector('button[data-ease]');"
+                    "var host=(ref&&ref.parentNode)||document.getElementById('outer')||document.body;"
+                    "host.appendChild(b);}"
+                    "})();")
+        else:
+            bw.eval("(function(){var s=document.getElementById('jp-hide-ease');"
+                    "if(s)s.parentNode.removeChild(s);"
+                    "var b=document.getElementById('jp-continue-bar');"
+                    "if(b)b.parentNode.removeChild(b);})();")
+    except Exception as e:
+        log("practice bottom hide: %s" % e)
+
+
+def sync_practice_bottom():
+    """Hide the native ease buttons only while a binary-grade Janki Practice card shows
+    its answer; restore them otherwise. Called on each question/answer render."""
+    try:
+        from ..util.config import _cfg
+        want_hide = False
+        if bool(_cfg().get("practice_binary_grade", True)):
+            r = getattr(mw, "reviewer", None)
+            card = getattr(r, "card", None) if r else None
+            if (card is not None
+                    and (card.note_type() or {}).get("name") == _MODEL_NAME
+                    and getattr(r, "state", None) == "answer"):
+                want_hide = True
+        set_practice_bottom_hidden(want_hide)
+    except Exception:
+        pass
+
+
+def sync_practice_model_if_present():
+    """Refresh the Janki Practice note type's CSS/template to the current add-on
+    version IF it already exists — so styling fixes (e.g. the opaque picked-choice
+    fill) reach already-converted decks on launch, without a manual re-convert.
+    Does nothing for users who never built a Practice deck (no model to update)."""
+    try:
+        if mw.col.models.by_name(_MODEL_NAME):
+            _ensure_model()
+    except Exception as e:
+        log("practice model sync: %s" % e)
+
+
 def _choices_html(q):
     from html import escape
     ch = q.get("choices") or []
@@ -1246,7 +1835,7 @@ def _choices_html(q):
     rows = []
     for j, c in enumerate(ch):
         cls = "jp-choice jp-correct" if j == ci else "jp-choice"
-        rows.append('<div class="%s">%s. %s</div>'
+        rows.append('<div class="%s"><span class="jp-letter">%s.</span> %s</div>'
                     % (cls, chr(65 + j), escape(_plain(c))))
     return "\n".join(rows)
 
@@ -1272,7 +1861,8 @@ def convert_bank_to_deck(bid):
         return (0, 0)
     m = _ensure_model()
     name = (meta.get("name") or bid).replace("::", "-")
-    did = mw.col.decks.id("Practice::" + name)
+    base = "Practice::" + name
+    did = mw.col.decks.id(base)          # bank deck (fallback when no lecture)
     dir_name = meta.get("dir", "")
     added = updated = 0
     ordinal = 0
@@ -1281,6 +1871,10 @@ def convert_bank_to_deck(bid):
             continue
         ordinal += 1
         qid = _safe("%s_%d" % (bid, ordinal))
+        # Each question's card goes into a per-lecture subdeck (Bank::Lecture) so the
+        # bank expands by lecture; lecture-less questions stay in the bank deck.
+        lec = (q.get("lecture") or "").strip().replace("::", "-")
+        qdid = mw.col.decks.id(base + "::" + lec) if lec else did
         fields = {"Question": _stem_html(q, dir_name),
                   "Choices": _choices_html(q),
                   "Explanation": _plain(q.get("explanation", "")),
@@ -1293,13 +1887,19 @@ def convert_bank_to_deck(bid):
                 note[k] = val
             note.tags = tags
             mw.col.update_note(note)
+            try:                              # re-file existing card into its lecture deck
+                cids = note.card_ids()
+                if cids:
+                    mw.col.set_deck(cids, qdid)
+            except Exception:
+                pass
             updated += 1
         else:
             note = mw.col.new_note(m)
             for k, val in fields.items():
                 note[k] = val
             note.tags = tags
-            mw.col.add_note(note, did)
+            mw.col.add_note(note, qdid)
             added += 1
     return (added, updated)
 
@@ -1333,7 +1933,8 @@ def convert_to_deck_dialog(on_done=None):
         mw.reset()
     except Exception:
         pass
-    showInfo("Practice deck updated:\n%d new card(s), %d updated." % (tot_a, tot_u))
+    tooltip("Practice deck updated: %d new, %d updated." % (tot_a, tot_u),
+            period=3500)
     if on_done:
         try:
             on_done()
@@ -1558,10 +2159,26 @@ def build_lo_tagmap_prompt(lectures, branches=None, hutch_on=True, aj_on=True,
     return "\n".join(out), stats
 
 
-def write_lo_tagmap(reply_path=None, raw=None):
+def _tagmap_to_txt(m):
+    """Serialize a {lecture: [tags]} map into Janki's ==== delimited .txt format
+    (the same shape _build_lecture_map_txt reads)."""
+    rule = "=" * 40
+    out = []
+    for name, tags in m.items():
+        out.append(rule)
+        out.append(name)
+        out.append(rule)
+        out.extend(tags)
+        out.append("")
+    return "\n".join(out)
+
+
+def write_lo_tagmap(reply_path=None, raw=None, out_path=None):
     """Turn the AI's lecture→tag JSON reply (a file path OR pasted `raw` text) into
     a proper lecture→tag map: expand concept-leaf names to full collection tags and
-    write it into user_files. Returns (map_path, lectures_written, kept, dropped)."""
+    write it out. Saves to `out_path` (format by extension — .txt uses the ====
+    format, anything else JSON); defaults to user_files/lecture_tagmap.json.
+    Returns (map_path, lectures_written, kept, dropped)."""
     if raw is None:
         with open(reply_path, encoding="utf-8") as f:
             raw = f.read()
@@ -1603,7 +2220,12 @@ def write_lo_tagmap(reply_path=None, raw=None):
         if clean:
             out_map[name] = sorted(set(clean))
 
-    out_path = os.path.join(os.path.dirname(_qbanks_dir()), "lecture_tagmap.json")
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(out_map, f, ensure_ascii=False, indent=2)
+    if not out_path:
+        out_path = os.path.join(os.path.dirname(_qbanks_dir()), "lecture_tagmap.json")
+    if out_path.lower().endswith(".txt"):
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(_tagmap_to_txt(out_map))
+    else:
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(out_map, f, ensure_ascii=False, indent=2)
     return out_path, len(out_map), kept, dropped
