@@ -109,13 +109,24 @@ def open_practice_hub():
     list again."""
     global _practice_view
     _practice_view = True
-    # The umbrella row is hidden in this view, so make sure it's expanded — otherwise
-    # its banks (its children) wouldn't render at all.
+    # The umbrella "Practice" row is hidden in this view, so it MUST be expanded —
+    # otherwise Anki doesn't render its children (the banks) at all and the view is
+    # blank. NB: the deck-browser home list uses the *reviewer*-scope collapse state
+    # (deck["collapsed"] / DeckCollapseScope.REVIEWER — the same one its own +/- toggle
+    # writes), NOT "browserCollapsed" (which is the card-browser sidebar). We expand
+    # only the parent so the banks list directly; each bank's lectures stay behind its
+    # own + (collapsed).
     try:
-        d = mw.col.decks.by_name(_PRACTICE_PARENT)
-        if d and d.get("browserCollapsed"):
-            d["browserCollapsed"] = False
-            mw.col.decks.save(d)
+        pd = mw.col.decks.by_name(_PRACTICE_PARENT)
+        if pd:
+            try:
+                from anki.decks import DeckCollapseScope
+                mw.col.decks.set_collapsed(int(pd["id"]), collapsed=False,
+                                           scope=DeckCollapseScope.REVIEWER)
+            except Exception:
+                # Legacy fallback: the reviewer-scope state is the "collapsed" field.
+                pd["collapsed"] = False
+                mw.col.decks.save(pd)
     except Exception:
         pass
     try:
@@ -227,8 +238,11 @@ def hide_practice_rows(deck_browser, content):
         dids = _practice_dids()
         html = content.tree
         if _practice_view:
-            # Drop the "Practice" umbrella deck itself — show its banks as the top
-            # decks (each expandable by lecture).
+            # Show the banks as the top decks (each expandable by lecture), dropping the
+            # "Practice" umbrella row. But NEVER strip everything: if no bank rows are
+            # present (cards live directly in "Practice", or its subdecks aren't in the
+            # rendered tree), fall back to showing the "Practice" deck itself so the
+            # view is never blank.
             parent_did = None
             try:
                 d = mw.col.decks.by_name(_PRACTICE_PARENT)
@@ -236,42 +250,52 @@ def hide_practice_rows(deck_browser, content):
                     parent_did = int(d["id"])
             except Exception:
                 pass
-            keep = dids - {parent_did} if parent_did is not None else dids
+            children = {x for x in dids if x != parent_did}
             names = {int(n.id): n.name for n in mw.col.decks.all_names_and_ids()}
-            hdr = iter(["To-Do", "Review", "Score"])   # New / Learn / Due columns
 
-            def _row(m):
-                row = m.group(0)
-                if "<th" in row:                    # column header row
-                    row = re.sub(r"(<th colspan=5[^>]*>).*?(</th>)", r"\1Bank\2",
-                                 row, count=1, flags=re.DOTALL)
-                    row = re.sub(r"(<th class=count>).*?(</th>)",
-                                 lambda mm: mm.group(1) + next(hdr, "") + mm.group(2),
-                                 row, flags=re.DOTALL)
+            def _filter(keep, deindent):
+                hdr = iter(["To-Do", "Review", "Score"])   # New / Learn / Due columns
+
+                def _row(m):
+                    row = m.group(0)
+                    if "<th" in row:                    # column header row
+                        row = re.sub(r"(<th colspan=5[^>]*>).*?(</th>)", r"\1Bank\2",
+                                     row, count=1, flags=re.DOTALL)
+                        row = re.sub(r"(<th class=count>).*?(</th>)",
+                                     lambda mm: mm.group(1) + next(hdr, "") + mm.group(2),
+                                     row, flags=re.DOTALL)
+                        return row
+                    if "top-level-drag-row" in row:     # spacer → same top gap as normal
+                        return row
+                    idm = re.search(r"<tr[^>]*id='(\d+)'", row)
+                    if not idm:
+                        return ""
+                    did = int(idm.group(1))
+                    if did not in keep:
+                        return ""
+                    # De-indent one level: banks were Practice::Bank (level 2), so strip
+                    # the leading 6× &nbsp; so banks read as top-level, lectures nest.
+                    if did in deindent:
+                        row = re.sub(r"(<td class=decktd colspan=5>)(?:&nbsp;){6}", r"\1",
+                                     row, count=1)
+                    # Replace the Due count with % accuracy for this bank/subbank subtree.
+                    pct = _acc_pct(did, names)
+                    label = ("%d%%" % pct) if pct is not None else "—"
+                    cells = list(re.finditer(r"<td align=end>.*?</td>", row, re.DOTALL))
+                    if len(cells) >= 3:
+                        c = cells[2]
+                        row = (row[:c.start()]
+                               + '<td align=end><span class="review-count">%s</span></td>' % label
+                               + row[c.end():])
                     return row
-                if "top-level-drag-row" in row:     # spacer → same top gap as normal
-                    return row
-                idm = re.search(r"<tr[^>]*id='(\d+)'", row)
-                if not idm:
-                    return ""
-                did = int(idm.group(1))
-                if not any(("open:%d" % d) in row for d in keep):
-                    return ""
-                # De-indent one level: banks were Practice::Bank (level 2), so strip the
-                # leading 6× &nbsp; so banks read as top-level and lectures nest under.
-                row = re.sub(r"(<td class=decktd colspan=5>)(?:&nbsp;){6}", r"\1",
-                             row, count=1)
-                # Replace the Due count with % accuracy for this bank/subbank subtree.
-                pct = _acc_pct(did, names)
-                label = ("%d%%" % pct) if pct is not None else "—"
-                cells = list(re.finditer(r"<td align=end>.*?</td>", row, re.DOTALL))
-                if len(cells) >= 3:
-                    c = cells[2]
-                    row = (row[:c.start()]
-                           + '<td align=end><span class="review-count">%s</span></td>' % label
-                           + row[c.end():])
-                return row
-            html = re.sub(r"<tr[^>]*>.*?</tr>", _row, html, flags=re.DOTALL)
+                return re.sub(r"<tr[^>]*>.*?</tr>", _row, content.tree, flags=re.DOTALL)
+
+            out = _filter(children, children) if children else ""
+            # Fallback: nothing survived (no bank rows in the tree) → show the whole
+            # Practice subtree, parent included, so it's never invisible.
+            if not out or not re.search(r"<tr[^>]*id='\d+'", out):
+                out = _filter(dids, children)
+            html = out
         else:
             for did in dids:
                 html = re.sub(
