@@ -748,6 +748,18 @@ class GlassSettings(QDialog):
         prac_app_lay.addWidget(self._prac_show_exp)
         prac_app_lay.addWidget(self._prac_show_all)
 
+        # Link to the practice-questions guide (how banks work + building a .qb
+        # from a .docx), mirroring the Lectures tab's tutorial link.
+        _prac_doc = QLabel(
+            'See the <a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
+            'practice-questions.md">practice guide &amp; how to import a document '
+            '↗</a> for the .qb / .docx format.')
+        _prac_doc.setWordWrap(True)
+        _prac_doc.setOpenExternalLinks(True)
+        _prac_doc.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        _prac_doc.setStyleSheet("color: gray; margin-bottom: 4px;")
+        prac_qb_lay.addWidget(_prac_doc)
+
         _imp_btn = QPushButton("Import question bank (.qb)…")
         _imp_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
