@@ -3,8 +3,9 @@
 *Janki can pull multiple-choice practice questions that relate to the card
 you're reviewing, and can also load whole question banks into Anki as a real,
 syncable "Practice" deck. Everything at runtime is **100% local** — no network,
-no AI. Banks are plain files (`.qb`) you import once; the optional AI step is a
-manual copy-paste round-trip you run yourself, offline.*
+no AI (although we can use it to help match questions to cards, more on that later).
+Banks are plain files (`.qb`) which can consist of up to hundreds of practice
+questions for your usage.
 
 ---
 
@@ -26,6 +27,12 @@ You use a bank in two ways:
 2. **A Practice deck** — load banks into Anki as a normal deck (one subdeck per
    bank, further split by lecture). Click **Practice** in the top toolbar to see
    your banks where the deck list normally is.
+3. **[In-Progress] Automatically Interspersed into Decks** - automatically
+   integrates practice problem cards into your Anki deck review cycles so you
+   can seamlessly practice higher level review questions once you seem to be
+   getting concepts down. You can also test questions relevant to what you've been
+   studying leading into your pomodoro breaks so you can benchmark your
+   understanding.
 
 ---
 
@@ -118,7 +125,8 @@ data ever leaves your machine automatically:
 2. Paste it into your own Claude/ChatGPT, and save its JSON reply to a file.
 3. **Apply AI tag results (.json)…** — applies those tags back onto the banks.
 
-This is entirely optional; banks work without it.
+This is entirely optional. Banks work without it, but it can be really helpful
+for integrating these questions seamlessly with your cards.
 
 ---
 
@@ -132,6 +140,14 @@ Again/Hard/Good/Easy:
 - **Incorrect** → graded Hard (comes back for another try).
 - **Skip** (advance without picking) → **buried** for the session, no judgement.
 
+Practice questions work fundamentally different from traditional card reviews
+because we are not trying to just associate definitions. It is testing your
+understanding. You either make the connection or you don't. When you get a card
+right, we get it out of your way, since the exercise is complete. If it's wrong,
+it acts equivalent in spacing to a 'Hard' card review. You will see it again
+another time, but not as quickly as simply not knowing a card to avoid just
+remembering the answer.
+
 The **Score** shown for each bank is the share of the cards you've *attempted*
 that you've *cleared*: **suspended ÷ attempted**, from each card's current state.
 Resetting a card returns it to "new" and drops it back out — and skipped/buried
@@ -140,3 +156,5 @@ cards don't count either way.
 > On **AnkiMobile**, practice cards still show the right/wrong color and the
 > explanation, but the app doesn't allow grading from card JavaScript — so grade
 > with AnkiMobile's own buttons. See **[Mobile cards](mobile-cards.md)**.
+> This unfortunately does screw with grading. Please keep this in mind if you are
+> doing lots of these practice bank problems on mobile.
