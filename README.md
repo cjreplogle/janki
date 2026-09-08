@@ -97,6 +97,12 @@ so nothing is left behind.
   or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
+- **[Practice questions](docs/practice-questions.md)** — pull multiple-choice questions
+  related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
+  Anki as a real, syncable Practice deck. Banks are local `.qb` files you can build from a
+  plain Word doc; grading is by answer choice (correct → suspend, wrong → retry, skip →
+  bury) with a per-bank Score. Runtime is 100% local. **→ [Practice system + how to import
+  a document as a question bank](docs/practice-questions.md).**
 - **[Mobile cards](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
   add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
   animation into your note types (scoped to mobile) so the look rides your normal sync
