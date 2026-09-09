@@ -6,7 +6,7 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 >[!WARNING]
 > **Most of the visual/native features are macOS-only.** Older versions of Mac OS and Windows lack certain functionalities.
 >
-> Some features within this add-on are still rather experimental. Please use this at your own risk. 
+> Some features within this add-on are still rather experimental. Please use at your own risk. 
 
 ## Install
 
