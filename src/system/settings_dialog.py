@@ -785,6 +785,16 @@ class GlassSettings(QDialog):
         self._int_after_n.setSuffix(" cards")
         after_row.addWidget(after_name)
         after_row.addWidget(self._int_after_n)
+        after_row.addWidget(QLabel("show"))
+        self._int_after_batch = QSpinBox()
+        self._int_after_batch.setRange(1, 50)
+        self._int_after_batch.setValue(
+            int(self.cfg.get("intersperse_after_cards_batch", 1)))
+        self._int_after_batch.setToolTip(
+            "How many practice questions to drop inline each time the "
+            "after-N-cards trigger fires.")
+        after_row.addWidget(self._int_after_batch)
+        after_row.addWidget(QLabel("question(s)"))
         after_row.addStretch()
         prac_int_lay.addLayout(after_row)
 
@@ -813,6 +823,22 @@ class GlassSettings(QDialog):
         range_row.addStretch()
         prac_int_lay.addLayout(range_row)
 
+        # Tag-memory window: how many recently-reviewed cards feed the relevance match.
+        window_row = QHBoxLayout()
+        window_row.addSpacing(40)
+        window_row.addWidget(QLabel("Match to the last"))
+        self._int_window = QSpinBox()
+        self._int_window.setRange(1, 500)
+        self._int_window.setValue(int(self.cfg.get("intersperse_tag_window", 25)))
+        self._int_window.setSuffix(" cards")
+        self._int_window.setToolTip(
+            "How many recently-reviewed cards' tags are remembered when choosing "
+            "relevant questions (the tag-memory window).")
+        window_row.addWidget(self._int_window)
+        window_row.addWidget(QLabel("reviewed"))
+        window_row.addStretch()
+        prac_int_lay.addLayout(window_row)
+
         # No-match fallback.
         nomatch_row = QHBoxLayout()
         nomatch_row.addSpacing(40)
@@ -830,9 +856,11 @@ class GlassSettings(QDialog):
         def _int_sync_enabled():
             on = self._int_enabled.isChecked()
             for w in (self._int_after, self._int_before, self._int_after_n,
-                      self._int_min, self._int_max, self._int_nomatch):
+                      self._int_after_batch, self._int_min, self._int_max,
+                      self._int_window, self._int_nomatch):
                 w.setEnabled(on)
             self._int_after_n.setEnabled(on and self._int_after.isChecked())
+            self._int_after_batch.setEnabled(on and self._int_after.isChecked())
 
         def _int_save():
             # Keep min ≤ max.
@@ -841,16 +869,19 @@ class GlassSettings(QDialog):
             self.cfg["intersperse_enabled"] = self._int_enabled.isChecked()
             self.cfg["intersperse_after_cards_enabled"] = self._int_after.isChecked()
             self.cfg["intersperse_after_cards_n"] = self._int_after_n.value()
+            self.cfg["intersperse_after_cards_batch"] = self._int_after_batch.value()
             self.cfg["intersperse_before_break_enabled"] = self._int_before.isChecked()
             self.cfg["intersperse_target_min"] = self._int_min.value()
             self.cfg["intersperse_target_max"] = self._int_max.value()
+            self.cfg["intersperse_tag_window"] = self._int_window.value()
             self.cfg["intersperse_nomatch"] = self._int_nomatch.currentData()
             mw.addonManager.writeConfig(__name__, self.cfg)
             _int_sync_enabled()
 
         for _w in (self._int_enabled, self._int_after, self._int_before):
             _w.stateChanged.connect(lambda _s: _int_save())
-        for _w in (self._int_after_n, self._int_min, self._int_max):
+        for _w in (self._int_after_n, self._int_after_batch, self._int_min,
+                   self._int_max, self._int_window):
             _w.valueChanged.connect(lambda _v: _int_save())
         self._int_nomatch.currentIndexChanged.connect(lambda _i: _int_save())
         _int_sync_enabled()
@@ -908,6 +939,34 @@ class GlassSettings(QDialog):
         _build_row.addWidget(_pptx_btn)
         prac_qb_lay.addLayout(_build_row)
 
+        # No-AI matching pass: deterministic lecture-header tags + concept mining
+        # from each question's answer/explanation text, so banks match review cards
+        # without pasting anything into an AI. Try this BEFORE the AI round-trip.
+        _match_btn = QPushButton("Match banks to my cards (no AI)")
+        _match_btn.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+
+        def _retag_no_ai():
+            from aqt.utils import tooltip
+            try:
+                dt, mc = qbank.retag_all_banks()
+                tooltip("Matched locally: %d deck-tagged from headers, %d concept-"
+                        "matched from text — no AI used." % (dt, mc), period=4200)
+            except Exception as e:
+                from aqt.utils import showWarning
+                showWarning("Could not re-tag banks:\n\n%s" % e)
+            _refresh_banks()
+
+        _match_btn.clicked.connect(_retag_no_ai)
+        prac_qb_lay.addWidget(_match_btn)
+        _match_hint = QLabel("Deterministic, 100% local. Do this first; only reach "
+                             "for the AI prompt below if matches are still sparse.")
+        _match_hint.setWordWrap(True)
+        _match_hint.setStyleSheet("color: gray; margin-bottom: 4px;")
+        prac_qb_lay.addWidget(_match_hint)
+
         # AI-assisted tagging (offline round-trip): copy a prompt to paste into
         # your own Claude/ChatGPT, then apply its JSON reply back onto the banks.
         # Side by side (copy → apply).
@@ -941,20 +1000,27 @@ class GlassSettings(QDialog):
         _deck_btn.clicked.connect(
             lambda: qbank.convert_to_deck_dialog(on_done=_refresh_banks))
 
-        _banks_label = QLabel("Installed banks  —  drag a .qb here to import · "
+        _banks_label = QLabel("Installed banks  —  drag a .qb/.docx/.pptx here to "
+                              "import or build · "
                               "drag rows to reorder · drop one bank onto another to "
-                              "nest it as a subbank · right-click for options "
+                              "nest it as a subbank · “+” to see subbanks · "
+                              "right-click for options "
                               "(⌘/Ctrl-click several, then right-click → Merge)")
         _banks_label.setWordWrap(True)
         _banks_label.setStyleSheet("color: gray; margin-top: 8px;")
         prac_qb_lay.addWidget(_banks_label)
 
-        from aqt.qt import QListWidget, QListWidgetItem, QAbstractItemView
+        from aqt.qt import (QTreeWidget, QTreeWidgetItem, QAbstractItemView,
+                            QHeaderView)
 
-        # A list that (a) imports a .qb/.zip dropped onto it and (b) reorders its own
-        # rows by internal drag. Plain checkable items (no per-row widgets) so the drag
-        # grabs anywhere on a row; enable = the item checkbox; the rest is right-click.
-        class _BankList(QListWidget):
+        _EXPAND_COL = 1   # right-hand column holding the +/− expander
+        _ROLE_SUB = int(Qt.ItemDataRole.UserRole) + 1   # child rows: (bid, "path")
+
+        # A tree that (a) imports a .qb/.zip dropped onto it, (b) reorders top-level
+        # banks by internal drag, and (c) nests one bank into another on drop-onto.
+        # Top-level rows are the banks (checkable = enabled); each expands via a
+        # right-side "+" to show its subbanks/lectures (read-only).
+        class _BankTree(QTreeWidget):
             on_import = None       # callable(paths)
             on_reordered = None    # callable(ordered_bids)
             on_nest = None         # callable(src_bids, dest_bid)
@@ -964,7 +1030,8 @@ class GlassSettings(QDialog):
                 if not md.hasUrls():
                     return []
                 return [u.toLocalFile() for u in md.urls()
-                        if u.toLocalFile().lower().endswith((".qb", ".zip"))]
+                        if u.toLocalFile().lower().endswith(
+                            (".qb", ".zip", ".docx", ".pptx"))]
 
             def dragEnterEvent(self, ev):
                 if self._paths(ev):
@@ -994,42 +1061,57 @@ class GlassSettings(QDialog):
                            == self.dropIndicatorPosition())
                 target = self.itemAt(pt)
                 if on_item and target is not None and self.on_nest:
-                    dest = target.data(Qt.ItemDataRole.UserRole)
-                    srcs = [it.data(Qt.ItemDataRole.UserRole)
+                    dest = target.data(0, Qt.ItemDataRole.UserRole)
+                    srcs = [it.data(0, Qt.ItemDataRole.UserRole)
                             for it in self.selectedItems()
-                            if it.data(Qt.ItemDataRole.UserRole)
-                            and it.data(Qt.ItemDataRole.UserRole) != dest]
+                            if it.data(0, Qt.ItemDataRole.UserRole)
+                            and it.data(0, Qt.ItemDataRole.UserRole) != dest]
                     if dest and srcs:
                         ev.acceptProposedAction()
                         self.on_nest(srcs, dest)
                         return
+                # Only reorder relative to a top-level bank (never reparent a bank in
+                # between another bank's subbank children).
+                if target is not None and target.parent() is not None:
+                    ev.ignore()
+                    return
                 super().dropEvent(ev)          # otherwise perform the internal reorder
                 if self.on_reordered:
-                    order = [self.item(i).data(Qt.ItemDataRole.UserRole)
-                             for i in range(self.count())]
+                    order = [self.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)
+                             for i in range(self.topLevelItemCount())]
                     self.on_reordered([b for b in order if b])
 
-        _banks_list = _BankList()
+        _banks_list = _BankTree()
         _banks_list.setObjectName("jankiBankDrop")
+        _banks_list.setColumnCount(2)
+        _banks_list.setHeaderHidden(True)
+        _banks_list.setRootIsDecorated(False)      # no left arrows; use our right "+"
+        _banks_list.setUniformRowHeights(True)
+        _banks_list.setExpandsOnDoubleClick(False)
         _banks_list.setAcceptDrops(True)
         _banks_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         _banks_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         _banks_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         _banks_list.setDropIndicatorShown(True)
         _banks_list.setMinimumHeight(90)
+        _hdr = _banks_list.header()
+        _hdr.setStretchLastSection(False)
+        _hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        _hdr.setSectionResizeMode(_EXPAND_COL, QHeaderView.ResizeMode.Fixed)
+        _banks_list.setColumnWidth(_EXPAND_COL, 26)
         _banks_list.setStyleSheet(
             "#jankiBankDrop{border:1px dashed #55585e;border-radius:6px;"
             "background:transparent;color:#eee;}"
-            "QListWidget::item{padding:5px 6px;}"
-            "QListWidget::item:selected{background:rgba(255,255,255,0.08);}")
+            "QTreeWidget::item{padding:4px 6px;}"
+            "QTreeWidget::item:selected{background:rgba(255,255,255,0.08);}")
         prac_qb_lay.addWidget(_banks_list)
 
-        # Guard so setCheckState during a rebuild doesn't fire the enable-toggle save.
+        # Guard so setCheckState/expander updates during a rebuild don't fire saves.
         self._banks_populating = False
 
         def _bank_at(pos):
             it = _banks_list.itemAt(pos)
-            return it.data(Qt.ItemDataRole.UserRole) if it else None
+            return it.data(0, Qt.ItemDataRole.UserRole) if it else None
 
         def _bank_name(bid):
             return (qbank.list_banks().get(bid, {}) or {}).get("name", bid)
@@ -1037,6 +1119,11 @@ class GlassSettings(QDialog):
         def _do_preview(bid):
             from ..features import practice
             practice.preview_bank(bid, _bank_name(bid))
+
+        def _do_preview_sub(bid, path):
+            from ..features import practice
+            title = "%s ▸ %s" % (_bank_name(bid), path.replace("::", " ▸ "))
+            practice.preview_bank(bid, title, path=path)
 
         def _do_remove(bid):
             qbank.remove_bank(bid)
@@ -1059,10 +1146,10 @@ class GlassSettings(QDialog):
 
         def _selected_bids():
             # Merge only banks that are BOTH highlighted AND checked (enabled).
-            return [it.data(Qt.ItemDataRole.UserRole)
+            return [it.data(0, Qt.ItemDataRole.UserRole)
                     for it in _banks_list.selectedItems()
-                    if it.data(Qt.ItemDataRole.UserRole)
-                    and it.checkState() == Qt.CheckState.Checked]
+                    if it.data(0, Qt.ItemDataRole.UserRole)
+                    and it.checkState(0) == Qt.CheckState.Checked]
 
         def _do_merge(bids):
             from aqt.qt import QInputDialog
@@ -1099,28 +1186,55 @@ class GlassSettings(QDialog):
             except Exception as e:
                 showWarning("Could not export bank:\n\n%s" % e)
 
-        def _on_item_changed(item):
+        def _on_item_changed(item, _col=0):
             if self._banks_populating:
                 return
-            bid = item.data(Qt.ItemDataRole.UserRole)
+            bid = item.data(0, Qt.ItemDataRole.UserRole)
             if not bid:
                 return
             reg = qbank._load_registry()
             if bid in reg["banks"]:
                 reg["banks"][bid]["enabled"] = (
-                    item.checkState() == Qt.CheckState.Checked)
+                    item.checkState(0) == Qt.CheckState.Checked)
                 qbank._save_registry(reg)
 
-        def _on_double_click(item):
-            bid = item.data(Qt.ItemDataRole.UserRole)
+        def _on_double_click(item, _col=0):
+            bid = item.data(0, Qt.ItemDataRole.UserRole)
             if bid:
                 _do_preview(bid)
+                return
+            sub = item.data(0, _ROLE_SUB)
+            if sub:
+                _do_preview_sub(sub[0], sub[1])
+
+        def _set_indicator(item):
+            # Right-side +/− expander for rows that have children.
+            if item.childCount() > 0:
+                item.setText(_EXPAND_COL, "−" if item.isExpanded() else "+")
+            else:
+                item.setText(_EXPAND_COL, "")
+
+        def _on_item_clicked(item, col):
+            if col == _EXPAND_COL and item.childCount() > 0:
+                item.setExpanded(not item.isExpanded())
+
+        def _on_expand_collapse(item):
+            self._banks_populating = True     # setText must not trip itemChanged
+            _set_indicator(item)
+            self._banks_populating = False
 
         def _on_menu(pos):
-            bid = _bank_at(pos)
-            if not bid:
-                return
             from aqt.qt import QMenu
+            it = _banks_list.itemAt(pos)
+            bid = it.data(0, Qt.ItemDataRole.UserRole) if it else None
+            if not bid:                       # subbank row → offer just Preview
+                sub = it.data(0, _ROLE_SUB) if it else None
+                if sub:
+                    m = QMenu(_banks_list)
+                    m.addAction("Preview subbank…",
+                                lambda _c=False, s=sub: _do_preview_sub(s[0], s[1]))
+                    m.exec(_banks_list.mapToGlobal(pos))
+                return
             sel = _selected_bids()
             m = QMenu(_banks_list)
             if len(sel) >= 2 and bid in sel:
@@ -1136,31 +1250,63 @@ class GlassSettings(QDialog):
 
         _banks_list.itemChanged.connect(_on_item_changed)
         _banks_list.itemDoubleClicked.connect(_on_double_click)
+        _banks_list.itemClicked.connect(_on_item_clicked)
+        _banks_list.itemExpanded.connect(_on_expand_collapse)
+        _banks_list.itemCollapsed.connect(_on_expand_collapse)
         _banks_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         _banks_list.customContextMenuRequested.connect(_on_menu)
+
+        def _add_subnodes(parent, nodes, bid, prefix):
+            # Recursively add subbank/lecture rows under a bank. Each carries its
+            # (bid, "path") so it can be previewed on its own.
+            from aqt.qt import QColor, QBrush
+            for n in nodes:
+                path = (prefix + "::" + n["name"]) if prefix else n["name"]
+                child = QTreeWidgetItem(["%s  (%d)" % (n["name"], n["count"]), ""])
+                child.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                child.setData(0, _ROLE_SUB, (bid, path))
+                child.setForeground(0, QBrush(QColor("#9aa0aa")))
+                child.setTextAlignment(_EXPAND_COL,
+                                       Qt.AlignmentFlag.AlignRight
+                                       | Qt.AlignmentFlag.AlignVCenter)
+                child.setToolTip(0, "Double-click to preview this subbank")
+                parent.addChild(child)
+                if n["children"]:
+                    _add_subnodes(child, n["children"], bid, path)
+                _set_indicator(child)
 
         def _refresh_banks():
             self._banks_populating = True
             _banks_list.clear()
             banks = qbank.list_banks()
             if not banks:
-                empty = QListWidgetItem("No banks imported yet.")
+                empty = QTreeWidgetItem(["No banks imported yet.", ""])
                 empty.setFlags(Qt.ItemFlag.NoItemFlags)
-                _banks_list.addItem(empty)
+                _banks_list.addTopLevelItem(empty)
                 self._banks_populating = False
                 return
             for bid, meta in banks.items():
-                item = QListWidgetItem("%s  (%s)" % (meta.get("name", bid),
-                                                     meta.get("count", "?")))
-                item.setData(Qt.ItemDataRole.UserRole, bid)
+                item = QTreeWidgetItem(["%s  (%s)" % (meta.get("name", bid),
+                                                      meta.get("count", "?")), ""])
+                item.setData(0, Qt.ItemDataRole.UserRole, bid)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                               | Qt.ItemFlag.ItemIsDragEnabled
                               | Qt.ItemFlag.ItemIsDropEnabled
                               | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked if meta.get("enabled", True)
+                item.setCheckState(0, Qt.CheckState.Checked if meta.get("enabled", True)
                                    else Qt.CheckState.Unchecked)
-                item.setToolTip("Double-click to preview · right-click for options")
-                _banks_list.addItem(item)
+                item.setTextAlignment(_EXPAND_COL,
+                                      Qt.AlignmentFlag.AlignRight
+                                      | Qt.AlignmentFlag.AlignVCenter)
+                item.setToolTip(0, "Double-click to preview · right-click for options "
+                                   "· “+” to see subbanks")
+                _banks_list.addTopLevelItem(item)
+                try:
+                    _add_subnodes(item, qbank.bank_subtree(bid), bid, "")
+                except Exception as _e:
+                    log("bank subtree: %s" % _e)
+                item.setExpanded(False)
+                _set_indicator(item)
             self._banks_populating = False
 
         def _on_import():
@@ -1171,8 +1317,14 @@ class GlassSettings(QDialog):
 
         def _import_dropped(paths):
             from aqt.utils import tooltip, showWarning
+            # Route each dropped file by type: .qb/.zip import directly; .docx and
+            # .pptx build a .qb first (each opens its own confirm/OCR flow).
+            qbs = [p for p in paths
+                   if p.lower().endswith((".qb", ".zip"))]
+            docs = [p for p in paths if p.lower().endswith(".docx")]
+            ppts = [p for p in paths if p.lower().endswith(".pptx")]
             ok = 0
-            for p in paths:
+            for p in qbs:
                 try:
                     qbank.import_qb(p)
                     ok += 1
@@ -1183,6 +1335,14 @@ class GlassSettings(QDialog):
                 tooltip("Imported %d question bank%s."
                         % (ok, "" if ok == 1 else "s"))
                 _refresh_banks()
+            for p in docs:
+                qbank.docx_estimate_dialog(on_done=_refresh_banks, path=p)
+            if ppts and not _is_mac:
+                showWarning(".pptx building uses macOS Vision OCR and is only "
+                            "available on macOS.")
+                ppts = []
+            for p in ppts:
+                qbank.pptx_import_dialog(on_done=_refresh_banks, path=p)
 
         def _on_reordered(order):
             qbank.reorder_banks(order)

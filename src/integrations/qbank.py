@@ -17,10 +17,12 @@ text-token overlap against the card's content.
 
 import os
 import re
+import math
 import json
 import shutil
 import difflib
 import zipfile
+import collections
 
 from aqt import mw
 
@@ -98,6 +100,15 @@ def import_qb(path):
     }
     _save_registry(reg)
     _Q_CACHE.pop(dir_name, None)
+    # Deterministic (no-AI) enrichment so the bank matches review cards without
+    # anyone pasting questions into an AI: lecture tags from headers + concept
+    # mining from answer/explanation text.
+    try:
+        assign_deck_tags_from_headers()
+        mine_concepts_from_banks()
+        _Q_CACHE.pop(dir_name, None)
+    except Exception as e:
+        log("qbank import enrich: %s" % e)
     # Keep the Practice deck in sync: if one already exists, fold this (new or
     # re-imported) bank into it right away.
     if _practice_deck_exists():
@@ -410,6 +421,40 @@ def list_banks():
     return _load_registry().get("banks", {})
 
 
+def bank_subtree(bid):
+    """The nested subbank/lecture structure of a bank, from its questions' `lecture`
+    paths (split on "::"). Returns a list of nodes, each
+    {"name": str, "count": int, "children": [...]}. Lecture-less questions aren't
+    nested. Used to expand a bank in the settings manager."""
+    meta = list_banks().get(bid)
+    if not meta:
+        return []
+    root = {}
+
+    def _node(container, name):
+        n = container.get(name)
+        if n is None:
+            n = {"name": name, "count": 0, "children": {}}
+            container[name] = n
+        return n
+
+    for q in _bank_questions(meta.get("dir", "")):
+        if not isinstance(q, dict) or not (q.get("stem") or q.get("incomplete")):
+            continue
+        segs = [s.strip() for s in (q.get("lecture") or "").split("::") if s.strip()]
+        cont = root
+        for seg in segs:
+            n = _node(cont, seg)
+            n["count"] += 1
+            cont = n["children"]
+
+    def _to_list(container):
+        return [{"name": n["name"], "count": n["count"],
+                 "children": _to_list(n["children"])} for n in container.values()]
+
+    return _to_list(root)
+
+
 def questions_for_bank(bid):
     """All normalized questions in one installed bank (for previewing)."""
     meta = list_banks().get(bid)
@@ -548,10 +593,140 @@ _STOP = set("the a an of to and or in on for with is are be this that as by from
             "can will not but has have had does do".split())
 
 
+def _stem(w):
+    """Crude plural stemmer so 'cells'↔'cell', 'anemias'↔'anemia', 'bodies'↔'body'
+    collapse to one token. Deliberately conservative (no Porter) — just the plural
+    endings that otherwise split obvious medical synonyms."""
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith("sses"):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _tokens_list(text):
+    """Ordered, stemmed word tokens. Uses the lecture engine's camelCase-aware
+    tokeniser + synonym folding when available, so question text, card text and
+    concept-leaf names all normalise the same way (order kept for phrase matching)."""
+    text = re.sub(r"<[^>]+>", " ", text or "")
+    lec = _lectures()
+    if lec is not None:
+        raw = lec._match_tokens(text)
+    else:
+        raw = re.findall(r"[a-z0-9]+", text.lower())
+    return [_stem(w) for w in raw if len(w) > 2 and w not in _STOP]
+
+
 def _tokens(text):
-    text = re.sub(r"<[^>]+>", " ", text or "").lower()
-    return {w for w in re.findall(r"[a-z0-9]+", text)
-            if len(w) > 2 and w not in _STOP}
+    return set(_tokens_list(text))
+
+
+# --- IDF weighting (rare medical terms outrank filler) ------------------------
+# Document frequency of each token across the collection's notes, so a shared
+# "schistocyte" counts for far more than a shared "patient". Read locally, never
+# uploaded. Built ONCE per session (lazily, only when text-fallback matching
+# actually needs it) and NOT keyed on col.mod — answering/suspending cards changes
+# col.mod constantly, and re-scanning the whole collection on every practice
+# trigger was the source of the long load. reset_caches() refreshes it per profile.
+_IDF = {"df": None, "n": 0}
+
+
+def reset_caches():
+    """Drop the session-cached matching tables so a newly-opened profile rebuilds
+    them lazily. Call on profile open — never mid-review (that would re-thrash)."""
+    _IDF["df"] = None
+    _IDF["n"] = 0
+    _CONCEPT_IDX["idx"] = None
+    _CONCEPT_IDX["mod"] = None
+
+
+_IDF_SAMPLE = 8000       # DF is a coarse weight; a sample keeps the build sub-second
+
+
+def _idf_table():
+    if _IDF["df"] is not None:
+        return _IDF["df"], _IDF["n"]
+    df = collections.Counter()
+    n = 0
+    try:
+        for flds in mw.col.db.list(
+                "select flds from notes limit ?", _IDF_SAMPLE):
+            n += 1
+            for t in _tokens(flds):
+                df[t] += 1
+    except Exception as e:
+        log("qbank idf: %s" % e)
+    _IDF["df"] = df
+    _IDF["n"] = n
+    return df, n
+
+
+def _idf(tok):
+    df, n = _idf_table()
+    if not n:
+        return 1.0
+    return math.log((n + 1.0) / (df.get(tok, 0) + 1.0)) + 1.0
+
+
+def _weighted_overlap(a, b):
+    """IDF-weighted coverage of set `b` (the question) by set `a` (the card/window):
+    Σidf(shared) / Σidf(b). 0..1; distinctive shared terms dominate."""
+    if not a or not b:
+        return 0.0
+    denom = sum(_idf(t) for t in b)
+    if denom <= 0:
+        return 0.0
+    return sum(_idf(t) for t in (a & b)) / denom
+
+
+# --- Deterministic concept detection (the AI-free bridge) ---------------------
+# A vignette rarely names its concept, but its ANSWER/EXPLANATION usually does
+# ("This is hereditary spherocytosis…"). We mine the collection's own concept-leaf
+# names (AnKing #Subjects vocabulary) out of that text — no AI, no upload. Only
+# multi-word concepts are mined (single words like "Anemia" are too broad).
+_CONCEPT_IDX = {"mod": None, "idx": None}
+
+
+def _concept_phrase_index():
+    """[(leaf_display, key_token_set, phrase)] for multi-word #Subjects concept
+    leaves. `phrase` is the leaf's words in order for a contiguous match; the token
+    set allows an order-independent all-words-present match. Cached by col mtime."""
+    try:
+        mod = mw.col.mod
+    except Exception:
+        mod = None
+    if _CONCEPT_IDX["idx"] is not None and _CONCEPT_IDX["mod"] == mod:
+        return _CONCEPT_IDX["idx"]
+    seen, idx = set(), []
+    for t in _concept_tags():
+        leaf = t.split("::")[-1].lstrip("*")
+        if leaf in seen:
+            continue
+        seen.add(leaf)
+        wl = _tokens_list(leaf.replace("_", " "))
+        if len(wl) < 2:                    # skip broad single-word concepts
+            continue
+        idx.append((leaf, set(wl), " ".join(wl)))
+    _CONCEPT_IDX.update(mod=mod, idx=idx)
+    return idx
+
+
+def _concepts_in_text(text):
+    """Concept-leaf display names whose name appears in `text` — either as a
+    contiguous phrase or with all of its distinctive words present."""
+    idx = _concept_phrase_index()
+    if not idx or not text:
+        return set()
+    tl = _tokens_list(text)
+    toks = set(tl)
+    hay = " " + " ".join(tl) + " "
+    hits = set()
+    for leaf, words, phrase in idx:
+        if (" " + phrase + " ") in hay or words <= toks:
+            hits.add(leaf)
+    return hits
 
 
 def _normalize_q(q):
@@ -570,15 +745,71 @@ def _normalize_q(q):
     }
 
 
-def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None):
-    """Rank complete questions across ENABLED banks by relevance to a set of concept
-    -leaf `leaves` (tag match wins decisively) or, as a fallback, text `tokens`
-    (token overlap). Returns question dicts best-first; each is annotated with
+_FUZZY_LEAF_MIN = 0.6
+
+
+def _leaf_words(leaf):
+    return frozenset(w for w in re.split(r"[_\s]+", leaf or "") if w)
+
+
+def _fuzzy_leaf_score(card_word_sets, qleaves):
+    """Word-set (Jaccard) overlap between the card's leaf-key words and each
+    question leaf's words — catches tag variants like 'DNA_Structure' vs
+    'Structure_of_DNA'. Cheap set ops (no difflib) so it stays fast in the review
+    hot path. Returns Σ of each question leaf's best match ≥ cutoff, else 0."""
+    if not card_word_sets or not qleaves:
+        return 0.0
+    total = 0.0
+    for ql in qleaves:
+        qw = _leaf_words(ql)
+        if not qw:
+            continue
+        best = 0.0
+        for cw in card_word_sets:
+            if not cw:
+                continue
+            j = len(qw & cw) / len(qw | cw)
+            if j > best:
+                best = j
+        if best >= _FUZZY_LEAF_MIN:
+            total += best
+    return total
+
+
+def _q_match_text(q):
+    """The question text used for the fallback: stem + choices + answer + the
+    explanation (the explanation/answer usually names the concept)."""
+    parts = [q.get("stem") or ""]
+    ch = q.get("choices") or []
+    if ch:
+        parts.extend(str(c) for c in ch)
+    a = q.get("answer")
+    if isinstance(a, str):
+        parts.append(a)
+    parts.append(q.get("explanation") or "")
+    return " ".join(parts)
+
+
+def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
+                    leaf_weights=None):
+    """Rank complete questions across ENABLED banks by relevance to concept-leaf
+    `leaves` (tag match wins decisively), then fuzzy leaf match, then IDF-weighted
+    text overlap of `tokens`. Returns question dicts best-first, each annotated with
     `_bid`/`_ordinal`/`_qid` so a caller can resolve it back to its Practice card
     (the qid mirrors convert_bank_to_deck's `bid_ordinal` numbering exactly).
 
-    `leaves`/`tokens` are sets. Incomplete (diagnostic) questions never match."""
+    `leaves`/`tokens` are sets. `leaf_weights` (optional) is a {leaf: weight} map so
+    concepts seen more often recently rank higher. Incomplete questions never match.
+    Mined concepts (deterministically detected from each question's answer/
+    explanation text) count as tag matches — this is the AI-free card↔question
+    bridge for banks that ship without concept tags."""
     exclude_qids = exclude_qids or set()
+    lw = leaf_weights or {}
+
+    def _w(ls):
+        return sum(lw.get(l, 1.0) for l in ls)
+
+    card_word_sets = [_leaf_words(l) for l in leaves]   # precomputed once for fuzzy
     scored = []
     for bid, meta in list_banks().items():
         if not meta.get("enabled", True):
@@ -598,16 +829,18 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None):
             if qid in exclude_qids:
                 continue
             score = 0.0
-            qleaves = _leaf_keys(q.get("tags"))
+            qleaves = _leaf_keys(q.get("tags")) | _leaf_keys(q.get("mined_tags"))
             inter = leaves & qleaves
             if inter:
-                score = 10.0 + len(inter)            # tag match wins decisively
-            elif use_text_fallback and tokens:
-                qtok = _tokens(q.get("stem", ""))
-                if qtok:
-                    ov = len(tokens & qtok) / len(qtok)
-                    if ov >= 0.35:
-                        score = ov
+                score = 10.0 + _w(inter)             # exact tag/concept match wins
+            else:
+                fuzz = _fuzzy_leaf_score(card_word_sets, qleaves)
+                if fuzz > 0:
+                    score = 6.0 + fuzz               # near-miss tag variant
+                elif use_text_fallback and tokens:
+                    ov = _weighted_overlap(tokens, _tokens(_q_match_text(q)))
+                    if ov >= 0.30:
+                        score = ov                   # IDF-weighted text (0..1)
             if score > 0:
                 qa = dict(q)
                 qa["_bid"] = bid
@@ -630,13 +863,14 @@ def find_for_card(card, limit=5):
 
 
 def intersperse_card_ids(leaves, tokens, limit, use_text_fallback=True,
-                         exclude_cids=None):
+                         exclude_cids=None, leaf_weights=None):
     """Resolve the top-ranked matching questions to REAL Practice **card ids** (best
     first), for interspersing into a live review session. Skips suspended cards
     (already retired) and any in `exclude_cids`. Returns up to `limit` card ids."""
     exclude_cids = set(exclude_cids or ())
     out = []
-    for q in _rank_questions(leaves, tokens, use_text_fallback=use_text_fallback):
+    for q in _rank_questions(leaves, tokens, use_text_fallback=use_text_fallback,
+                             leaf_weights=leaf_weights):
         if len(out) >= limit:
             break
         qid = q.get("_qid")
@@ -1778,14 +2012,16 @@ def _write_qb_plain(out_path, base_name, qs):
     return man
 
 
-def pptx_import_dialog(on_done=None):
+def pptx_import_dialog(on_done=None, path=None):
     """Pick a .pptx, OCR its slides locally, parse MCQs, and build+import a .qb
-    in one step. OCR is macOS Vision (offline); imperfect slides may be skipped."""
+    in one step. OCR is macOS Vision (offline); imperfect slides may be skipped.
+    Pass ``path`` to skip the file picker (e.g. a file dropped onto the list)."""
     from aqt.qt import QFileDialog, QMessageBox
     from aqt.utils import tooltip, showWarning
     import tempfile
-    path, _ = QFileDialog.getOpenFileName(
-        mw, "Build .qb from .pptx (OCR)", "", "PowerPoint (*.pptx)")
+    if not path:
+        path, _ = QFileDialog.getOpenFileName(
+            mw, "Build .qb from .pptx (OCR)", "", "PowerPoint (*.pptx)")
     if not path:
         return
     tmp = tempfile.mkdtemp(prefix="janki_pptx_")
@@ -2031,6 +2267,120 @@ def _family_tags(root):
     return sorted(t for t in _collection_tags() if root in t)
 
 
+# AnKing content is copyrighted, so its CARD TEXT is never emitted as an example
+# snippet (tag NAMES are fine — they're just labels). A note counts as AnKing if it
+# carries any AnKing marker tag (the #AK root, the #AnKing note marker, or the
+# #Subjects concept subtree, which only AnKing ships).
+_ANKING_MARKS = ("#AK", "#AnKing", _SUBJECTS_MARK)
+
+
+def _is_anking_tags(tagset):
+    return any(m in t for t in tagset for m in _ANKING_MARKS)
+
+
+def _card_snippet(flds, max_len=160):
+    """A short plain-text preview of a note's fields (\x1f-separated), so the AI
+    can see what a candidate tag actually covers. Read locally; never uploaded on
+    its own — it only lands in the prompt the user pastes into their own AI."""
+    parts = [p for p in (_plain(f) for f in (flds or "").split("\x1f")) if p]
+    s = " / ".join(parts)
+    return (s[:max_len].rstrip() + "…") if len(s) > max_len else s
+
+
+def _decks_top_level():
+    """[(top-level deck name, [deck_ids incl. subdecks])], for the deck-source
+    picker. Selecting a top-level deck includes all of its subdecks."""
+    out = {}
+    try:
+        for d in mw.col.decks.all_names_and_ids(skip_empty_default=True,
+                                                include_filtered=False):
+            top = d.name.split("::", 1)[0]
+            if top == "Practice":        # skip our own Janki Practice decks
+                continue
+            if "anking" in top.lower():  # copyright — AnKing text is never used
+                continue
+            out.setdefault(top, []).append(d.id)
+    except Exception as e:
+        log("qbank deck list: %s" % e)
+    return sorted(out.items(), key=lambda kv: kv[0].lower())
+
+
+def _notes_in_decks(deck_ids):
+    """Set of note ids that have at least one card in any of `deck_ids`.
+    None (no filter) → None (means the whole collection)."""
+    if not deck_ids:
+        return None
+    try:
+        ph = ",".join("?" * len(deck_ids))
+        return set(mw.col.db.list(
+            "select distinct nid from cards where did in (%s)" % ph,
+            *[int(d) for d in deck_ids]))
+    except Exception as e:
+        log("qbank notes-in-decks: %s" % e)
+        return None
+
+
+def _candidate_examples(concept_leaves, hutch_tags, aj_tags, max_len=160,
+                        deck_ids=None):
+    """One representative card snippet per candidate tag, from a SINGLE local pass
+    over notes (stops early once every wanted tag has an example). Concept leaves
+    are keyed by leaf name (matched via any full #Subjects path carrying it);
+    Hutch/AJ are keyed by their full tag. `deck_ids` restricts which decks the
+    example cards may come from. Returns (concept_ex, hutch_ex, aj_ex)."""
+    concept_ex, hutch_ex, aj_ex = {}, {}, {}
+    allowed_nids = _notes_in_decks(deck_ids)   # None = whole collection
+    # Map every wanted concept full-path → its displayed leaf name.
+    path_leaf = {}
+    if concept_leaves:
+        leafset = set(concept_leaves)
+        for t in _concept_tags():
+            leaf = t.split("::")[-1]
+            if leaf in leafset:
+                path_leaf[t] = leaf
+    hutch_set, aj_set = set(hutch_tags), set(aj_tags)
+    wanted = set(path_leaf) | hutch_set | aj_set
+    if not wanted:
+        return concept_ex, hutch_ex, aj_ex
+    need_leaves = set(path_leaf.values())
+    try:
+        rows = mw.col.db.execute("select id, tags, flds from notes")
+    except Exception as e:
+        log("qbank candidate examples: %s" % e)
+        return concept_ex, hutch_ex, aj_ex
+    for nid, tags_str, flds in rows:
+        if not tags_str:
+            continue
+        if allowed_nids is not None and nid not in allowed_nids:
+            continue
+        ntags = set(tags_str.split())
+        if _is_anking_tags(ntags):        # never emit AnKing card text (copyright)
+            continue
+        hit = ntags & wanted
+        if not hit:
+            continue
+        snip = None
+        for t in hit:
+            if t in path_leaf:
+                leaf = path_leaf[t]
+                if leaf not in concept_ex:
+                    snip = snip if snip is not None else _card_snippet(flds, max_len)
+                    if snip:
+                        concept_ex[leaf] = snip
+                        need_leaves.discard(leaf)
+            elif t in hutch_set and t not in hutch_ex:
+                snip = snip if snip is not None else _card_snippet(flds, max_len)
+                if snip:
+                    hutch_ex[t] = snip
+            elif t in aj_set and t not in aj_ex:
+                snip = snip if snip is not None else _card_snippet(flds, max_len)
+                if snip:
+                    aj_ex[t] = snip
+        if (not need_leaves and len(hutch_ex) >= len(hutch_set)
+                and len(aj_ex) >= len(aj_set)):
+            break
+    return concept_ex, hutch_ex, aj_ex
+
+
 # --- Deterministic deck-tag pointer (headers → school-deck lecture tag) -------
 # A .qb's lecture headers (e.g. "GeneticRBCDisorders") map onto the school deck's
 # own lecture tags (AJ_UCCOM_keep::Blood::Week2::14_GeneticDisordersofRBCs). That
@@ -2064,14 +2414,20 @@ def _best_deck_tag(lec, header, fam_tags):
     return best if best_s >= _DECK_MATCH_MIN else None
 
 
-def assign_deck_tags_from_headers(family="AJ_UCCOM_keep"):
-    """Confidence-gated pass: stamp each question's best-matching <family> lecture
-    tag (from its .qb lecture header) onto the question. Returns (tagged, total)."""
+def assign_deck_tags_from_headers(families=("AJ_UCCOM_keep", "hUtChCOM")):
+    """Confidence-gated pass: stamp each question's best-matching lecture tag (from
+    its .qb lecture header) onto the question, for EACH school-deck family the
+    collection has (AJ and Hutch by default). A header often maps into whichever
+    deck the user actually studies, so covering both makes lecture-level matching
+    fire regardless. Returns (tagged, total)."""
+    if isinstance(families, str):
+        families = (families,)
     lec = _lectures()
     if lec is None:
         return (0, 0)
-    fam_tags = _family_tags(family)
-    if not fam_tags:
+    fam_lists = [(f, _family_tags(f)) for f in families]
+    fam_lists = [(f, ts) for f, ts in fam_lists if ts]
+    if not fam_lists:
         return (0, 0)
     tagged = total = 0
     for _bid, meta in list_banks().items():
@@ -2086,12 +2442,18 @@ def assign_deck_tags_from_headers(family="AJ_UCCOM_keep"):
             if not L:
                 continue
             if L not in cache:
-                cache[L] = _best_deck_tag(lec, L, fam_tags)
-            dt = cache[L]
-            if dt:
+                dts = []
+                for _f, ts in fam_lists:
+                    dt = _best_deck_tag(lec, L, ts)
+                    if dt:
+                        dts.append(dt)
+                cache[L] = dts
+            dts = cache[L]
+            if dts:
                 cur = q.get("tags") or []
-                if dt not in cur:
-                    q["tags"] = sorted(set(cur) | {dt})
+                new = set(cur) | set(dts)
+                if new != set(cur):
+                    q["tags"] = sorted(new)
                     changed = True
                 tagged += 1
         if changed:
@@ -2099,8 +2461,69 @@ def assign_deck_tags_from_headers(family="AJ_UCCOM_keep"):
     return tagged, total
 
 
+def mine_concepts_from_banks():
+    """Deterministically detect concept leaves in each question's stem + correct
+    answer + explanation using the collection's own #Subjects vocabulary, storing
+    them in the question's `mined_tags`. This is the AI-free bridge that lets
+    tag-less banks match real review cards. No AI, nothing uploaded. Returns
+    (questions_with_concepts, total)."""
+    if not _concept_phrase_index():
+        return (0, 0)
+    mined = total = 0
+    for _bid, meta in list_banks().items():
+        dir_name = meta.get("dir", "")
+        qs = _bank_questions(dir_name)
+        changed = False
+        for q in qs:
+            if not isinstance(q, dict) or not q.get("stem") or q.get("incomplete"):
+                continue
+            total += 1
+            ci = _correct_index(q)
+            ch = q.get("choices") or []
+            correct = ch[ci] if 0 <= ci < len(ch) else ""
+            a = q.get("answer")
+            text = " ".join([q.get("stem") or "", str(correct),
+                             a if isinstance(a, str) else "",
+                             q.get("explanation") or ""])
+            hits = sorted(_concepts_in_text(text))
+            prev = list(q.get("mined_tags") or [])
+            if hits != prev:
+                if hits:
+                    q["mined_tags"] = hits
+                else:
+                    q.pop("mined_tags", None)
+                changed = True
+            if hits:
+                mined += 1
+        if changed:
+            _rewrite_bank(dir_name, qs)
+    return mined, total
+
+
+def retag_all_banks():
+    """Run every deterministic (no-AI) tagging pass so banks match review cards as
+    well as possible without anyone uploading questions/cards to an AI: the calendar
+    lecture map, header→deck lecture tags (AJ/Hutch), and concept mining from each
+    question's answer/explanation. Returns (deck_tagged, concept_mined)."""
+    try:
+        retag_from_lecture_map()
+    except Exception as e:
+        log("retag_all lecture_map: %s" % e)
+    dt = mc = 0
+    try:
+        dt, _ = assign_deck_tags_from_headers()
+    except Exception as e:
+        log("retag_all headers: %s" % e)
+    try:
+        mc, _ = mine_concepts_from_banks()
+    except Exception as e:
+        log("retag_all mine: %s" % e)
+    return dt, mc
+
+
 def build_tagging_prompt(bids, include_choices=False, include_answer=False,
-                         branches=None, concepts=True, hutch_on=True, aj_on=True):
+                         branches=None, concepts=True, hutch_on=True, aj_on=True,
+                         include_card_text=False, card_text_decks=None):
     """Build the paste-into-an-AI prompt for the given bank ids. The candidate
     list is fully modular — each part can be toggled to trade coverage for tokens:
       • concepts   — AnKing #Subjects concept leaves (optionally limited to
@@ -2110,6 +2533,11 @@ def build_tagging_prompt(bids, include_choices=False, include_answer=False,
       • include_choices — add ALL MCQ options to each question (biggest).
       • include_answer  — add only the CORRECT option (cheaper; often names the
                           diagnosis). Ignored when include_choices is on.
+      • include_card_text — append a representative card snippet to each candidate
+                          tag (from the notes carrying it) so the AI can see what
+                          each tag covers. Much larger prompt.
+      • card_text_decks — restrict which decks the example snippets are drawn from
+                          (list of deck ids; None = whole collection).
     Returns (prompt_text, stats)."""
     lec = _lectures()
 
@@ -2157,23 +2585,38 @@ def build_tagging_prompt(bids, include_choices=False, include_answer=False,
         sections.append("  • Hutch — full hUtChCOM tags; return the whole :: path.")
     if aj:
         sections.append("  • AJ — full AJ_UCCOM_keep tags; return the whole :: path.")
+    if include_card_text:
+        sections.append("  • Any '⟶ e.g. …' after a candidate is a sample card's "
+                        "text for context only — it shows what the tag covers; "
+                        "return just the tag, never the example text.")
     qids = [qid for _L, items in groups for qid, _q in items]
     ex1 = qids[0] if qids else ((bids[0] + "#1") if bids else "bank#1")
     ex2 = qids[1] if len(qids) > 1 else ex1
     ex_tag = (concept_leaves[0] if concept_leaves else
               hutch[0] if hutch else aj[0] if aj else "Some_Concept")
 
+    # Optional: a representative card snippet per candidate, so the AI can see
+    # what each tag actually covers (a big token cost — off by default).
+    concept_ex = hutch_ex = aj_ex = {}
+    if include_card_text:
+        concept_ex, hutch_ex, aj_ex = _candidate_examples(
+            concept_leaves, hutch, aj, deck_ids=card_text_decks)
+
+    def _line(name, ex):
+        snip = ex.get(name)
+        return "- %s  ⟶ e.g. %s" % (name, snip) if snip else "- %s" % name
+
     out = [_prompt_header(sections, ex1, ex2, ex_tag), "\n" + "=" * 64,
            "CANDIDATE TAGS"]
     if concept_leaves:
         out.append("\n-- Concepts (AnKing #Subjects) — return the name exactly --")
-        out.extend("- %s" % t for t in concept_leaves)
+        out.extend(_line(t, concept_ex) for t in concept_leaves)
     if hutch:
         out.append("\n-- Hutch (hUtChCOM) — return the full tag exactly --")
-        out.extend("- %s" % t for t in hutch)
+        out.extend(_line(t, hutch_ex) for t in hutch)
     if aj:
         out.append("\n-- AJ (AJ_UCCOM_keep) — return the full tag exactly --")
-        out.extend("- %s" % t for t in aj)
+        out.extend(_line(t, aj_ex) for t in aj)
 
     out.append("\n" + "=" * 64)
     out.append("QUESTIONS")
@@ -2251,8 +2694,31 @@ def copy_tagging_prompt_dialog(on_done=None):
     cb_aj.setChecked(False)   # AJ lecture tag is assigned in code, not by the model
     cb_answer = QCheckBox("Correct answer"); cb_answer.setChecked(False)
     cb_choices = QCheckBox("All answer choices (larger)"); cb_choices.setChecked(False)
-    for c in (cb_concepts, cb_hutch, cb_aj, cb_answer, cb_choices):
+    cb_cardtext = QCheckBox("Example card text per tag (much larger)")
+    cb_cardtext.setChecked(False)
+    cb_cardtext.setToolTip(
+        "Append a short snippet from a real card carrying each candidate tag, so "
+        "the AI can see what the tag covers. Greatly increases prompt size.")
+    for c in (cb_concepts, cb_hutch, cb_aj, cb_answer, cb_choices, cb_cardtext):
         inc_v.addWidget(c)
+
+    # Suboption of card text: which decks the example snippets may come from
+    # (nonspecific — just the user's own top-level decks; all on = whole
+    # collection, the default). Indented so it reads as a child of card text.
+    deck_lbl = QLabel("      from decks:")
+    deck_lbl.setStyleSheet("color:#9aa0aa;")
+    inc_v.addWidget(deck_lbl)
+    deck_scroll = QScrollArea(); deck_scroll.setWidgetResizable(True)
+    deck_scroll.setFixedHeight(120)
+    deck_host = QWidget(); deck_hv = QVBoxLayout(deck_host)
+    deck_hv.setContentsMargins(22, 0, 0, 0)
+    deck_cbs = {}                                   # top-level name -> (checkbox, [dids])
+    for _name, _dids in _decks_top_level():
+        _dcb = QCheckBox(_name); _dcb.setChecked(True)
+        deck_cbs[_name] = (_dcb, _dids); deck_hv.addWidget(_dcb)
+    deck_hv.addStretch()
+    deck_scroll.setWidget(deck_host)
+    inc_v.addWidget(deck_scroll)
 
     bmap = _concept_branches()
     branch_order = sorted(bmap, key=lambda b: (-len(bmap[b]), b))
@@ -2273,7 +2739,8 @@ def copy_tagging_prompt_dialog(on_done=None):
     bank_row.addWidget(cb_all)
     bank_row.addSpacing(10)
     bank_row.addWidget(_dropdown("Include in prompt", inc_box))
-    bank_row.addWidget(_dropdown("Concept subject blocks", scroll))
+    blocks_btn = _dropdown("Concept subject blocks", scroll)
+    bank_row.addWidget(blocks_btn)
     bank_row.addStretch()
     v.addLayout(bank_row)
 
@@ -2308,11 +2775,20 @@ def copy_tagging_prompt_dialog(on_done=None):
         if cb_concepts.isChecked():
             chosen = [b for b, cb in branch_cbs.items() if cb.isChecked()]
             sel_branches = None if len(chosen) == len(branch_cbs) else set(chosen)
+        deck_ids = None
+        if cb_cardtext.isChecked():
+            chosen = [(cb, dids) for cb, dids in deck_cbs.values()]
+            picked = [d for cb, dids in chosen if cb.isChecked() for d in dids]
+            # All selected → None (whole collection); a subset → just those decks.
+            if picked and not all(cb.isChecked() for cb, _d in chosen):
+                deck_ids = picked
         return dict(include_choices=cb_choices.isChecked(),
                     include_answer=cb_answer.isChecked(),
                     concepts=cb_concepts.isChecked(),
                     hutch_on=cb_hutch.isChecked(), aj_on=cb_aj.isChecked(),
-                    branches=sel_branches)
+                    branches=sel_branches,
+                    include_card_text=cb_cardtext.isChecked(),
+                    card_text_decks=deck_ids)
 
     def _build():
         prompt, stats = build_tagging_prompt(_selected_bids(), **_params())
@@ -2322,15 +2798,22 @@ def copy_tagging_prompt_dialog(on_done=None):
         return prompt, stats
 
     def _refresh(*_a):
+        blocks_btn.setVisible(cb_concepts.isChecked())   # AnKing-only; hide otherwise
         for cb in branch_cbs.values():
             cb.setEnabled(cb_concepts.isChecked())
         cb_answer.setEnabled(not cb_choices.isChecked())  # choices supersede answer
+        deck_lbl.setEnabled(cb_cardtext.isChecked())      # deck picker is a subopt
+        deck_scroll.setEnabled(cb_cardtext.isChecked())
+        for _dcb, _d in deck_cbs.values():
+            _dcb.setEnabled(cb_cardtext.isChecked())
         try:
             prompt, stats = build_tagging_prompt(_selected_bids(), **_params())
         except Exception:
             est.setText(""); return
         extra = ("  · +choices" if cb_choices.isChecked()
                  else "  · +answer" if cb_answer.isChecked() else "")
+        if cb_cardtext.isChecked():
+            extra += "  · +card text"
         est.setText("≈ %d tokens  ·  %d questions, %d candidates "
                     "(%d concepts + %d Hutch + %d AJ)%s"
                     % (len(prompt) // 4, stats["questions"], stats["candidates"],
@@ -2343,8 +2826,9 @@ def copy_tagging_prompt_dialog(on_done=None):
 
     cb_all.toggled.connect(_toggle_all)
     grp.buttonToggled.connect(lambda *a: _refresh())
-    for w in (cb_concepts, cb_hutch, cb_aj, cb_answer, cb_choices,
-              *branch_cbs.values()):
+    for w in (cb_concepts, cb_hutch, cb_aj, cb_answer, cb_choices, cb_cardtext,
+              *branch_cbs.values(),
+              *[cb for cb, _d in deck_cbs.values()]):
         w.toggled.connect(_refresh)
     _refresh()
 
@@ -3464,7 +3948,8 @@ def convert_to_deck_dialog(on_done=None):
             % (len(banks), "" if len(banks) == 1 else "s")):
         return
     try:
-        assign_deck_tags_from_headers()   # deterministic AJ lecture tags first
+        assign_deck_tags_from_headers()   # deterministic lecture tags first
+        mine_concepts_from_banks()        # + concept mining (AI-free bridge)
     except Exception as e:
         log("deck-tag pass: %s" % e)
     tot_a = tot_u = 0
@@ -3487,13 +3972,15 @@ def convert_to_deck_dialog(on_done=None):
             pass
 
 
-def docx_estimate_dialog(on_done=None):
+def docx_estimate_dialog(on_done=None, path=None):
     """Pick a .docx, show how many questions it yields, then (on confirm) build a
-    .qb next to it and import it. Untagged → matches by text similarity."""
+    .qb next to it and import it. Untagged → matches by text similarity.
+    Pass ``path`` to skip the file picker (e.g. a file dropped onto the list)."""
     from aqt.qt import QFileDialog, QMessageBox
     from aqt.utils import tooltip, showWarning
-    path, _ = QFileDialog.getOpenFileName(
-        mw, "Build .qb from .docx", "", "Word documents (*.docx)")
+    if not path:
+        path, _ = QFileDialog.getOpenFileName(
+            mw, "Build .qb from .docx", "", "Word documents (*.docx)")
     if not path:
         return
     try:
@@ -3524,9 +4011,10 @@ def docx_estimate_dialog(on_done=None):
         showWarning("Could not create/import .qb:\n\n%s" % e)
         return
     retag_from_lecture_map()                   # M1 calendar map (if it matches)
-    deck_tagged, _t = assign_deck_tags_from_headers()   # deterministic AJ tags
-    tooltip("Imported “%s” (%d questions); assigned %d school-deck tag(s) from "
-            "lecture headers." % (man.get("name"), len(qs), deck_tagged))
+    deck_tagged, _t = assign_deck_tags_from_headers()   # deterministic deck tags
+    mined, _m = mine_concepts_from_banks()     # concept mining (AI-free bridge)
+    tooltip("Imported “%s” (%d questions); %d deck-tagged from headers, %d concept-"
+            "matched from text." % (man.get("name"), len(qs), deck_tagged, mined))
     if on_done:
         try:
             on_done()

@@ -34,13 +34,30 @@ from ..util import state
 from ..integrations import qbank
 
 # --- session tracking -------------------------------------------------------
-# Concepts (leaf keys) + text tokens of the last _WINDOW real cards reviewed, so a
-# trigger matches what you've actually been studying. Practice/interspersed cards are
-# never counted here.
-_WINDOW = 25
-_recent_leaves = collections.deque(maxlen=_WINDOW)
-_recent_tokens = collections.deque(maxlen=_WINDOW)
+# Concepts (leaf keys) + text tokens of the last N real cards reviewed, so a trigger
+# matches what you've actually been studying. Practice/interspersed cards are never
+# counted here. N (the "tag memory" window) is configurable — intersperse_tag_window.
+_WINDOW_DEFAULT = 25
+_recent_leaves = collections.deque(maxlen=_WINDOW_DEFAULT)
+_recent_tokens = collections.deque(maxlen=_WINDOW_DEFAULT)
 _cards_since = 0
+
+
+def _window_size():
+    try:
+        return max(1, int(_cfg().get("intersperse_tag_window", _WINDOW_DEFAULT)))
+    except Exception:
+        return _WINDOW_DEFAULT
+
+
+def _ensure_window():
+    """Resize the recency deques in place if the configured window changed, keeping
+    the most recent entries."""
+    global _recent_leaves, _recent_tokens
+    n = _window_size()
+    if _recent_leaves.maxlen != n:
+        _recent_leaves = collections.deque(list(_recent_leaves)[-n:], maxlen=n)
+        _recent_tokens = collections.deque(list(_recent_tokens)[-n:], maxlen=n)
 
 # --- inline (Trigger A) state ----------------------------------------------
 _inline_queue = []          # card ids waiting to be served as the next reviewer cards
@@ -48,6 +65,9 @@ _inline_active = set()      # card ids currently shown as an inline practice car
 _seen = set()               # card ids already interspersed this session (no repeats)
 _requeue = []               # wrong/unfinished inline cids to resurface later
 _warned_empty = False       # one-time "no practice cards built" nag per session
+_inline_history = []        # cids served this batch, in order (for undo/step-back)
+_inline_resolved = {}       # cid -> "suspend" | "requeue" | "skip" (to reverse on undo)
+_orig_undo = None           # original mw.undo, so we can defer to it off practice cards
 
 # --- pre-break (Trigger B) state -------------------------------------------
 _FILTERED_NAME = "Janki Practice (interspersed)"
@@ -74,19 +94,29 @@ def _target_size():
     return lo, hi
 
 
+def _after_batch_size():
+    # How many questions to drop inline each time the after-N-cards trigger fires.
+    return max(1, int(_cfg().get("intersperse_after_cards_batch", 1)))
+
+
 def _use_text_fallback():
     return _cfg().get("intersperse_nomatch", "skip") == "text"
 
 
 def _match_inputs():
-    """Aggregate leaf keys + tokens across the recency window."""
+    """Aggregate leaf keys + tokens across the recency window, plus per-leaf
+    frequency weights so concepts seen on MORE recent cards rank higher (a step
+    toward the decay-curve idea)."""
     leaves = set()
     tokens = set()
+    weights = collections.Counter()
     for s in _recent_leaves:
         leaves |= s
+        for l in s:
+            weights[l] += 1
     for s in _recent_tokens:
         tokens |= s
-    return leaves, tokens
+    return leaves, tokens, weights
 
 
 def _is_practice_note(card):
@@ -100,18 +130,25 @@ def reset_session():
     """Wipe per-session state (called on profile open)."""
     global _cards_since, _warned_empty
     _warned_empty = False
+    try:
+        qbank.reset_caches()      # rebuild IDF/concept caches for the new profile
+    except Exception:
+        pass
+    _ensure_window()
     _recent_leaves.clear()
     _recent_tokens.clear()
     _seen.clear()
     _requeue.clear()
     _inline_queue.clear()
     _inline_active.clear()
+    _inline_history.clear()
+    _inline_resolved.clear()
     _cards_since = 0
 
 
 def _gather(limit):
     """Card ids to intersperse now: resurfaced wrong ones first, then fresh matches."""
-    leaves, tokens = _match_inputs()
+    leaves, tokens, weights = _match_inputs()
     fallback = _use_text_fallback()
     batch = []
     # Resurface previously-wrong inline cards first (drop any now suspended).
@@ -127,7 +164,8 @@ def _gather(limit):
         fresh = qbank.intersperse_card_ids(
             leaves, tokens, limit - len(batch),
             use_text_fallback=fallback,
-            exclude_cids=set(batch) | _seen)
+            exclude_cids=set(batch) | _seen,
+            leaf_weights=weights)
         batch.extend(fresh)
     return batch[:limit]
 
@@ -166,6 +204,7 @@ def _serve_next_inline(reviewer):
             continue
         _inline_active.add(cid)
         _seen.add(cid)
+        _inline_history.append(cid)
         reviewer.card = card
         try:
             card.start_timer()
@@ -188,8 +227,7 @@ def _do_nextcard(self):
         return None
     # Time to start a new inline batch?
     if _should_trigger_inline():
-        _, hi = _target_size()
-        batch = _gather(hi)
+        batch = _gather(_after_batch_size())
         _cards_since = 0            # reset either way (skip retries after another N)
         if batch:
             _inline_queue.extend(batch)
@@ -197,7 +235,13 @@ def _do_nextcard(self):
                 return None
         else:
             _hint_no_cards()
+    _clear_inline_history()     # falling through to a real card → batch is over
     return _orig_nextcard(self)
+
+
+def _clear_inline_history():
+    _inline_history.clear()
+    _inline_resolved.clear()
 
 
 def _hint_no_cards():
@@ -277,6 +321,7 @@ def exit_inline():
     the scheduler serve it again (you land back where you were)."""
     _inline_queue.clear()
     _inline_active.clear()
+    _clear_inline_history()
     r = getattr(mw, "reviewer", None)
     if r is not None and _orig_nextcard is not None:
         try:
@@ -294,10 +339,13 @@ def resolve_inline(cid, correct, answered):
     try:
         if answered and correct:
             mw.col.sched.suspend_cards([cid])
+            _inline_resolved[cid] = "suspend"
         elif answered and not correct:
             if cid not in _requeue:
                 _requeue.append(cid)   # comes back later, like practice-mode "Hard"
-        # skip (not answered) → drop for the session (already in _seen)
+            _inline_resolved[cid] = "requeue"
+        else:
+            _inline_resolved[cid] = "skip"   # dropped for the session (in _seen)
     except Exception as e:
         log("intersperse resolve: %s" % e)
     r = getattr(mw, "reviewer", None)
@@ -306,6 +354,94 @@ def resolve_inline(cid, correct, answered):
             r.nextCard()
         except Exception as e:
             log("intersperse advance: %s" % e)
+
+
+# ---------------------------------------------------------------------------
+# Undo (Ctrl+Z) while on an inline practice card
+# ---------------------------------------------------------------------------
+# Inline cards bypass the scheduler, so Anki's undo has no review-log entry to
+# walk — it would just undo our suspend and let the reviewer refresh ADVANCE to
+# the next queued practice card (progressing, not going back), and un-retire a
+# card you'd just cleared. So while an inline card is on screen we intercept undo
+# and step back through our own inline history instead, reversing the previous
+# card's resolution (unsuspend / un-requeue) so it can be answered again.
+def _step_back_inline(reviewer):
+    if len(_inline_history) < 2:
+        tooltip("Nothing earlier to undo in this practice set.")
+        return
+    cur = _inline_history.pop()          # the (unresolved) card currently on screen
+    _inline_active.discard(cur)
+    if cur not in _inline_queue:
+        _inline_queue.insert(0, cur)     # forward will reach it again
+    prev = _inline_history[-1]           # the card to return to
+    kind = _inline_resolved.pop(prev, None)
+    try:
+        if kind == "suspend":
+            mw.col.sched.unsuspend_cards([prev])   # raw call → no queue-refresh
+        elif kind == "requeue" and prev in _requeue:
+            _requeue.remove(prev)
+    except Exception as e:
+        log("intersperse undo reverse: %s" % e)
+    try:
+        card = mw.col.get_card(prev)
+    except Exception:
+        card = None
+    if card is None:
+        return
+    _inline_active.add(prev)
+    reviewer.card = card
+    try:
+        card.start_timer()
+    except Exception:
+        pass
+    try:
+        reviewer._showQuestion()
+    except Exception as e:
+        log("intersperse undo show: %s" % e)
+
+
+def _intercept_undo(*args, **kwargs):
+    """Route undo to the inline step-back while a practice card is on screen;
+    otherwise defer to Anki's real undo."""
+    r = getattr(mw, "reviewer", None)
+    cur = getattr(r, "card", None) if r is not None else None
+    if (r is not None and cur is not None
+            and is_inline_active(getattr(cur, "id", None))):
+        try:
+            _step_back_inline(r)
+        except Exception as e:
+            log("intersperse undo: %s" % e)
+        return None
+    if _orig_undo is not None:
+        return _orig_undo()
+    return None
+
+
+def _install_undo_wrap():
+    """Catch both undo entry points: the Ctrl+Z menu action (reconnected) and the
+    reviewer's own 'u'/'ㅕ' keys (which read mw.undo when the reviewer is shown)."""
+    global _orig_undo
+    if _orig_undo is not None:
+        return
+    _orig_undo = mw.undo
+    try:
+        from aqt.qt import qconnect
+        # Only take over the menu's slot if we can cleanly drop Anki's own — else
+        # both would fire and undo twice. (mw.undo attr wrap still covers 'u'/'ㅕ'.)
+        disconnected = False
+        try:
+            mw.form.actionUndo.triggered.disconnect(_orig_undo)
+            disconnected = True
+        except Exception:
+            pass
+        if disconnected:
+            qconnect(mw.form.actionUndo.triggered, _intercept_undo)
+    except Exception as e:
+        log("intersperse undo menu wrap: %s" % e)
+    try:
+        mw.undo = _intercept_undo
+    except Exception as e:
+        log("intersperse undo attr wrap: %s" % e)
 
 
 # ---------------------------------------------------------------------------
@@ -352,10 +488,10 @@ def run_pre_break_set(on_done):
     if not want_pre_break() or _pre_break_active:
         return on_done()
     _, hi = _target_size()
-    leaves, tokens = _match_inputs()
+    leaves, tokens, weights = _match_inputs()
     cids = qbank.intersperse_card_ids(
         leaves, tokens, hi, use_text_fallback=_use_text_fallback(),
-        exclude_cids=_seen)
+        exclude_cids=_seen, leaf_weights=weights)
     if not cids:
         return on_done()               # nothing relevant → straight to the break
     try:
@@ -427,6 +563,7 @@ def _on_answered(reviewer, card, ease):
         return
     if _is_practice_note(card):
         return                         # never count practice/interspersed cards
+    _ensure_window()                   # honor a changed tag-memory window size
     try:
         note = card.note()
         _recent_leaves.append(qbank._leaf_keys(list(note.tags)))
@@ -448,6 +585,7 @@ def _on_state_change(new_state, old_state):
     if new_state != "review":
         _inline_queue.clear()
         _inline_active.clear()
+        _clear_inline_history()
 
 
 _hooks_installed = False
@@ -457,6 +595,7 @@ def install():
     """Wrap the reviewer + register hooks (idempotent)."""
     global _hooks_installed
     _install_nextcard_wrap()
+    _install_undo_wrap()
     if _hooks_installed:
         return
     try:

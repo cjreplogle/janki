@@ -878,6 +878,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Either match → this exact card content already animated → just reveal.
         "      if(s===PREV_HASH || s===getSig()){ reveal(); return; }\n"
         "      setSig(s); window.__jkAmbPhr=null; jkAmbHook();\n"
+        "      // Janki Practice (MCQ) card → reveal instantly and let the template's\n"
+        "      // own per-choice / flip animation run. The typewriter head is injected\n"
+        "      // once per session (based on the FIRST card), so an interspersed practice\n"
+        "      // card in an otherwise-normal review would otherwise get the text reveal\n"
+        "      // and fight the choice animation. Detect it per-card via its markup.\n"
+        "      if(qa.querySelector('.jp-stem, #jp-choices')){ reveal(); return; }\n"
         "      // Cloze reveal → show instantly, no animation. Front of cloze (and basic\n"
         "      // cards) fall through and animate normally.\n"
         "      if(qa.querySelector('.cloze') && isClozeBack()){ reveal(); return; }\n"

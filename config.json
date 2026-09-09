@@ -148,8 +148,10 @@
   "intersperse_enabled": false,
   "intersperse_after_cards_enabled": true,
   "intersperse_after_cards_n": 20,
+  "intersperse_after_cards_batch": 1,
   "intersperse_before_break_enabled": true,
   "intersperse_target_min": 2,
   "intersperse_target_max": 4,
+  "intersperse_tag_window": 25,
   "intersperse_nomatch": "skip"
 }

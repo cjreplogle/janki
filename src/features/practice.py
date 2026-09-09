@@ -316,16 +316,29 @@ def _close_panel():
     _panel = None
 
 
-def preview_bank(bid, title=None):
+def _lecture_matches(lec, path):
+    """True if a question's lecture path starts with the subbank `path` (both split
+    on '::' and whitespace-normalised)."""
+    have = [s.strip() for s in (lec or "").split("::") if s.strip()]
+    want = [s.strip() for s in (path or "").split("::") if s.strip()]
+    return have[:len(want)] == want
+
+
+def preview_bank(bid, title=None, path=None):
     """Table-like, read-only view of an imported bank: one row per question stem;
-    click a row to expand its choices (correct one marked) / answer."""
+    click a row to expand its choices (correct one marked) / answer. When `path` is
+    given, only questions in that subbank/lecture (lecture starting with `path`) are
+    shown."""
     global _panel
     import os
     from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
                         QTreeWidget, QTreeWidgetItem, QBrush, QColor, QPixmap, Qt)
     qs = qbank.questions_for_bank(bid)
+    if path:
+        qs = [q for q in qs if _lecture_matches(q.get("lecture"), path)]
     if not qs:
-        tooltip("This bank has no questions to preview.")
+        tooltip("This subbank has no questions to preview." if path
+                else "This bank has no questions to preview.")
         return
     meta = qbank.list_banks().get(bid, {})
     media_dir = os.path.join(qbank._qbanks_dir(), meta.get("dir", ""), "media")
@@ -418,7 +431,7 @@ def preview_bank(bid, title=None):
     def _retag():
         tagged, total = qbank.retag_from_lecture_map()
         tooltip("Tagged %d of %d questions from the lecture map." % (tagged, total))
-        preview_bank(bid, title)          # reopen so the new tags show
+        preview_bank(bid, title, path)    # reopen so the new tags show
 
     tag_btn.clicked.connect(_retag)
     topbar.addWidget(tag_btn)
