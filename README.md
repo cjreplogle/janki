@@ -4,10 +4,9 @@ A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins th
 transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <ins>is not affiliated with</ins>.
 
 >[!WARNING]
-> **Most of the visual/native features are macOS-only.** This is mostly untested on Windows devices.
-> A proper Windows port of the mac-only visuals may come later if people ask.
+> **Most of the visual/native features are macOS-only.** Older versions of Mac OS and Windows lack certain functionalities.
 >
-> Some features are still rather experimental. Please use this at your own risk. 
+> Some features within this add-on are still rather experimental. Please use this at your own risk. 
 
 ## Install
 
@@ -162,7 +161,7 @@ for programs which automatically closing apps / disabling Wi-Fi on the device. T
 may be bugs/issues I have not identified yet. Please use the less invasive "load today's
 lectures" version if you have concerns about this.
 
-[cjre.pl/ogle](https://cjre.pl/ogle) 
+[cjre.pl/ogle](https://cjre.pl/ogle/plain)
 
 ## License
 
