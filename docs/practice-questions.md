@@ -26,13 +26,17 @@ You use a bank in two ways:
    card's content.
 2. **A Practice deck** — load banks into Anki as a normal deck (one subdeck per
    bank, further split by lecture). Click **Practice** in the top toolbar to see
-   your banks where the deck list normally is.
-3. **[In-Progress] Automatically Interspersed into Decks** - automatically
-   integrates practice problem cards into your Anki deck review cycles so you
-   can seamlessly practice higher level review questions once you seem to be
-   getting concepts down. You can also test questions relevant to what you've been
-   studying leading into your pomodoro breaks so you can benchmark your
-   understanding.
+   your banks where the deck list normally is. New cards appear in **exact
+   slide/source order** — even across the per-lecture subdecks — because Janki
+   pins each card's position to its order in the document and sets the bank's deck
+   options to gather new cards by ascending position (options group *"Janki
+   Practice (slide order)"*). (This governs the first pass through new cards;
+   after that, normal spaced-repetition scheduling takes over.)
+3. **Automatically interspersed into your review sessions** — Janki can drop
+   relevant practice questions into your *normal* review (not just the Practice
+   deck), matched to the concepts of the cards you've just been studying. See
+   **[Interspersing practice into review](#interspersing-practice-into-review)**
+   below.
 
 ---
 
@@ -103,7 +107,7 @@ Rules:
 
 ### 2. Import it
 
-**Settings → Practice → Question Bank → Estimate .qb from .docx…**, pick the
+**Settings → Practice → Question Bank → Build .qb from .docx…**, pick the
 file. Janki reports how many questions and lectures it found (and how many have
 images), then **Create & import** builds the `.qb` next to your `.docx` and
 imports it. Lecture headers are also used to auto-assign school-deck tags where
@@ -111,6 +115,117 @@ they match.
 
 If it reports *"No questions found"*, the doc isn't in the expected format —
 check the `1.` / `A)` / `Answer:` prefixes above.
+
+---
+
+## Building a bank from a PowerPoint (`.pptx`) of question screenshots
+
+Some question banks live as **slide decks where each question (and its answer)
+is a pasted screenshot**, not selectable text. Janki can still turn these into a
+real MCQ bank: it reads the text *out of the slide images* using macOS's
+built-in text recognition (the Vision framework) — **fully offline, no download,
+no account, nothing uploaded.**
+
+**Settings → Practice → Question Bank → Build .qb from .pptx (OCR)…**, pick the
+file. Janki extracts each slide image, recognizes the text, assembles the
+multiple-choice questions, and reports how many it read cleanly before building
+and importing the `.qb`. From there it behaves like any other bank (same binary
+grading, Score, Practice deck).
+
+For this to work the slides should read roughly like:
+
+```
+3. Which phase immediately follows isovolumetric contraction?
+(A) Rapid ejection
+(B) Isovolumetric relaxation
+(C) Rapid filling
+(D) Atrial systole
+```
+
+…with the answer on a **later** slide, keyed by the same question number:
+
+```
+3. The answer is A. Once ventricular pressure exceeds aortic pressure…
+```
+
+Questions are matched to their answers **by number** (numbers may restart per
+section — that's fine), so it doesn't matter whether answers are interleaved
+after each question or batched at the end.
+
+Good to know:
+
+- **First run needs Xcode Command Line Tools** (for the ~30-line recognition
+  helper Janki compiles once and caches). If they're missing, Janki tells you to
+  run `xcode-select --install` and try again. macOS only.
+- **OCR is not perfect.** A clean deck yields most of its questions; some may be
+  skipped if the recognizer garbles the choices or can't find the answer letter.
+  Janki **never guesses an answer** — a question with no confidently-matched
+  answer is dropped rather than imported wrong. Skim the bank's **+** preview
+  afterwards and fix any stragglers.
+- **Import incomplete questions for diagnosis (optional).** If some questions were
+  *detected* but couldn't be fully parsed (no answer matched, choices/stem
+  missing), the build dialog offers an extra **"Import … + N incomplete"** button.
+  Those come in as flagged **⚠ incomplete** cards that show their original slide
+  image plus whatever text was read, so you can see exactly what tripped up the
+  parse. They're marked in the **+** preview, are never surfaced as related
+  questions during review, and can be fixed or removed. (Because they have no
+  confirmed answer, they won't grade as "correct" — they're a diagnostic aid.)
+- **Figures are carried over.** If a question has a graph/table/photo — either as
+  a separate image on the slide, or baked into the question screenshot (detected
+  when the stem mentions a "graph"/"table"/"curve"/"figure") — that image travels
+  with the bank and shows on the card beneath the recognized text.
+- **Two-question and shared-figure slides are handled.** Side-by-side questions
+  (two columns on one slide) are read a column at a time, and a shared figure
+  panel ("Questions 13-15") is attached to each question in that range even
+  though they live on later slides. If a question's number is garbled/dropped by
+  OCR (e.g. a coloured number label), it's filled in sequence within the section
+  so its answer still binds.
+- **Section titles become lecture tags.** Banks organised under native-text title
+  slides (e.g. "Cell Death and Injury") tag each question with that topic, so the
+  Practice deck splits into per-topic subdecks. Question numbers may restart per
+  section — that's handled.
+
+---
+
+## Interspersing practice into review
+
+Instead of setting practice questions aside in their own deck, Janki can weave
+them into your ordinary review sessions — so you practice higher-level questions
+on the concepts you're *currently* studying, and can benchmark yourself right
+before a break.
+
+Turn it on in **Settings → Practice → Intersperse**. Everything is off until you
+enable it, and it only ever surfaces questions from your **enabled** banks.
+
+**How relevance works.** As you review, Janki tracks the concept tags (`#AK` /
+AnKing, AJ, Hutch, …) of the cards you've recently answered. When it's time to
+intersperse, it pulls the questions that best match those concepts — the same tag
+matcher used by `Tab + Q`.
+
+**Two triggers, two modes:**
+
+- **After every N cards → seamless inline.** A matched question simply appears as
+  your next "card" in the same deck flow, then your real cards resume — no leaving
+  the deck. It's a real Practice card, so it looks and grades exactly like the
+  Practice deck: pick an answer, see it tint green/red with the explanation, and
+  **Continue**. Get it right and it retires (and counts toward the bank's Score);
+  get it wrong or skip and it comes back later in the session.
+- **Before each pomodoro break → mini practice set.** Right before the break
+  screen, Janki gathers a short set of matched questions and lets you run through
+  them as a quick benchmark, then the break begins. (Requires Pomodoro enabled
+  under **Focus → Pomodoro**.)
+
+**Settings:**
+
+- **Every N cards** — how often the inline trigger fires.
+- **Questions per round** — the target range (min–max) to pull each time.
+- **If nothing matches** — either **Skip this round** (default; stay uninterrupted
+  when there's nothing relevant) or **Text-similarity fallback** (surface loosely
+  related questions using text overlap, the same fallback `Tab + Q` uses).
+
+Interspersing never touches your real deck's scheduling: inline questions are
+graded by Janki directly (right → retire, wrong → resurface), and the pre-break
+set runs in a temporary filtered deck that's torn down afterward.
 
 ---
 

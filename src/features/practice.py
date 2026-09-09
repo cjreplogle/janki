@@ -320,12 +320,15 @@ def preview_bank(bid, title=None):
     """Table-like, read-only view of an imported bank: one row per question stem;
     click a row to expand its choices (correct one marked) / answer."""
     global _panel
-    from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-                        QTreeWidget, QTreeWidgetItem, QBrush, QColor)
+    import os
+    from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+                        QTreeWidget, QTreeWidgetItem, QBrush, QColor, QPixmap, Qt)
     qs = qbank.questions_for_bank(bid)
     if not qs:
         tooltip("This bank has no questions to preview.")
         return
+    meta = qbank.list_banks().get(bid, {})
+    media_dir = os.path.join(qbank._qbanks_dir(), meta.get("dir", ""), "media")
 
     tree = QTreeWidget()
     tree.setHeaderHidden(True)
@@ -337,7 +340,15 @@ def preview_bank(bid, title=None):
         "QTreeWidget::item:selected{background:rgba(255,255,255,0.08);}")
     green = QBrush(QColor("#7ddb9a"))
     for i, q in enumerate(qs, 1):
-        top = QTreeWidgetItem(["%d.  %s" % (i, q.get("stem", ""))])
+        stem_txt = ("(figure question — see image)" if q.get("figure_only")
+                    else q.get("stem", "") or "(no stem detected)")
+        prefix = "⚠ " if q.get("incomplete") else ""
+        top = QTreeWidgetItem(["%s%d.  %s" % (prefix, i, stem_txt)])
+        if q.get("incomplete"):
+            top.setForeground(0, QBrush(QColor("#ffcf7a")))
+            ic = QTreeWidgetItem(["Incomplete:  %s" % q.get("incomplete")])
+            ic.setForeground(0, QBrush(QColor("#ffcf7a")))
+            top.addChild(ic)
         choices = q.get("choices")
         if choices:
             ci = PracticePanel._answer_index(q.get("answer"), choices)
@@ -351,6 +362,11 @@ def preview_bank(bid, title=None):
             child = QTreeWidgetItem(["Answer:  %s" % (q.get("answer") or "")])
             child.setForeground(0, green)
             top.addChild(child)
+        exp = (q.get("explanation") or "").strip()
+        if exp:
+            echild = QTreeWidgetItem(["Rationale:  %s" % exp])
+            echild.setForeground(0, QBrush(QColor("#c9b98a")))
+            top.addChild(echild)
         lec = q.get("lecture")
         if lec:
             lchild = QTreeWidgetItem(["Lecture:  %s" % lec])
@@ -361,7 +377,23 @@ def preview_bank(bid, title=None):
             tchild = QTreeWidgetItem(["Tags:  %s" % ", ".join(str(t) for t in tags)])
             tchild.setForeground(0, QBrush(QColor("#9aa0aa")))
             top.addChild(tchild)
+        img_items = []
+        for name in (q.get("media") or []):
+            fp = os.path.join(media_dir, name)
+            pm = QPixmap(fp) if os.path.isfile(fp) else QPixmap()
+            if pm.isNull():
+                continue
+            ichild = QTreeWidgetItem([""])
+            top.addChild(ichild)
+            img_items.append((ichild, pm))
         tree.addTopLevelItem(top)
+        for ichild, pm in img_items:          # widgets set after the item is in the tree
+            lbl = QLabel()
+            lbl.setPixmap(pm.scaledToWidth(
+                420, Qt.TransformationMode.SmoothTransformation)
+                if pm.width() > 420 else pm)
+            lbl.setStyleSheet("padding:4px;")
+            tree.setItemWidget(ichild, 0, lbl)
 
     def _toggle(it, _col):
         if it.parent() is None:               # only top-level rows expand/collapse
@@ -397,6 +429,11 @@ def preview_bank(bid, title=None):
     _panel = dlg
     dlg.show()
     dlg.raise_()
+    try:
+        from ..user import glass
+        glass.hold_dialog_above(dlg)
+    except Exception:
+        pass
 
 
 def _clear(layout):

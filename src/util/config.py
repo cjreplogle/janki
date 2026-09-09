@@ -2,7 +2,6 @@
 
 import os
 import sys
-from pathlib import Path
 
 from aqt import mw
 
@@ -31,27 +30,15 @@ def _is_active() -> bool:
     return False
 
 
-def _safe_edition() -> bool:
-    """Safe (no-glass) edition: marked by a `safe_edition.flag` file shipped ONLY
-    in the safe build. It runs every feature but NEVER patches Anki or attempts
-    window transparency / OLED / the self-heal."""
-    try:
-        # config.py lives in src/util/, so the flag (written at the add-on ROOT by
-        # the safe build) is two directories up.
-        return (Path(__file__).resolve().parent.parent.parent / "safe_edition.flag").exists()
-    except Exception:
-        return False
-
-
-SAFE = _safe_edition()
-
-# Two switches:
+# There is no longer a separate "safe (no-glass)" edition of Janki — the
+# features-only role is now the standalone "Load today's lectures" add-on. Janki
+# is glass-only, so both switches simply track _is_active():
 #   ACTIVE — run janki's features (timers, focus, pomodoro, hotkeys, …)
 #   GLASS  — window transparency + OLED + the stock-Anki self-heal patch
-# In the glass edition both track _is_active() (identical to the old single gate).
-# The safe edition flips features ON while keeping every glass/patch path OFF.
-ACTIVE = _is_active() or SAFE
-GLASS = _is_active() and not SAFE
+# SAFE is kept as a False constant for any legacy reference.
+SAFE = False
+ACTIVE = _is_active()
+GLASS = _is_active()
 
 
 # ---------------------------------------------------------------------------

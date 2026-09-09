@@ -1,5 +1,6 @@
 """The GlassSettings dialog and its opener."""
 
+import re
 import sys
 from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
@@ -61,8 +62,10 @@ class GlassSettings(QDialog):
         self._prac_tabs = prac_tabs
         prac_app_page = QWidget(); prac_app_lay = QVBoxLayout(prac_app_page)
         prac_qb_page = QWidget();  prac_qb_lay = QVBoxLayout(prac_qb_page)
+        prac_int_page = QWidget(); prac_int_lay = QVBoxLayout(prac_int_page)
         prac_tabs.addTab(prac_app_page, "Appearance")
         prac_tabs.addTab(prac_qb_page, "Question Bank")
+        prac_tabs.addTab(prac_int_page, "Intersperse")
 
         # Focus → subtabs: Flare / Timer / Caption / Pomodoro / Lockdown.
         focus_page = QWidget(); _focus_outer = QVBoxLayout(focus_page)
@@ -748,6 +751,110 @@ class GlassSettings(QDialog):
         prac_app_lay.addWidget(self._prac_show_exp)
         prac_app_lay.addWidget(self._prac_show_all)
 
+        # === Practice ▸ Intersperse ==========================================
+        # Surface relevant practice questions during ordinary review sessions,
+        # matched to the concepts of the cards you've recently studied.
+        int_note = QLabel(
+            "Automatically drop relevant practice questions into your normal review "
+            "sessions — a quick check every N cards, and/or a benchmark set right "
+            "before each pomodoro break. Questions are matched to the concept tags "
+            "of the cards you've just been studying. Grading behaves exactly like the "
+            "Practice deck (get it right and it retires).")
+        int_note.setWordWrap(True)
+        int_note.setStyleSheet("color: gray; margin-bottom: 4px;")
+        prac_int_lay.addWidget(int_note)
+
+        self._int_enabled = QCheckBox("Enable interspersed practice questions")
+        self._int_enabled.setChecked(bool(self.cfg.get("intersperse_enabled", False)))
+        prac_int_lay.addWidget(self._int_enabled)
+
+        # Trigger A — after every N cards (seamless inline).
+        self._int_after = QCheckBox(
+            "After every N cards — drop a question inline (no leaving the deck)")
+        self._int_after.setStyleSheet("margin-left: 22px;")
+        self._int_after.setChecked(
+            bool(self.cfg.get("intersperse_after_cards_enabled", True)))
+        prac_int_lay.addWidget(self._int_after)
+
+        after_row = QHBoxLayout()
+        after_row.addSpacing(40)
+        after_name = QLabel("Every")
+        self._int_after_n = QSpinBox()
+        self._int_after_n.setRange(1, 500)
+        self._int_after_n.setValue(int(self.cfg.get("intersperse_after_cards_n", 20)))
+        self._int_after_n.setSuffix(" cards")
+        after_row.addWidget(after_name)
+        after_row.addWidget(self._int_after_n)
+        after_row.addStretch()
+        prac_int_lay.addLayout(after_row)
+
+        # Trigger B — before each pomodoro break (mini practice set).
+        self._int_before = QCheckBox(
+            "Before each pomodoro break — present a short matched set")
+        self._int_before.setStyleSheet("margin-left: 22px;")
+        self._int_before.setChecked(
+            bool(self.cfg.get("intersperse_before_break_enabled", True)))
+        prac_int_lay.addWidget(self._int_before)
+        _int_before_hint = QLabel("Requires Pomodoro enabled (Focus ▸ Pomodoro).")
+        _int_before_hint.setStyleSheet("color: gray; margin-left: 40px;")
+        prac_int_lay.addWidget(_int_before_hint)
+
+        # Target range — how many questions to shoot for each time.
+        range_row = QHBoxLayout()
+        range_row.addSpacing(40)
+        range_row.addWidget(QLabel("Questions per round:"))
+        self._int_min = QSpinBox(); self._int_min.setRange(1, 50)
+        self._int_min.setValue(int(self.cfg.get("intersperse_target_min", 2)))
+        self._int_max = QSpinBox(); self._int_max.setRange(1, 50)
+        self._int_max.setValue(int(self.cfg.get("intersperse_target_max", 4)))
+        range_row.addWidget(self._int_min)
+        range_row.addWidget(QLabel("to"))
+        range_row.addWidget(self._int_max)
+        range_row.addStretch()
+        prac_int_lay.addLayout(range_row)
+
+        # No-match fallback.
+        nomatch_row = QHBoxLayout()
+        nomatch_row.addSpacing(40)
+        nomatch_row.addWidget(QLabel("If nothing matches:"))
+        self._int_nomatch = QComboBox()
+        self._int_nomatch.addItem("Skip this round", "skip")
+        self._int_nomatch.addItem("Text-similarity fallback", "text")
+        _nm = self.cfg.get("intersperse_nomatch", "skip")
+        self._int_nomatch.setCurrentIndex(1 if _nm == "text" else 0)
+        nomatch_row.addWidget(self._int_nomatch)
+        nomatch_row.addStretch()
+        prac_int_lay.addLayout(nomatch_row)
+        prac_int_lay.addStretch()
+
+        def _int_sync_enabled():
+            on = self._int_enabled.isChecked()
+            for w in (self._int_after, self._int_before, self._int_after_n,
+                      self._int_min, self._int_max, self._int_nomatch):
+                w.setEnabled(on)
+            self._int_after_n.setEnabled(on and self._int_after.isChecked())
+
+        def _int_save():
+            # Keep min ≤ max.
+            if self._int_min.value() > self._int_max.value():
+                self._int_max.setValue(self._int_min.value())
+            self.cfg["intersperse_enabled"] = self._int_enabled.isChecked()
+            self.cfg["intersperse_after_cards_enabled"] = self._int_after.isChecked()
+            self.cfg["intersperse_after_cards_n"] = self._int_after_n.value()
+            self.cfg["intersperse_before_break_enabled"] = self._int_before.isChecked()
+            self.cfg["intersperse_target_min"] = self._int_min.value()
+            self.cfg["intersperse_target_max"] = self._int_max.value()
+            self.cfg["intersperse_nomatch"] = self._int_nomatch.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            _int_sync_enabled()
+
+        for _w in (self._int_enabled, self._int_after, self._int_before):
+            _w.stateChanged.connect(lambda _s: _int_save())
+        for _w in (self._int_after_n, self._int_min, self._int_max):
+            _w.valueChanged.connect(lambda _v: _int_save())
+        self._int_nomatch.currentIndexChanged.connect(lambda _i: _int_save())
+        _int_sync_enabled()
+
         # Link to the practice-questions guide (how banks work + building a .qb
         # from a .docx), mirroring the Lectures tab's tutorial link.
         _prac_doc = QLabel(
@@ -767,17 +874,44 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         prac_qb_lay.addWidget(_imp_btn)
 
-        _docx_btn = QPushButton("Estimate .qb from .docx…")
+        # Build a .qb from a document — .docx (typed) or .pptx (slide images via
+        # OCR) — side by side.
+        _build_row = QHBoxLayout()
+        _docx_btn = QPushButton("Build .qb from .docx…")
         _docx_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
             "padding:5px 12px;border-radius:5px;}"
             "QPushButton:hover{background-color:#61646b;}")
         _docx_btn.clicked.connect(
             lambda: qbank.docx_estimate_dialog(on_done=_refresh_banks))
-        prac_qb_lay.addWidget(_docx_btn)
+        _build_row.addWidget(_docx_btn)
+
+        # .pptx OCR uses macOS Vision — disable + relabel on other platforms.
+        import sys as _sys
+        _is_mac = _sys.platform == "darwin"
+        _pptx_btn = QPushButton("Build .qb from .pptx (OCR)…" if _is_mac
+                                else "Build .qb from .pptx (macOS only)")
+        if _is_mac:
+            _pptx_btn.setStyleSheet(
+                "QPushButton{background-color:#55585e;color:white;border:none;"
+                "padding:5px 12px;border-radius:5px;}"
+                "QPushButton:hover{background-color:#61646b;}")
+            _pptx_btn.clicked.connect(
+                lambda: qbank.pptx_import_dialog(on_done=_refresh_banks))
+        else:
+            _pptx_btn.setEnabled(False)
+            _pptx_btn.setToolTip(
+                "Slide OCR uses macOS's Vision framework — available on macOS only.")
+            _pptx_btn.setStyleSheet(
+                "QPushButton{background-color:#3a3c40;color:#777;border:none;"
+                "padding:5px 12px;border-radius:5px;}")
+        _build_row.addWidget(_pptx_btn)
+        prac_qb_lay.addLayout(_build_row)
 
         # AI-assisted tagging (offline round-trip): copy a prompt to paste into
         # your own Claude/ChatGPT, then apply its JSON reply back onto the banks.
+        # Side by side (copy → apply).
+        _tag_row = QHBoxLayout()
         _prompt_btn = QPushButton("Copy AI tag-matching prompt…")
         _prompt_btn.setStyleSheet(
             "QPushButton{background-color:#55585e;color:white;border:none;"
@@ -785,7 +919,7 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         _prompt_btn.clicked.connect(
             lambda: qbank.copy_tagging_prompt_dialog(on_done=_refresh_banks))
-        prac_qb_lay.addWidget(_prompt_btn)
+        _tag_row.addWidget(_prompt_btn)
 
         _apply_btn = QPushButton("Apply AI tag results (.json)…")
         _apply_btn.setStyleSheet(
@@ -794,7 +928,8 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         _apply_btn.clicked.connect(
             lambda: qbank.apply_tag_results_dialog(on_done=_refresh_banks))
-        prac_qb_lay.addWidget(_apply_btn)
+        _tag_row.addWidget(_apply_btn)
+        prac_qb_lay.addLayout(_tag_row)
 
         # Convert banks into a real, syncable "Practice" deck (subdeck per bank).
         # Added to the layout at the very bottom of the page (after the stretch below).
@@ -806,71 +941,227 @@ class GlassSettings(QDialog):
         _deck_btn.clicked.connect(
             lambda: qbank.convert_to_deck_dialog(on_done=_refresh_banks))
 
-        _banks_label = QLabel("Installed banks")
+        _banks_label = QLabel("Installed banks  —  drag a .qb here to import · "
+                              "drag rows to reorder · drop one bank onto another to "
+                              "nest it as a subbank · right-click for options "
+                              "(⌘/Ctrl-click several, then right-click → Merge)")
+        _banks_label.setWordWrap(True)
         _banks_label.setStyleSheet("color: gray; margin-top: 8px;")
         prac_qb_lay.addWidget(_banks_label)
 
-        _banks_box = QWidget()
-        _banks_v = QVBoxLayout(_banks_box)
-        _banks_v.setContentsMargins(0, 0, 0, 0)
-        prac_qb_lay.addWidget(_banks_box)
+        from aqt.qt import QListWidget, QListWidgetItem, QAbstractItemView
+
+        # A list that (a) imports a .qb/.zip dropped onto it and (b) reorders its own
+        # rows by internal drag. Plain checkable items (no per-row widgets) so the drag
+        # grabs anywhere on a row; enable = the item checkbox; the rest is right-click.
+        class _BankList(QListWidget):
+            on_import = None       # callable(paths)
+            on_reordered = None    # callable(ordered_bids)
+            on_nest = None         # callable(src_bids, dest_bid)
+
+            def _paths(self, ev):
+                md = ev.mimeData()
+                if not md.hasUrls():
+                    return []
+                return [u.toLocalFile() for u in md.urls()
+                        if u.toLocalFile().lower().endswith((".qb", ".zip"))]
+
+            def dragEnterEvent(self, ev):
+                if self._paths(ev):
+                    ev.acceptProposedAction()
+                else:
+                    super().dragEnterEvent(ev)
+
+            def dragMoveEvent(self, ev):
+                if self._paths(ev):
+                    ev.acceptProposedAction()
+                else:
+                    super().dragMoveEvent(ev)
+
+            def dropEvent(self, ev):
+                ps = self._paths(ev)
+                if ps:
+                    ev.acceptProposedAction()
+                    if self.on_import:
+                        self.on_import(ps)
+                    return
+                # Dropped ONTO a bank row → nest the dragged bank(s) into it (subbank).
+                try:
+                    pt = ev.position().toPoint()
+                except Exception:
+                    pt = ev.pos()
+                on_item = (QAbstractItemView.DropIndicatorPosition.OnItem
+                           == self.dropIndicatorPosition())
+                target = self.itemAt(pt)
+                if on_item and target is not None and self.on_nest:
+                    dest = target.data(Qt.ItemDataRole.UserRole)
+                    srcs = [it.data(Qt.ItemDataRole.UserRole)
+                            for it in self.selectedItems()
+                            if it.data(Qt.ItemDataRole.UserRole)
+                            and it.data(Qt.ItemDataRole.UserRole) != dest]
+                    if dest and srcs:
+                        ev.acceptProposedAction()
+                        self.on_nest(srcs, dest)
+                        return
+                super().dropEvent(ev)          # otherwise perform the internal reorder
+                if self.on_reordered:
+                    order = [self.item(i).data(Qt.ItemDataRole.UserRole)
+                             for i in range(self.count())]
+                    self.on_reordered([b for b in order if b])
+
+        _banks_list = _BankList()
+        _banks_list.setObjectName("jankiBankDrop")
+        _banks_list.setAcceptDrops(True)
+        _banks_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        _banks_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        _banks_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        _banks_list.setDropIndicatorShown(True)
+        _banks_list.setMinimumHeight(90)
+        _banks_list.setStyleSheet(
+            "#jankiBankDrop{border:1px dashed #55585e;border-radius:6px;"
+            "background:transparent;color:#eee;}"
+            "QListWidget::item{padding:5px 6px;}"
+            "QListWidget::item:selected{background:rgba(255,255,255,0.08);}")
+        prac_qb_lay.addWidget(_banks_list)
+
+        # Guard so setCheckState during a rebuild doesn't fire the enable-toggle save.
+        self._banks_populating = False
+
+        def _bank_at(pos):
+            it = _banks_list.itemAt(pos)
+            return it.data(Qt.ItemDataRole.UserRole) if it else None
+
+        def _bank_name(bid):
+            return (qbank.list_banks().get(bid, {}) or {}).get("name", bid)
+
+        def _do_preview(bid):
+            from ..features import practice
+            practice.preview_bank(bid, _bank_name(bid))
+
+        def _do_remove(bid):
+            qbank.remove_bank(bid)
+            _refresh_banks()
+
+        def _do_rename(bid):
+            from aqt.qt import QInputDialog
+            from aqt.utils import showWarning
+            cur = _bank_name(bid)
+            new, ok = QInputDialog.getText(self, "Rename bank", "New name:",
+                                           text=cur)
+            new = (new or "").strip()
+            if not (ok and new and new != cur):
+                return
+            try:
+                qbank.rename_bank(bid, new)
+            except Exception as e:
+                showWarning("Could not rename bank:\n\n%s" % e)
+            _refresh_banks()
+
+        def _selected_bids():
+            # Merge only banks that are BOTH highlighted AND checked (enabled).
+            return [it.data(Qt.ItemDataRole.UserRole)
+                    for it in _banks_list.selectedItems()
+                    if it.data(Qt.ItemDataRole.UserRole)
+                    and it.checkState() == Qt.CheckState.Checked]
+
+        def _do_merge(bids):
+            from aqt.qt import QInputDialog
+            from aqt.utils import tooltip, showWarning
+            if len(bids) < 2:
+                return
+            new, ok = QInputDialog.getText(self, "Merge banks",
+                                           "Name for the merged bank:",
+                                           text="Merged bank")
+            new = (new or "").strip()
+            if not (ok and new):
+                return
+            try:
+                qbank.merge_banks(bids, new)
+                tooltip("Merged %d banks into “%s”." % (len(bids), new))
+            except Exception as e:
+                showWarning("Could not merge banks:\n\n%s" % e)
+            _refresh_banks()
+
+        def _do_export(bid):
+            from aqt.qt import QFileDialog
+            from aqt.utils import tooltip, showWarning
+            name = _bank_name(bid)
+            safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_") or bid
+            dest, _f = QFileDialog.getSaveFileName(
+                self, "Export question bank", safe + ".qb", "Question banks (*.qb)")
+            if not dest:
+                return
+            if not dest.lower().endswith(".qb"):
+                dest += ".qb"
+            try:
+                qbank.export_bank(bid, dest)
+                tooltip("Exported “%s”." % name)
+            except Exception as e:
+                showWarning("Could not export bank:\n\n%s" % e)
+
+        def _on_item_changed(item):
+            if self._banks_populating:
+                return
+            bid = item.data(Qt.ItemDataRole.UserRole)
+            if not bid:
+                return
+            reg = qbank._load_registry()
+            if bid in reg["banks"]:
+                reg["banks"][bid]["enabled"] = (
+                    item.checkState() == Qt.CheckState.Checked)
+                qbank._save_registry(reg)
+
+        def _on_double_click(item):
+            bid = item.data(Qt.ItemDataRole.UserRole)
+            if bid:
+                _do_preview(bid)
+
+        def _on_menu(pos):
+            bid = _bank_at(pos)
+            if not bid:
+                return
+            from aqt.qt import QMenu
+            sel = _selected_bids()
+            m = QMenu(_banks_list)
+            if len(sel) >= 2 and bid in sel:
+                m.addAction("Merge %d selected + checked banks…" % len(sel),
+                            lambda _c=False, bs=list(sel): _do_merge(bs))
+                m.addSeparator()
+            m.addAction("Preview questions…", lambda _c=False, b=bid: _do_preview(b))
+            m.addAction("Rename…", lambda _c=False, b=bid: _do_rename(b))
+            m.addAction("Export the Bank…", lambda _c=False, b=bid: _do_export(b))
+            m.addSeparator()
+            m.addAction("Remove", lambda _c=False, b=bid: _do_remove(b))
+            m.exec(_banks_list.mapToGlobal(pos))
+
+        _banks_list.itemChanged.connect(_on_item_changed)
+        _banks_list.itemDoubleClicked.connect(_on_double_click)
+        _banks_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        _banks_list.customContextMenuRequested.connect(_on_menu)
 
         def _refresh_banks():
-            while _banks_v.count():
-                _it = _banks_v.takeAt(0)
-                _w = _it.widget()
-                if _w is not None:
-                    _w.setParent(None)
+            self._banks_populating = True
+            _banks_list.clear()
             banks = qbank.list_banks()
             if not banks:
-                _empty = QLabel("No banks imported yet.")
-                _empty.setStyleSheet("color: gray;")
-                _banks_v.addWidget(_empty)
+                empty = QListWidgetItem("No banks imported yet.")
+                empty.setFlags(Qt.ItemFlag.NoItemFlags)
+                _banks_list.addItem(empty)
+                self._banks_populating = False
                 return
             for bid, meta in banks.items():
-                cb = QCheckBox("%s  (%s)" % (meta.get("name", bid),
-                                             meta.get("count", "?")))
-                cb.setChecked(bool(meta.get("enabled", True)))
-
-                def _on_toggle(_s, _bid=bid, _cb=cb):
-                    reg = qbank._load_registry()
-                    if _bid in reg["banks"]:
-                        reg["banks"][_bid]["enabled"] = _cb.isChecked()
-                        qbank._save_registry(reg)
-
-                cb.stateChanged.connect(_on_toggle)
-                pv = QPushButton("+")
-                pv.setFixedWidth(28)
-                pv.setToolTip("Preview the questions in this bank")
-                pv.setStyleSheet(
-                    "QPushButton{background-color:#55585e;color:white;border:none;"
-                    "padding:3px 8px;border-radius:5px;}"
-                    "QPushButton:hover{background-color:#61646b;}")
-
-                def _on_preview(_c=False, _bid=bid, _name=meta.get("name", bid)):
-                    from ..features import practice
-                    practice.preview_bank(_bid, _name)
-
-                pv.clicked.connect(_on_preview)
-                rm = QPushButton("Remove")
-                rm.setStyleSheet(
-                    "QPushButton{background-color:#6e5250;color:white;border:none;"
-                    "padding:3px 10px;border-radius:5px;}"
-                    "QPushButton:hover{background-color:#7c5d5b;}")
-
-                def _on_remove(_c=False, _bid=bid):
-                    qbank.remove_bank(_bid)
-                    _refresh_banks()
-
-                rm.clicked.connect(_on_remove)
-                row_w = QWidget()
-                row = QHBoxLayout(row_w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.addWidget(cb)
-                row.addStretch()
-                row.addWidget(pv)
-                row.addWidget(rm)
-                _banks_v.addWidget(row_w)
+                item = QListWidgetItem("%s  (%s)" % (meta.get("name", bid),
+                                                     meta.get("count", "?")))
+                item.setData(Qt.ItemDataRole.UserRole, bid)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                              | Qt.ItemFlag.ItemIsDragEnabled
+                              | Qt.ItemFlag.ItemIsDropEnabled
+                              | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked if meta.get("enabled", True)
+                                   else Qt.CheckState.Unchecked)
+                item.setToolTip("Double-click to preview · right-click for options")
+                _banks_list.addItem(item)
+            self._banks_populating = False
 
         def _on_import():
             qbank.import_dialog()
@@ -878,6 +1169,47 @@ class GlassSettings(QDialog):
 
         _imp_btn.clicked.connect(_on_import)
 
+        def _import_dropped(paths):
+            from aqt.utils import tooltip, showWarning
+            ok = 0
+            for p in paths:
+                try:
+                    qbank.import_qb(p)
+                    ok += 1
+                except Exception as e:
+                    showWarning("Could not import %s:\n\n%s"
+                                % (p.replace("\\", "/").rsplit("/", 1)[-1], e))
+            if ok:
+                tooltip("Imported %d question bank%s."
+                        % (ok, "" if ok == 1 else "s"))
+                _refresh_banks()
+
+        def _on_reordered(order):
+            qbank.reorder_banks(order)
+            _refresh_banks()
+
+        def _on_nest(src_bids, dest_bid):
+            from aqt.utils import tooltip, showWarning
+            done = 0
+            for s in src_bids:
+                try:
+                    qbank.nest_bank(s, dest_bid)
+                    done += 1
+                except Exception as e:
+                    showWarning("Could not nest bank:\n\n%s" % e)
+            if done:
+                tooltip("Nested %d bank%s into “%s”."
+                        % (done, "" if done == 1 else "s", _bank_name(dest_bid)))
+            _refresh_banks()
+
+        _banks_list.on_import = _import_dropped
+        _banks_list.on_reordered = _on_reordered
+        _banks_list.on_nest = _on_nest
+
+        try:
+            qbank.reconcile_names()      # pick up any deck renames from the main window
+        except Exception:
+            pass
         _refresh_banks()
 
         # === Appearance (cont.) / General ===================================
@@ -1221,11 +1553,6 @@ class GlassSettings(QDialog):
 
 def _open_settings(section=None):
     d = GlassSettings()
-    # "Always in front" carries WindowStaysOnTopHint on the main window, which
-    # would float above this child dialog — match it so settings stays visible.
-    if _cfg().get("always_on_top", False):
-        from aqt.qt import Qt
-        d.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     if section == "practice_qbank":
         try:
             for i in range(d._tabs.count()):
@@ -1249,3 +1576,9 @@ def _open_settings(section=None):
     d.show()
     d.raise_()
     d.activateWindow()
+    # Keep the always-in-front main window from floating over this dialog.
+    try:
+        from ..user import glass
+        glass.hold_dialog_above(d)
+    except Exception:
+        pass

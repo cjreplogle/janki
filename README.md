@@ -99,10 +99,25 @@ so nothing is left behind.
   underlines unless in fullscreen.
 - **[Practice questions](docs/practice-questions.md)** — pull multiple-choice questions
   related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
-  Anki as a real, syncable Practice deck. Banks are local `.qb` files you can build from a
-  plain Word doc; grading is by answer choice (correct → suspend, wrong → retry, skip →
-  bury) with a per-bank Score. Runtime is 100% local. **→ [Practice system + how to import
-  a document as a question bank](docs/practice-questions.md).**
+  Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
+  choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
+  100% local.
+  - **Build a bank from a PowerPoint of question screenshots (`.pptx`, macOS).** Many
+    question banks are just slide decks where each question and its answer is a pasted
+    screenshot, not selectable text. Janki reads the text *out of the slide images* with
+    macOS's built-in Vision text recognition — **fully offline, nothing uploaded** — and
+    assembles a real MCQ bank. It handles two-column and shared-figure/vignette slides,
+    figures (carried onto the card), several answer-key formats, and imports anything it
+    can't confidently parse as flagged ⚠ *incomplete* cards for review. You can also build
+    a bank from a plain **Word doc** (`.docx`).
+  - **Intersperse practice into normal review.** Optionally drop relevant practice
+    questions into your ordinary review sessions — a quick inline check every N cards, and/or
+    a benchmark set right before a pomodoro break — matched to the concept tags of the cards
+    you've just been studying. Enable it under **Settings ▸ Practice ▸ Intersperse**.
+  - **Manage banks** — import/reorder by drag, rename, export, merge several into one, or
+    drop one bank onto another to nest it as a subbank.
+
+  **→ [Practice system + how to import a document as a question bank](docs/practice-questions.md).**
 - **[Mobile cards](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
   add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
   animation into your note types (scoped to mobile) so the look rides your normal sync

@@ -129,11 +129,11 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
         focus._open_last_deck()
         return
 
-    if kc == 12:  # Q — practice quiz: next related question for the current card
-        _gtap_log("Q hit → practice.open_practice")
+    if kc == 12:  # Q — inline practice question (review mode) for the current card
+        _gtap_log("Q hit → intersperse.practice_now")
         try:
-            from ..features import practice
-            practice.open_practice()
+            from ..features import intersperse
+            intersperse.practice_now()
         except Exception as e:
             _gtap_log(f"practice open error: {e}")
         return

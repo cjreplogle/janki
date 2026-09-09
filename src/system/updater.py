@@ -1,11 +1,10 @@
 """In-app updater (GitHub Releases).
 
-Janki isn't on AnkiWeb (the Glass edition self-patches Anki, which doesn't belong
-there), so Anki's native auto-update doesn't apply. This checks the repo's latest
-release, and if it's newer than the installed version, offers a one-click update:
-it downloads the .ankiaddon for THIS edition (Glass vs Safe, detected via the
-safe-edition flag), installs it in place via Anki's own add-on manager (which
-preserves your meta.json settings), and prompts a restart.
+Janki isn't on AnkiWeb (it self-patches Anki, which doesn't belong there), so
+Anki's native auto-update doesn't apply. This checks the repo's latest release,
+and if it's newer than the installed version, offers a one-click update: it
+downloads janki.ankiaddon, installs it in place via Anki's own add-on manager
+(which preserves your meta.json settings), and prompts a restart.
 
 Behaviour: a throttled once-a-day check on launch that only speaks up when an
 update exists, plus a manual "Check for updates" menu item. Stdlib only; every
@@ -22,7 +21,7 @@ from datetime import date
 from aqt import mw
 from aqt.utils import showInfo, askUser
 
-from ..util.config import SAFE, log
+from ..util.config import log
 
 _REPO = "cjreplogle/janki"
 _API = "https://api.github.com/repos/%s/releases/latest" % _REPO
@@ -30,7 +29,7 @@ _STATE = Path.home() / ".janki_update_check"
 
 
 def _asset_name() -> str:
-    return "janki-safe.ankiaddon" if SAFE else "janki.ankiaddon"
+    return "janki.ankiaddon"
 
 
 def _current_version() -> str:
@@ -49,7 +48,7 @@ def _ver_tuple(s: str):
 
 
 def _fetch_latest():
-    """Return (tag, asset_download_url) for this edition, or raise."""
+    """Return (tag, asset_download_url) for the latest release, or raise."""
     req = urllib.request.Request(_API, headers={"User-Agent": "janki-updater",
                                                 "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=20) as r:

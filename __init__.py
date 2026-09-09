@@ -44,7 +44,7 @@ except Exception as _e:
 from .src.util.bridge import _bridge
 from .src.util.config import log, ACTIVE, GLASS, _cfg
 from .src.util import state
-from .src.features import card_timer, focus, lockdown, pomodoro
+from .src.features import card_timer, focus, lockdown, pomodoro, intersperse
 from .src.user import css, glass, hud
 from .src.system import settings_dialog, tray
 from .src.util import diagnostics, keytap
@@ -192,6 +192,34 @@ def _startup():
             qbank.sync_practice_model_if_present()
         except Exception as _qb_exc:
             log("practice model sync: %s" % _qb_exc)
+
+        # Intersperse practice questions into normal review sessions (wraps the
+        # reviewer + registers its hooks; all behaviour gated behind the
+        # intersperse_enabled config). Reset per-session tracking on each open.
+        try:
+            intersperse.install()
+            intersperse.reset_session()
+        except Exception as _int_exc:
+            log("intersperse install: %s" % _int_exc)
+
+        # Keep bank names in sync when a Practice deck is renamed in the main window.
+        # Only reconcile on deck-affecting operations (not every card answer).
+        try:
+            if hasattr(gui_hooks, "operation_did_execute") and not getattr(
+                    mw, "_janki_bank_reconcile_hooked", False):
+                from .src.integrations import qbank as _qb_rec
+
+                def _janki_reconcile_banks(changes, handler):
+                    try:
+                        if getattr(changes, "deck", False):
+                            _qb_rec.reconcile_names()
+                    except Exception:
+                        pass
+
+                gui_hooks.operation_did_execute.append(_janki_reconcile_banks)
+                mw._janki_bank_reconcile_hooked = True
+        except Exception as _rec_exc:
+            log("bank reconcile hook: %s" % _rec_exc)
 
         # In-app updater: throttled once-a-day background check on launch (Janki
         # isn't on AnkiWeb, so this replaces manual GitHub reinstalls). The manual
@@ -511,7 +539,7 @@ def _startup():
             if _cfg().get("always_on_top", False):
                 glass._apply_always_on_top(True)
         else:
-            log("inactive (no ANKI_GLASS and not the safe edition).")
+            log("inactive (not started via AnkiGlass; no ANKI_GLASS).")
     except Exception as exc:
         log(f"startup error: {exc}")
 

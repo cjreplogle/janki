@@ -348,6 +348,60 @@ def _apply_always_on_top(on: bool) -> None:
     mw.show()
 
 
+# While a Janki-owned dialog is open, keep the "Always in front" main window from
+# floating over it. Both windows share the same StaysOnTop level, so their order
+# is by whoever was fronted last — which lets the main window intermittently jump
+# ahead of a freshly-opened dialog. We fix this by *natively* lowering the MAIN
+# window's NSWindow level while the dialog lives (no Qt flag toggling, so the
+# vibrancy/glass is untouched), then restoring it when the last dialog closes.
+_aot_suspend_depth = 0
+_aot_saved_level = None
+
+
+def hold_dialog_above(dialog) -> None:
+    """Ensure `dialog` isn't covered by the always-in-front main window. No-op
+    unless Always-in-front is on (and on macOS). Reference-counted so nested/
+    multiple dialogs restore correctly."""
+    global _aot_suspend_depth, _aot_saved_level
+    if sys.platform != "darwin" or not _cfg().get("always_on_top", False):
+        return
+    try:
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if not ns:
+            return
+        if _aot_suspend_depth == 0:
+            _aot_saved_level = int(msg(c_long, ns, b"level"))
+            msg(None, ns, b"setLevel:", (c_long,), (0,))     # NSNormalWindowLevel
+        _aot_suspend_depth += 1
+    except Exception as exc:
+        log("hold_dialog_above: %s" % exc)
+        return
+
+    def _release(*_a):
+        global _aot_suspend_depth, _aot_saved_level
+        if _aot_suspend_depth <= 0:
+            return
+        _aot_suspend_depth -= 1
+        if _aot_suspend_depth == 0:
+            try:
+                msg, _cls = _bridge()
+                ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+                if ns and _aot_saved_level is not None:
+                    msg(None, ns, b"setLevel:", (c_long,), (_aot_saved_level,))
+            except Exception:
+                pass
+            _aot_saved_level = None
+
+    try:
+        dialog.finished.connect(_release)        # QDialog: fires once, on close
+    except Exception:
+        try:
+            dialog.destroyed.connect(_release)
+        except Exception:
+            pass
+
+
 def _reload_all_webviews():
     if not GLASS:
         return

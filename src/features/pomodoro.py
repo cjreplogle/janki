@@ -483,6 +483,15 @@ def _make_pomodoro():
             # break hides the overlay and reveals the card already loaded beneath.
             if self._break_pending:
                 self._break_pending = False
+                # Optionally run a short matched practice set FIRST (a pre-break
+                # benchmark), then begin the break once it's cleared.
+                try:
+                    from . import intersperse
+                    if intersperse.want_pre_break():
+                        intersperse.run_pre_break_set(on_done=self._begin_break)
+                        return
+                except Exception:
+                    pass
                 self._begin_break()
                 return
             self._in_review = True

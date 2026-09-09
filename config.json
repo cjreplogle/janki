@@ -144,5 +144,12 @@
   "practice_show_all_answers": false,
   "practice_remote_mode": false,
   "practice_binary_grade": true,
-  "practice_wrong_ease": 2
+  "practice_wrong_ease": 2,
+  "intersperse_enabled": false,
+  "intersperse_after_cards_enabled": true,
+  "intersperse_after_cards_n": 20,
+  "intersperse_before_break_enabled": true,
+  "intersperse_target_min": 2,
+  "intersperse_target_max": 4,
+  "intersperse_nomatch": "skip"
 }

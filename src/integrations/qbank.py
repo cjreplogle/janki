@@ -98,7 +98,34 @@ def import_qb(path):
     }
     _save_registry(reg)
     _Q_CACHE.pop(dir_name, None)
+    # Keep the Practice deck in sync: if one already exists, fold this (new or
+    # re-imported) bank into it right away.
+    if _practice_deck_exists():
+        try:
+            convert_bank_to_deck(bid)
+            mw.reset()
+        except Exception as e:
+            log("auto-sync practice deck on import: %s" % e)
     return man
+
+
+def _practice_deck_exists():
+    try:
+        return mw.col.decks.by_name("Practice") is not None
+    except Exception:
+        return False
+
+
+def _remove_bank_deck(name):
+    """Delete a bank's Practice::<name> deck plus its lecture subdecks and cards."""
+    try:
+        target = "Practice::" + (name or "").replace("::", "-")
+        dids = [d.id for d in mw.col.decks.all_names_and_ids()
+                if d.name == target or d.name.startswith(target + "::")]
+        if dids:
+            mw.col.decks.remove(dids)
+    except Exception as e:
+        log("remove bank deck: %s" % e)
 
 
 def remove_bank(bid):
@@ -108,6 +135,275 @@ def remove_bank(bid):
         shutil.rmtree(os.path.join(_qbanks_dir(), meta["dir"]), ignore_errors=True)
         _Q_CACHE.pop(meta["dir"], None)
         _save_registry(reg)
+        # Also drop its cards from the Practice deck so the queue stays in sync.
+        try:
+            _remove_bank_deck(meta.get("name") or bid)
+            mw.reset()
+        except Exception as e:
+            log("remove bank deck sync: %s" % e)
+
+
+def reorder_banks(ordered_bids):
+    """Persist a new registry/display order for installed banks. Any bank not named
+    in `ordered_bids` keeps its old relative position at the end."""
+    reg = _load_registry()
+    banks = reg.get("banks", {})
+    new = {}
+    for bid in ordered_bids:
+        if bid in banks and bid not in new:
+            new[bid] = banks[bid]
+    for bid, meta in banks.items():
+        if bid not in new:
+            new[bid] = meta
+    reg["banks"] = new
+    _save_registry(reg)
+
+
+def rename_bank(bid, new_name):
+    """Rename an installed bank (registry) and, if its Practice deck is built, rename
+    that deck subtree to match."""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("Name cannot be empty.")
+    reg = _load_registry()
+    meta = reg["banks"].get(bid)
+    if not meta:
+        raise ValueError("Bank not found.")
+    old_name = meta.get("name") or bid
+    if new_name == old_name:
+        return
+    meta["name"] = new_name
+    _save_registry(reg)
+    try:
+        old_base = "Practice::" + old_name.replace("::", "-")
+        new_base = "Practice::" + new_name.replace("::", "-")
+        deck = mw.col.decks.by_name(old_base)
+        if deck:
+            mw.col.decks.rename(deck, new_base)   # renames its subdecks too
+            mw.reset()
+    except Exception as e:
+        log("rename bank deck: %s" % e)
+
+
+def merge_banks(bids, new_name):
+    """Merge several installed banks into ONE new bank, keeping each original bank as
+    a subbank: every question's `lecture` is prefixed with its source bank's name
+    ("<origbank>::<origlecture>"), so the built Practice deck nests as
+    Practice::<merged>::<origbank>[::<origlecture>]. Media are copied (de-collided).
+    The source banks are removed afterward. Returns the new bank id."""
+    import time
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("Name cannot be empty.")
+    bids = [b for b in (bids or []) if b]
+    if len(bids) < 2:
+        raise ValueError("Select at least two banks to merge.")
+    reg = _load_registry()
+    banks = reg.get("banks", {})
+    for b in bids:
+        if b not in banks:
+            raise ValueError("Bank not found: %s" % b)
+
+    new_bid = _safe("merged_%d" % int(time.time()))
+    while new_bid in banks or os.path.exists(os.path.join(_qbanks_dir(), _safe(new_bid))):
+        new_bid += "_x"
+    new_dir = _safe(new_bid)
+    dest = os.path.join(_qbanks_dir(), new_dir)
+    dest_media = os.path.join(dest, "media")
+    os.makedirs(dest_media, exist_ok=True)
+
+    merged_qs = []
+    families = set()
+    for b in bids:
+        meta = banks[b]
+        bname = meta.get("name") or b
+        bdir = meta.get("dir", "")
+        if meta.get("family"):
+            families.add(meta.get("family"))
+        src_media = os.path.join(_qbanks_dir(), bdir, "media")
+        for q in _bank_questions(bdir):
+            if not isinstance(q, dict):
+                continue
+            q = dict(q)
+            origlec = (q.get("lecture") or "").strip()
+            q["lecture"] = bname + ("::" + origlec if origlec else "")
+            media = q.get("media") or []
+            if media:
+                new_media = []
+                for name in media:
+                    sp = os.path.join(src_media, name)
+                    arc = name
+                    dp = os.path.join(dest_media, arc)
+                    if os.path.exists(dp):           # collision → prefix with bank id
+                        arc = "%s_%s" % (_safe(b), name)
+                        dp = os.path.join(dest_media, arc)
+                    if os.path.isfile(sp):
+                        try:
+                            shutil.copyfile(sp, dp)
+                        except Exception:
+                            pass
+                    new_media.append(arc)
+                q["media"] = new_media
+            merged_qs.append(q)
+
+    with open(os.path.join(dest, "questions.jsonl"), "w", encoding="utf-8") as f:
+        f.write("\n".join(json.dumps(q, ensure_ascii=False) for q in merged_qs))
+    family = sorted(families)[0] if len(families) == 1 else ""
+    man = {"qb_format": 1, "id": new_bid, "name": new_name, "family": family,
+           "match": "tags", "version": "", "count": len(merged_qs)}
+    with open(os.path.join(dest, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(man, f, ensure_ascii=False, indent=2)
+
+    reg = _load_registry()
+    reg["banks"][new_bid] = {
+        "name": new_name, "family": family, "match": "tags", "version": "",
+        "dir": new_dir, "count": len(merged_qs), "enabled": True,
+    }
+    _save_registry(reg)
+    _Q_CACHE.pop(new_dir, None)
+
+    for b in bids:                       # sources are now folded into the merged bank
+        remove_bank(b)
+
+    if _practice_deck_exists():
+        try:
+            convert_bank_to_deck(new_bid)
+            mw.reset()
+        except Exception as e:
+            log("merge convert: %s" % e)
+    return new_bid
+
+
+def nest_bank(src_bid, dest_bid):
+    """Fold one bank INTO another (drag src onto dest): src's questions are appended
+    to dest with their `lecture` prefixed by src's name, so src becomes a subbank
+    (Practice::<dest>::<src>[::<lecture>]). dest keeps its own identity and its
+    existing cards/scheduling; src is removed. Returns dest_bid."""
+    if not src_bid or not dest_bid or src_bid == dest_bid:
+        return dest_bid
+    reg = _load_registry()
+    banks = reg.get("banks", {})
+    src = banks.get(src_bid)
+    dest = banks.get(dest_bid)
+    if not src or not dest:
+        raise ValueError("Bank not found.")
+    src_name = src.get("name") or src_bid
+    src_dir = src.get("dir", "")
+    dest_dir = dest.get("dir", "")
+    src_media = os.path.join(_qbanks_dir(), src_dir, "media")
+    dest_media = os.path.join(_qbanks_dir(), dest_dir, "media")
+    os.makedirs(dest_media, exist_ok=True)
+
+    dest_qs = [q for q in _bank_questions(dest_dir) if isinstance(q, dict)]
+    for q in _bank_questions(src_dir):
+        if not isinstance(q, dict):
+            continue
+        q = dict(q)
+        origlec = (q.get("lecture") or "").strip()
+        q["lecture"] = src_name + ("::" + origlec if origlec else "")
+        media = q.get("media") or []
+        if media:
+            new_media = []
+            for name in media:
+                sp = os.path.join(src_media, name)
+                arc = name
+                dp = os.path.join(dest_media, arc)
+                if os.path.exists(dp):               # collision → prefix with src id
+                    arc = "%s_%s" % (_safe(src_bid), name)
+                    dp = os.path.join(dest_media, arc)
+                if os.path.isfile(sp):
+                    try:
+                        shutil.copyfile(sp, dp)
+                    except Exception:
+                        pass
+                new_media.append(arc)
+            q["media"] = new_media
+        dest_qs.append(q)
+
+    _rewrite_bank(dest_dir, dest_qs)                  # writes questions.jsonl
+    count = sum(1 for q in dest_qs if q.get("stem") or q.get("incomplete"))
+    reg = _load_registry()
+    if dest_bid in reg["banks"]:
+        reg["banks"][dest_bid]["count"] = count
+        _save_registry(reg)
+    try:                                              # keep dest manifest count current
+        mp = os.path.join(_qbanks_dir(), dest_dir, "manifest.json")
+        if os.path.isfile(mp):
+            with open(mp, encoding="utf-8") as f:
+                man = json.load(f)
+            man["count"] = count
+            with open(mp, "w", encoding="utf-8") as f:
+                json.dump(man, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log("nest manifest: %s" % e)
+
+    remove_bank(src_bid)                              # src folded into dest now
+    if _practice_deck_exists():
+        try:
+            convert_bank_to_deck(dest_bid)
+            mw.reset()
+        except Exception as e:
+            log("nest convert: %s" % e)
+    return dest_bid
+
+
+def reconcile_names():
+    """Keep registry bank names in sync with their Practice decks, so renaming a
+    bank's deck in Anki's main window is reflected in the settings manager. Each bank
+    records its built deck id (`did`); if that deck's name changed, adopt the new
+    leaf name. Also back-fills `did` for banks built before this existed. Returns True
+    if anything changed."""
+    try:
+        reg = _load_registry()
+    except Exception:
+        return False
+    changed = False
+    for bid, meta in reg.get("banks", {}).items():
+        did = meta.get("did")
+        if not did:                       # back-fill from the current name
+            try:
+                base = "Practice::" + (meta.get("name") or bid).replace("::", "-")
+                deck = mw.col.decks.by_name(base)
+            except Exception:
+                deck = None
+            if deck:
+                meta["did"] = int(deck["id"])
+                changed = True
+            continue
+        try:
+            deck = mw.col.decks.get(int(did), default=False)
+        except Exception:
+            deck = None
+        if not deck:
+            continue
+        name = deck.get("name", "")
+        if not name.startswith("Practice::"):
+            continue                      # moved out of Practice:: — leave the name be
+        leaf = name.split("::", 1)[1]
+        # Compare against the current name's deck-leaf form ("::" → "-" on build).
+        if leaf and leaf != (meta.get("name") or "").replace("::", "-"):
+            meta["name"] = leaf
+            changed = True
+    if changed:
+        _save_registry(reg)
+    return changed
+
+
+def export_bank(bid, out_path):
+    """Write an installed bank back out as a shareable .qb (a zip of its
+    manifest.json + questions + media). Returns the output path."""
+    meta = list_banks().get(bid)
+    if not meta:
+        raise ValueError("Bank not found.")
+    bdir = os.path.join(_qbanks_dir(), meta.get("dir", ""))
+    if not os.path.isdir(bdir):
+        raise ValueError("Bank files are missing on disk.")
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _dirs, files in os.walk(bdir):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                z.write(fp, os.path.relpath(fp, bdir))
+    return out_path
 
 
 def list_banks():
@@ -268,7 +564,58 @@ def _normalize_q(q):
         "tags": q.get("tags") or [],
         "lecture": q.get("lecture", ""),
         "source": q.get("source", "bank"),
+        "media": q.get("media") or [],
+        "figure_only": bool(q.get("figure_only")),
+        "incomplete": q.get("incomplete") or "",
     }
+
+
+def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None):
+    """Rank complete questions across ENABLED banks by relevance to a set of concept
+    -leaf `leaves` (tag match wins decisively) or, as a fallback, text `tokens`
+    (token overlap). Returns question dicts best-first; each is annotated with
+    `_bid`/`_ordinal`/`_qid` so a caller can resolve it back to its Practice card
+    (the qid mirrors convert_bank_to_deck's `bid_ordinal` numbering exactly).
+
+    `leaves`/`tokens` are sets. Incomplete (diagnostic) questions never match."""
+    exclude_qids = exclude_qids or set()
+    scored = []
+    for bid, meta in list_banks().items():
+        if not meta.get("enabled", True):
+            continue
+        ordinal = 0
+        for q in _bank_questions(meta.get("dir", "")):
+            if not isinstance(q, dict):
+                continue
+            # Mirror convert_bank_to_deck: the ordinal advances for every question
+            # that becomes a card (has a stem OR is incomplete) so the qid lines up.
+            if not q.get("stem") and not q.get("incomplete"):
+                continue
+            ordinal += 1
+            if not q.get("stem") or q.get("incomplete"):
+                continue    # only complete questions are matchable
+            qid = _safe("%s_%d" % (bid, ordinal))
+            if qid in exclude_qids:
+                continue
+            score = 0.0
+            qleaves = _leaf_keys(q.get("tags"))
+            inter = leaves & qleaves
+            if inter:
+                score = 10.0 + len(inter)            # tag match wins decisively
+            elif use_text_fallback and tokens:
+                qtok = _tokens(q.get("stem", ""))
+                if qtok:
+                    ov = len(tokens & qtok) / len(qtok)
+                    if ov >= 0.35:
+                        score = ov
+            if score > 0:
+                qa = dict(q)
+                qa["_bid"] = bid
+                qa["_ordinal"] = ordinal
+                qa["_qid"] = qid
+                scored.append((score, qa))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [q for _s, q in scored]
 
 
 def find_for_card(card, limit=5):
@@ -276,31 +623,51 @@ def find_for_card(card, limit=5):
     Prefers concept-tag overlap; falls back to text-token overlap for untagged
     banks/questions."""
     note = card.note()
-    card_leaves = _leaf_keys(list(note.tags))
-    card_tokens = _tokens((card.question() or "") + " " + (card.answer() or ""))
+    leaves = _leaf_keys(list(note.tags))
+    tokens = _tokens((card.question() or "") + " " + (card.answer() or ""))
+    ranked = _rank_questions(leaves, tokens, use_text_fallback=True)
+    return [_normalize_q(q) for q in ranked[:limit]]
 
-    scored = []
-    for bid, meta in list_banks().items():
-        if not meta.get("enabled", True):
+
+def intersperse_card_ids(leaves, tokens, limit, use_text_fallback=True,
+                         exclude_cids=None):
+    """Resolve the top-ranked matching questions to REAL Practice **card ids** (best
+    first), for interspersing into a live review session. Skips suspended cards
+    (already retired) and any in `exclude_cids`. Returns up to `limit` card ids."""
+    exclude_cids = set(exclude_cids or ())
+    out = []
+    for q in _rank_questions(leaves, tokens, use_text_fallback=use_text_fallback):
+        if len(out) >= limit:
+            break
+        qid = q.get("_qid")
+        if not qid:
             continue
-        for q in _bank_questions(meta.get("dir", "")):
-            if not isinstance(q, dict) or not q.get("stem"):
+        try:
+            nids = mw.col.find_notes('note:"%s" QID:%s' % (_MODEL_NAME, qid))
+        except Exception:
+            nids = []
+        got = None
+        for nid in nids:
+            try:
+                note = mw.col.get_note(nid)
+            except Exception:
                 continue
-            score = 0.0
-            qleaves = _leaf_keys(q.get("tags"))
-            inter = card_leaves & qleaves
-            if inter:
-                score = 10.0 + len(inter)            # tag match wins decisively
-            elif card_tokens:
-                qtok = _tokens(q.get("stem", ""))
-                if qtok:
-                    ov = len(card_tokens & qtok) / len(qtok)
-                    if ov >= 0.35:
-                        score = ov
-            if score > 0:
-                scored.append((score, q))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [_normalize_q(q) for _s, q in scored[:limit]]
+            for cid in note.card_ids():
+                if cid in exclude_cids or cid in out:
+                    continue
+                try:
+                    c = mw.col.get_card(cid)
+                except Exception:
+                    continue
+                if getattr(c, "queue", 0) == -1:     # suspended → already retired
+                    continue
+                got = cid
+                break
+            if got:
+                break
+        if got:
+            out.append(got)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +830,1075 @@ def _write_qb(docx_path, qs):
     if src is not None:
         src.close()
     return out, man
+
+
+# ---------------------------------------------------------------------------
+# Build a .qb from a .pptx question bank whose questions/answers live INSIDE
+# slide images (screenshots). We OCR each slide with the built-in macOS Vision
+# framework (fully offline, no model download, no pip install) via a tiny Swift
+# helper compiled on first use, then parse the recognized text into the SAME
+# question shape as the .docx path so all the existing grading/Score reuse.
+#
+# Expected slide text (as recognized):
+#   N. <stem>              (A) <choice> … (E) <choice>
+# and, on a later slide, keyed by the same number:
+#   N. The answer is X. <rationale>
+# Question numbers reset per section, so an answer binds to the *nearest
+# preceding* unanswered question carrying that number.
+# ---------------------------------------------------------------------------
+_PPTX_LOGO_DIMS = (2475000, 816900)   # repeated banner/logo on every slide → skip
+
+_OCR_SWIFT = r'''import Foundation
+import Vision
+import AppKit
+
+struct OCRBox { let y: CGFloat; let minX: CGFloat; let maxX: CGFloat; let s: String }
+
+// Sort one column's boxes into reading order: top-to-bottom, left-to-right.
+func columnOrder(_ items: [OCRBox]) -> [String] {
+    return items.sorted {
+        if abs($0.y - $1.y) > 0.02 { return $0.y > $1.y }
+        return $0.minX < $1.minX
+    }.map { $0.s }
+}
+
+func ocr(_ path: String) -> [String] {
+    guard let img = NSImage(contentsOfFile: path),
+          let tiff = img.tiffRepresentation,
+          let bmp = NSBitmapImageRep(data: tiff),
+          let cg = bmp.cgImage else { return [] }
+    let req = VNRecognizeTextRequest()
+    req.recognitionLevel = .accurate
+    req.usesLanguageCorrection = true
+    let h = VNImageRequestHandler(cgImage: cg, options: [:])
+    try? h.perform([req])
+    var boxes: [OCRBox] = []
+    for o in (req.results ?? []) {
+        guard let t = o.topCandidates(1).first else { continue }
+        let bb = o.boundingBox
+        boxes.append(OCRBox(y: bb.origin.y, minX: bb.minX, maxX: bb.maxX, s: t.string))
+    }
+    if boxes.isEmpty { return [] }
+    // Detect a vertical gutter in the central region that no text box spans, so
+    // side-by-side (two-question) slides are read a full column at a time instead
+    // of interleaving the columns row by row (which scrambles both questions).
+    var bestGap: CGFloat = 0, bestSplit: CGFloat = -1
+    var x: CGFloat = 0.34
+    while x <= 0.66 {
+        if !boxes.contains(where: { $0.minX < x && $0.maxX > x }) {
+            let leftEdge = boxes.filter { $0.maxX <= x }.map { $0.maxX }.max() ?? 0
+            let rightEdge = boxes.filter { $0.minX >= x }.map { $0.minX }.min() ?? 1
+            if rightEdge - leftEdge > bestGap { bestGap = rightEdge - leftEdge; bestSplit = (leftEdge + rightEdge) / 2 }
+        }
+        x += 0.01
+    }
+    if bestSplit > 0 && bestGap > 0.05 {
+        let left = boxes.filter { ($0.minX + $0.maxX) / 2 < bestSplit }
+        let right = boxes.filter { ($0.minX + $0.maxX) / 2 >= bestSplit }
+        if left.count >= 3 && right.count >= 3 {
+            return columnOrder(left) + columnOrder(right)
+        }
+    }
+    return columnOrder(boxes)
+}
+
+// For an embedded-figure question the screenshot holds stem + figure + choices.
+// We keep the stem + figure + question line as the image (rendered exactly as on
+// the slide) and crop OFF the choices block at the bottom (they're shown as
+// separate clickable options). Returns the y to keep down to [0, y], or nil if
+// no choices row is found (then the full image is kept).
+func choicesTop(_ cg: CGImage) -> CGFloat? {
+    let W = CGFloat(cg.width), H = CGFloat(cg.height)
+    let req = VNRecognizeTextRequest(); req.recognitionLevel = .accurate
+    try? VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])
+    var opts: [(CGFloat, Character)] = []      // (top-left y, letter)
+    for o in (req.results ?? []) {
+        guard let t = o.topCandidates(1).first?.string else { continue }
+        // an option line: "(A) …", "A) …", "A. …"
+        let s = t.trimmingCharacters(in: .whitespaces)
+        let chars = Array(s.prefix(3))
+        var letter: Character? = nil
+        if chars.count >= 3, chars[0] == "(", chars[2] == ")" { letter = chars[1] }
+        else if chars.count >= 2, chars[1] == ")" || chars[1] == "." { letter = chars[0] }
+        if let L = letter, "ABCDEabcde".contains(L) {
+            opts.append(((1 - o.boundingBox.maxY) * H, Character(String(L).uppercased())))
+        }
+    }
+    // Need option A followed by at least one more (B/C/…) in the lower half.
+    let aRows = opts.filter { $0.1 == "A" && $0.0 > 0.25 * H }.map { $0.0 }.sorted()
+    for ay in aRows {
+        if opts.contains(where: { $0.1 == "B" && $0.0 > ay - 4 }) {
+            return max(0, ay - 12)
+        }
+    }
+    return nil
+}
+
+func cropFigure(_ inp: String, _ outp: String) -> Bool {
+    guard let img = NSImage(contentsOfFile: inp), let tiff = img.tiffRepresentation,
+          let bmp = NSBitmapImageRep(data: tiff), let cg = bmp.cgImage,
+          let y = choicesTop(cg), y > 0.15 * CGFloat(cg.height) else { return false }
+    let rect = CGRect(x: 0, y: 0, width: CGFloat(cg.width), height: y)
+    guard let c = cg.cropping(to: rect) else { return false }
+    let rep = NSBitmapImageRep(cgImage: c)
+    guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+    do { try data.write(to: URL(fileURLWithPath: outp)); return true } catch { return false }
+}
+
+let args = CommandLine.arguments
+if args.count >= 4 && args[1] == "--crop" {
+    print(cropFigure(args[2], args[3]) ? "OK" : "SKIP")
+} else {
+    // Process this chunk sequentially, flushing one JSON line per image so the
+    // caller can stream progress. Parallelism comes from the caller running
+    // several of these processes at once (a single throttled process is pinned
+    // to a couple of cores; multiple processes spread across the machine).
+    for path in args.dropFirst() {
+        let obj: [String: Any] = ["path": path, "lines": ocr(path)]
+        if let d = try? JSONSerialization.data(withJSONObject: obj),
+           let s = String(data: d, encoding: .utf8) { print(s); fflush(stdout) }
+    }
+}
+'''
+
+
+def _ocr_dir():
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    d = os.path.join(root, "user_files", "ocr")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _ocr_binary():
+    """Compile (once, cached in user_files) and return the Vision OCR helper.
+    Raises RuntimeError with a friendly message if the toolchain is missing."""
+    import subprocess
+    d = _ocr_dir()
+    src = os.path.join(d, "janki_ocr.swift")
+    binp = os.path.join(d, "janki_ocr")
+    cur = ""
+    if os.path.isfile(src):
+        with open(src, encoding="utf-8") as f:
+            cur = f.read()
+    if cur != _OCR_SWIFT:                 # source changed / first run → rebuild
+        with open(src, "w", encoding="utf-8") as f:
+            f.write(_OCR_SWIFT)
+        try:
+            os.remove(binp)
+        except OSError:
+            pass
+    if os.path.isfile(binp) and os.access(binp, os.X_OK):
+        return binp
+    swiftc = shutil.which("swiftc") or "/usr/bin/swiftc"
+    if not os.path.exists(swiftc):
+        raise RuntimeError(
+            "Reading text from slides uses macOS's built-in text recognition, "
+            "which needs Xcode Command Line Tools.\n\nInstall them once with:\n"
+            "    xcode-select --install\n\nthen try again.")
+    r = subprocess.run([swiftc, "-O", src, "-o", binp],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.isfile(binp):
+        raise RuntimeError("Could not build the OCR helper:\n\n%s"
+                           % ((r.stderr or "").strip()[:800]))
+    return binp
+
+
+def _boost_thread_qos():
+    """Raise this thread's macOS QoS to user-initiated so a subprocess spawned
+    from it is routed to the Neural Engine. Accurate Vision OCR launched from a
+    background/low-QoS thread (e.g. Anki's taskman worker) otherwise falls back
+    to CPU and runs ~50× slower. Harmless off macOS."""
+    import sys
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+        # QOS_CLASS_USER_INTERACTIVE = 0x21 — matches the (proven-fast) shell
+        # context that routes accurate Vision to the Neural Engine.
+        ctypes.CDLL("/usr/lib/libSystem.dylib").pthread_set_qos_class_self_np(0x21, 0)
+    except Exception:
+        pass
+
+
+def _ocr_images(paths, progress=None):
+    """Return {path: [lines]} using macOS Vision. Runs several helper processes in
+    parallel and streams their combined output so `progress(done, total, path)`
+    fires per image. Multiple processes are used because accurate Vision OCR
+    spawned from Anki's background thread is throttled to a couple of cores
+    (~0.2s/image); spreading the work across processes recovers most of the
+    speed (~5× on an 8-core machine)."""
+    import subprocess
+    import select
+    _boost_thread_qos()                     # helps when the Neural Engine is reachable
+    binp = _ocr_binary()
+    paths = list(paths)
+    total = len(paths)
+    out = {}
+    if not paths:
+        return out
+    nproc = max(1, min(8, os.cpu_count() or 4, total))
+    chunks = [paths[i::nproc] for i in range(nproc)]
+    procs = [subprocess.Popen([binp] + c, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL)
+             for c in chunks if c]
+    bufs = {p.stdout.fileno(): b"" for p in procs}
+    open_fds = set(bufs)
+    done = 0
+    try:
+        while open_fds:
+            ready, _, _ = select.select(list(open_fds), [], [], 0.2)
+            for fd in ready:
+                data = os.read(fd, 65536)
+                if not data:
+                    open_fds.discard(fd)
+                    continue
+                bufs[fd] += data
+                while b"\n" in bufs[fd]:
+                    line, bufs[fd] = bufs[fd].split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        o = json.loads(line.decode("utf-8", "ignore"))
+                        out[o["path"]] = o.get("lines", [])
+                    except Exception:
+                        continue
+                    done += 1
+                    if progress:
+                        progress(done, total, o.get("path"))
+    finally:
+        for p in procs:
+            p.wait()
+    return out
+
+
+def _crop_figure(src):
+    """Crop `src` to just its figure (drop stem/choices text) via the helper.
+    Returns the cropped path, or `src` unchanged if no figure band was found."""
+    import subprocess
+    _boost_thread_qos()
+    out = os.path.splitext(src)[0] + ".crop.png"
+    try:
+        binp = _ocr_binary()
+        r = subprocess.run([binp, "--crop", src, out], capture_output=True,
+                           text=True, timeout=60)
+        if r.returncode == 0 and (r.stdout or "").strip() == "OK" and os.path.isfile(out):
+            return out
+    except Exception:
+        pass
+    return src
+
+
+def _pptx_slide_pics(z, names, sx):
+    """→ [(arc, (cx, cy)), …] for the <p:pic> images on one slide, in order."""
+    rels_name = "ppt/slides/_rels/" + sx.rsplit("/", 1)[-1] + ".rels"
+    rmap = {}
+    if rels_name in names:
+        rx = z.read(rels_name).decode("utf-8", "ignore")
+        for rid, tgt in re.findall(r'Id="([^"]+)"[^>]*Target="([^"]+)"', rx):
+            rmap[rid] = tgt
+    xml = z.read(sx).decode("utf-8", "ignore")
+    out = []
+    for blk in re.findall(r"<p:pic>.*?</p:pic>", xml, re.S):
+        emb = re.search(r'r:embed="([^"]+)"', blk)
+        ext = re.search(r'<a:ext cx="(\d+)" cy="(\d+)"', blk)
+        if not emb or not ext:
+            continue
+        tgt = rmap.get(emb.group(1))
+        if not tgt:
+            continue
+        arc = os.path.normpath(os.path.join("ppt/slides", tgt)).replace("\\", "/")
+        if arc in names:
+            out.append((arc, (int(ext.group(1)), int(ext.group(2)))))
+    return out
+
+
+def _pptx_native_paragraphs(z, sx):
+    """Native (typed, not screenshot) text on a slide, one string per paragraph."""
+    xml = z.read(sx).decode("utf-8", "ignore")
+    out = []
+    for p in re.split(r"</a:p>", xml):
+        runs = re.findall(r"<a:t>(.*?)</a:t>", p, re.S)
+        t = re.sub(r"\s+", " ", " ".join(re.sub(r"<[^>]+>", "", x) for x in runs))
+        t = (t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+              .replace("&quot;", '"').replace("&#8217;", "’").replace("&apos;", "'")).strip()
+        if t:
+            out.append(t)
+    return out
+
+
+def _pptx_content_images(pptx_path, tmpdir):
+    """Extract content images from a .pptx in slide order, dropping page chrome.
+    Returns a per-slide sequence of **(temp_path, category)** — with repeats: a
+    recurring image (an answer-key panel shown on several slides) appears once
+    per slide it's on, so it can re-match against questions that come later. Each
+    distinct image is written to disk (and later OCR'd) only once.
+
+    `category` is the current section — banks are organised under native-text
+    "title" slides whose text names a topic (e.g. "Cell Death and Injury"). We
+    take the topic list from the agenda slide (topics that recur) and, walking in
+    order, switch the current category whenever a slide's whole native text is
+    one of them. Questions inherit it as their lecture tag, and answer↔question
+    matching is scoped to a section.
+
+    Chrome (a watermark/logo/footer) is any image on **most** slides — dropped
+    everywhere so it's never OCR'd and never pollutes the parse. The fixed-size
+    banner is skipped as a fallback."""
+    z = zipfile.ZipFile(pptx_path)
+    names = set(z.namelist())
+    slide_xmls = sorted(
+        [n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)],
+        key=lambda n: int(re.search(r"(\d+)", n.rsplit("/", 1)[-1]).group(1)))
+    per_slide = [_pptx_slide_pics(z, names, sx) for sx in slide_xmls]
+    per_text = [_pptx_native_paragraphs(z, sx) for sx in slide_xmls]
+
+    # Topics = native paragraphs that recur across slides (a title slide repeats
+    # its topic from the agenda). A slide whose whole native text is one topic is
+    # a section header.
+    pfreq = {}
+    for paras in per_text:
+        for p in set(paras):
+            pfreq[p] = pfreq.get(p, 0) + 1
+    topics = {p for p, c in pfreq.items() if c >= 2 and 2 <= len(p) <= 80}
+
+    # Chrome images: present on > half the slides (min 5).
+    ifreq = {}
+    for pics in per_slide:
+        for arc in {arc for arc, _ in pics}:
+            ifreq[arc] = ifreq.get(arc, 0) + 1
+    n = len(slide_xmls)
+    chrome = {arc for arc, c in ifreq.items() if c > max(5, n // 2)}
+
+    ordered, extracted = [], {}
+    category = ""
+    for sid, (pics, paras) in enumerate(zip(per_slide, per_text)):
+        full = " ".join(paras).strip()
+        if full in topics:                 # a section-title slide
+            category = full
+        for arc, dims in pics:
+            if arc in chrome or dims == _PPTX_LOGO_DIMS:
+                continue
+            if arc not in extracted:
+                fp = os.path.join(tmpdir, "%03d_%s"
+                                  % (len(extracted), arc.rsplit("/", 1)[-1]))
+                with open(fp, "wb") as f:
+                    f.write(z.read(arc))
+                extracted[arc] = fp
+            ordered.append((extracted[arc], category, sid))
+    z.close()
+    return ordered
+
+
+# Answer styles seen in the wild (question slides always carry (A)–(E) choices;
+# answer slides don't — that's how we tell them apart):
+#   "N. The answer is X. <rationale>"   number may be on a nearby/earlier line
+#   "N. X <rationale>"                  BRS key; the '.' after the letter is often
+#                                        dropped by OCR, so the letter is just a
+#                                        standalone A–E token
+#   "N. Correct: <rationale> (X)"        letter in trailing parens
+_RE_P_ANS = re.compile(r"(?i)\bthe answer is\s*\(?([A-F])\b")
+_RE_P_ANS_BRS = re.compile(r"^\s*(\d{1,3})[\.\)]\s+([A-F])(?:[\.\):]\s*|\s+)(\S.*)$")
+_RE_P_ANS_COR = re.compile(r"(?i)^\s*(\d{1,3})?[\.\)]?\s*correct\b.*?\(([A-F])\)")
+_RE_P_NUM = re.compile(r"^\s*(\d{1,3})[\.\)]\s+(\S.*)$")
+_RE_P_STD = re.compile(r"^\s*(\d{1,3})[\.\)]?\s*$")     # a bare number on its own line
+_RE_P_CHO = re.compile(r"^\s*\(?([A-Fa-f])[\)\.\:]\s*(\S.*)$")
+# A choice letter alone on its own line ("(C)" / "C)" / "C." — text on the next
+# line). Requires a bracket/punctuation so a bare graph label ("A", "B") is NOT
+# mistaken for a choice.
+_RE_P_CHO0 = re.compile(r"^\s*(?:\(([A-Fa-f])\)|([A-Fa-f])[\)\.\:])\s*$")
+# "Questions 13-15" panel that shares a figure across a range of questions.
+_RE_P_QRANGE = re.compile(
+    r"(?i)\bquestions?\s+(\d{1,3})\s*(?:-|–|—|to|thru|through)\s*(\d{1,3})")
+
+
+def _join(a, b):
+    """Join wrapped OCR fragments, healing soft hyphens ('con-' + 'centration'
+    → 'concentration') from line-break hyphenation."""
+    a = a.rstrip()
+    b = b.strip()
+    if not a:
+        return b
+    if not b:
+        return a
+    if a.endswith("-") and len(a) >= 2 and a[-2].isalpha() and b[:1].islower():
+        return a[:-1] + b
+    return a + " " + b
+
+
+def _merge_bare_numbers(lines):
+    """Fold a lone question number onto the following line ('4' + 'A chronic…'
+    → '4. A chronic…') so a numbered stem is recognised even when OCR puts the
+    number on its own line."""
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        m = _RE_P_STD.match(lines[i])
+        prev = out[-1] if out else None
+        # Only fold a *question* number: not part of a run of numbers (a data
+        # table), and only onto a *stem-like* next line — a real stem is a long
+        # sentence (≥3 words), so a lone graph axis label ("60" + "R" / "log dose")
+        # is never turned into a bogus "60. R" question that steals the choices.
+        if (m and i + 1 < n and not _RE_P_STD.match(lines[i + 1])
+                and not _RE_P_CHO.match(lines[i + 1])
+                and (prev is None or not _RE_P_STD.match(prev))
+                and len(lines[i + 1].split()) >= 3
+                and int(m.group(1)) <= 60):
+            out.append("%s. %s" % (m.group(1), lines[i + 1].strip()))
+            i += 2
+        else:
+            out.append(lines[i])
+            i += 1
+    return out
+
+
+def _choice_letter(l):
+    """Uppercase letter (A–F) if `l` is an answer-choice marker ('(A) x', 'A) x',
+    'A.', or a lone '(A)'), else None."""
+    m = _RE_P_CHO.match(l)
+    if m:
+        return m.group(1).upper()
+    m0 = _RE_P_CHO0.match(l)
+    if m0:
+        return (m0.group(1) or m0.group(2)).upper()
+    return None
+
+
+def _split_question_segments(lines):
+    """Split a slide's lines into one segment per question. A new question begins
+    at a numbered stem ('N. …') OR — for slides whose question numbers OCR dropped
+    or garbled (blue-label numbers, faint digits) — at an '(A)' choice that
+    restarts the letter run while the current segment already holds ≥2 choices
+    (that new question's stem is the trailing non-choice lines before the '(A)')."""
+    segs, cur = [], []
+    for l in lines:
+        if _RE_P_NUM.match(l):
+            if cur:
+                segs.append(cur)
+            cur = [l]
+            continue
+        if _choice_letter(l) == "A" and sum(
+                1 for x in cur if _choice_letter(x) is not None) >= 2:
+            j = len(cur)                    # peel trailing stem lines off `cur`
+            while j > 0 and _choice_letter(cur[j - 1]) is None:
+                j -= 1
+            head, stem_lines = cur[:j], cur[j:]
+            if head:
+                segs.append(head)
+            cur = stem_lines + [l]
+            continue
+        cur.append(l)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
+def _extract_questions(lines):
+    """Questions on a slide: a stem followed by A→B→C… choices. Multiple questions
+    per slide split at each numbered stem, or (when OCR loses the number) at the
+    next question's '(A)'. Kept only if a stem accumulates ≥2 sequential choices —
+    which is also what marks a slide as a *question* slide (answer slides carry no
+    parenthesised choices). `_num` is None when the number couldn't be read; the
+    caller fills it in sequence within the section."""
+    lines = _merge_bare_numbers(lines)
+    out = []
+    for seg in _split_question_segments(lines):
+        if not seg:
+            continue
+        m = _RE_P_NUM.match(seg[0])
+        num = int(m.group(1)) if m else None
+        stem0 = m.group(2) if m else seg[0]
+        q = {"_num": num, "stem": re.sub(r"^[\s.·•]+", "", stem0).strip(),
+             "choices": [], "answer": None, "explanation": "", "lecture": "",
+             "objective": "", "tags": [], "source": "bank"}
+        field = "stem"
+        for l in seg[1:]:
+            want = chr(65 + len(q["choices"]))
+            # Only parenthesised/dotted "(A)"/"A." choices — NOT bare "A text",
+            # which on answer slides is the per-distractor explanation ("A …", "B
+            # …") and would make an answer slide look like a question.
+            cm = _RE_P_CHO.match(l)
+            c0 = _RE_P_CHO0.match(l)
+            c0_letter = (c0.group(1) or c0.group(2)) if c0 else None
+            if cm and cm.group(1).upper() == want and len(q["choices"]) < 6:
+                q["choices"].append(cm.group(2).strip())
+                field = "choice"
+            elif c0_letter and c0_letter.upper() == want and len(q["choices"]) < 6:
+                q["choices"].append("")     # letter alone; text is on next line(s)
+                field = "choice"
+            elif (field == "choice" and len(q["choices"]) < 6
+                  and re.match(r"^%s\s+[A-Z]" % want, l) and len(l.split()) <= 6):
+                # OCR sometimes drops a choice letter's delimiter ("C Potency" for
+                # "C. Potency"). Accept it ONLY when it's the expected next letter
+                # and short — so a long answer-slide distractor line never matches.
+                q["choices"].append(l.split(None, 1)[1].strip())
+                field = "choice"
+            elif field == "choice" and q["choices"]:
+                q["choices"][-1] = _join(q["choices"][-1], l)
+            elif field == "stem":
+                q["stem"] = _join(q["stem"], l)
+        q["choices"] = [c.strip() for c in q["choices"]]
+        if (len(q["choices"]) >= 2 and all(q["choices"])
+                and not _looks_like_answer_text(q["stem"])):
+            out.append(q)
+    return out
+
+
+# A per-distractor explanation line on an answer slide: a bare letter then a
+# capitalised word ("A Intrinsic activity refers to…"). Questions use "A." with a
+# delimiter, so these only appear on answer/explanation slides.
+_RE_P_DISTRACT = re.compile(r"^\s*([A-F])\s+[A-Z]")
+# "N. X <rationale>" answer line where X is the answer letter right after the
+# number — tolerating OCR that mashes it into the next word ("2. CA peculiar…" =
+# answer C). X must not be the start of a lowercase word ("2. Beta…" ≠ answer B).
+_RE_P_ANS_EXPL = re.compile(r"^\s*(\d{1,3})[\.\)]\s+([A-F])(?![a-z])")
+# A "distractors defer to the answer" line: "A-E See correct answer explanation" /
+# "A, B, D, E See correct answer explanation" — marks an explanation slide.
+_RE_P_SEE_EXPL = re.compile(r"(?i)see\s+(?:the\s+)?(?:correct\s+)?answer\s+explanation"
+                            r"|see\s+correct\s+answer")
+
+
+def _merge_answer_wrap(lines):
+    """OCR often wraps 'The answer is X' across a line break ('… The answer' +
+    'is B'). Join a line to the next while it dangles mid-phrase so the answer
+    marker is detectable."""
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        cur = lines[i]
+        while i + 1 < n and re.search(r"(?i)\bthe answer(?:\s+is)?\s*$", cur):
+            cur = cur + " " + lines[i + 1]
+            i += 1
+        out.append(cur)
+        i += 1
+    return out
+
+
+def _looks_like_answer_text(s):
+    """True if `s` is answer-key prose, not a question stem — a distractor
+    reference ("(choice E)"), the 'N. Correct: … (X)' key, or 'the answer is X'.
+    Used to keep answer content from being mis-parsed as a question."""
+    s = s or ""
+    return bool(re.search(r"(?i)\(choices?\s+[A-F]\b", s)
+                or _RE_P_ANS_COR.match(s)
+                or re.search(r"(?i)\bthe answer is\s+[A-F]\b", s))
+
+
+def _match_choice_to_rationale(choices, rat):
+    """Which choice does this answer's rationale describe? These answer keys open
+    by restating the correct choice ("… Scar formation. A large infarct …"), so a
+    choice's text appears at the start of the rationale. Returns (index, confidence
+    0-1). Used to verify/repair a positional answer binding without guessing —
+    when nothing matches (the rationale is about a different question) confidence
+    is low and the caller leaves the question unmatched."""
+    def norm(s):
+        return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
+    rn = re.sub(r"\s+", " ", norm(rat)).strip()
+    head = rn[:120]
+    head_tokens = set(rn.split()[:24])
+    best_i, best = -1, 0.0
+    for i, c in enumerate(choices):
+        cn = re.sub(r"\s+", " ", norm(c)).strip()
+        if not cn:
+            continue
+        score = 0.0
+        key = cn[:28]                       # verbatim restatement at the head
+        if len(key) >= 6 and key in head:
+            score = 0.9
+        ctoks = [t for t in cn.split() if len(t) > 3]   # content-word overlap
+        if ctoks:
+            hits = sum(1 for t in ctoks if t in head_tokens)
+            if hits >= 2:
+                score = max(score, hits / len(ctoks))
+        if score > best:
+            best, best_i = score, i
+    return best_i, best
+
+
+def _is_expl_answer_slide(lines):
+    """An 'explanation' answer slide: 'N. <answer letter> <rationale>' (the answer
+    is the first char after the number), confirmed by either ≥2 per-distractor
+    lines ('A …', 'B …') or a 'See correct answer explanation' deferral line."""
+    if not any(_RE_P_ANS_EXPL.match(l) for l in lines):
+        return False
+    return (sum(1 for l in lines if _RE_P_DISTRACT.match(l)) >= 2
+            or any(_RE_P_SEE_EXPL.search(l) for l in lines))
+
+
+def _extract_answers(lines):
+    """Answers on an answer slide → [(num_or_None, letter, rationale)]. Handles
+    'The answer is X' (even wrapped across lines), BRS 'N. X <rationale>', 'N.
+    Correct: … (X)', the 'N. X <rationale>' explanation format (answer = first
+    char after the number, possibly OCR-mashed into the word), and several answers
+    on one slide (a repeated key panel). A numberless 'The answer is X' recovers
+    its number from the nearest preceding numbered line."""
+    lines = _merge_answer_wrap(lines)
+    marks = []                          # (i, num_or_None, letter, rat_start, explicit)
+    for i, l in enumerate(lines):
+        mc = _RE_P_ANS_COR.match(l)
+        if mc:
+            num = int(mc.group(1)) if mc.group(1) else None
+            marks.append((i, num, mc.group(2).upper(), mc.end(), num is not None))
+            continue
+        mb = _RE_P_ANS_BRS.match(l)
+        if mb:
+            marks.append((i, int(mb.group(1)), mb.group(2).upper(), mb.start(3), True))
+            continue
+        m1 = _RE_P_ANS.search(l)
+        if m1:
+            num = None
+            for j in range(i, -1, -1):
+                mm = _RE_P_NUM.match(lines[j]) or _RE_P_STD.match(lines[j])
+                if mm and int(mm.group(1)) <= 60:   # skip page numbers ("102
+                    num = int(mm.group(1))          # Chapter 12") — Q numbers are
+                    break                           # small and reset per section
+            marks.append((i, num, m1.group(1).upper(), m1.end(), False))
+    # Fallback: an explanation slide ("N. X rationale" + distractor lines) whose
+    # answer letter the standard patterns missed (OCR mashed it into the word).
+    if not marks and _is_expl_answer_slide(lines):
+        for i, l in enumerate(lines):
+            me = _RE_P_ANS_EXPL.match(l)
+            if me:
+                marks.append((i, int(me.group(1)), me.group(2).upper(), me.end(), True))
+    # A numberless "The answer is X" (BRS batches several answers on one slide and
+    # only numbers the first) recovers its number from the nearest number above —
+    # which is the *previous* answer's, giving a duplicate. Bump it past the last.
+    last_num = 0
+    for k, (i, num, letter, pos, explicit) in enumerate(marks):
+        if explicit and num is not None:
+            last_num = num
+        elif num is not None:
+            if num <= last_num:
+                num = last_num + 1
+            last_num = num
+            marks[k] = (i, num, letter, pos, explicit)
+    out = []
+    for k, (i, num, letter, pos, explicit) in enumerate(marks):
+        end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+        rat = lines[i][pos:].lstrip(" .:-)")
+        for l in lines[i + 1:end]:
+            rat = _join(rat, l)
+        out.append((num, letter, rat.strip()))
+    return out
+
+
+def _has_answers(lines):
+    lines = _merge_answer_wrap(lines)
+    if any(_RE_P_ANS.search(l) or _RE_P_ANS_BRS.match(l) or _RE_P_ANS_COR.match(l)
+           for l in lines):
+        return True
+    return _is_expl_answer_slide(lines)
+
+
+# A question has an EMBEDDED figure only if its stem actually references an
+# accompanying figure — phrases, not bare words ("dose-response curve" in a
+# choice must NOT trigger this).
+# Nouns that name an embedded figure/image in a question stem (histology/path
+# banks lean on "illustration"/"image"/"photomicrograph", not just "figure").
+_FIG_NOUN = (r"graph|figure|table|diagram|chart|histogram|tracing|curves?|"
+             r"illustration|image|photo(?:graph|micrograph)?|micrograph|"
+             r"section|specimen|slide|smear|biopsy")
+_FIG_KW = re.compile(
+    r"(?i)"
+    r"\b(?:" + _FIG_NOUN + r")\s+(?:below|above)\b"   # "graph below", "image above"
+    r"|\bfollowing\s+(?:" + _FIG_NOUN + r")\b"        # "following table/illustration"
+    r"|\bshown\s+(?:below|above|in the\b)"            # "shown below", "shown in the"
+    r"|\b(?:depicted|illustrated)\b"
+    r"|\b(?:" + _FIG_NOUN + r")\s+(?:shows?|depicts?|demonstrates?)\b"  # "illustration shows"
+    r"|\bcurves?\s+in\s+the\s+(?:graph|figure)\b"     # "curves in the graph"
+    r"|\bin\s+the\s+(?:" + _FIG_NOUN + r")\b")        # "in the illustration/image"
+
+
+def _looks_like_prose(lines):
+    """True if `lines` read as sentence text (a question-stem fragment) rather
+    than a figure's scattered labels — used to tell a stem that was split across
+    two images apart from an actual graph/table screenshot."""
+    body = [l for l in lines if not _RE_P_STD.match(l)]
+    words = sum(len(l.split()) for l in body)
+    return words >= 12 and words >= 4 * max(1, len(body))
+
+
+def _shared_case(lines):
+    """A '(For) Questions X-Y refer to the following case: …' lead-in shared by a
+    range of questions (a clinical vignette above the first question). Returns
+    (lo, hi, case_text) or None."""
+    for i, l in enumerate(lines):
+        m = _RE_P_QRANGE.search(l)
+        if not m or not re.search(r"(?i)refer|following|case|patient|scenario", l):
+            continue
+        # A figure range ("refer to the following graph/diagram") is not a case.
+        if re.search(r"(?i)graph|diagram|figure|table|chart|curve|tracing", l):
+            return None
+        lo, hi = int(m.group(1)), int(m.group(2))
+        if not (0 < lo <= hi <= lo + 20):
+            return None
+        buf = []
+        for nx in lines[i + 1:]:            # case text up to the first question
+            if _RE_P_NUM.match(nx) or _choice_letter(nx):
+                break
+            buf.append(nx)
+        # Only a genuine prose vignette — not a figure's scattered labels.
+        if not _looks_like_prose(buf):
+            return None
+        text = re.sub(r"(?i)^\s*(?:refer[^:]*:|case)?\s*:?\s*",
+                      "", " ".join(buf)).strip()
+        if text:
+            return lo, hi, text
+    return None
+
+
+def _continues_choices(q, lines):
+    """True if `lines` begin with the next expected choice letter of `q` — i.e.
+    they're the tail of a choice list that spilled onto the next image."""
+    for l in lines:
+        cl = _choice_letter(l)
+        if cl is not None:
+            return cl == chr(65 + len(q["choices"]))
+        if l.strip():
+            return False                    # real text before any choice → not a tail
+    return False
+
+
+def _append_choices(q, lines):
+    """Append continuation choices (a choice list split across two images)."""
+    for l in lines:
+        want = chr(65 + len(q["choices"]))
+        cm = _RE_P_CHO.match(l)
+        c0 = _RE_P_CHO0.match(l)
+        c0l = (c0.group(1) or c0.group(2)) if c0 else None
+        if cm and cm.group(1).upper() == want and len(q["choices"]) < 6:
+            q["choices"].append(cm.group(2).strip())
+        elif c0l and c0l.upper() == want and len(q["choices"]) < 6:
+            q["choices"].append("")
+        elif q["choices"]:
+            q["choices"][-1] = _join(q["choices"][-1], l)
+
+
+def _parse_ocr_blocks(blocks):
+    """blocks = [(path, [lines], category, slide_id), …] in slide order →
+    (questions, n_detected). A slide that yields questions (stem + ≥2 choices) is
+    a question slide; if it states answers it's an answer slide; anything else on
+    a slide (a graph/table/photo screenshot) is a *figure*. Answers bind to
+    questions **within the same section** (numbers reset per section and some keys
+    are numberless, so global matching is unsafe). Figures on a question's slide
+    are attached to that question; a question whose text references a figure but
+    has no separate figure image keeps its own screenshot (embedded graph/table)."""
+    questions = []          # every question (with choices), in slide order
+    answers = []            # (n_seen_before, num, letter, rat, category)
+    slide_figs = {}         # slide_id → [figure image paths]
+    range_figs = []         # (category, lo, hi, [paths]) — a shared-figure panel
+    range_cases = {}        # (category, lo, hi) → case text shared by a range
+    sec_last = {}           # category → last question number seen/assigned
+    seen_stems = set()
+    pending = None          # (prefix_text, prefix_num) — a stem fragment (a
+                            # question whose opening text is on the previous image)
+    last_q = None           # most recent question (for choices split across images)
+    last_q_sid = None
+    for path, raw, category, sid in blocks:
+        lines = [l.strip() for l in raw if l.strip()]
+        # A shared clinical vignette ("Questions 26-28 refer to the following
+        # case: …") can appear on its own panel or inline above the first
+        # question — record it either way so it prepends to that whole range.
+        case = _shared_case(lines)
+        if case:
+            range_cases.setdefault((category, case[0], case[1]), case[2])
+        qs = _extract_questions(lines)
+        if qs:                              # → a question slide
+            for n, q in enumerate(qs):
+                # Include the number and the choices: consecutive figure questions
+                # can share an identical figure-description lead-in ("The figure
+                # below depicts…") yet be different questions — dedup only true
+                # repeats (same number, stem AND choices), not those.
+                key = (category, q.get("_num"), q["stem"][:80].lower(),
+                       tuple(c[:20].lower() for c in q["choices"]))
+                if key in seen_stems:       # skip a repeated question panel
+                    continue
+                seen_stems.add(key)
+                if n == 0 and pending:      # opening text was on the prior image
+                    q["stem"] = _join(pending[0], q["stem"])
+                    if q["_num"] is None:
+                        q["_num"] = pending[1]
+                # OCR may drop a question's number (blue label / faint digit); fill
+                # it in sequence within the section so its answer still binds.
+                if q["_num"] is None:
+                    q["_num"] = sec_last.get(category, 0) + 1
+                sec_last[category] = q["_num"]
+                q["lecture"] = category or ""
+                q["_cat"] = category
+                q["_slide"] = sid
+                q["_src"] = path
+                questions.append(q)
+                last_q, last_q_sid = q, sid
+            pending = None
+        elif last_q is not None and sid == last_q_sid \
+                and _continues_choices(last_q, lines):
+            _append_choices(last_q, lines)  # choice list spilled onto next image
+            pending = None
+        elif _has_answers(lines):           # → an answer slide
+            pending = None
+            for num, letter, rat in _extract_answers(lines):
+                answers.append((len(questions), num, letter, rat, category))
+        elif case:                          # a pure shared-case / range panel
+            for l in lines:                 # may also be a shared *figure* range
+                mr = _RE_P_QRANGE.search(l)
+                if mr and re.search(r"(?i)graph|figure|table|diagram|chart|below", l):
+                    lo, hi = int(mr.group(1)), int(mr.group(2))
+                    if 0 < lo <= hi <= lo + 20:
+                        range_figs.append((category, lo, hi, [path]))
+        elif _looks_like_prose(lines) and not _looks_like_answer_text(" ".join(lines)):
+            # → a stem fragment (not a figure): the opening of the next question,
+            # whose choices are on the following image. Require it to START like a
+            # real stem (number or a capital letter) — a fragment beginning
+            # mid-sentence/lowercase is an answer-rationale continuation
+            # ("elastic fibers … are produced by fibroblasts"), not a question, and
+            # must NOT be carried onto the next question.
+            nums = [l for l in lines if _RE_P_STD.match(l)]
+            pnum = int(_RE_P_STD.match(nums[0]).group(1)) if nums else None
+            body = " ".join(l for l in lines if not _RE_P_STD.match(l)).strip()
+            if body[:1].isupper() or body[:1].isdigit():
+                pending = (_join(pending[0], body) if pending else body,
+                           (pending[1] if pending and pending[1] else pnum))
+            else:
+                pending = None              # rationale continuation → drop
+        else:                               # → a figure/other image
+            pending = None
+            slide_figs.setdefault(sid, []).append(path)
+            # A "Questions 13-15" panel: one figure shared by a range of questions
+            # that live on *later* slides. Record the range so it attaches to them.
+            for l in lines:
+                mr = _RE_P_QRANGE.search(l)
+                if mr:
+                    lo, hi = int(mr.group(1)), int(mr.group(2))
+                    if 0 < lo <= hi <= lo + 20:
+                        range_figs.append((category, lo, hi, [path]))
+
+    for pos, num, letter, rat, category in answers:
+        pool = [q for q in questions[:pos]
+                if q["_cat"] == category and q["answer"] is None]
+        target = idx = None
+        if num is not None:                 # pass 1: bind by question number
+            for q in reversed(pool):
+                if q["_num"] == num:
+                    target, idx = q, ord(letter) - 65
+                    break
+        if target is None and pool:
+            # pass 2: no number match. Verify against the most-recent open question
+            # by matching the answer's rationale text to one of its choices — the
+            # rationale restates the correct choice ("… Fibronectin forms tracks…").
+            # This recovers answers whose number was garbled/misaligned WITHOUT
+            # guessing: bind to the text-matched choice (self-correcting the letter),
+            # or, only for a numberless answer, fall back to the stated letter.
+            cand = pool[-1]
+            mi, conf = _match_choice_to_rationale(cand["choices"], rat)
+            if conf >= 0.7:
+                target, idx = cand, mi
+            elif num is None:
+                target, idx = cand, ord(letter) - 65
+        if target is not None and idx is not None and 0 <= idx < len(target["choices"]):
+            target["answer"] = idx
+            target["explanation"] = rat
+
+    # Attach figures: a separate figure image on the question's slide, a shared
+    # "Questions X-Y" figure panel (on an earlier slide), or (for an embedded
+    # graph/table) the question's own screenshot when it names a figure.
+    for q in questions:
+        figs = list(slide_figs.get(q["_slide"], []))
+        shared = [p for cat, lo, hi, ps in range_figs
+                  if cat == q["_cat"] and lo <= (q["_num"] or -1) <= hi for p in ps]
+        if figs:                            # separate figure image(s) on the slide
+            q["_media_paths"] = list(dict.fromkeys(figs))
+        elif shared:                        # figure shared across a question range
+            q["_media_paths"] = list(dict.fromkeys(shared))
+        elif _FIG_KW.search(q["stem"]):        # figure referenced in the stem
+            # Embedded figure: the graph/table is baked into the question
+            # screenshot, so OCR dragged its labels/cells into the stem. Show the
+            # screenshot itself and render image-only (drop the garbled stem text).
+            q["_media_paths"] = [q["_src"]]
+            q["figure_only"] = True
+
+    # Prepend a shared clinical vignette to every question in its range.
+    for q in questions:
+        for (cat, lo, hi), text in range_cases.items():
+            if q["_cat"] == cat and lo <= (q["_num"] or -1) <= hi:
+                q["stem"] = _join(text, q["stem"])
+                break
+
+    good, incomplete = [], []
+    for q in questions:
+        src = q.get("_src")
+        for k in ("_num", "_cat", "_slide", "_src"):
+            q.pop(k, None)
+        if q["stem"] and len(q["choices"]) >= 2 and q["answer"] is not None:
+            q["id"] = "q%d" % (len(good) + 1)
+            good.append(q)
+            continue
+        # Detected but didn't fully resolve. Keep it aside (flagged) so it can be
+        # imported as an *incomplete* card for diagnosis instead of vanishing.
+        reasons = []
+        if not q["stem"]:
+            reasons.append("no stem")
+        if len(q["choices"]) < 2:
+            reasons.append("only %d choice(s)" % len(q["choices"]))
+        if q["answer"] is None:
+            reasons.append("no answer matched")
+        q["incomplete"] = ", ".join(reasons) or "incomplete"
+        if not q.get("_media_paths") and src:   # show the original slide for context
+            q["_media_paths"] = [src]
+        q["id"] = "x%d" % (len(incomplete) + 1)
+        incomplete.append(q)
+    return good, len(questions), incomplete
+
+
+def _write_qb_plain(out_path, base_name, qs):
+    """Write a .qb from already-parsed question dicts, copying any attached figure
+    images (from each question's `_media_paths`) into media/ and recording their
+    names on the question's `media` field."""
+    man = {"qb_format": 1, "id": re.sub(r"[^A-Za-z0-9_.-]", "-", base_name).lower(),
+           "name": base_name.replace("_", " "), "version": "1", "author": "internal",
+           "family": "", "match": "text", "count": len(qs)}
+    fields = ("id", "stem", "choices", "answer", "explanation", "lecture",
+              "objective", "tags", "source", "media", "figure_only", "incomplete")
+    written = {}            # src temp path → media/<arc name>
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps(man, indent=2))
+        for q in qs:
+            names = []
+            for sp in q.get("_media_paths", []):
+                if sp not in written:
+                    ext = os.path.splitext(sp)[1] or ".png"
+                    arc = "m%d%s" % (len(written), ext)
+                    try:
+                        z.write(sp, "media/" + arc)
+                    except OSError:
+                        continue
+                    written[sp] = arc
+                names.append(written[sp])
+            if names:
+                q["media"] = list(dict.fromkeys(names))
+        clean = [{k: q[k] for k in fields if k in q} for q in qs]
+        z.writestr("questions.jsonl",
+                   "\n".join(json.dumps(q, ensure_ascii=False) for q in clean))
+    return man
+
+
+def pptx_import_dialog(on_done=None):
+    """Pick a .pptx, OCR its slides locally, parse MCQs, and build+import a .qb
+    in one step. OCR is macOS Vision (offline); imperfect slides may be skipped."""
+    from aqt.qt import QFileDialog, QMessageBox
+    from aqt.utils import tooltip, showWarning
+    import tempfile
+    path, _ = QFileDialog.getOpenFileName(
+        mw, "Build .qb from .pptx (OCR)", "", "PowerPoint (*.pptx)")
+    if not path:
+        return
+    tmp = tempfile.mkdtemp(prefix="janki_pptx_")
+    try:
+        imgs = _pptx_content_images(path, tmp)   # [(temp_path, category, sid), …]
+    except Exception as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        showWarning("Could not read .pptx:\n\n%s" % e)
+        return
+    if not imgs:
+        shutil.rmtree(tmp, ignore_errors=True)
+        showWarning("No slide images found in this .pptx.")
+        return
+    uniq = list(dict.fromkeys(p for p, _c, _s in imgs))   # OCR each image once
+
+    # OCR is the slow part — run it OFF the main thread so the progress bar
+    # actually animates (a main-thread loop would freeze the UI). Images finish
+    # out of order (parallel processes), so report the monotonic count, not the
+    # slide index (which would jump around).
+    def _bg():
+        def prog(done, total, cur_path=None):
+            pct = int(100 * done / total) if total else 0
+            mw.taskman.run_on_main(
+                lambda d=done, t=total, p=pct: mw.progress.update(
+                    label="Reading slides… %d of %d  (%d%%)" % (d, t, p),
+                    value=d, max=t))
+        return _ocr_images(uniq, progress=prog)
+
+    def _after(fut):
+        mw.progress.finish()
+        try:
+            ocr_map = fut.result()
+        except Exception as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            showWarning("Text recognition failed:\n\n%s" % e)
+            return
+        qs, detected, incomplete = _parse_ocr_blocks(
+            [(p, ocr_map.get(p, []), cat, sid) for p, cat, sid in imgs])
+        # Keep `tmp` alive until after _write_qb_plain — each question's figure
+        # images (_media_paths) point into it and are copied into the .qb.
+        try:
+            if not qs and not incomplete:
+                showWarning(
+                    "No multiple-choice questions could be read.\n\n"
+                    "OCR detected %d candidate(s) but none had usable choices. "
+                    "Check the slide format." % detected)
+                return
+            base = os.path.splitext(os.path.basename(path))[0]
+            m = QMessageBox(mw)
+            m.setWindowTitle("Build .qb from .pptx")
+            m.setText("Recognized %d complete question(s) (of %d detected across "
+                      "%d slide image(s))." % (len(qs), detected, len(uniq)))
+            info = ("OCR isn't perfect — some questions may need a small fix in the "
+                    "bank preview afterwards.\n\nCreate a .qb and import it now?")
+            if incomplete:
+                info = ("%d more were detected but couldn't be fully parsed "
+                        "(missing an answer, choices, or stem). You can also import "
+                        "those as flagged “incomplete” cards — each shows its "
+                        "original slide image — to diagnose/fix them.\n\n"
+                        % len(incomplete)) + info
+            m.setInformativeText(info)
+            create = inc_btn = None
+            if qs:
+                create = m.addButton("Create & import",
+                                     QMessageBox.ButtonRole.AcceptRole)
+            if incomplete:
+                inc_btn = m.addButton(
+                    ("Import %d complete + %d incomplete" % (len(qs), len(incomplete)))
+                    if qs else "Import %d incomplete" % len(incomplete),
+                    QMessageBox.ButtonRole.AcceptRole)
+            m.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            m.exec()
+            clicked = m.clickedButton()
+            if clicked not in (create, inc_btn) or clicked is None:
+                return
+            final_qs = list(qs)
+            if clicked is inc_btn:
+                final_qs += incomplete
+            # Crop embedded-figure screenshots down to just the figure (they
+            # otherwise carry the stem/choices text too). Incomplete cards keep
+            # their full screenshot (no figure_only flag) for diagnosis.
+            crop_qs = [q for q in final_qs
+                       if q.get("figure_only") and q.get("_media_paths")]
+            if crop_qs:
+                mw.progress.start(label="Cropping figures…", immediate=True)
+                try:
+                    for i, q in enumerate(crop_qs):
+                        mw.progress.update(label="Cropping figures… %d/%d"
+                                           % (i + 1, len(crop_qs)))
+                        q["_media_paths"] = [_crop_figure(q["_media_paths"][0])]
+                finally:
+                    mw.progress.finish()
+            out = os.path.splitext(path)[0] + ".qb"
+            try:
+                man = _write_qb_plain(out, base, final_qs)
+                import_qb(out)
+            except Exception as e:
+                showWarning("Could not create/import .qb:\n\n%s" % e)
+                return
+            retag_from_lecture_map()
+            assign_deck_tags_from_headers()
+            n_inc = len(final_qs) - len(qs)
+            tooltip("Imported “%s” (%d questions%s from slide OCR)."
+                    % (man.get("name"), len(final_qs),
+                       (" incl. %d incomplete" % n_inc) if n_inc else ""),
+                    period=4000)
+            if on_done:
+                on_done()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    mw.progress.start(label="Preparing text recognition…", immediate=True)
+    mw.taskman.run_in_background(_bg, _after)
 
 
 # ---------------------------------------------------------------------------
@@ -1457,8 +2893,15 @@ _CARD_CSS = (
     "margin:0 auto;padding:26px;transition:background-color .25s ease;}"
     ".jp-stem{margin-bottom:18px;line-height:1.5;"
     "animation:jpSlideUp .35s ease-out both;}"
+    # Diagnostic banner on an incomplete-parse card.
+    ".jp-incomplete{background:rgba(255,176,32,0.16);border:1px solid "
+    "rgba(255,176,32,0.5);color:#ffcf7a;font-size:0.8em;font-weight:600;"
+    "padding:6px 10px;border-radius:8px;margin-bottom:12px;}"
     ".jp-answered .jp-stem{animation:none;}"   # don't re-animate on the flip
-    ".jp-stem img{max-width:100%;border-radius:8px;margin-top:10px;}"
+    # Cap figure height so the choices stay on-screen (scales to fit within both
+    # the width and ~40% of the viewport height, keeping aspect ratio).
+    ".jp-stem img{display:block;max-width:100%;max-height:40vh;height:auto;"
+    "width:auto;object-fit:contain;border-radius:8px;margin:10px auto 0;}"
     ".jp-choice{padding:8px 12px;margin:6px 0;border-radius:8px;"
     "border:1px solid rgba(255,255,255,0.08);overflow:hidden;"
     # transition drives the fade-out + collapse of hidden choices (and the reflow
@@ -1842,7 +3285,15 @@ def _choices_html(q):
 
 def _stem_html(q, dir_name):
     from html import escape
-    html = escape(_plain(q.get("stem", "")))
+    # figure_only: the question (stem + figure) lives in the screenshot, so show
+    # just the image — the OCR'd stem is garbled figure/table text.
+    html = "" if q.get("figure_only") else escape(_plain(q.get("stem", "")))
+    if q.get("incomplete"):
+        # An imported-for-diagnosis card: banner + always show the raw stem text
+        # and the original slide image so the parse can be inspected/fixed.
+        html = ('<div class="jp-incomplete">⚠ Incomplete parse — %s</div>'
+                % escape(_plain(q.get("incomplete")))
+                + escape(_plain(q.get("stem", ""))))
     for name in (q.get("media") or []):
         src = os.path.join(_qbanks_dir(), dir_name, "media", name)
         if os.path.isfile(src):
@@ -1852,6 +3303,68 @@ def _stem_html(q, dir_name):
             except Exception:
                 pass
     return html
+
+
+_INCOMPLETE_TAG = "Practice::Incomplete"
+
+
+def _theme_tag(lecture):
+    """The section/theme title (e.g. a "Glycogen Metabolism" title slide) as an
+    Anki tag: spaces → underscores (Anki splits tags on spaces), grouped under a
+    'Practice::' root so all theme tags sit together in the tag sidebar. None if
+    the question has no theme."""
+    t = re.sub(r"\s+", "_", (lecture or "").strip()).strip("_")
+    return "Practice::" + t if t else None
+
+
+_PRACTICE_CONF_NAME = "Janki Practice (slide order)"
+
+
+def _ensure_practice_conf():
+    """A deck-options group that shows new practice cards in **slide order**:
+    gather by ascending position across the whole bank (ignoring the lecture
+    subdecks) and don't re-sort. Returns its id, or None if the API differs."""
+    try:
+        conf = None
+        for c in mw.col.decks.all_config():
+            if c.get("name") == _PRACTICE_CONF_NAME:
+                conf = c
+                break
+        if conf is None:
+            conf = mw.col.decks.add_config(_PRACTICE_CONF_NAME)
+        conf["newGatherPriority"] = 1     # LOWEST_POSITION → ascending position
+        conf["newSortOrder"] = 1          # NO_SORT → keep the gathered (slide) order
+        conf["new"]["order"] = 0          # in-order (not random) for old scheduler too
+        conf["new"]["perDay"] = 9999      # work through the bank rather than 20/day
+        mw.col.decks.update_config(conf)
+        return conf["id"]
+    except Exception as e:
+        log("practice deck-config: %s" % e)
+        return None
+
+
+def _apply_practice_conf(did, cid):
+    if not cid or not did:
+        return
+    try:
+        deck = mw.col.decks.get(did)
+        if deck and str(deck.get("conf")) != str(cid):
+            mw.col.decks.set_config_id_for_deck_dict(deck, cid)
+    except Exception as e:
+        log("apply practice conf: %s" % e)
+
+
+def _reposition_new(note, pos):
+    """Pin a card's new-queue position to `pos` (slide order). Only touches cards
+    still in the new queue, so it never disturbs already-scheduled reviews."""
+    try:
+        for cid in note.card_ids():
+            c = mw.col.get_card(cid)
+            if c.type == 0 and c.due != pos:   # 0 = new
+                c.due = pos
+                mw.col.update_card(c)
+    except Exception as e:
+        log("reposition new card: %s" % e)
 
 
 def convert_bank_to_deck(bid):
@@ -1864,22 +3377,42 @@ def convert_bank_to_deck(bid):
     base = "Practice::" + name
     did = mw.col.decks.id(base)          # bank deck (fallback when no lecture)
     dir_name = meta.get("dir", "")
+    cid = _ensure_practice_conf()        # slide-order deck options
+    _apply_practice_conf(mw.col.decks.id("Practice"), cid)
+    _apply_practice_conf(did, cid)
+    seen_dids = {did}
     added = updated = 0
     ordinal = 0
     for q in _bank_questions(dir_name):
-        if not isinstance(q, dict) or not q.get("stem"):
+        if not isinstance(q, dict):
+            continue
+        # A complete question needs a stem; an incomplete (diagnostic) card is kept
+        # even with no stem, since its screenshot/partial data is the whole point.
+        if not q.get("stem") and not q.get("incomplete"):
             continue
         ordinal += 1
         qid = _safe("%s_%d" % (bid, ordinal))
         # Each question's card goes into a per-lecture subdeck (Bank::Lecture) so the
-        # bank expands by lecture; lecture-less questions stay in the bank deck.
-        lec = (q.get("lecture") or "").strip().replace("::", "-")
+        # bank expands by lecture; lecture-less questions stay in the bank deck. A
+        # lecture may itself be nested with "::" (e.g. a merged bank stores
+        # "<origbank>::<lecture>") — keep that hierarchy so each merged bank becomes a
+        # subbank.
+        segs = [s.strip() for s in (q.get("lecture") or "").split("::") if s.strip()]
+        lec = "::".join(segs)
         qdid = mw.col.decks.id(base + "::" + lec) if lec else did
+        if qdid not in seen_dids:
+            _apply_practice_conf(qdid, cid)
+            seen_dids.add(qdid)
         fields = {"Question": _stem_html(q, dir_name),
                   "Choices": _choices_html(q),
                   "Explanation": _plain(q.get("explanation", "")),
                   "QID": qid}
         tags = [str(t) for t in (q.get("tags") or [])]
+        tt = _theme_tag(q.get("lecture"))   # tag the card by its section theme
+        if tt and tt not in tags:
+            tags.append(tt)
+        if q.get("incomplete") and _INCOMPLETE_TAG not in tags:
+            tags.append(_INCOMPLETE_TAG)    # flag diagnostic (incomplete) cards
         nids = mw.col.find_notes('note:"%s" QID:%s' % (_MODEL_NAME, qid))
         if nids:
             note = mw.col.get_note(nids[0])
@@ -1901,6 +3434,18 @@ def convert_bank_to_deck(bid):
             note.tags = tags
             mw.col.add_note(note, qdid)
             added += 1
+        # Pin new-queue position to slide order (with gather=LOWEST_POSITION this
+        # makes the whole bank review in exact slideshow order across lectures).
+        _reposition_new(note, ordinal)
+    # Record the bank's deck id so a later deck rename can be synced back (see
+    # reconcile_names).
+    try:
+        reg = _load_registry()
+        if bid in reg["banks"] and reg["banks"][bid].get("did") != did:
+            reg["banks"][bid]["did"] = int(did)
+            _save_registry(reg)
+    except Exception as e:
+        log("store bank did: %s" % e)
     return (added, updated)
 
 
@@ -1948,7 +3493,7 @@ def docx_estimate_dialog(on_done=None):
     from aqt.qt import QFileDialog, QMessageBox
     from aqt.utils import tooltip, showWarning
     path, _ = QFileDialog.getOpenFileName(
-        mw, "Estimate .qb from .docx", "", "Word documents (*.docx)")
+        mw, "Build .qb from .docx", "", "Word documents (*.docx)")
     if not path:
         return
     try:
@@ -1962,7 +3507,7 @@ def docx_estimate_dialog(on_done=None):
     lects = len({q.get("lecture") for q in qs if q.get("lecture")})
     imgs = sum(1 for q in qs if q.get("media_rids"))
     m = QMessageBox(mw)
-    m.setWindowTitle("Estimate .qb from .docx")
+    m.setWindowTitle("Build .qb from .docx")
     m.setText("Parsed %d questions across %d lectures (%d with images)."
               % (len(qs), lects, imgs))
     m.setInformativeText("Create a .qb and import it now?\n(Untagged — matches by "

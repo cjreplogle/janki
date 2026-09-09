@@ -1424,6 +1424,18 @@ def _jp_resolve():
     mw._janki_last_resolved = cid
     pend = getattr(mw, "_janki_pending_grade", None)
     mw._janki_pending_grade = None
+    # Interspersed inline practice card (Trigger A): it was NOT served by the
+    # scheduler, so answer_card would desync the real queue. Resolve it ourselves
+    # (correct → suspend/retire, wrong → resurface, skip → drop) and advance.
+    try:
+        from ..features import intersperse
+        if intersperse.is_inline_active(cid):
+            correct = bool(pend and len(pend) >= 2 and pend[1])
+            answered = bool(pend and len(pend) >= 3 and pend[2])
+            intersperse.resolve_inline(cid, correct, answered)
+            return
+    except Exception as e:
+        log("intersperse resolve delegate: %s" % e)
     if pend and len(pend) >= 3 and pend[2]:
         _jp_apply_grade(pend[0], pend[1])
     else:
