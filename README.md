@@ -138,10 +138,8 @@ so nothing is left behind.
 ## Suggested Add-Ons
 
 These extra installs help tie together some theming:
-* [Anki Redesign](https://ankiweb.net/shared/info/2119814566)
-* [Change Interface Font](https://ankiweb.net/shared/info/1431333984)
-* [AMBOSS](https://www.amboss.com/us/anki)
-
+* [Anki Redesign](https://ankiweb.net/shared/info/2119814566) (Some menu animations)
+* [AMBOSS](https://www.amboss.com/us/anki) (Card underlines can explain terms, another integrated question bank)
 
 ## Support
 *If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features
