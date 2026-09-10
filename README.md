@@ -1,10 +1,10 @@
 # Janki
 
 A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins the reviewer with native frosted-glass
-transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), and adds some general QOL changes which should be particularly helpful for students at a certain medical school this project <ins>is not affiliated with</ins>.
+transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), integrates a practice question/review system, and provides a card scheduler that works with your calendar!
 
 >[!WARNING]
-> **Most of the visual/native features are macOS-only.** Older versions of Mac OS and Windows lack certain functionalities.
+> **Most of the visual/native features are macOS-only.** Older versions of MacOS and Windows lack certain functionalities.
 >
 > Some features within this add-on are still rather experimental. Please use at your own risk. 
 
@@ -18,7 +18,7 @@ There are two builds on the [Releases](../../releases) page — pick one:
   (details below). I use this.
 - **`load-todays-lectures.ankiaddon`** — a bare-bones version of the add-on that
   simply has the [Load today's lectures](docs/load-todays-lectures.md) import
-  functionality. Designed if you don't care about any of the other features.
+  functionality. Designed for if you don't care for any of the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
@@ -38,10 +38,10 @@ There are two builds on the [Releases](../../releases) page — pick one:
 > the restart.
 >
 > **Safe by design:** if the glass ever fails to start on your Anki version, Janki
-> automatically rolls its changes back on the next launch and opens plain Anki —
-> it will never leave you stuck on a broken/crashing app. You can re-enable it
+> automatically rolls its changes back on the next launch and opens plain Anki.
+> It should never leave you stuck with a broken/crashing app. You can re-enable it
 > later from **Tools → Janki: Settings… → General**. Prefer zero risk? Use the
-> **Safe** build, which never patches Anki at all.
+> **load-todays-lectures** build, which does not patch Anki at all.
 
 
 
@@ -142,8 +142,7 @@ These extra installs help tie together some theming:
 * [AMBOSS](https://www.amboss.com/us/anki) (Card underlines can explain terms, another integrated question bank)
 
 ## Support
-*If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features
-you think will be helpful to other people!* 
+*If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features you think will be helpful to other people!* 
 
 Janki is an independent, unofficial project. It is **not affiliated with, endorsed
 by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
@@ -154,10 +153,9 @@ your own local collection.
 
 As Janki has functionalities that patch the original code of Anki to improve visuals 
 and stamp cards for mobile effects. Certain functionalities, such as Lockdown Mode, 
-may also ask for system level permissions to work properly. Mac OS makes this a requirement
+may also ask for system level permissions to work properly. MacOS makes this a requirement
 for programs which automatically closing apps / disabling Wi-Fi on the device. There 
-may be bugs/issues I have not identified yet. Please use the less invasive "load today's
-lectures" version if you have concerns about this.
+may be bugs, issues, or inaccuracies I have not yet identified.
 
 [cjre.pl/ogle](https://cjre.pl/ogle/plain)
 
