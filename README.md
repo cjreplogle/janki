@@ -157,11 +157,11 @@ may also ask for system level permissions to work properly. MacOS makes this a r
 for programs which automatically closing apps / disabling Wi-Fi on the device. There 
 may be bugs, issues, or inaccuracies I have not yet identified.
 
-[cjre.pl/ogle](https://cjre.pl/ogle/plain)
-
 ## License
 
 Licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LICENSE)).
 Janki extends [Anki](https://github.com/ankitects/anki), which is also AGPL-3.0; the
 self-heal patches Anki's own files locally at runtime and does not redistribute
 Anki's source.
+
+[cjre.pl/ogle](https://cjre.pl/ogle/plain)
