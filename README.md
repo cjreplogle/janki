@@ -33,9 +33,6 @@ There are two builds on the [Releases](../../releases) page — pick one:
 > before Anki starts drawing — something an add-on alone can't do. Janki modifies
 > two of Anki's own files to enable it (backups are kept), and **re-applies
 > automatically after any Anki update**, prompting a quick restart when it does.
-> It only edits local rendering/startup code — your collection, sync, and login
-> are untouched. Everything except the visual glass still works even if you skip
-> the restart.
 
 
 
