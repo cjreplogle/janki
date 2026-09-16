@@ -533,9 +533,9 @@ class _FullscreenWatcher(QObject):
             if t == QEvent.Type.Close and obj is mw:
                 # Red-button close should quit everything: tear down the floating
                 # coherence HUD / XP bar so no stray window keeps the app alive.
-                # (Skipped when tray-minimize is intercepting the close.)
-                if not (_cfg().get("tray_minimize", False)
-                        and tray._tray_icon and tray._tray_icon.isVisible()):
+                # (Skipped when tray-minimize is intercepting the close — gate on the
+                # SETTING only; isVisible() is unreliable on newer macOS.)
+                if not _cfg().get("tray_minimize", False):
                     tray._teardown_glass_windows()
             elif t == QEvent.Type.WindowStateChange:
                 # Apply OLED synchronously & instantly (no grey-before-black flash).

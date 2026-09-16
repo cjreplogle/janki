@@ -122,6 +122,7 @@
   "deck_stats": true,
   "tray_minimize": true,
   "card_font": "Lora",
+  "cloze_color": "#6db3ff",
   "text_black_to_white": true,
   "light_mode_warning": true,
   "stock_selfheal": true,

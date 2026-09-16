@@ -2,9 +2,28 @@
 
 import sys
 from aqt import mw
-from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon
+from aqt.qt import QAction, QEvent, QMenu, QObject, Qt, QTimer, QSystemTrayIcon, QIcon
 
 from ..util.config import log, _cfg
+
+
+def _silhouette_icon():
+    """A monochrome white silhouette of the Anki star for the menu-bar instead of
+    the full-colour icon. Uses a bundled star-shaped PNG (anki-tray.png) — the macOS
+    app icon is a rounded-SQUARE tile, so masking it gave a blob; the bundled star
+    has a transparent background so its alpha is the real star shape. Marked as a
+    mask so macOS renders it as a template image (adapts: white on the dark menu
+    bar). Falls back to the app icon if the asset is missing / off macOS."""
+    try:
+        import os
+        png = os.path.join(os.path.dirname(__file__), "anki-tray.png")
+        if sys.platform == "darwin" and os.path.isfile(png):
+            ic = QIcon(png)
+            ic.setIsMask(True)     # NSImage template → adaptive silhouette
+            return ic
+    except Exception as e:
+        log(f"tray silhouette: {e}")
+    return mw.windowIcon()
 
 
 def _remember_state(prev_state=None) -> None:
@@ -100,7 +119,7 @@ def _apply_tray(on: bool) -> None:
     global _tray_icon, _tray_caption_action, _tray_focus_action, _tray_lockdown_action
     if on:
         if _tray_icon is None:
-            _tray_icon = QSystemTrayIcon(mw.windowIcon(), mw)
+            _tray_icon = QSystemTrayIcon(_silhouette_icon(), mw)
             menu = QMenu()
             # Mode toggles, mirrored from the Tab+\ / Tab+F hotkeys, so caption and
             # focus can be driven from the menu-bar icon even when Anki is unfocused.
@@ -137,10 +156,24 @@ def _apply_tray(on: bool) -> None:
         # intercept close-to-minimize (the filter itself is gated on tray_minimize,
         # so showing the icon for the mode controls doesn't hijack the close button)
         mw.installEventFilter(_tray_filter)
+        _install_close_hook()   # reliable primary path (event filter is the backup)
+        _install_reopen_hook()  # Dock-icon click / ⌘-Tab reopens the hidden window
+        # THE fix: keep the app alive when the main window is hidden/closed. Without
+        # this, macOS quits the app the moment the last window goes away — even
+        # though we swallowed the Close — so the tray icon disappears. Quitting is
+        # still available via ⌘Q / the tray "Quit" (both use unloadProfileAndExit).
+        try:
+            mw.app.setQuitOnLastWindowClosed(False)
+        except Exception as e:
+            log(f"quitOnLastWindowClosed: {e}")
     else:
         if _tray_icon is not None:
             _tray_icon.hide()
         mw.removeEventFilter(_tray_filter)
+        try:
+            mw.app.setQuitOnLastWindowClosed(True)
+        except Exception:
+            pass
 
 
 def _tray_should_show() -> bool:
@@ -165,16 +198,102 @@ def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
                 pass
 
 
+def _ensure_tray_target() -> None:
+    """Guarantee a menu-bar icon exists to restore from before we hide the window.
+    Don't rely on QSystemTrayIcon.isVisible() — it reports False on some macOS
+    versions even when the item is shown, which used to let the red-X close fall
+    through and QUIT Anki instead of minimizing."""
+    try:
+        if _tray_icon is None:
+            _apply_tray(True)
+        else:
+            _tray_icon.show()
+    except Exception as e:
+        log(f"ensure tray target: {e}")
+
+
+def _minimize_to_tray() -> None:
+    try:
+        _ensure_tray_target()
+        _remember_state()
+        _persist_geom()
+    except Exception as e:
+        log(f"tray minimize: {e}")
+    try:
+        mw.hide()
+    except Exception:
+        pass
+
+
+_close_hooked = False
+_reopen_hooked = False
+
+
+def _install_reopen_hook() -> None:
+    """Reopen the window when the app is activated while hidden — i.e. clicking the
+    Anki Dock icon (or ⌘-Tab back) after closing to the tray brings it back, the
+    same as clicking the menu-bar icon. No-op when a window is already showing."""
+    global _reopen_hooked
+    if _reopen_hooked:
+        return
+    try:
+        def _on_state(st):
+            try:
+                if st == Qt.ApplicationState.ApplicationActive and not mw.isVisible():
+                    _restore_window()
+                    try:
+                        from ..user import glass
+                        glass._wake_main_webviews()
+                    except Exception:
+                        pass
+            except Exception as e:
+                log(f"reopen on activate: {e}")
+        mw.app.applicationStateChanged.connect(_on_state)
+        _reopen_hooked = True
+    except Exception as e:
+        log(f"install reopen hook: {e}")
+
+
+def _install_close_hook() -> None:
+    """Override AnkiQt.closeEvent so the red-X just HIDES the window (keeping the
+    tray icon to reopen from) instead of quitting. This is the reliable primary
+    path — Qt always calls closeEvent, whereas an installed event filter can miss
+    the Close on some macOS/Qt builds. Only hides; no heavy work (can't hang)."""
+    global _close_hooked
+    if _close_hooked:
+        return
+    try:
+        from aqt.main import AnkiQt
+        _orig = AnkiQt.closeEvent
+
+        def _ce(self, event, _orig=_orig):
+            if self is mw and _cfg().get("tray_minimize", False):
+                try:
+                    event.ignore()
+                except Exception:
+                    pass
+                _minimize_to_tray()
+                return
+            return _orig(self, event)
+
+        AnkiQt.closeEvent = _ce
+        _close_hooked = True
+    except Exception as e:
+        log(f"install close hook: {e}")
+
+
 class _TrayFilter(QObject):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is mw and _cfg().get("tray_minimize", False) and _tray_icon and _tray_icon.isVisible():
+        # Gate on the SETTING only (not isVisible — see _ensure_tray_target).
+        if obj is mw and _cfg().get("tray_minimize", False):
             if event.type() == QEvent.Type.Close:
-                # Anki's closeEvent (which saves geometry) never runs when we
-                # swallow the Close, so remember the state + persist the size
-                # ourselves before hiding.
-                _remember_state()
-                _persist_geom()
-                mw.hide()
+                # Red-X → minimize to the menu bar instead of quitting. Anki's
+                # closeEvent (which saves geometry) never runs when we swallow the
+                # Close, so remember the state + persist the size ourselves first,
+                # and make sure the tray icon is present to restore from. Wrapped so
+                # that if ANY helper throws we STILL swallow the close (an exception
+                # here used to bubble out and let Anki quit anyway).
+                _minimize_to_tray()
                 return True
             if event.type() == QEvent.Type.WindowStateChange:
                 if mw.windowState() & Qt.WindowState.WindowMinimized:

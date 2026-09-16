@@ -255,6 +255,18 @@ def merge_banks(bids, new_name):
                             pass
                     new_media.append(arc)
                 q["media"] = new_media
+            sl = q.get("slide")
+            if sl:
+                sp = os.path.join(src_media, sl); arc = sl
+                dp = os.path.join(dest_media, arc)
+                if os.path.exists(dp):
+                    arc = "%s_%s" % (_safe(b), sl); dp = os.path.join(dest_media, arc)
+                if os.path.isfile(sp):
+                    try:
+                        shutil.copyfile(sp, dp)
+                    except Exception:
+                        pass
+                q["slide"] = arc
             merged_qs.append(q)
 
     with open(os.path.join(dest, "questions.jsonl"), "w", encoding="utf-8") as f:
@@ -329,6 +341,18 @@ def nest_bank(src_bid, dest_bid):
                         pass
                 new_media.append(arc)
             q["media"] = new_media
+        sl = q.get("slide")
+        if sl:
+            sp = os.path.join(src_media, sl); arc = sl
+            dp = os.path.join(dest_media, arc)
+            if os.path.exists(dp):
+                arc = "%s_%s" % (_safe(src_bid), sl); dp = os.path.join(dest_media, arc)
+            if os.path.isfile(sp):
+                try:
+                    shutil.copyfile(sp, dp)
+                except Exception:
+                    pass
+            q["slide"] = arc
         dest_qs.append(q)
 
     _rewrite_bank(dest_dir, dest_qs)                  # writes questions.jsonl
@@ -740,6 +764,9 @@ def _normalize_q(q):
         "lecture": q.get("lecture", ""),
         "source": q.get("source", "bank"),
         "media": q.get("media") or [],
+        "slide": q.get("slide") or "",
+        "ans_slide": q.get("ans_slide") or "",
+        "slide_no": q.get("slide_no") or "",
         "figure_only": bool(q.get("figure_only")),
         "incomplete": q.get("incomplete") or "",
     }
@@ -1868,7 +1895,8 @@ def _parse_ocr_blocks(blocks):
         elif _has_answers(lines):           # → an answer slide
             pending = None
             for num, letter, rat in _extract_answers(lines):
-                answers.append((len(questions), num, letter, rat, category))
+                # keep `path` = the answer/explanation slide image, to attach later
+                answers.append((len(questions), num, letter, rat, category, path))
         elif case:                          # a pure shared-case / range panel
             for l in lines:                 # may also be a shared *figure* range
                 mr = _RE_P_QRANGE.search(l)
@@ -1903,7 +1931,7 @@ def _parse_ocr_blocks(blocks):
                     if 0 < lo <= hi <= lo + 20:
                         range_figs.append((category, lo, hi, [path]))
 
-    for pos, num, letter, rat, category in answers:
+    for pos, num, letter, rat, category, ans_path in answers:
         pool = [q for q in questions[:pos]
                 if q["_cat"] == category and q["answer"] is None]
         target = idx = None
@@ -1928,6 +1956,8 @@ def _parse_ocr_blocks(blocks):
         if target is not None and idx is not None and 0 <= idx < len(target["choices"]):
             target["answer"] = idx
             target["explanation"] = rat
+            if ans_path:
+                target["_ans_slide_src"] = ans_path   # explanation/answer slide image
 
     # Attach figures: a separate figure image on the question's slide, a shared
     # "Questions X-Y" figure panel (on an earlier slide), or (for an embedded
@@ -1957,6 +1987,11 @@ def _parse_ocr_blocks(blocks):
     good, incomplete = [], []
     for q in questions:
         src = q.get("_src")
+        if src:
+            q["_slide_src"] = src          # keep the source slide for later viewing/editing
+        sn = q.get("_slide")
+        if sn is not None:
+            q["slide_no"] = sn + 1         # 1-based slide number for easy reference
         for k in ("_num", "_cat", "_slide", "_src"):
             q.pop(k, None)
         if q["stem"] and len(q["choices"]) >= 2 and q["answer"] is not None:
@@ -1980,6 +2015,29 @@ def _parse_ocr_blocks(blocks):
     return good, len(questions), incomplete
 
 
+def _shrink_image_bytes(path, max_w=1400, quality=80):
+    """Downscale (to `max_w` wide) and JPEG-compress an image to bytes, for storing
+    lightweight reference slides in a .qb. Returns None on any failure so the caller
+    can fall back to the original file."""
+    try:
+        from aqt.qt import Qt, QImage, QByteArray, QBuffer, QIODevice
+        img = QImage(path)
+        if img.isNull():
+            return None
+        if img.width() > max_w:
+            img = img.scaledToWidth(
+                max_w, Qt.TransformationMode.SmoothTransformation)
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not img.save(buf, "JPG", quality):
+            return None
+        return bytes(ba)
+    except Exception as e:
+        log("qbank shrink image: %s" % e)
+        return None
+
+
 def _write_qb_plain(out_path, base_name, qs):
     """Write a .qb from already-parsed question dicts, copying any attached figure
     images (from each question's `_media_paths`) into media/ and recording their
@@ -1988,7 +2046,8 @@ def _write_qb_plain(out_path, base_name, qs):
            "name": base_name.replace("_", " "), "version": "1", "author": "internal",
            "family": "", "match": "text", "count": len(qs)}
     fields = ("id", "stem", "choices", "answer", "explanation", "lecture",
-              "objective", "tags", "source", "media", "figure_only", "incomplete")
+              "objective", "tags", "source", "media", "slide", "ans_slide",
+              "slide_no", "figure_only", "incomplete")
     written = {}            # src temp path → media/<arc name>
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(man, indent=2))
@@ -2006,6 +2065,45 @@ def _write_qb_plain(out_path, base_name, qs):
                 names.append(written[sp])
             if names:
                 q["media"] = list(dict.fromkeys(names))
+            # The original slide screenshot — stored (not shown on the card) only so
+            # it can be viewed/compared when correcting a mis-parsed question. It's a
+            # reference image, not study content, so downscale + JPEG-compress it to
+            # keep the .qb light (raw slide PNGs would bloat a bank by 10-100×).
+            sp = q.get("_slide_src")
+            if sp:
+                if sp not in written:
+                    arc = "s%d.jpg" % len(written)
+                    data = _shrink_image_bytes(sp)
+                    try:
+                        if data is not None:
+                            z.writestr("media/" + arc, data)
+                        else:
+                            arc = "s%d%s" % (len(written),
+                                             os.path.splitext(sp)[1] or ".png")
+                            z.write(sp, "media/" + arc)   # fallback: store as-is
+                        written[sp] = arc
+                    except OSError:
+                        pass
+                if sp in written:
+                    q["slide"] = written[sp]
+            # The answer/explanation slide (shown on the back), same compression.
+            ap = q.get("_ans_slide_src")
+            if ap:
+                if ap not in written:
+                    arc = "a%d.jpg" % len(written)
+                    data = _shrink_image_bytes(ap)
+                    try:
+                        if data is not None:
+                            z.writestr("media/" + arc, data)
+                        else:
+                            arc = "a%d%s" % (len(written),
+                                             os.path.splitext(ap)[1] or ".png")
+                            z.write(ap, "media/" + arc)
+                        written[ap] = arc
+                    except OSError:
+                        pass
+                if ap in written:
+                    q["ans_slide"] = written[ap]
         clean = [{k: q[k] for k in fields if k in q} for q in qs]
         z.writestr("questions.jsonl",
                    "\n".join(json.dumps(q, ensure_ascii=False) for q in clean))
@@ -3076,9 +3174,99 @@ _JP_SIZE_JS = (
     "for(i=0;i<cs.length;i++){if(!vis(cs[i]))continue;if(!one(cs[i])){box.classList.remove('jp-big');break;}}}"
     "};}"
 )
+# Correct answer is stored in the editable {{Answer}} field (a letter A–F, or a
+# 1-based number) and rendered into a hidden #jp-answer element. This marks the
+# matching choice .jp-correct AT RENDER TIME, so editing the Answer field in Anki's
+# note editor (or the Janki editor) changes which choice is right everywhere —
+# front tint, back highlight, and grading — with no rebuild. If the field is empty
+# (older cards not yet re-converted) the baked .jp-correct class is left as-is.
+_JP_ANSWER_JS = (
+    "if(!window.jankiMarkCorrect){window.jankiMarkCorrect=function(){"
+    "var box=document.getElementById('jp-choices');"
+    "var ans=document.getElementById('jp-answer');"
+    "if(!box||!ans)return;var v=(ans.textContent||'').trim();if(!v)return;"
+    "var cs=box.querySelectorAll('.jp-choice');var idx=-1;"
+    "if(/^[A-Za-z]$/.test(v)){idx=v.toUpperCase().charCodeAt(0)-65;}"
+    "else{var n=parseInt(v,10);if(!isNaN(n))idx=n-1;}"
+    "if(idx<0||idx>=cs.length)return;"
+    "for(var i=0;i<cs.length;i++)cs[i].classList.remove('jp-correct');"
+    "cs[idx].classList.add('jp-correct');};}"
+)
+# "Show original slide" toggle: swaps the (possibly mis-parsed) question text/choices
+# for the stored source-slide image, as a fallback. The button is baked into the card
+# template (so it works on AnkiMobile too) and positioned by CSS — bottom-left on
+# desktop, bottom-center on mobile. State persists across cards via sessionStorage;
+# stopPropagation so tapping it never flips the card.
+_JP_SLIDE_JS = (
+    "if(!window.jankiApplySlide){"
+    "window.jankiApplySlide=function(open){"
+    # Render the slide as a full-viewport, self-scrolling OVERLAY (position:fixed;
+    # inset:0) rather than in the card flow — the reviewer's card layout (zoom / vh /
+    # centering) was clipping the top of a tall slide in every mode; a fixed overlay
+    # sidesteps it entirely, showing the whole image from its true top, scrollable.
+    "var q=document.getElementById('jp-slide');"
+    "var a=document.getElementById('jp-ans-slide');"
+    "if(!q&&!a)return;"                                 # no slide on this card → no-op
+    "var isBack=!!document.querySelector('.jp-answered');"
+    "var tgt=open?((isBack&&a)?a:q):null;"              # back → answer slide, else question
+    "[q,a].forEach(function(el){if(!el)return;el.classList.remove('jp-overlay');"
+    "if(el!==tgt)el.style.display='none';});"
+    "if(tgt){tgt.style.display='block';tgt.classList.add('jp-overlay');"
+    "try{tgt.scrollTop=0;}catch(_){}}"
+    "var btn=document.getElementById('jp-slide-btn');"
+    "if(btn)btn.textContent=open?'Show question':'Show original slide';"
+    # Showing the slide = the parse is untrusted → restore Anki's real Again/Hard/
+    # Good/Easy to self-grade; put the binary Continue back in normal mode.
+    "try{if(typeof pycmd!=='undefined')pycmd('janki-slide:'+(open?'1':'0'));}catch(_){}};"
+    "window.jankiToggleSlide=function(){"
+    "var cur=false;try{cur=sessionStorage.getItem('jp_show_slide')==='1';}catch(_){}"
+    "var nw=!cur;try{sessionStorage.setItem('jp_show_slide',nw?'1':'0');}catch(_){}"
+    "window.jankiApplySlide(nw);};"
+    "window.jankiSlideInit=function(){"
+    # Only when this card has a stored slide (#jp-slide or #jp-ans-slide).
+    "var has=!!(document.getElementById('jp-slide')||"
+    "document.getElementById('jp-ans-slide'));"
+    "var btn=document.getElementById('jp-slide-btn');"
+    "if(!has){if(btn&&btn.parentNode)btn.parentNode.removeChild(btn);return;}"
+    # Create the button in JS and attach it to <body> (NOT inside #qa/.card): that
+    # escapes any transformed ancestor, so position:fixed pins to the real viewport
+    # — the reliable way to reach the screen bottom on AnkiMobile. Persists across
+    # card renders (it lives outside #qa), so there's never a duplicate.
+    "if(!btn){btn=document.createElement('button');btn.id='jp-slide-btn';"
+    "btn.type='button';btn.className='jp-slide-btn';document.body.appendChild(btn);}"
+    "else if(btn.parentNode!==document.body){document.body.appendChild(btn);}"
+    "if(!btn._jpwired){btn._jpwired=true;"
+    "var go=function(e){if(e){if(e.preventDefault)e.preventDefault();"
+    "if(e.stopPropagation)e.stopPropagation();}window.jankiToggleSlide();};"
+    "btn.addEventListener('click',go);btn.addEventListener('touchend',go,{passive:false});}"
+    # MOBILE: AnkiMobile/WKWebView often anchors position:fixed to the card content
+    # (not the viewport), so the button rides up with a short card. Pin it to the LIVE
+    # viewport bottom in document coords via visualViewport, re-placed on scroll/resize.
+    "var isMob=/(mobile|iphone|ipad|ipod|android)/i.test("
+    "(document.body&&document.body.className||'')+' '+"
+    "(document.documentElement&&document.documentElement.className||''));"
+    "if(isMob&&!btn._jpmob){btn._jpmob=true;"
+    "var place=function(){var vv=window.visualViewport;"
+    "var vh=vv?vv.height:window.innerHeight;var voff=vv?vv.offsetTop:0;"
+    "var sy=window.pageYOffset||document.documentElement.scrollTop||0;"
+    "btn.style.position='absolute';btn.style.bottom='auto';btn.style.left='50%';"
+    "btn.style.transform='translateX(-50%)';"
+    "btn.style.top=(sy+voff+vh-btn.offsetHeight-6)+'px';};"
+    "btn._jpplace=place;"
+    "window.addEventListener('scroll',place,{passive:true});"
+    "window.addEventListener('resize',place);"
+    "if(window.visualViewport){visualViewport.addEventListener('resize',place);"
+    "visualViewport.addEventListener('scroll',place);}"
+    "setTimeout(place,0);setTimeout(place,300);}"
+    "else if(isMob&&btn._jpplace){setTimeout(btn._jpplace,0);}"
+    "var rem=false;try{rem=sessionStorage.getItem('jp_show_slide')==='1';}catch(_){}"
+    "window.jankiApplySlide(rem);};}"
+)
 _FRONT_JS = (
     "(function(){if(document.querySelector('.jp-answered'))return;"  # back re-runs this; skip it
     "var box=document.getElementById('jp-choices');if(!box)return;"
+    + _JP_ANSWER_JS + "window.jankiMarkCorrect();"
+    + _JP_SLIDE_JS + "window.jankiSlideInit();"
     # Tint a choice box via INLINE styles (not just a class) so the fill shows even
     # when an older/stale note-type CSS is deployed — inline beats a non-!important
     # stylesheet rule, so the box always colours in step with the whole-card tint.
@@ -3194,6 +3382,8 @@ _BACK_JS = (
     "(function(){"
     + _JP_TINT_JS +
     _JP_SIZE_JS +
+    _JP_ANSWER_JS + "window.jankiMarkCorrect();"   # correct from editable {{Answer}}
+    + _JP_SLIDE_JS + "window.jankiSlideInit();"
     # Tap helper: bind an action to BOTH touch (AnkiMobile) and click (desktop)
     # without double-firing OR triggering AnkiMobile's tap-to-advance gesture. We
     # swallow touchstart+touchend (preventDefault + stopPropagation) so the tap never
@@ -3357,6 +3547,16 @@ _BACK_JS = (
 )
 _FRONT_TMPL = ('<div class="jp-stem">{{Question}}</div>\n'
                '<div class="jp-choices" id="jp-choices">{{Choices}}</div>\n'
+               # Editable correct-answer holder (a letter A–F). Hidden; read by
+               # jankiMarkCorrect to mark the right choice. Flows to the back via
+               # {{FrontSide}}, so the answer highlight is field-driven too.
+               '<div id="jp-answer" style="display:none">{{Answer}}</div>\n'
+               # Original-slide fallback: just the hidden slide container. The toggle
+               # BUTTON is created by jankiSlideInit and attached to <body> (so it
+               # escapes transformed ancestors and position:fixed reaches the real
+               # screen bottom, incl. AnkiMobile). Only when a slide exists ({{#Slide}}).
+               '{{#Slide}}<div class="jp-slide" id="jp-slide" style="display:none">'
+               '{{Slide}}</div>{{/Slide}}\n'
                '<script>' + _FRONT_JS + '</script>')
 _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
               '{{#Explanation}}<div class="jp-explain">'
@@ -3367,6 +3567,14 @@ _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
               '</div>'
               '<div class="jp-explain-body" id="jp-explain-body">{{Explanation}}</div>'
               '</div>{{/Explanation}}\n'
+              # The original answer/explanation slide, shown on the back for reference
+              # (fallback when the parsed rationale is wrong/incomplete). Only when a
+              # slide is stored ({{#AnsSlide}}).
+              # Answer slide — hidden by default (normal mode shows the TEXT
+              # explanation above); revealed only in "slide mode" (the toggle).
+              '{{#AnsSlide}}<div class="jp-ans-slide" id="jp-ans-slide" '
+              'style="display:none"><div class="jp-ans-slide-h">Answer slide</div>'
+              '{{AnsSlide}}</div>{{/AnsSlide}}\n'
               '<script>' + _BACK_JS + '</script>')
 # Choice boxes fade/slide in one-by-one on the FRONT (a reveal touch that matches
 # the text-scroll); on the BACK (.jp-answered) the animation is disabled so the
@@ -3484,6 +3692,37 @@ _CARD_CSS = (
     "border:1px solid rgba(120,230,160,0.5);transition:background .15s,transform .05s;}"
     ".jp-continue:hover{background:rgba(80,200,130,0.28);}"
     ".jp-continue:active{transform:scale(0.98);}"
+    # Slide mode = a full-viewport, self-scrolling overlay (added by jankiApplySlide).
+    # position:fixed;inset:0 escapes the card's zoom/vh/centering layout that was
+    # clipping a tall slide's top; the image shows in full from its true top, scrollable.
+    ".jp-slide.jp-overlay,.jp-ans-slide.jp-overlay{position:fixed!important;"
+    "top:0!important;right:0!important;bottom:0!important;left:0!important;"
+    "z-index:25!important;overflow:auto!important;background:#1c1d21!important;"
+    "margin:0!important;padding:16px!important;border:none!important;"
+    "box-sizing:border-box!important;-webkit-overflow-scrolling:touch;}"
+    ".jp-slide.jp-overlay img,.jp-ans-slide.jp-overlay img{max-width:100%!important;"
+    "max-height:none!important;height:auto!important;display:block!important;"
+    "margin:0 auto!important;border-radius:6px!important;}"
+    # Original-slide fallback button: pinned bottom-left on desktop (low, just above
+    # the bottom bar), and bottom-CENTER on mobile (AnkiMobile has no such bar).
+    ".jp-slide-btn{position:fixed;left:10px;bottom:0;z-index:30;cursor:pointer;"
+    "font-size:0.52em;color:#9fb4d8;opacity:0.55;background:rgba(28,29,33,0.7);"
+    "border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 9px;}"
+    ".jp-slide-btn:hover{opacity:1;color:#fff;}"
+    ".mobile .jp-slide-btn,.iphone .jp-slide-btn,.ipad .jp-slide-btn,"
+    ".android .jp-slide-btn{left:50%;right:auto;"
+    "bottom:calc(env(safe-area-inset-bottom, 0px));"
+    "transform:translateX(-50%);font-size:0.62em;padding:5px 12px;}"
+    ".jp-slide img{display:block;max-width:100%;max-height:80vh;height:auto;"
+    "width:auto;margin:0 auto;border-radius:8px;}"
+    # Answer/explanation slide shown on the back.
+    ".jp-ans-slide{margin-top:22px;padding-top:16px;"
+    "border-top:1px solid rgba(255,255,255,0.12);"
+    "animation:jpSlideUp .4s ease-out both;animation-delay:.15s;}"
+    ".jp-ans-slide-h{font-weight:600;color:#9fb4d8;margin-bottom:8px;"
+    "letter-spacing:.02em;text-transform:uppercase;font-size:0.78em;}"
+    ".jp-ans-slide img{display:block;max-width:100%;max-height:70vh;height:auto;"
+    "width:auto;margin:0 auto;border-radius:8px;}"
     # Phone-width screens: shrink the answer + rationale text so the card isn't
     # crowded (a bit tighter choice padding too).
     "@media (max-width:520px){"
@@ -3503,6 +3742,16 @@ def _ensure_model():
         if m.get("css") != _CARD_CSS:
             m["css"] = _CARD_CSS
             changed = True
+        # Migrate: add fields introduced after this deck was built (Answer, the
+        # slide number, and the slide image) so older Practice decks gain them.
+        try:
+            have = {f.get("name") for f in m.get("flds", [])}
+            for fld in ("Answer", "SlideNo", "Slide", "AnsSlide"):
+                if fld not in have:
+                    mm.add_field(m, mm.new_field(fld))
+                    changed = True
+        except Exception:
+            pass
         try:
             t = m["tmpls"][0]
             if t.get("qfmt") != _FRONT_TMPL or t.get("afmt") != _BACK_TMPL:
@@ -3521,7 +3770,8 @@ def _ensure_model():
                     pass
         return m
     m = mm.new(_MODEL_NAME)
-    for f in ("Question", "Choices", "Explanation", "QID"):
+    for f in ("Question", "Choices", "Answer", "Explanation",
+              "SlideNo", "Slide", "AnsSlide", "QID"):
         mm.add_field(m, mm.new_field(f))
     t = mm.new_template("Practice")
     t["qfmt"] = _FRONT_TMPL
@@ -3550,6 +3800,7 @@ def apply_practice_prefs(persist=False):
     # returns later this session can be resolved again (see css._jp_resolve).
     try:
         mw._janki_last_resolved = None
+        mw._janki_slide_fallback = False   # slide fallback is per-card; reset each render
     except Exception:
         pass
     try:
@@ -3743,6 +3994,27 @@ def sync_practice_bottom():
         pass
 
 
+def cleanup_slide_button_if_not_practice():
+    """The slide toggle is attached to <body>, so on desktop (where the card webview
+    persists across cards) it would linger onto a non-practice card — whose template
+    JS never runs to remove it. Strip it here when the current card isn't a Janki
+    Practice card. (Practice cards manage it themselves via jankiSlideInit; AnkiMobile
+    reloads per card so it's a non-issue there.)"""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    try:
+        r = getattr(mw, "reviewer", None)
+        card = getattr(r, "card", None) if r else None
+        is_practice = (card is not None
+                       and (card.note_type() or {}).get("name") == _MODEL_NAME)
+        if not is_practice:
+            web.eval("(function(){var b=document.getElementById('jp-slide-btn');"
+                     "if(b&&b.parentNode)b.parentNode.removeChild(b);})();")
+    except Exception:
+        pass
+
+
 def sync_practice_model_if_present():
     """Refresh the Janki Practice note type's CSS/template to the current add-on
     version IF it already exists — so styling fixes (e.g. the opaque picked-choice
@@ -3755,6 +4027,38 @@ def sync_practice_model_if_present():
         log("practice model sync: %s" % e)
 
 
+def _answer_letter(q):
+    """The correct choice as a letter (A–F) for the editable Answer field, or ""."""
+    ch = q.get("choices") or []
+    ci = _correct_index(q)
+    return chr(65 + ci) if 0 <= ci < len(ch) else ""
+
+
+def _slide_html(q, dir_name):
+    """`<img>` for the question's stored source slide, added to the collection's
+    media so it shows in Anki's note editor (the Slide field). "" if none stored.
+    Not placed on the card template — this is a reference image for the editor."""
+    return _media_img_field(q.get("slide"), dir_name)
+
+
+def _ans_slide_html(q, dir_name):
+    """`<img>` for the answer/explanation slide, shown on the back. "" if none."""
+    return _media_img_field(q.get("ans_slide"), dir_name)
+
+
+def _media_img_field(name, dir_name):
+    if not name:
+        return ""
+    src = os.path.join(_qbanks_dir(), dir_name, "media", name)
+    if not os.path.isfile(src):
+        return ""
+    try:
+        fn = mw.col.media.add_file(src)
+        return '<img src="%s">' % fn
+    except Exception:
+        return ""
+
+
 def _choices_html(q):
     from html import escape
     ch = q.get("choices") or []
@@ -3765,6 +4069,203 @@ def _choices_html(q):
         rows.append('<div class="%s"><span class="jp-letter">%s.</span> %s</div>'
                     % (cls, chr(65 + j), escape(_plain(c))))
     return "\n".join(rows)
+
+
+def _locate_by_qid(qid):
+    """Find the bank question behind a Practice card's QID (bid_ordinal). Returns
+    (bid, dir_name, qs_list, index) or None. `qs_list` is the live cached list, so
+    mutating qs_list[index] and calling _rewrite_bank persists the edit."""
+    if not qid:
+        return None
+    for bid, meta in list_banks().items():
+        dir_name = meta.get("dir", "")
+        qs = _bank_questions(dir_name)
+        ordinal = 0
+        for i, q in enumerate(qs):
+            if not isinstance(q, dict):
+                continue
+            if not q.get("stem") and not q.get("incomplete"):
+                continue
+            ordinal += 1
+            if _safe("%s_%d" % (bid, ordinal)) == qid:
+                return bid, dir_name, qs, i
+    return None
+
+
+def edit_question_dialog(card=None, on_done=None):
+    """View the original slide and edit a practice card's stem / choices / correct
+    answer / explanation on the user end. Writes back to the .qb bank (so it
+    survives rebuilds) AND updates the live Anki card. Operates on the current
+    reviewer card by default."""
+    from aqt.qt import (Qt, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                        QPlainTextEdit, QPushButton, QRadioButton, QButtonGroup,
+                        QScrollArea, QWidget, QPixmap)
+    from aqt.utils import tooltip, showWarning
+    r = getattr(mw, "reviewer", None)
+    card = card or (getattr(r, "card", None) if r else None)
+    if card is None:
+        tooltip("Open a practice card in the reviewer first.")
+        return
+    try:
+        note = card.note()
+        if (note.note_type() or {}).get("name") != _MODEL_NAME:
+            tooltip("This isn't a Janki practice card.")
+            return
+    except Exception:
+        return
+    qid = note["QID"] if "QID" in note else ""
+    loc = _locate_by_qid(qid)
+    if not loc:
+        showWarning("Couldn't find this card's source question in any imported "
+                    "bank (it may have been added manually or its bank removed).")
+        return
+    bid, dir_name, qs, idx = loc
+    q = qs[idx]
+
+    dlg = QDialog(mw)
+    dlg.setWindowTitle("Edit practice question")
+    dlg.setMinimumWidth(660)
+    v = QVBoxLayout(dlg)
+
+    # Original slide (stored on newer imports) — shown for comparison.
+    slide_name = q.get("slide") or next(iter(q.get("media") or []), None)
+    img_path = None
+    if slide_name:
+        p = os.path.join(_qbanks_dir(), dir_name, "media", slide_name)
+        if os.path.isfile(p):
+            img_path = p
+    if img_path:
+        _sn = q.get("slide_no")
+        v.addWidget(QLabel("Original slide%s:"
+                           % ((" (slide %s)" % _sn) if _sn else "")))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(260)
+        lbl = QLabel()
+        pm = QPixmap(img_path)
+        if not pm.isNull():
+            lbl.setPixmap(pm.scaledToWidth(
+                620, Qt.TransformationMode.SmoothTransformation))
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scroll.setWidget(lbl)
+        v.addWidget(scroll)
+    else:
+        hint = QLabel("No original slide stored for this card. Newer imports keep "
+                      "the source slide — re-import this bank to view it here.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+        v.addWidget(hint)
+
+    v.addWidget(QLabel("Question:"))
+    stem_edit = QPlainTextEdit(_plain(q.get("stem", "")))
+    stem_edit.setFixedHeight(84)
+    v.addWidget(stem_edit)
+
+    v.addWidget(QLabel("Choices — select the correct one (clear a box to remove it):"))
+    grp = QButtonGroup(dlg)
+    rows_host = QWidget()
+    rows_v = QVBoxLayout(rows_host)
+    rows_v.setContentsMargins(0, 0, 0, 0)
+    rows = []                       # (radio, line_edit) in display order
+    ci = _correct_index(q)
+
+    def _add_row(text="", correct=False):
+        rb = QRadioButton()
+        grp.addButton(rb)
+        le = QLineEdit(text)
+        rb.setChecked(correct)
+        row = QHBoxLayout()
+        row.addWidget(rb)
+        row.addWidget(le)
+        w = QWidget()
+        w.setLayout(row)
+        rows_v.addWidget(w)
+        rows.append((rb, le))
+
+    for j, c in enumerate(q.get("choices") or []):
+        _add_row(_plain(c), j == ci)
+    if not rows:
+        _add_row("", True)
+    v.addWidget(rows_host)
+
+    add_btn = QPushButton("+ Add choice")
+    add_btn.clicked.connect(lambda: _add_row("", False))
+    v.addWidget(add_btn)
+
+    v.addWidget(QLabel("Explanation / rationale:"))
+    exp_edit = QPlainTextEdit(_plain(q.get("explanation", "")))
+    exp_edit.setFixedHeight(90)
+    v.addWidget(exp_edit)
+
+    btns = QHBoxLayout()
+    btns.addStretch()
+    cancel = QPushButton("Cancel")
+    cancel.clicked.connect(dlg.reject)
+    save = QPushButton("Save")
+    save.setDefault(True)
+    btns.addWidget(cancel)
+    btns.addWidget(save)
+    v.addLayout(btns)
+
+    def _save():
+        # Keep non-empty choices in order; the correct index is the checked row's
+        # position among the kept choices.
+        kept, correct_idx = [], None
+        for rb, le in rows:
+            t = le.text().strip()
+            if not t:
+                continue
+            if rb.isChecked():
+                correct_idx = len(kept)
+            kept.append(t)
+        q["stem"] = stem_edit.toPlainText().strip()
+        q["choices"] = kept
+        q["answer"] = correct_idx
+        q["explanation"] = exp_edit.toPlainText().strip()
+        # Resolved a previously-incomplete card?
+        if q.get("incomplete") and q["stem"] and len(kept) >= 2 and correct_idx is not None:
+            q.pop("incomplete", None)
+            q.pop("figure_only", None)     # it's a real MCQ now, not a raw screenshot
+        _rewrite_bank(dir_name, qs)
+        # Push the edit onto the live Anki card.
+        try:
+            note["Question"] = _stem_html(q, dir_name)
+            note["Choices"] = _choices_html(q)
+            if "Answer" in note:
+                note["Answer"] = _answer_letter(q)
+            if "SlideNo" in note:
+                note["SlideNo"] = str(q.get("slide_no") or "")
+            if "Slide" in note:
+                note["Slide"] = _slide_html(q, dir_name)
+            if "AnsSlide" in note:
+                note["AnsSlide"] = _ans_slide_html(q, dir_name)
+            note["Explanation"] = _plain(q.get("explanation", ""))
+            if not q.get("incomplete") and _INCOMPLETE_TAG in note.tags:
+                note.tags = [t for t in note.tags if t != _INCOMPLETE_TAG]
+            mw.col.update_note(note)
+        except Exception as e:
+            log("edit question note update: %s" % e)
+        # Re-render if it's the card currently on screen.
+        try:
+            if r is not None and getattr(r, "card", None) is not None \
+                    and r.card.nid == note.id:
+                r.card.load()
+                if getattr(r, "state", None) == "answer":
+                    r._showAnswer()
+                else:
+                    r._showQuestion()
+        except Exception:
+            pass
+        tooltip("Saved. The card and its bank were updated.")
+        dlg.accept()
+        if on_done:
+            try:
+                on_done()
+            except Exception:
+                pass
+
+    save.clicked.connect(_save)
+    dlg.exec()
 
 
 def _stem_html(q, dir_name):
@@ -3889,7 +4390,11 @@ def convert_bank_to_deck(bid):
             seen_dids.add(qdid)
         fields = {"Question": _stem_html(q, dir_name),
                   "Choices": _choices_html(q),
+                  "Answer": _answer_letter(q),
                   "Explanation": _plain(q.get("explanation", "")),
+                  "SlideNo": str(q.get("slide_no") or ""),
+                  "Slide": _slide_html(q, dir_name),
+                  "AnsSlide": _ans_slide_html(q, dir_name),
                   "QID": qid}
         tags = [str(t) for t in (q.get("tags") or [])]
         tt = _theme_tag(q.get("lecture"))   # tag the card by its section theme

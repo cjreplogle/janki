@@ -6,7 +6,7 @@ from aqt import mw
 from aqt.qt import Qt, QTimer
 
 from ..util.bridge import _bridge
-from ..util.config import _cfg
+from ..util.config import _cfg, log
 from ..util import state
 from . import card_timer
 from ..util import keytap
@@ -122,18 +122,15 @@ _focus_mode_on = False
 _focus_hidden = False   # whether the chrome is currently hidden
 
 # CSS applied to the reviewer webview while Focus Mode is engaged: hide the card
-# tags and vertically centre the card text in the window (the chrome is hidden so
-# the card owns the full height). Uses height:100% (not 100vh — QtWebEngine
-# mis-resolves vh).
+# tags and let the card own the full height. Uses a plain BLOCK layout (top-aligned,
+# scrollable) — NOT flex: a flex column combined with the card `zoom` clipped the top
+# of tall content in QtWebEngine and blocked scrolling to it. Block layout flows the
+# card from its true top, keeps the top visible, and scrolls when tall.
 _FOCUS_CSS = (
     "#tags-container{display:none!important;}"
-    "html,body{height:100%!important;}"
+    "html{height:100%!important;}"
     "body{min-height:100%!important;box-sizing:border-box!important;"
-    "display:flex!important;flex-direction:column!important;"
-    # `safe center`: centre short cards, but fall back to top-alignment the moment
-    # the content is taller than the viewport (revealed back / small window) so the
-    # top never gets clipped or pushed off-screen.
-    "justify-content:safe center!important;}"
+    "display:block!important;padding-top:12px!important;overflow-y:auto!important;}"
 )
 
 
@@ -204,6 +201,30 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0) -> None:
         web.eval(js)
     except Exception:
         pass
+
+
+def _focus_clear_anchor() -> None:
+    """Drop the inline answer-anchor overrides so the card falls back to the
+    stylesheet's `safe center` (used for questions, and on Focus Mode exit)."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    try:
+        web.eval("(function(){var b=document.body;if(!b)return;"
+                 "b.style.removeProperty('justify-content');"
+                 "b.style.removeProperty('padding-top');})()")
+    except Exception:
+        pass
+
+
+def _focus_position_card() -> None:
+    """No-op now that Focus Mode top-aligns the card (_FOCUS_CSS uses flex-start):
+    the card starts at the top and the answer grows downward, so there's no flip
+    shift to compensate for. Just clear any stale inline anchor from the old
+    centred layout so it can't add unwanted top padding."""
+    if not _focus_hidden:
+        return
+    _focus_clear_anchor()
 
 
 def _reassert_web_focus() -> None:
@@ -326,6 +347,7 @@ def _focus_set_hidden(hidden: bool) -> None:
                 pass
         _reclaim_central_layout()
         _focus_apply_card(False, -toolbar_h)  # -toolbar_h: card jumped down, slide up
+        _focus_clear_anchor()                 # drop any answer-anchor inline overrides
         for wv in chrome:
             _fade_chrome(wv, True)
 

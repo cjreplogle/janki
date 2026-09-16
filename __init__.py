@@ -146,8 +146,13 @@ def _startup():
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
         # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a
         # restart. No-op on a source build, when already patched, or on an
-        # unvalidated Anki version. See stock_selfheal.py.
-        stock_selfheal.maybe_self_heal()
+        # unvalidated Anki version. See stock_selfheal.py. Wrapped so a self-heal
+        # failure on a new Anki version can NEVER abort the rest of startup (which
+        # would silently drop the tray/close-to-tray + every feature below).
+        try:
+            stock_selfheal.maybe_self_heal()
+        except Exception as _sh_exc:
+            log(f"self-heal: {_sh_exc}")
 
         # Expose the bundled web assets (Lora font files) via Anki's media server
         # so the desktop webviews' @font-face can load them at
@@ -170,6 +175,19 @@ def _startup():
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
+
+        # Edit the practice card you're currently reviewing: view its original slide
+        # and fix a mis-parsed stem / choices / correct answer / explanation. Writes
+        # back to the .qb bank and the live card. (No-op with a hint off a practice
+        # card.) Ctrl+Shift+E while reviewing.
+        try:
+            from aqt.qt import QKeySequence as _QKS
+            edit_q = QAction("Janki: Edit this practice question…", mw)
+            edit_q.setShortcut(_QKS("Ctrl+Shift+E"))
+            edit_q.triggered.connect(lambda: qbank.edit_question_dialog())
+            mw.form.menuTools.addAction(edit_q)
+        except Exception as _eq_exc:
+            log("edit-question menu: %s" % _eq_exc)
 
         # Practice questions are bound to Tab+Q, handled by the global key tap
         # (src/util/keytap.py, keycode 12) so it rides the Tab modifier like the
@@ -328,8 +346,11 @@ def _startup():
         except Exception:
             pass
 
-        if tray._tray_should_show():
-            tray._apply_tray(True)
+        try:
+            if tray._tray_should_show():
+                tray._apply_tray(True)
+        except Exception as _tray_exc:
+            log("tray apply: %s" % _tray_exc)
 
         if _cfg().get("global_keys", False):
             keytap._apply_global_keys(True)
@@ -395,6 +416,7 @@ def _startup():
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 focus._apply_card_zoom()      # re-assert card zoom on the new card
+                focus._focus_position_card()  # centre the question (Focus Mode)
                 amboss._start_amboss_size_watch()   # widen window while previews are up
                 # Show term underlines (all modes). Fade them in on a genuinely new
                 # question, but INSTANTLY when this is a re-render of the same card
@@ -414,6 +436,7 @@ def _startup():
                     qbank.apply_practice_prefs()   # click-to-flip + back show/hide defaults
                     qbank.sync_contanki_for_card() # suspend Contanki on remote practice cards
                     qbank.sync_practice_bottom()   # question side: restore native buttons
+                    qbank.cleanup_slide_button_if_not_practice()  # drop stale slide btn
                 except Exception:
                     pass
                 if pomodoro._pomo_instance:
@@ -426,11 +449,13 @@ def _startup():
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
+                focus._focus_position_card()  # anchor back to question top (Focus Mode)
                 amboss._apply_amboss_underlines(front=False)  # back: no fade, instant
                 try:
                     from .src.integrations import qbank
                     qbank.sync_contanki_for_card()  # keep Contanki suspended on the back
                     qbank.sync_practice_bottom()    # hide native ease buttons (binary grade)
+                    qbank.cleanup_slide_button_if_not_practice()  # drop stale slide btn
                 except Exception:
                     pass
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)
@@ -542,6 +567,18 @@ def _startup():
             log("inactive (not started via AnkiGlass; no ANKI_GLASS).")
     except Exception as exc:
         log(f"startup error: {exc}")
+        # Always persist the full traceback (independent of JANKI_DEBUG) so a
+        # startup abort — which also silently skips the glass/tray setup below the
+        # failure point — can actually be diagnosed.
+        try:
+            import os, traceback, datetime
+            p = os.path.expanduser("~/Library/Logs/janki-startup.log")
+            with open(p, "a", encoding="utf-8") as f:
+                f.write("\n=== %s ===\n%s\n"
+                        % (datetime.datetime.now().isoformat(),
+                           traceback.format_exc()))
+        except Exception:
+            pass
 
 
 if hasattr(gui_hooks, "main_window_did_init"):

@@ -231,7 +231,13 @@ def _prompt_restart() -> None:
                 box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
                 box.exec()
                 if box.clickedButton() is quit_btn:
-                    mw.close()
+                    # Real shutdown — mw.close() would be swallowed by Janki's
+                    # tray-minimize filter (turned into a hide), so the restart the
+                    # glass patch needs would never happen and glass would stay off.
+                    try:
+                        mw.unloadProfileAndExit()
+                    except Exception:
+                        mw.close()
             except Exception as exc:
                 log("self-heal prompt: %s" % exc)
 

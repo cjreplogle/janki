@@ -647,6 +647,17 @@ def _build_css(cfg, context):
                      "#qa, .card, #qa *:not(kbd) {\n"
                      "  font-family: %s !important;\n}\n"
                      "</style>\n" % ui_font_stack(cfg))
+        # Cloze deletions: recolour to a readable blue by default. Many note types
+        # (incl. AnKing) colour the active cloze green, which fights the glass; a
+        # calm blue reads better and matches the mobile-cards cloze colour.
+        # Configurable via `cloze_color`; set it blank to leave the note type's own.
+        _cloze = str(cfg.get("cloze_color", "#6db3ff") or "").strip()
+        if _cloze:
+            parts.append("<style>\n"
+                         ".cloze, .cloze b, #qa .cloze, .card .cloze,\n"
+                         "html .night_mode .cloze, html .nightMode .cloze,\n"
+                         "html .night_mode #qa .cloze, html .nightMode.card .cloze {\n"
+                         "  color: %s !important;\n}\n</style>\n" % _cloze)
         # Hide the AnKing note-type countdown timer (#s2/.timer). Its text renders
         # black (unreadable on glass) and isn't wanted — timing is handled at the
         # system level. Scoped to the reviewer, so the pomodoro HUD .timer is safe.
@@ -1464,7 +1475,11 @@ def _janki_answer_card(self, ease):
         if (card is not None
                 and (card.note_type() or {}).get("name") == "Janki Practice"
                 and _cfg().get("practice_binary_grade", True)
-                and getattr(self, "state", None) == "answer"):
+                and getattr(self, "state", None) == "answer"
+                # While the original-slide fallback is shown, the parse is untrusted,
+                # so let the real Again/Hard/Good/Easy grade the card directly instead
+                # of the binary pick-based resolver.
+                and not getattr(mw, "_janki_slide_fallback", False)):
             _jp_resolve()
             return
     except Exception:
@@ -1529,6 +1544,28 @@ def _on_js_message(handled, message, context):
         if isinstance(message, str) and message == "jp-continue":
             try:
                 _jp_resolve()
+            except Exception:
+                pass
+            return (True, None)
+        # "Show original slide" fallback: while the slide is shown the parsed answer
+        # can't be trusted, so reveal Anki's native Again/Hard/Good/Easy to self-grade;
+        # restore the binary Continue when the question is shown again.
+        # Bottom-bar "Original slide" button → flip slide mode in the card webview.
+        if isinstance(message, str) and message == "janki-slide-toggle":
+            try:
+                mw.web.eval("window.jankiToggleSlide&&window.jankiToggleSlide();")
+            except Exception:
+                pass
+            return (True, None)
+        if isinstance(message, str) and message.startswith("janki-slide:"):
+            try:
+                from ..integrations import qbank
+                show = message.endswith(":1")
+                mw._janki_slide_fallback = show   # let native ease grade while shown
+                if show:
+                    qbank.set_practice_bottom_hidden(False)
+                else:
+                    qbank.sync_practice_bottom()
             except Exception:
                 pass
             return (True, None)

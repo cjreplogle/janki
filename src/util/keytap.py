@@ -20,6 +20,13 @@ from ..user import hud
 # ---------------------------------------------------------------------------
 _key_tap_running = False
 _key_tap_enabled = False
+# Handles kept so the tap + its CFRunLoop can be torn down cleanly at app quit
+# (otherwise the daemon thread's C callback can fire during Python finalization →
+# SIGBUS in sip/Qt teardown).
+_cg = None
+_cf = None
+_key_tap_port = None
+_key_tap_runloop = None
 _tab_held = False        # True while Tab is physically held down
 _tab_used_combo = False  # True if Tab was used as a modifier this press
 _swallow_space_until_up = False  # after a hold-Space break skip, eat Space until released
@@ -321,6 +328,23 @@ def ax_trusted() -> bool:
         return False
 
 
+def stop_key_tap() -> None:
+    """Disable the CGEventTap and stop its CFRunLoop so the daemon thread exits
+    cleanly at app quit, avoiding a callback firing during interpreter teardown."""
+    global _key_tap_running
+    try:
+        if _key_tap_port is not None and _cg is not None:
+            _cg.CGEventTapEnable(_key_tap_port, False)
+    except Exception:
+        pass
+    try:
+        if _key_tap_runloop is not None and _cf is not None:
+            _cf.CFRunLoopStop(_key_tap_runloop)
+    except Exception:
+        pass
+    _key_tap_running = False
+
+
 def _start_key_tap() -> None:
     global _key_tap_running
     if _key_tap_running or sys.platform != 'darwin':
@@ -376,6 +400,9 @@ def _start_key_tap() -> None:
         CF.CFMachPortCreateRunLoopSource.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
         CF.CFRunLoopGetCurrent.restype = ctypes.c_void_p
         CF.CFRunLoopAddSource.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        CF.CFRunLoopStop.argtypes = [ctypes.c_void_p]
+        global _cg, _cf
+        _cg, _cf = CG, CF        # kept for stop_key_tap()
         CG.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
         CG.CGEventCreateKeyboardEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_bool]
         # kCFRunLoopDefaultMode is a CFStringRef global exported from CF.
@@ -501,11 +528,23 @@ def _start_key_tap() -> None:
             if not src:
                 return
             CG.CGEventTapEnable(port, True)
-            CF.CFRunLoopAddSource(CF.CFRunLoopGetCurrent(), src, kCFRunLoopDefaultMode)
+            global _key_tap_port, _key_tap_runloop
+            _key_tap_port = port
+            _key_tap_runloop = CF.CFRunLoopGetCurrent()
+            CF.CFRunLoopAddSource(_key_tap_runloop, src, kCFRunLoopDefaultMode)
             CF.CFRunLoopRun()
 
         threading.Thread(target=_run, daemon=True).start()
         _key_tap_running = True
+        # Tear the tap down cleanly when the app quits, BEFORE Python finalizes —
+        # so its C callback can't fire into a half-destroyed interpreter (SIGBUS).
+        try:
+            from aqt.qt import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(stop_key_tap)
+        except Exception:
+            pass
     except Exception as exc:
         _gtap_log(f"EXCEPTION: {exc}")
         log(f"key tap: {exc}")
