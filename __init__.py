@@ -176,19 +176,6 @@ def _startup():
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
 
-        # Edit the practice card you're currently reviewing: view its original slide
-        # and fix a mis-parsed stem / choices / correct answer / explanation. Writes
-        # back to the .qb bank and the live card. (No-op with a hint off a practice
-        # card.) Ctrl+Shift+E while reviewing.
-        try:
-            from aqt.qt import QKeySequence as _QKS
-            edit_q = QAction("Janki: Edit this practice question…", mw)
-            edit_q.setShortcut(_QKS("Ctrl+Shift+E"))
-            edit_q.triggered.connect(lambda: qbank.edit_question_dialog())
-            mw.form.menuTools.addAction(edit_q)
-        except Exception as _eq_exc:
-            log("edit-question menu: %s" % _eq_exc)
-
         # Practice questions are bound to Tab+Q, handled by the global key tap
         # (src/util/keytap.py, keycode 12) so it rides the Tab modifier like the
         # other reviewer binds — each press asks the next related question for the
@@ -408,6 +395,17 @@ def _startup():
         # Last question content hash we FADED underlines for — so a re-render of the
         # same card shows them instantly instead of re-fading (flicker).
         _QA_FADE_LAST = {"qh": None}
+        # Inject the Focus-Mode trailing-trim INTO the card HTML (runs before first
+        # paint) so trimming dead space doesn't visibly reflow the card after it shows.
+        if hasattr(gui_hooks, 'card_will_show'):
+            def _card_will_show(text, card, kind):
+                try:
+                    if isinstance(kind, str) and "review" in kind.lower():
+                        return text + focus.FOCUS_TRIM_SCRIPT
+                except Exception:
+                    pass
+                return text
+            gui_hooks.card_will_show.append(_card_will_show)
         if hasattr(gui_hooks, 'reviewer_did_show_question'):
             def _on_show_question(_r):
                 state._remote_active = True
@@ -416,6 +414,7 @@ def _startup():
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
                 focus._apply_card_zoom()      # re-assert card zoom on the new card
+                focus.reassert_chrome_hidden()  # Anki re-shows the toolbar per card
                 focus._focus_position_card()  # centre the question (Focus Mode)
                 amboss._start_amboss_size_watch()   # widen window while previews are up
                 # Show term underlines (all modes). Fade them in on a genuinely new
@@ -449,6 +448,7 @@ def _startup():
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
                 css._sync_reviewer_fs()       # Edit/More only in fullscreen
+                focus.reassert_chrome_hidden()  # Anki re-shows the toolbar per card
                 focus._focus_position_card()  # anchor back to question top (Focus Mode)
                 amboss._apply_amboss_underlines(front=False)  # back: no fade, instant
                 try:

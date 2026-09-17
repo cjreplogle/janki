@@ -11,17 +11,18 @@ transparency, throws in some focused study tool add-ons (for if you lose focus e
 ## Install
 
 Runs as an Anki plugin on **normal, stock Anki** — no custom build or separate app.
-There are two builds on the [Releases](../../releases) page — pick one:
+There are two builds — pick one (each link always downloads the latest release):
 
-- **`janki.ankiaddon`** — the full frosted-glass experience. Adds a small,
-  self-healing, reversible **patch layer** to Anki that enables the transparency
-  (details below). I use this.
-- **`load-todays-lectures.ankiaddon`** — a bare-bones version of the add-on that
-  simply has the [Load today's lectures](docs/load-todays-lectures.md) import
-  functionality. Designed for if you don't care for any of the other features.
+- **[⬇ Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)**
+  — the full frosted-glass experience. Adds a small, self-healing, reversible
+  **patch layer** to Anki that enables the transparency (details below). I use this.
+- **[⬇ Download `load-todays-lectures.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/load-todays-lectures.ankiaddon)**
+  — a bare-bones version of the add-on that simply has the
+  [Load today's lectures](docs/load-todays-lectures.md) import functionality.
+  Designed for if you don't care for any of the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
-2. **Download `janki.ankiaddon`** from the [Releases](../../releases) page.
+2. **[Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)** (always the latest release).
 3. **Double-click it** (Anki opens and installs it), or in Anki:
    **Tools → Add-ons → Install from file…** → pick the `.ankiaddon`.
 4. **Restart Anki.** On first launch Janki applies a small one-time patch to Anki

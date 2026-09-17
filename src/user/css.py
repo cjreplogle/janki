@@ -1562,6 +1562,8 @@ def _on_js_message(handled, message, context):
                 from ..integrations import qbank
                 show = message.endswith(":1")
                 mw._janki_slide_fallback = show   # let native ease grade while shown
+                from ..features import focus
+                focus.set_slide_topbar_hidden(show)  # slide reaches window top
                 if show:
                     qbank.set_practice_bottom_hidden(False)
                 else:

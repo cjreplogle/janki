@@ -84,6 +84,10 @@ def _cursor_tick():
             and _cursor_idle_s >= _CURSOR_HIDE_S
             and getattr(mw, "state", None) == "review"):
         _focus_set_hidden(True)
+    # Enforce chrome-hidden every tick while engaged — Anki re-shows the top toolbar
+    # on card renders, and this timer can't be missed the way a render hook can.
+    if _focus_hidden and getattr(mw, "state", None) == "review":
+        reassert_chrome_hidden()
 
 
 def _start_cursor_hide():
@@ -122,15 +126,18 @@ _focus_mode_on = False
 _focus_hidden = False   # whether the chrome is currently hidden
 
 # CSS applied to the reviewer webview while Focus Mode is engaged: hide the card
-# tags and let the card own the full height. Uses a plain BLOCK layout (top-aligned,
-# scrollable) — NOT flex: a flex column combined with the card `zoom` clipped the top
-# of tall content in QtWebEngine and blocked scrolling to it. Block layout flows the
-# card from its true top, keeps the top visible, and scrolls when tall.
+# tags and SAFE-CENTER the card vertically. A flex column with margin:auto on #qa
+# centres a short card, but when the card is taller than the viewport the auto margins
+# collapse and it aligns to the TOP and scrolls — so tall content is never clipped
+# (the old top-clip that forced plain block layout is now fixed at the native layer:
+# the toolbar band is reclaimed, so flex centring is safe again).
 _FOCUS_CSS = (
     "#tags-container{display:none!important;}"
     "html{height:100%!important;}"
     "body{min-height:100%!important;box-sizing:border-box!important;"
-    "display:block!important;padding-top:12px!important;overflow-y:auto!important;}"
+    "display:flex!important;flex-direction:column!important;"
+    "padding:12px 0!important;overflow-y:auto!important;}"
+    "#qa{margin-top:auto!important;margin-bottom:auto!important;}"
 )
 
 
@@ -203,6 +210,146 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0) -> None:
         pass
 
 
+def reassert_chrome_hidden() -> None:
+    """Re-hide the chrome if Focus Mode is engaged. Anki RE-SHOWS the top toolbar
+    (toolbarWeb) on every card render, which pushes mw.web down by the toolbar's
+    height — its faded-transparent 50px band became the 'dead space at the top the
+    card can't go over' (web inWin y=50, toolbarWeb vis=True h=50 while
+    focus_hidden=True). Called from the per-render hooks so the
+    toolbar stays hidden card-to-card. Cheap and idempotent: no-op unless a chrome
+    view is actually visible, so it won't fight the fade animation on toggle."""
+    if not _focus_hidden or state._pomo_on_break:
+        return
+    # Top toolbar: pin height to 0 (deterministic — Anki re-shows it per render and
+    # plain hide() lost that race). Bottom bar: hide() is enough (its slot is at the
+    # bottom, so it never creates a top band, and clamping BOTH corrupted the layout).
+    _clamp_toolbar(True)
+    bw = getattr(mw, "bottomWeb", None)
+    if bw is not None:
+        try:
+            if bw.isVisible():
+                bw.hide()
+        except Exception:
+            pass
+    _reclaim_central_layout()
+
+
+def set_slide_topbar_hidden(hidden: bool) -> None:
+    """Hide ONLY the top toolbar while the full-window slide overlay is open, so the
+    slide reaches the very TOP of the window ('app contents above it' was the top
+    toolbar). The bottom grade bar stays visible for self-grading. Re-asserted per
+    render because the slide re-sends janki-slide:1 on each card. On close, restore
+    the toolbar unless Focus Mode wants it hidden anyway."""
+    tb = getattr(mw, "toolbarWeb", None)
+    if tb is None:
+        return
+    try:
+        if hidden:
+            _clamp_toolbar(True)     # 0-height band so the slide reaches the top edge
+            _reclaim_central_layout()
+        else:
+            if _focus_hidden:
+                return          # Focus Mode keeps the toolbar hidden regardless
+            _clamp_toolbar(False)
+            _reclaim_central_layout()
+    except Exception:
+        pass
+
+
+# --- Focus-Mode card layout (trim + averaged vertical positioning) --------------
+# Baseline: Focus Mode centres the whole #qa box (margin:auto). Two problems that this
+# fixes:
+#   1) Trailing dead space inside #qa (a dangling <hr>, empty <br>s, empty #pic div)
+#      makes the box taller than the visible text, so the text rides high. We hide the
+#      trailing empties (tagged data-janki-trim, reversible) so the box wraps content.
+#   2) A photo BELOW the text still makes the text ride high when the whole block is
+#      centred. Per the user's spec, position the card at the AVERAGE of the two
+#      centres: where the TEXT alone would centre, and where ALL contents centre. That
+#      is a downward nudge of (allBottom - textBottom)/4 from the all-centred baseline
+#      (half-way toward text-centred), applied as a translateY on #qa. Clamped so it
+#      never pushes content off-screen, and skipped when the block overflows the window.
+_CORE_RESTORE = (
+    "var qa=document.getElementById('qa');if(!qa)return;"
+    "qa.querySelectorAll('[data-janki-trim]').forEach(function(e){"
+    "e.style.removeProperty('display');e.removeAttribute('data-janki-trim');});"
+    "qa.style.removeProperty('transform');"
+)
+_CORE_APPLY = (
+    "var qa=document.getElementById('qa');if(!qa)return;"
+    "qa.style.removeProperty('transform');"                  # reset before measuring
+    # 1) trim trailing empties
+    "var k=qa.children;for(var i=k.length-1;i>=0;i--){var el=k[i];"
+    "var cs=getComputedStyle(el);"
+    "if(cs.display==='none'||cs.position==='fixed'||cs.position==='absolute')continue;"
+    "var t=el.tagName;"
+    "var media=el.querySelector&&el.querySelector('img,svg,video,canvas,audio,iframe');"
+    "var txt=(el.textContent||'').replace(/\\s+/g,'');"
+    "if(t==='BR'||t==='HR'||(!txt&&!media&&t!=='IMG'&&t!=='SVG'&&t!=='CANVAS')){"
+    "el.setAttribute('data-janki-trim','1');el.style.setProperty('display','none');}"
+    "else break;}"
+    # 2) collect the remaining in-flow children
+    "var vis=[];for(var j=0;j<qa.children.length;j++){var c=qa.children[j];"
+    "var s=getComputedStyle(c);"
+    "if(s.display==='none'||s.position==='fixed'||s.position==='absolute')continue;"
+    "var r0=c.getBoundingClientRect();"
+    "if(r0.height<=0&&!(c.querySelector&&c.querySelector('img,svg,canvas,video')))continue;"
+    "vis.push(c);}"
+    "if(!vis.length)return;"
+    "var allTop=vis[0].getBoundingClientRect().top;"
+    "var allBot=vis[vis.length-1].getBoundingClientRect().bottom;"
+    # textBottom = bottom of the last child that is NOT a media-only (image) element
+    "var textBot=allBot;"
+    "for(var m=vis.length-1;m>=0;m--){var c2=vis[m];"
+    "var hasImg=c2.querySelector&&c2.querySelector('img,svg,canvas,video');"
+    "var isImg=/^(IMG|SVG|CANVAS|VIDEO|PICTURE)$/.test(c2.tagName);"
+    "var tx=(c2.textContent||'').replace(/\\s+/g,'');"
+    "if((hasImg||isImg)&&!tx)continue;"                       # skip trailing media
+    "textBot=c2.getBoundingClientRect().bottom;break;}"
+    "var extra=allBot-textBot;if(extra<=1)return;"
+    "var V=window.innerHeight;var Hall=allBot-allTop;"
+    "var shift=extra/4;"                                      # half-way text↔all centre
+    "var room=(V-Hall)/2;if(room<0)room=0;"                   # never push off-screen
+    "if(shift>room)shift=room;if(shift<=0)return;"
+    "var z=parseFloat(getComputedStyle(qa).zoom)||1;"         # #qa carries card zoom
+    "qa.style.setProperty('transform','translateY('+(shift/z)+'px)');"
+)
+
+# Injected INTO the card HTML via card_will_show so it runs synchronously during render
+# — BEFORE first paint — instead of a post-paint web.eval (which showed the padded
+# layout for one frame, then reflowed: the flicker). Gated on window.__jankiFocus.
+FOCUS_TRIM_SCRIPT = (
+    "<script>(function(){try{if(!window.__jankiFocus)return;"
+    + _CORE_APPLY + "}catch(_){}})();</script>"
+)
+
+
+def set_focus_flag() -> None:
+    """Mirror _focus_hidden into a page global so the inline card_will_show script knows
+    whether to run on the next card render (it executes before paint, so it can't call
+    back into Python)."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    try:
+        web.eval("window.__jankiFocus=" + ("true" if _focus_hidden else "false") + ";")
+    except Exception:
+        pass
+
+
+def trim_trailing_empties() -> None:
+    """Apply (Focus on) or restore (Focus off) the trim + averaged positioning on the
+    CURRENTLY shown card — used on toggle. Per-card navigation is handled pre-paint by
+    the inline FOCUS_TRIM_SCRIPT, so this only needs to act on the live card."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    core = _CORE_APPLY if _focus_hidden else _CORE_RESTORE
+    try:
+        web.eval("(function(){try{" + core + "}catch(_){}})()")
+    except Exception:
+        pass
+
+
 def _focus_clear_anchor() -> None:
     """Drop the inline answer-anchor overrides so the card falls back to the
     stylesheet's `safe center` (used for questions, and on Focus Mode exit)."""
@@ -240,6 +387,34 @@ def _reassert_web_focus() -> None:
         return
     try:
         web.setFocus()
+    except Exception:
+        pass
+
+
+_QWIDGETSIZE_MAX = 16777215
+
+
+def _clamp_toolbar(collapse: bool) -> None:
+    """Show/hide the top toolbar at the QWidget level to reclaim its 50px band.
+
+    Anki's TopWebView.hide()/show() are FLAG-ONLY overrides (they just set
+    self.hidden) — they never call QWidget.hide(), so a plain mw.toolbarWeb.hide()
+    did NOTHING (that was the persistent 'dead band at the top': the toolbar stayed
+    visible at inWin y=50). We call QWidget.hide()/show() DIRECTLY to bypass the
+    override and actually collapse/restore the layout slot. The toolbar keeps its
+    real fixed height throughout, so restore needs no height re-measurement — and
+    because Anki's own re-show is flag-only, it can't fight a QWidget-level hide."""
+    tb = getattr(mw, "toolbarWeb", None)
+    if tb is None:
+        return
+    try:
+        from aqt.qt import QWidget
+        if collapse:
+            if tb.isVisible():
+                QWidget.hide(tb)
+        else:
+            if not tb.isVisible():
+                QWidget.show(tb)
     except Exception:
         pass
 
@@ -316,9 +491,11 @@ def _focus_set_hidden(hidden: bool) -> None:
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
-            for wv in chrome:
+            _clamp_toolbar(True)       # deterministic 0-height top band
+            bw = getattr(mw, "bottomWeb", None)
+            if bw is not None:
                 try:
-                    wv.hide()
+                    bw.hide()
                 except Exception:
                     pass
             # Force the central layout to reclaim the space the hidden chrome left,
@@ -326,6 +503,8 @@ def _focus_set_hidden(hidden: bool) -> None:
             # strip could otherwise linger as an empty band, and the card centres
             # within the lowered region (looks un-centred, pushed down by the gap).
             _reclaim_central_layout()
+            set_focus_flag()                 # let the inline trim run on future renders
+            trim_trailing_empties()          # shrink #qa to visible content so it centres
             _focus_apply_card(True, off)     # +toolbar_h: card jumped up, slide down
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
             # QWebEngine geometry can settle a frame late; re-reclaim + re-centre
@@ -340,9 +519,13 @@ def _focus_set_hidden(hidden: bool) -> None:
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
         # and fade the chrome back in over the top.
-        for wv in chrome:
+        _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
+        set_focus_flag()               # stop the inline trim from running on new cards
+        trim_trailing_empties()        # _focus_hidden is now False → restores trimmed nodes
+        bw = getattr(mw, "bottomWeb", None)
+        if bw is not None:
             try:
-                wv.show()
+                bw.show()
             except Exception:
                 pass
         _reclaim_central_layout()
@@ -369,10 +552,16 @@ def _apply_card_zoom() -> None:
     if web is None:
         return
     z = float(_cfg().get("card_zoom", 1.0))
+    # Zoom ONLY #qa (the card content container). The reviewer's <body> carries the
+    # class "card", so a ".card" selector zoomed the SCROLL CONTAINER itself — and a
+    # zoomed scroll container mis-computes its scroll range in QtWebEngine, clipping
+    # the TOP of any card taller than the viewport (the Focus Mode top-clip bug). It
+    # also double-zoomed (#qa nested inside the zoomed body). #qa scales all its
+    # descendants, so this still zooms the whole card, once, without touching scroll.
     js = ("(function(){var s=document.getElementById('__janki_zoom');"
           "if(!s){s=document.createElement('style');s.id='__janki_zoom';"
           "(document.head||document.documentElement).appendChild(s);}"
-          "s.textContent='#qa,.card{zoom:" + ("%g" % z) + ";}';})()")
+          "s.textContent='#qa{zoom:" + ("%g" % z) + ";}';})()")
     try:
         web.eval(js)
     except Exception:

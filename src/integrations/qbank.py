@@ -3200,19 +3200,54 @@ _JP_ANSWER_JS = (
 _JP_SLIDE_JS = (
     "if(!window.jankiApplySlide){"
     "window.jankiApplySlide=function(open){"
-    # Render the slide as a full-viewport, self-scrolling OVERLAY (position:fixed;
-    # inset:0) rather than in the card flow — the reviewer's card layout (zoom / vh /
-    # centering) was clipping the top of a tall slide in every mode; a fixed overlay
-    # sidesteps it entirely, showing the whole image from its true top, scrollable.
+    # Render the slide(s) into a single BODY-LEVEL overlay (#jp-slide-ov, position:fixed
+    # inset:0) — appended to <body> so it escapes the card's zoom/vh/centering layout
+    # entirely. Images are FIT to the viewport (flex-centered, object-fit:contain, no
+    # scroll). On the ANSWER side both the question AND answer slides show at once,
+    # stacked and each capped to ~half height so both fit without scrolling.
     "var q=document.getElementById('jp-slide');"
     "var a=document.getElementById('jp-ans-slide');"
     "if(!q&&!a)return;"                                 # no slide on this card → no-op
     "var isBack=!!document.querySelector('.jp-answered');"
-    "var tgt=open?((isBack&&a)?a:q):null;"              # back → answer slide, else question
-    "[q,a].forEach(function(el){if(!el)return;el.classList.remove('jp-overlay');"
-    "if(el!==tgt)el.style.display='none';});"
-    "if(tgt){tgt.style.display='block';tgt.classList.add('jp-overlay');"
-    "try{tgt.scrollTop=0;}catch(_){}}"
+    "var qi=q?q.querySelector('img'):null;"
+    "var ai=a?a.querySelector('img'):null;"
+    "if(q)q.style.display='none';if(a)a.style.display='none';"  # only render via overlay
+    "var ov=document.getElementById('jp-slide-ov');"
+    "if(!open){if(ov)ov.style.display='none';"
+    "document.body.classList.remove('jp-slide-open');}"        # reveal the card text
+    "else{"
+    "var srcs=[];"
+    "if(isBack){if(qi&&qi.src)srcs.push(qi.src);if(ai&&ai.src)srcs.push(ai.src);}"
+    "else{if(qi&&qi.src)srcs.push(qi.src);else if(ai&&ai.src)srcs.push(ai.src);}"
+    # Enter slide mode as soon as the card HAS a slide (q||a already checked above) —
+    # cover the text with the opaque overlay + hide #qa IMMEDIATELY, even before the
+    # image src has resolved. Anki rewrites document.body.className on every card render,
+    # wiping jp-slide-open, so we must re-add it here each time; and the image can lag a
+    # frame, so we show the overlay first (opaque) and fill/refresh it when srcs arrive.
+    "if(!ov){ov=document.createElement('div');ov.id='jp-slide-ov';"
+    "document.body.appendChild(ov);}"
+    "else if(ov.parentNode!==document.body)document.body.appendChild(ov);"
+    "ov.className='jp-slide-ov'+(srcs.length>1?' jp-two':'');"
+    "document.body.classList.add('jp-slide-open');"          # hide card text NOW
+    "ov.style.display='flex';"
+    # Rebuild only when the set changed, so re-asserting per render doesn't reload imgs.
+    "var key=srcs.join('|');"
+    "if(srcs.length&&ov._jpkey!==key){ov._jpkey=key;ov.innerHTML='';"
+    "srcs.forEach(function(s){var im=document.createElement('img');im.src=s;"
+    "ov.appendChild(im);});}"
+    # Replay the fade/slide-up in (same jpSlideUp the answer slides + photos use) each
+    # time it opens — reflow between animation:none and '' restarts the CSS animation.
+    "ov.style.animation='none';void ov.offsetWidth;ov.style.animation='';"
+    # Anki re-applies document.body.className a beat AFTER this runs on a fresh card,
+    # stripping jp-slide-open (so the text reappeared on subsequent cards). Reassert the
+    # class + overlay on the next frames — no animation replay, just re-hide the text.
+    "var reOpen=function(){try{if(sessionStorage.getItem('jp_show_slide')!=='1')return;}"
+    "catch(_){}document.body.classList.add('jp-slide-open');if(ov)ov.style.display='flex';};"
+    "try{requestAnimationFrame(reOpen);}catch(_){}"
+    "setTimeout(reOpen,50);setTimeout(reOpen,150);setTimeout(reOpen,400);"
+    # If the image wasn't ready yet, re-run shortly so the overlay gets its picture.
+    "if(!srcs.length){setTimeout(function(){window.jankiApplySlide(true);},80);"
+    "setTimeout(function(){window.jankiApplySlide(true);},250);}}"
     "var btn=document.getElementById('jp-slide-btn');"
     "if(btn)btn.textContent=open?'Show question':'Show original slide';"
     # Showing the slide = the parse is untrusted → restore Anki's real Again/Hard/
@@ -3692,17 +3727,21 @@ _CARD_CSS = (
     "border:1px solid rgba(120,230,160,0.5);transition:background .15s,transform .05s;}"
     ".jp-continue:hover{background:rgba(80,200,130,0.28);}"
     ".jp-continue:active{transform:scale(0.98);}"
-    # Slide mode = a full-viewport, self-scrolling overlay (added by jankiApplySlide).
-    # position:fixed;inset:0 escapes the card's zoom/vh/centering layout that was
-    # clipping a tall slide's top; the image shows in full from its true top, scrollable.
-    ".jp-slide.jp-overlay,.jp-ans-slide.jp-overlay{position:fixed!important;"
-    "top:0!important;right:0!important;bottom:0!important;left:0!important;"
-    "z-index:25!important;overflow:auto!important;background:#1c1d21!important;"
-    "margin:0!important;padding:16px!important;border:none!important;"
-    "box-sizing:border-box!important;-webkit-overflow-scrolling:touch;}"
-    ".jp-slide.jp-overlay img,.jp-ans-slide.jp-overlay img{max-width:100%!important;"
-    "max-height:none!important;height:auto!important;display:block!important;"
-    "margin:0 auto!important;border-radius:6px!important;}"
+    # Slide mode = a body-level, full-viewport overlay (#jp-slide-ov, built by
+    # jankiApplySlide and appended to <body> so it escapes the card's zoom/vh/centering).
+    # Images are FIT to the viewport (flex-centered, object-fit:contain) so the whole
+    # slide shows at once with NO scrolling. On the back, both question + answer slides
+    # stack (.jp-two) and each is capped to ~half height so both fit without scrolling.
+    "#jp-slide-ov{position:fixed;top:0;right:0;bottom:0;left:0;z-index:25;"
+    "background:#1c1d21;display:flex;flex-direction:column;align-items:center;"
+    "justify-content:center;gap:10px;padding:16px;box-sizing:border-box;"
+    "animation:jpSlideUp .35s ease-out both;}"                 # fade/slide-up like photos
+    "#jp-slide-ov img{display:block;max-width:100%;max-height:100%;width:auto;"
+    "height:auto;object-fit:contain;border-radius:6px;}"
+    "#jp-slide-ov.jp-two img{max-height:calc(50% - 8px);}"
+    # While the overlay is open, hide the card text behind it (the overlay lives on
+    # <body>, so hiding #qa is safe and guarantees nothing bleeds through).
+    "body.jp-slide-open #qa{visibility:hidden!important;}"
     # Original-slide fallback button: pinned bottom-left on desktop (low, just above
     # the bottom bar), and bottom-CENTER on mobile (AnkiMobile has no such bar).
     ".jp-slide-btn{position:fixed;left:10px;bottom:0;z-index:30;cursor:pointer;"

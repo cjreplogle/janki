@@ -1429,7 +1429,12 @@ class GlassSettings(QDialog):
         self._menubar.stateChanged.connect(on_menubar)
         gen_lay.addWidget(self._menubar)
 
-        self._tray = QCheckBox("Minimize to system tray instead of taskbar")
+        self._tray = QCheckBox("Keep running in the tray when the window is closed")
+        self._tray.setToolTip(
+            "On: closing the window (red X) hides Anki to the menu-bar/tray icon and it "
+            "keeps running — click the icon or the Dock to reopen.\n"
+            "Off: the window behaves like a native app — the red X closes it and quits Anki."
+        )
         self._tray.setChecked(bool(self.cfg.get("tray_minimize", False)))
 
         def on_tray(_state):

@@ -158,12 +158,16 @@ def _apply_tray(on: bool) -> None:
         mw.installEventFilter(_tray_filter)
         _install_close_hook()   # reliable primary path (event filter is the backup)
         _install_reopen_hook()  # Dock-icon click / ⌘-Tab reopens the hidden window
-        # THE fix: keep the app alive when the main window is hidden/closed. Without
-        # this, macOS quits the app the moment the last window goes away — even
-        # though we swallowed the Close — so the tray icon disappears. Quitting is
-        # still available via ⌘Q / the tray "Quit" (both use unloadProfileAndExit).
+        # Keep the app alive when the window is hidden/closed ONLY when tray-minimize
+        # is on. The tray icon can also be up purely for the mode controls
+        # (menubar_controls) — in that case the red-X should behave NATIVELY (close the
+        # window and, being the last window, quit the app), so quitOnLastWindowClosed
+        # must stay True. Tying it to tray_minimize (not icon presence) is what makes
+        # the "show in tray" toggle actually switch between tray and native behaviour.
+        # Quitting is always available via ⌘Q / the tray "Quit".
         try:
-            mw.app.setQuitOnLastWindowClosed(False)
+            mw.app.setQuitOnLastWindowClosed(
+                not bool(_cfg().get("tray_minimize", False)))
         except Exception as e:
             log(f"quitOnLastWindowClosed: {e}")
     else:
