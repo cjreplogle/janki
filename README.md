@@ -143,7 +143,6 @@ so nothing is left behind.
   <p align="center">
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" controls muted width="240"></video>
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" controls muted width="240"></video>
-    <img src="docs/media/mobile-card.jpg" alt="Themed mobile card" width="230">
   </p>
 - **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
