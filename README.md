@@ -143,7 +143,9 @@ so nothing is left behind.
 
   <p align="center">
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" autoplay loop muted playsinline controls width="240"></video>
+    <!-- practice mobile clip hidden for now
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" autoplay loop muted playsinline controls width="240"></video>
+    -->
   </p>
 - **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
