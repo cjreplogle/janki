@@ -85,7 +85,7 @@ so nothing is left behind.
   things are in fullscreen. (Note: also integrated to work & adjust with remote buttons)
 
   <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/caption-mode.mp4" controls muted width="560"></video>
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/caption-mode.mp4" autoplay loop muted playsinline controls width="560"></video>
   </p>
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
@@ -93,7 +93,7 @@ so nothing is left behind.
   any recall based on the "shape" of the text rather than content.
 
   <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" controls muted width="560"></video>
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
   </p>
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
@@ -141,8 +141,8 @@ so nothing is left behind.
   **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md).**
 
   <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" controls muted width="240"></video>
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" controls muted width="240"></video>
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" autoplay loop muted playsinline controls width="240"></video>
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" autoplay loop muted playsinline controls width="240"></video>
   </p>
 - **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
