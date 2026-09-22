@@ -152,7 +152,7 @@ so nothing is left behind.
   lectures manually. **→ [How to use it: Load Today's Lectures tutorial](docs/load-todays-lectures.md).**
 
   <p align="center">
-    <img src="docs/media/load-todays-lectures.jpg" alt="Load today's lectures" width="560">
+    <img src="docs/media/load-todays-lectures.jpg" alt="Load today's lectures" width="375">
   </p>
 
   *This feature expects your own calendar export and tag map; set their paths on
