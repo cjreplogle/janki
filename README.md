@@ -4,7 +4,7 @@ A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins th
 transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), integrates a practice question/review system, and provides a card scheduler that works with your calendar!
 
 <p align="center">
-  <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="720">
+  <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="360">
 </p>
 
 >[!WARNING]
