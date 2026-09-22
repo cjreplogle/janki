@@ -81,15 +81,26 @@ def _restore_window() -> None:
         log(f"restore window: {exc}")
 
 
+_quitting = False
+
+
 def _quit_from_tray() -> None:
-    """Fully exit Anki from the tray. mw.close() would be swallowed by the tray
-    filter (turned into a hide), so drive Anki's real shutdown directly. Geometry
-    was already persisted before the hide (_persist_geom), and __init__._save_size
-    skips while hidden, so the saved state isn't clobbered."""
+    """Fully exit Anki from the tray. The shutdown fires mw.closeEvent, which the tray
+    close-hook/filter would otherwise swallow and turn into a hide (so quitting took two
+    clicks). Set _quitting so those interceptors let the real close through this once.
+    Geometry was already persisted before any hide (_persist_geom), and _save_size skips
+    while hidden, so the saved state isn't clobbered."""
+    global _quitting
+    _quitting = True
+    try:
+        mw.app.setQuitOnLastWindowClosed(True)
+    except Exception:
+        pass
     try:
         mw.unloadProfileAndExit()
     except Exception as exc:
         log(f"tray quit: {exc}")
+        _quitting = False
 from ..features import focus, lockdown, pomodoro
 from ..user import hud
 from ..integrations import gamepad
@@ -408,7 +419,7 @@ def _install_close_hook() -> None:
         _orig = AnkiQt.closeEvent
 
         def _ce(self, event, _orig=_orig):
-            if self is mw and _cfg().get("tray_minimize", False):
+            if self is mw and _cfg().get("tray_minimize", False) and not _quitting:
                 try:
                     event.ignore()
                 except Exception:
@@ -426,7 +437,7 @@ def _install_close_hook() -> None:
 class _TrayFilter(QObject):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         # Gate on the SETTING only (not isVisible — see _ensure_tray_target).
-        if obj is mw and _cfg().get("tray_minimize", False):
+        if obj is mw and _cfg().get("tray_minimize", False) and not _quitting:
             if event.type() == QEvent.Type.Close:
                 # Red-X → minimize to the menu bar instead of quitting. Anki's
                 # closeEvent (which saves geometry) never runs when we swallow the

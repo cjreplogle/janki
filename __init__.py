@@ -44,7 +44,7 @@ except Exception as _e:
 from .src.util.bridge import _bridge
 from .src.util.config import log, ACTIVE, GLASS, _cfg
 from .src.util import state
-from .src.features import card_timer, focus, lockdown, pomodoro, intersperse
+from .src.features import card_timer, focus, lockdown, pomodoro, intersperse, reword
 from .src.user import css, glass, hud
 from .src.system import settings_dialog, tray
 from .src.util import diagnostics, keytap
@@ -409,6 +409,9 @@ def _startup():
             def _card_will_show(text, card, kind):
                 try:
                     if isinstance(kind, str) and "review" in kind.lower():
+                        # Reword is a DISPLAY-ONLY swap (same card data-space, no
+                        # scheduler impact); no-op unless enabled + a variant exists.
+                        text = reword.apply(text, card, kind)
                         return text + focus.FOCUS_TRIM_SCRIPT
                 except Exception:
                     pass

@@ -420,6 +420,43 @@ def hold_dialog_above(dialog) -> None:
             pass
 
 
+def float_dialog_above(dialog) -> None:
+    """Raise `dialog`'s own NSWindow to the floating level so it stays above the main
+    window regardless of always-on-top state or a later restore of the main window.
+    Used when a dialog is opened from the tray while the main window is hidden — the
+    main window could otherwise be brought back (Dock click) and cover it. Restores
+    the dialog's normal level when it closes. No-op off macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        if not ns:
+            return
+        # 3 = NSFloatingWindowLevel; sits above the normal main window (level 0). Only
+        # relative to Janki's own windows in practice, since it drops back on close.
+        msg(None, ns, b"setLevel:", (c_long,), (3,))
+    except Exception as exc:
+        log("float_dialog_above: %s" % exc)
+        return
+
+    def _restore(*_a):
+        try:
+            msg, _cls = _bridge()
+            ns = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+            if ns:
+                msg(None, ns, b"setLevel:", (c_long,), (0,))
+        except Exception:
+            pass
+    try:
+        dialog.finished.connect(_restore)
+    except Exception:
+        try:
+            dialog.destroyed.connect(_restore)
+        except Exception:
+            pass
+
+
 def _reload_all_webviews():
     if not GLASS:
         return

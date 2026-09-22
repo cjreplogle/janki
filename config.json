@@ -155,5 +155,7 @@
   "intersperse_target_min": 2,
   "intersperse_target_max": 4,
   "intersperse_tag_window": 25,
-  "intersperse_nomatch": "skip"
+  "intersperse_nomatch": "skip",
+  "reword_enabled": false,
+  "reword_variants": 3
 }

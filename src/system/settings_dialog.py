@@ -1719,6 +1719,60 @@ class GlassSettings(QDialog):
         close.clicked.connect(_close_settings)
         lay.addWidget(close)
 
+        # Fit the window HEIGHT to the currently-shown tab so a short tab doesn't leave
+        # a tall window with empty space at the bottom. QTabWidget's own sizeHint /
+        # minimumSizeHint aggregate the MAX over all pages (Qt ignores per-page size
+        # policy here), so the only reliable way is to measure the current tab's real
+        # content height ourselves — recursing through the nested tab groups — and pin
+        # the outer tab widget to it with setFixedHeight (which overrides that min).
+        from aqt.qt import QTimer
+        tabws = [tabs, prac_tabs, focus_tabs]
+        _lt = locals().get("lec_tabs")
+        if _lt is not None:
+            tabws.append(_lt)
+
+        def _tabbar_h(tw):
+            tb = tw.tabBar()
+            return (tb.sizeHint().height() if tb else 0) + 10   # + frame/margins
+
+        def _direct_nested(page):
+            lay_ = page.layout() if page else None
+            if lay_ is not None:
+                for i in range(lay_.count()):
+                    it = lay_.itemAt(i)
+                    w = it.widget() if it else None
+                    if isinstance(w, QTabWidget):
+                        return w
+            return None
+
+        def _page_h(page):
+            if page is None:
+                return 0
+            nested = _direct_nested(page)
+            if nested is not None:                     # page just hosts a nested group
+                return _eff_h(nested)
+            return page.sizeHint().height()
+
+        def _eff_h(tw):
+            return _page_h(tw.currentWidget()) + _tabbar_h(tw)
+
+        def _fit(*_a):
+            try:
+                self.layout().activate()
+                tabs.setFixedHeight(_eff_h(tabs))
+                self.layout().activate()
+                self.adjustSize()
+                self.resize(self.width(), self.sizeHint().height())
+            except Exception:
+                pass
+
+        for tw in tabws:
+            try:
+                tw.currentChanged.connect(lambda _i, f=_fit: QTimer.singleShot(0, f))
+            except Exception:
+                pass
+        QTimer.singleShot(0, _fit)
+
     def _update_color_swatch(self):
         c = self.cfg.get("tint_color", "#1e1e1e")
         self._color_btn.setText(c)
@@ -1734,7 +1788,7 @@ class GlassSettings(QDialog):
             diagnostics._live_apply(self.cfg)
 
 
-def _open_settings(section=None):
+def _open_settings(section=None, float_above=False):
     d = GlassSettings()
     if section == "practice_qbank":
         try:
@@ -1763,5 +1817,9 @@ def _open_settings(section=None):
     try:
         from ..user import glass
         glass.hold_dialog_above(d)
+        # Opened from the tray (main window hidden): float the dialog above the main
+        # window so restoring the main window later can't cover it.
+        if float_above:
+            glass.float_dialog_above(d)
     except Exception:
         pass
