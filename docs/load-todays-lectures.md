@@ -36,9 +36,9 @@ keep working across deck versions.
 **Tools → Load today's lectures** → click **Choose file…** and pick your map.
 It's saved for next time.
 
-![Tools → Load today's lectures](images/menu.png)
+<p align="center"><img src="images/menu.png" alt="Tools → Load today's lectures" width="60%"></p>
 
-![First run — choose your tag map](images/first-run.png)
+<p align="center"><img src="images/first-run.png" alt="First run — choose your tag map" width="60%"></p>
 
 ---
 
@@ -50,12 +50,12 @@ The **Lectures** window opens.
 Next ▶** to change day, **Use** to include a row, and the **Matched lecture**
 dropdown to fix a wrong guess (`~` = fuzzy auto-guess).
 
-![Lectures window with a calendar](images/lectures-calendar.png)
+<p align="center"><img src="images/lectures-calendar.png" alt="Lectures window with a calendar" width="60%"></p>
 
 **Without a calendar** — every lecture is listed; just tick what you want. Use
 **➕ Import calendar…** (an `.ics` file *or* URL) to switch to day mode.
 
-![Lectures window, manual mode](images/lectures-manual.png)
+<p align="center"><img src="images/lectures-manual.png" alt="Lectures window, manual mode" width="60%"></p>
 
 Also: **+** on a row opens its tags to enable/disable individual ones; **Apply**
 unsuspends; **Re-suspend day** undoes the shown day. The amber ⚠ and the **Exact
@@ -75,7 +75,7 @@ matches only** checkbox are explained under Settings.
   default an `#AK` concept with no exact tag in your collection is matched
   loosely (`tag:*concept*`); tick this to use exact tags only.
 
-![Settings → Lectures: Sources](images/settings.png)
+<p align="center"><img src="images/settings.png" alt="Settings → Lectures: Sources" width="60%"></p>
 
 **Tools → Janki: Settings… → Behavior** (standalone: **… → Settings…**).
 - Lots of other controls to the search algorithm parameters here. Avoid touching
