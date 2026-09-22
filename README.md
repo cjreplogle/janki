@@ -3,6 +3,10 @@
 A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins the reviewer with native frosted-glass
 transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), integrates a practice question/review system, and provides a card scheduler that works with your calendar!
 
+<p align="center">
+  <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="720">
+</p>
+
 >[!WARNING]
 > **Most of the visual/native features are macOS-only.** Older versions of MacOS and Windows lack certain functionalities.
 >
@@ -61,6 +65,11 @@ so nothing is left behind.
 
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
+
+  <p align="center">
+    <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="380">
+    <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="380">
+  </p>
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
@@ -72,10 +81,18 @@ so nothing is left behind.
   to change the Anki notecard view to be in "caption" form. **Tab+Arrow Keys**
   adjusts their screen position. Remains visible in this view even when other
   things are in fullscreen. (Note: also integrated to work & adjust with remote buttons)
+
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/caption-mode.mp4" controls muted width="560"></video>
+  </p>
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
 - **Improved Animations** — typing animation plays on card reveal to prevent
   any recall based on the "shape" of the text rather than content.
+
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" controls muted width="560"></video>
+  </p>
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
   Toggle the whole system on/off in settings.
@@ -93,6 +110,11 @@ so nothing is left behind.
   Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
   choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
   100% local.
+
+  <p align="center">
+    <img src="docs/media/practice.jpg" alt="Practice question" width="380">
+    <img src="docs/media/practice2.jpg" alt="Practice question, answered" width="380">
+  </p>
   - **Build a bank from a PowerPoint of question screenshots (`.pptx`, macOS).** Many
     question banks are just slide decks where each question and its answer is a pasted
     screenshot, not selectable text. Janki reads the text *out of the slide images* with
@@ -116,11 +138,21 @@ so nothing is left behind.
   `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
   (Apply / Remove — one-click reversible).
   **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md).**
+
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" controls muted width="240"></video>
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" controls muted width="240"></video>
+    <img src="docs/media/mobile-card.jpg" alt="Themed mobile card" width="230">
+  </p>
 - **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards
   (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
   lectures manually. **→ [How to use it: Load Today's Lectures tutorial](docs/load-todays-lectures.md).**
+
+  <p align="center">
+    <img src="docs/media/load-todays-lectures.jpg" alt="Load today's lectures" width="560">
+  </p>
 
   *This feature expects your own calendar export and tag map; set their paths on
   the Lectures → Sources tab (or just run **Tools → Load today's lectures** and

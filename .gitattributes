@@ -1,0 +1,5 @@
+# Keep documentation + its (heavy) media OUT of the built .ankiaddon.
+# `git archive HEAD` produces the addon zip; export-ignore drops these from it so the
+# addon download stays small. They still live in the repo for the README/GitHub pages.
+docs/ export-ignore
+.gitattributes export-ignore
