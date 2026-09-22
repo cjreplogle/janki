@@ -114,8 +114,7 @@ so nothing is left behind.
   100% local.
 
   <p align="center">
-    <img src="docs/media/practice.jpg" alt="Practice question" width="380">
-    <img src="docs/media/practice2.jpg" alt="Practice question, answered" width="380">
+    <img src="docs/media/practice.jpg" alt="Practice question" width="480">
   </p>
   - **Build a bank from a PowerPoint of question screenshots (`.pptx`, macOS).** Many
     question banks are just slide decks where each question and its answer is a pasted
