@@ -66,10 +66,10 @@ so nothing is left behind.
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
 
-  <table><tr>
-    <td width="50%"><img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="100%"></td>
-    <td width="50%"><img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="100%"></td>
-  </tr></table>
+  <p align="center">
+    <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="48%">
+    <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
+  </p>
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
@@ -111,9 +111,12 @@ so nothing is left behind.
   choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
   100% local.
 
+  <!-- hidden for now
   <p align="center">
     <img src="docs/media/practice.jpg" alt="Practice question" width="480">
   </p>
+  -->
+
   - **Build a bank from a PowerPoint of question screenshots (`.pptx`, macOS).** Many
     question banks are just slide decks where each question and its answer is a pasted
     screenshot, not selectable text. Janki reads the text *out of the slide images* with
