@@ -190,6 +190,13 @@ def _startup():
         mw._glass_diagnose = diagnostics.glass_diagnose_live
         mw._amboss_diagnose = amboss._amboss_diagnose
 
+        # TEMP: breadcrumb for the intermittent "lost focus" — logs window/app focus
+        # changes + Focus-Mode toggles (with trigger) to ~/Library/Logs/janki-focus.log.
+        try:
+            diagnostics.install_focus_watch()
+        except Exception as _fw:
+            log("focus-watch install: %s" % _fw)
+
         # Keep the Janki Practice note type's CSS/template current so styling fixes
         # reach already-converted decks on launch (no manual re-convert needed).
         try:
@@ -336,6 +343,7 @@ def _startup():
         try:
             if tray._tray_should_show():
                 tray._apply_tray(True)
+            tray.start_to_tray_if_wanted()   # "open to tray on login" → start hidden
         except Exception as _tray_exc:
             log("tray apply: %s" % _tray_exc)
 

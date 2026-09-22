@@ -464,6 +464,15 @@ def _reclaim_central_layout() -> None:
 
 def _focus_set_hidden(hidden: bool) -> None:
     global _focus_hidden
+    # TEMP breadcrumb: log every Focus-Mode chrome change + who triggered it, so an
+    # unexpected "lost focus" (chrome coming back) can be traced to its caller.
+    try:
+        from ..util import diagnostics
+        diagnostics.flog("focus_set_hidden(%s) state=%s break=%s  by %s"
+                         % (hidden, getattr(mw, "state", "?"),
+                            state._pomo_on_break, diagnostics.caller_stack()))
+    except Exception:
+        pass
     # Set state FIRST so it can never get stuck (a stuck _focus_hidden=True leaves
     # the card permanently centred with the chrome back). Per-render CSS keys off it.
     _focus_hidden = hidden

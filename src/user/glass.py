@@ -343,9 +343,27 @@ def _sync_oled():
 
 
 def _apply_always_on_top(on: bool) -> None:
-    from PyQt6.QtCore import Qt
-    mw.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
-    mw.show()
+    """Keep the main window in front. Uses the NATIVE NSWindow level rather than Qt's
+    WindowStaysOnTopHint: mw.setWindowFlag() RECREATES the platform window, which on
+    macOS drops fullscreen and blanks the window (the intermittent 'kicked out of
+    fullscreen to a blank window' glitch). setLevel does the same job with no recreate.
+    Falls back to the Qt flag only off macOS / if the native bridge is unavailable."""
+    if sys.platform == "darwin":
+        try:
+            msg, _cls = _bridge()
+            ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+            if ns:
+                # 3 = NSFloatingWindowLevel, 0 = NSNormalWindowLevel.
+                msg(None, ns, b"setLevel:", (c_long,), (3 if on else 0,))
+                return
+        except Exception as exc:
+            log("always-on-top (native): %s" % exc)
+    try:
+        from PyQt6.QtCore import Qt
+        mw.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        mw.show()
+    except Exception as exc:
+        log("always-on-top (qt): %s" % exc)
 
 
 # While a Janki-owned dialog is open, keep the "Always in front" main window from
@@ -498,6 +516,77 @@ def _wake_main_webviews():
                   f"views={len(views)} vis={[v.isVisible() for v in views]}")
     except Exception as e:
         keytap._gtap_log(f"[restore] _wake error: {e}")
+
+
+def _reclaim_app_focus():
+    """Pull Anki to the front right after launch. Janki.app starts Anki via `just run`
+    from a shell, so Terminal grabs focus back a beat later — which deactivates Anki
+    and knocks an OLED native-fullscreen Space out to the desktop (the 'loaded then
+    lost focus/fullscreen' glitch). Re-activating ourselves a few times beats that."""
+    if sys.platform != "darwin":
+        return
+    try:
+        msg, cls = _bridge()
+        nsapp = msg(c_void_p, cls("NSApplication"), b"sharedApplication")
+        if nsapp:
+            msg(None, nsapp, b"activateIgnoringOtherApps:", (c_bool,), (True,))
+    except Exception as exc:
+        log(f"reclaim focus: {exc}")
+    try:
+        mw.raise_()
+        mw.activateWindow()
+    except Exception:
+        pass
+
+
+def _frontmost_app_name() -> str:
+    try:
+        from ctypes import c_char_p
+        msg, cls = _bridge()
+        ws = msg(c_void_p, cls("NSWorkspace"), b"sharedWorkspace")
+        app = msg(c_void_p, ws, b"frontmostApplication") if ws else None
+        nm = msg(c_void_p, app, b"localizedName") if app else None
+        b = msg(c_char_p, nm, b"UTF8String") if nm else None
+        return b.decode("utf-8", "replace") if b else ""
+    except Exception:
+        return ""
+
+
+_focus_guard_until = 0.0
+_focus_guard_hooked = False
+# Terminal-family launcher apps that host `just run` / the AnkiGlass script.
+_LAUNCHER_APPS = ("Terminal", "iTerm2", "iTerm", "kitty", "Alacritty", "WezTerm")
+
+
+def install_launch_focus_guard(seconds: float = 25.0) -> None:
+    """For the first `seconds` after launch, if the LAUNCHER terminal steals focus
+    (Janki.app runs Anki from a shell, so Terminal grabs it back and knocks an OLED
+    native-fullscreen Space to the desktop), grab focus straight back. Scoped to the
+    launcher apps + a short window so it never fights the user switching apps later."""
+    global _focus_guard_until, _focus_guard_hooked
+    if sys.platform != "darwin":
+        return
+    import time
+    _focus_guard_until = time.time() + seconds
+    if _focus_guard_hooked:
+        return
+    _focus_guard_hooked = True
+    try:
+        def _on_state(st):
+            try:
+                import time as _t
+                if _t.time() > _focus_guard_until:
+                    return
+                if st != Qt.ApplicationState.ApplicationInactive:
+                    return
+                if _frontmost_app_name() in _LAUNCHER_APPS:
+                    QTimer.singleShot(0, _reclaim_app_focus)
+                    QTimer.singleShot(120, _reclaim_app_focus)
+            except Exception:
+                pass
+        mw.app.applicationStateChanged.connect(_on_state)
+    except Exception as exc:
+        log(f"launch focus guard: {exc}")
 
 
 def _reapply_native():

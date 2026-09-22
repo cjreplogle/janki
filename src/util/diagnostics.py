@@ -4,12 +4,111 @@ import os
 from ctypes import c_void_p, c_bool
 from aqt import mw
 from aqt.webview import AnkiWebView
-from aqt.qt import QTimer
+from aqt.qt import QTimer, QObject, QEvent
 
 from .bridge import _bridge
-from .config import ACTIVE, _cfg
+from .config import ACTIVE, _cfg, log
 from ..user import glass
 from . import keytap
+
+
+# ---------------------------------------------------------------------------
+# Focus / window breadcrumb — TEMP: capture what drops app/window focus or flips
+# Focus Mode, since the general log() is stderr-only. Writes to janki-focus.log.
+# ---------------------------------------------------------------------------
+_FOCUS_LOG = os.path.expanduser("~/Library/Logs/janki-focus.log")
+
+
+def flog(msg: str) -> None:
+    try:
+        import datetime
+        with open(_FOCUS_LOG, "a", encoding="utf-8") as f:
+            f.write("%s  %s\n"
+                    % (datetime.datetime.now().isoformat(timespec="milliseconds"), msg))
+    except Exception:
+        pass
+
+
+def caller_stack(limit: int = 6) -> str:
+    """A compact 'file:line func' trail of the current Python call stack (skips this
+    frame) — shows who triggered a Focus-Mode change."""
+    try:
+        import traceback
+        frames = traceback.extract_stack()[:-1][-limit:]
+        return " <- ".join("%s:%d %s" % (os.path.basename(fr.filename), fr.lineno, fr.name)
+                           for fr in frames)
+    except Exception:
+        return "?"
+
+
+def _frontmost() -> str:
+    """Who currently holds focus: the frontmost APP + Anki's key window class. Names
+    the thief when mw deactivates (another app, or a Janki helper panel)."""
+    try:
+        from ctypes import c_char_p
+        msg, cls = _bridge()
+
+        def _nsstr(p):
+            if not p:
+                return "?"
+            b = msg(c_char_p, p, b"UTF8String")
+            return b.decode("utf-8", "replace") if b else "?"
+        ws = msg(c_void_p, cls("NSWorkspace"), b"sharedWorkspace")
+        app = msg(c_void_p, ws, b"frontmostApplication") if ws else None
+        appname = _nsstr(msg(c_void_p, app, b"localizedName")) if app else "?"
+        nsapp = msg(c_void_p, cls("NSApplication"), b"sharedApplication")
+        keyw = msg(c_void_p, nsapp, b"keyWindow") if nsapp else None
+        kcls = "?"
+        if keyw:
+            kcls = _nsstr(msg(c_void_p, msg(c_void_p, keyw, b"class"), b"description"))
+        return "frontApp=%s keyWin=%s" % (appname, kcls)
+    except Exception as exc:
+        return "frontmost? %s" % exc
+
+
+class _FocusWatch(QObject):
+    def eventFilter(self, obj, ev):
+        try:
+            t = ev.type()
+            if t == QEvent.Type.WindowActivate:
+                flog("mw WindowActivate")
+            elif t == QEvent.Type.WindowDeactivate:
+                flog("mw WindowDeactivate visible=%s fs=%s  %s"
+                     % (mw.isVisible(), mw.isFullScreen(), _frontmost()))
+            elif t == QEvent.Type.WindowStateChange:
+                flog("mw WindowStateChange fs=%s min=%s max=%s visible=%s"
+                     % (mw.isFullScreen(), mw.isMinimized(), mw.isMaximized(),
+                        mw.isVisible()))
+            elif t == QEvent.Type.Hide:
+                flog("mw Hide")
+            elif t == QEvent.Type.Show:
+                flog("mw Show fs=%s" % mw.isFullScreen())
+        except Exception:
+            pass
+        return False
+
+
+_focus_watch = None
+
+
+def install_focus_watch() -> None:
+    global _focus_watch
+    if _focus_watch is not None:
+        return
+    try:
+        _focus_watch = _FocusWatch()
+        mw.installEventFilter(_focus_watch)
+
+        def _on_app_state(st):
+            try:
+                flog("appState=%s visible=%s fs=%s"
+                     % (st, mw.isVisible(), mw.isFullScreen()))
+            except Exception:
+                pass
+        mw.app.applicationStateChanged.connect(_on_app_state)
+        flog("=== focus-watch installed (state=%s) ===" % getattr(mw, "state", "?"))
+    except Exception as exc:
+        log("focus-watch: %s" % exc)
 
 # ---------------------------------------------------------------------------
 # Diagnostics

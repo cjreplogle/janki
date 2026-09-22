@@ -1447,6 +1447,24 @@ class GlassSettings(QDialog):
         self._tray.stateChanged.connect(on_tray)
         gen_lay.addWidget(self._tray)
 
+        self._tray_login = QCheckBox("Open Janki to the tray at login")
+        self._tray_login.setToolTip(
+            "Launch Janki automatically when you log in and start it minimized to the "
+            "menu-bar/tray (macOS)."
+        )
+        self._tray_login.setChecked(bool(self.cfg.get("open_to_tray_on_login", False)))
+
+        def on_tray_login(_state):
+            on = self._tray_login.isChecked()
+            self.cfg["open_to_tray_on_login"] = on
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            tray.set_login_item(on)
+            if on:
+                tray._apply_tray(True)   # ensure a tray target exists to launch into
+
+        self._tray_login.stateChanged.connect(on_tray_login)
+        gen_lay.addWidget(self._tray_login)
+
         # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
         # caption mode even when another app is focused/fullscreen.
         self._hid = QCheckBox(

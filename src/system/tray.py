@@ -120,38 +120,28 @@ def _apply_tray(on: bool) -> None:
     if on:
         if _tray_icon is None:
             _tray_icon = QSystemTrayIcon(_silhouette_icon(), mw)
-            menu = QMenu()
-            # Mode toggles, mirrored from the Tab+\ / Tab+F hotkeys, so caption and
-            # focus can be driven from the menu-bar icon even when Anki is unfocused.
-            # Caption/Focus mode are macOS-native, so only offer them there — the
-            # rest of the tray (open/quit, close-to-tray) is cross-platform.
+            # macOS: clicking the icon opens the GLASS NAVIGATOR (decks + toggles +
+            # open/quit) instead of a native menu — richer, and themed like the main
+            # window. No context menu is set, so the click reaches us as a Trigger.
+            # Other platforms keep the plain cross-platform QMenu.
             if sys.platform == "darwin":
-                _tray_caption_action = QAction("Caption mode", mw)
-                _tray_caption_action.setCheckable(True)
-                _tray_caption_action.triggered.connect(lambda _c=False: hud._toggle_coherence())
-                _tray_focus_action = QAction("Focus mode", mw)
-                _tray_focus_action.setCheckable(True)
-                _tray_focus_action.triggered.connect(lambda _c=False: focus._toggle_focus_mode())
-                _tray_lockdown_action = QAction("Lockdown mode", mw)
-                _tray_lockdown_action.setCheckable(True)
-                _tray_lockdown_action.triggered.connect(lambda _c=False: lockdown.toggle())
-                menu.addAction(_tray_caption_action)
-                menu.addAction(_tray_focus_action)
-                menu.addAction(_tray_lockdown_action)
-            last_deck_action = QAction("Open last studied deck", mw)
-            last_deck_action.triggered.connect(lambda _c=False: focus._open_last_deck())
-            menu.addAction(last_deck_action)
-            menu.addSeparator()
-            restore_action = QAction("Open Anki", mw)
-            restore_action.triggered.connect(lambda: _restore_window())
-            quit_action = QAction("Quit", mw)
-            quit_action.triggered.connect(lambda: _quit_from_tray())
-            menu.addAction(restore_action)
-            menu.addSeparator()
-            menu.addAction(quit_action)
-            menu.aboutToShow.connect(_sync_tray_actions)
-            _tray_icon.setContextMenu(menu)
-            _tray_icon.activated.connect(_on_tray_activated)
+                _tray_icon.activated.connect(_on_tray_activated)
+            else:
+                menu = QMenu()
+                last_deck_action = QAction("Open last studied deck", mw)
+                last_deck_action.triggered.connect(lambda _c=False: focus._open_last_deck())
+                menu.addAction(last_deck_action)
+                menu.addSeparator()
+                restore_action = QAction("Open Anki", mw)
+                restore_action.triggered.connect(lambda: _restore_window())
+                quit_action = QAction("Quit", mw)
+                quit_action.triggered.connect(lambda: _quit_from_tray())
+                menu.addAction(restore_action)
+                menu.addSeparator()
+                menu.addAction(quit_action)
+                menu.aboutToShow.connect(_sync_tray_actions)
+                _tray_icon.setContextMenu(menu)
+                _tray_icon.activated.connect(_on_tray_activated)
         _tray_icon.show()
         # intercept close-to-minimize (the filter itself is gated on tray_minimize,
         # so showing the icon for the mode controls doesn't hijack the close button)
@@ -188,11 +178,22 @@ def _tray_should_show() -> bool:
 
 
 def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
-    if reason == QSystemTrayIcon.ActivationReason.Trigger:
-        # Only ever RESTORE on click — never hide. Hiding here fought the context
-        # menu (every other click hid the app), and a re-shown glass window can
-        # come back blank, so it looked un-unhideable. The menu's "Open Anki" /
-        # close-to-tray handle hiding.
+    if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                  QSystemTrayIcon.ActivationReason.Context):
+        # Arm the reopen-suppression FIRST: the click activates the app, which would
+        # otherwise trigger the activate→reopen hook and yank the window back. Set it
+        # before anything else so it lands no matter the event order.
+        suppress_reopen()
+        # macOS: open the glass navigator (decks + toggles + open/quit).
+        if sys.platform == "darwin":
+            try:
+                from . import tray_nav
+                tray_nav.show_navigator()
+                return
+            except Exception as e:
+                log(f"tray navigator: {e}")
+        # Other platforms (or if the navigator failed): just RESTORE on click —
+        # never hide. The menu's "Open Anki" / close-to-tray handle hiding.
         if not mw.isVisible() or mw.isMinimized():
             _restore_window()
             try:
@@ -231,25 +232,161 @@ def _minimize_to_tray() -> None:
 
 _close_hooked = False
 _reopen_hooked = False
+_suppress_reopen_until = 0.0
+
+
+_APP_PATH = "/Applications/Janki.app"
+_LAUNCH_BIN = "/Applications/Janki.app/Contents/MacOS/AnkiGlass"
+_LOGIN_LABEL = "com.cjreplogle.janki.login"
+# The env var the login-launch LaunchAgent sets. Manual double-clicks of Janki.app
+# never carry it, so start_to_tray_if_wanted() can tell an auto login launch apart
+# from a user opening the app — the latter must ALWAYS show the window.
+_LOGIN_ENV = "JANKI_LOGIN_LAUNCH"
+
+
+def _login_plist_path() -> str:
+    import os
+    return os.path.expanduser("~/Library/LaunchAgents/%s.plist" % _LOGIN_LABEL)
+
+
+def set_login_item(enable: bool) -> None:
+    """Add/remove Janki as a macOS login item so it comes up (hidden, into the tray)
+    at login. Implemented as a per-user LaunchAgent rather than a System Events login
+    item so the launch can be TAGGED with an env var (JANKI_LOGIN_LAUNCH=1): that's
+    what lets start_to_tray_if_wanted() hide only on a real login launch and never on
+    a manual open. No-op off macOS."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import os
+        import subprocess
+        # Migration/cleanup: drop any legacy System Events login item we used before.
+        subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to delete login item "Janki"'],
+            capture_output=True)
+        plist = _login_plist_path()
+        if enable and os.path.isfile(_LAUNCH_BIN):
+            os.makedirs(os.path.dirname(plist), exist_ok=True)
+            content = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0">\n<dict>\n'
+                '  <key>Label</key><string>%s</string>\n'
+                '  <key>ProgramArguments</key>\n  <array><string>%s</string></array>\n'
+                '  <key>EnvironmentVariables</key>\n'
+                '  <dict><key>%s</key><string>1</string></dict>\n'
+                '  <key>RunAtLoad</key><true/>\n'
+                '</dict>\n</plist>\n'
+                % (_LOGIN_LABEL, _LAUNCH_BIN, _LOGIN_ENV))
+            with open(plist, "w", encoding="utf-8") as f:
+                f.write(content)
+            # Don't `launchctl load` now — that would immediately launch a 2nd copy.
+            # launchd auto-loads ~/Library/LaunchAgents at the next login (RunAtLoad).
+        else:
+            try:
+                subprocess.run(["launchctl", "unload", plist], capture_output=True)
+            except Exception:
+                pass
+            try:
+                if os.path.isfile(plist):
+                    os.remove(plist)
+            except Exception:
+                pass
+    except Exception as e:
+        log(f"login item: {e}")
+
+
+def start_to_tray_if_wanted() -> None:
+    """If 'open to tray on login' is set AND this launch was the auto login launch
+    (tagged JANKI_LOGIN_LAUNCH=1 by the LaunchAgent), bring Janki up minimized to the
+    tray: ensure the icon exists, then hide the window a beat after init. A manual
+    double-click of Janki.app carries no such tag, so the window shows normally."""
+    if sys.platform != "darwin":
+        return
+    import os
+    if not _cfg().get("open_to_tray_on_login", False):
+        return
+    if os.environ.get(_LOGIN_ENV) != "1":
+        return
+    try:
+        _ensure_tray_target()
+        # Keep the app alive when we hide the only window on launch (even if plain
+        # tray-minimize is off) — otherwise quitOnLastWindowClosed would quit it.
+        try:
+            mw.app.setQuitOnLastWindowClosed(False)
+        except Exception:
+            pass
+
+        def _go():
+            try:
+                if mw.isVisible():
+                    _minimize_to_tray()
+            except Exception as e:
+                log(f"start-to-tray: {e}")
+        QTimer.singleShot(600, _go)
+        QTimer.singleShot(1500, _go)   # again, after any late show
+    except Exception as e:
+        log(f"start-to-tray init: {e}")
+
+
+def suppress_reopen(secs: float = 1.2) -> None:
+    """Briefly stop the activate → reopen-window hook. Clicking the menu-bar icon
+    activates the app, which would otherwise yank the hidden window back onto the
+    screen — but the icon click should only open the tray navigator, not the window."""
+    global _suppress_reopen_until
+    import time
+    _suppress_reopen_until = time.time() + secs
+
+
+def _do_reopen() -> None:
+    """Restore + repaint the hidden main window."""
+    try:
+        if mw.isVisible():
+            return
+        _restore_window()
+        try:
+            from ..user import glass
+            glass._wake_main_webviews()   # repaint the transparent window
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"reopen: {e}")
 
 
 def _install_reopen_hook() -> None:
-    """Reopen the window when the app is activated while hidden — i.e. clicking the
-    Anki Dock icon (or ⌘-Tab back) after closing to the tray brings it back, the
-    same as clicking the menu-bar icon. No-op when a window is already showing."""
+    """Reopen the hidden window when the app is activated (Dock icon / ⌘-Tab).
+
+    On macOS the menu-bar icon click ALSO activates the app, and we don't want that
+    to restore the window (it should only open the tray navigator). Rather than
+    disable reopen entirely (which broke the Dock-icon reopen), we DEFER the restore
+    briefly and skip it if reopen-suppression got armed in the meantime. A menu-bar
+    click arms suppress_reopen() in _on_tray_activated, so it's skipped; a Dock/⌘-Tab
+    activation arms nothing, so it restores. The small delay also removes the ordering
+    race between the tray `activated` signal and applicationStateChanged."""
     global _reopen_hooked
     if _reopen_hooked:
         return
     try:
+        import time
+
         def _on_state(st):
             try:
-                if st == Qt.ApplicationState.ApplicationActive and not mw.isVisible():
-                    _restore_window()
-                    try:
-                        from ..user import glass
-                        glass._wake_main_webviews()
-                    except Exception:
-                        pass
+                if st != Qt.ApplicationState.ApplicationActive or mw.isVisible():
+                    return
+                if sys.platform == "darwin":
+                    # Let a possible menu-bar-icon click arm suppression first, then
+                    # re-check before restoring.
+                    def _maybe():
+                        if mw.isVisible():
+                            return
+                        if time.time() < _suppress_reopen_until:
+                            return
+                        _do_reopen()
+                    QTimer.singleShot(140, _maybe)
+                else:
+                    _do_reopen()
             except Exception as e:
                 log(f"reopen on activate: {e}")
         mw.app.applicationStateChanged.connect(_on_state)

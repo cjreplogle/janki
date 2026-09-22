@@ -121,6 +121,7 @@
   "always_on_top": false,
   "deck_stats": true,
   "tray_minimize": true,
+  "open_to_tray_on_login": false,
   "card_font": "Lora",
   "cloze_color": "#6db3ff",
   "text_black_to_white": true,
