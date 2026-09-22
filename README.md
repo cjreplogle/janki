@@ -66,12 +66,10 @@ so nothing is left behind.
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
 
-  <p align="left">
-    <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="420">
-  </p>
-  <p align="right">
-    <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="420">
-  </p>
+  <table><tr>
+    <td width="50%"><img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="100%"></td>
+    <td width="50%"><img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="100%"></td>
+  </tr></table>
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
