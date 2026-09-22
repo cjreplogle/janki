@@ -66,9 +66,11 @@ so nothing is left behind.
 - **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
   serif card font, OLED full-screen mode.
 
-  <p align="center">
-    <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="380">
-    <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="380">
+  <p align="left">
+    <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="420">
+  </p>
+  <p align="right">
+    <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="420">
   </p>
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
