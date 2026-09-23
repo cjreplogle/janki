@@ -63,20 +63,22 @@ so nothing is left behind.
 
 ## Features
 
-- **Frosted-glass reviewer** — revamps the Anki user interface from the ground up, based on macOS design language. Includes a rework of card animations, application-wide transparency, and much, much more...
+- **Frosted-glass reviewer** — revamps the Anki user interface from the ground up. Minimal, yet designed to seamlessly take advantage of modern hardware features. Includes a rework of card animations, application-wide frosted glass transparency, and much, much more...
 
   <p align="center">
     <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="48%">
     <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
   </p>
-  <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
-  </p>
 - **Focus Mode** (**`Tab+F`**) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
   you from getting distracted. Escape by holding space/the entry bind for 10s.
-  Tiered into three modes depending on your preferences.
+  Tiered into three levels depending on how cooked your attention span is from
+  doom-scrolling.
+  
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
+  </p>
 - **Caption Mode** — Trying to multitask but still see your anki cards? Press **`Tab + \`**
   to change the Anki notecard view to be in "caption" form. **`Tab+Arrow Keys`**
   adjusts their screen position. Remains visible in this view even when other
