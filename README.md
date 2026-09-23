@@ -70,13 +70,17 @@ so nothing is left behind.
     <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="48%">
     <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
   </p>
+- **Improved Animations** — typing animation plays on card reveal to prevent
+  any recall based on the "shape" of the text rather than content.
+
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
+  </p>
 - **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
   you from getting distracted. Escape by holding space/the entry bind for 10s.
   Tiered into three modes depending on your preferences.
-- **OLED Optimization** — when in fullscreen, uses a true black backdrop. Useful
-  for increasing contrast and readability on Mac displays.
 - **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \\**
   to change the Anki notecard view to be in "caption" form. **Tab+Arrow Keys**
   adjusts their screen position. Remains visible in this view even when other
@@ -87,12 +91,6 @@ so nothing is left behind.
   </p>
 - **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
   when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
-- **Improved Animations** — typing animation plays on card reveal to prevent
-  any recall based on the "shape" of the text rather than content.
-
-  <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
-  </p>
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
   Toggle the whole system on/off in settings.
@@ -105,35 +103,20 @@ so nothing is left behind.
   or **Cmd**+**-** hotkeys to zoom card contents so that exists now
 - **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
   underlines unless in fullscreen.
+- **[Rephrase](docs/rephrase.md)** — automatically re-word the same card
+  slightly differently while retaining core information, so you don't memorize the
+  card without understanding it. Automatically intersperses reworded cards after a
+  single pass, while the original text is easily retrievable. All rephrases fall
+  under the same card so making headway with the adjusted wording has the same
+  effect as getting the original card correct.
 - **[Practice questions](docs/practice-questions.md)** — pull multiple-choice questions
   related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
   Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
   choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
   100% local.
 
-  <!-- hidden for now
-  <p align="center">
-    <img src="docs/media/practice.jpg" alt="Practice question" width="480">
-  </p>
-  -->
-
-  - **Build a bank from a PowerPoint of question screenshots (`.pptx`, macOS).** Many
-    question banks are just slide decks where each question and its answer is a pasted
-    screenshot, not selectable text. Janki reads the text *out of the slide images* with
-    macOS's built-in Vision text recognition — **fully offline, nothing uploaded** — and
-    assembles a real MCQ bank. It handles two-column and shared-figure/vignette slides,
-    figures (carried onto the card), several answer-key formats, and imports anything it
-    can't confidently parse as flagged ⚠ *incomplete* cards for review. You can also build
-    a bank from a plain **Word doc** (`.docx`).
-  - **Intersperse practice into normal review.** Optionally drop relevant practice
-    questions into your ordinary review sessions — a quick inline check every N cards, and/or
-    a benchmark set right before a pomodoro break — matched to the concept tags of the cards
-    you've just been studying. Enable it under **Settings ▸ Practice ▸ Intersperse**.
-  - **Manage banks** — import/reorder by drag, rename, export, merge several into one, or
-    drop one bank onto another to nest it as a subbank.
-
   **→ [Practice system + how to import a document as a question bank](docs/practice-questions.md).**
-- **[Mobile cards](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
+- **[Mobile card theming](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
   add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
   animation into your note types (scoped to mobile) so the look rides your normal sync
   to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
@@ -147,7 +130,7 @@ so nothing is left behind.
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" autoplay loop muted playsinline controls width="240"></video>
     -->
   </p>
-- **[Load today's lectures](docs/load-todays-lectures.md)** (optional) — reads a local `.ics`
+- **[Load today's lectures](docs/load-todays-lectures.md)** — reads a local `.ics`
   calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
   classes for the day, and adaptively unsuspends relevant tagged cards
   (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
