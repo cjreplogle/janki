@@ -63,46 +63,42 @@ so nothing is left behind.
 
 ## Features
 
-- **Frosted-glass reviewer** — native macOS vibrancy/blur; transparent cards,
-  serif card font, OLED full-screen mode.
+- **Frosted-glass reviewer** — revamps the Anki user interface from the ground up, based on macOS design language. Includes a rework of card animations, application-wide transparency, and much, much more...
 
   <p align="center">
     <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="48%">
     <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
   </p>
-- **Improved Animations** — typing animation plays on card reveal to prevent
-  any recall based on the "shape" of the text rather than content.
-
   <p align="center">
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
   </p>
-- **Focus Mode** (`Tab+F`) — hides toolbar/answer bar and centers the card.
+- **Focus Mode** (**`Tab+F`**) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
   you from getting distracted. Escape by holding space/the entry bind for 10s.
   Tiered into three modes depending on your preferences.
-- **Caption Mode** — Trying to multitask but still see your anki cards? Press **Tab + \\**
-  to change the Anki notecard view to be in "caption" form. **Tab+Arrow Keys**
+- **Caption Mode** — Trying to multitask but still see your anki cards? Press **`Tab + \`**
+  to change the Anki notecard view to be in "caption" form. **`Tab+Arrow Keys`**
   adjusts their screen position. Remains visible in this view even when other
   things are in fullscreen. (Note: also integrated to work & adjust with remote buttons)
 
   <p align="center">
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/caption-mode.mp4" autoplay loop muted playsinline controls width="560"></video>
   </p>
-- **Global hotkeys** — hold **Tab** as a modifier to drive the reviewer even
-  when Anki is not focused. (i.e. Tab+Z → again, overrides being unfocused)
+- **Global hotkeys & remote** — hold **Tab** as a modifier or use your
+  controller to drive the reviewer even when Anki is not focused.
+  (i.e. **`Tab+Z`** → again, overrides being unfocused). **`Cmd+Opt+A`** also will globally
+  focus the Anki window regardless of whatever else you are doing.
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
   Toggle the whole system on/off in settings.
+- **Tray menu** — keeps Anki open in the background and allows you to navigate a
+  miniaturized menu with other things focused.
 - **Card timer** — a thin bar fills over N seconds; when it runs out a red
   edge-glow flares (a "time to move on" nudge). A green flare marks a card
   finished for the day. Intensity and timing are adjustable.
-- **Always in front** — always places the Anki app in front of other windows, 
-  even when Anki is not focused so you can always see what you are studying.
-- **Quick Zoom** — for whatever god forsaken reason Anki does not have **Cmd**+**+**
-  or **Cmd**+**-** hotkeys to zoom card contents so that exists now
-- **AMBOSS integrations** — frosts the AMBOSS side panel and hover tooltip; hides term
-  underlines unless in fullscreen.
+- **Quick Zoom** — for whatever god forsaken reason Anki does not have **`Cmd+`**
+  or **`Cmd-`** hotkeys to zoom card contents so that exists now...
 - **[Rephrase](docs/rephrase.md)** — automatically re-word the same card
   slightly differently while retaining core information, so you don't memorize the
   card without understanding it. Automatically intersperses reworded cards after a
