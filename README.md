@@ -70,7 +70,9 @@ so nothing is left behind.
     <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
   </p>
 - **Focus Mode** (**`Tab+F`**) — hides toolbar/answer bar and centers the card.
-  Only has the card contents on screen.
+  Only has the card contents on screen. Also throws in small customizable timer
+  which fills over N seconds; when it runs out a red edge-glow flares
+  (a "time to move on" nudge). A green flare denotes a card as finished for the day.
 - **Lockdown Mode** (`backtick/~+delete`) — locks Janki into fullscreen to keep
   you from getting distracted. Escape by holding space/the entry bind for 10s.
   Tiered into three levels depending on how cooked your attention span is from
@@ -93,12 +95,9 @@ so nothing is left behind.
   focus the Anki window regardless of whatever else you are doing.
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
-  Toggle the whole system on/off in settings.
+  Toggle the whole system on/off in settings. 
 - **Tray menu** — keeps Anki open in the background and allows you to navigate a
   miniaturized menu with other things focused.
-- **Card timer** — a thin bar fills over N seconds; when it runs out a red
-  edge-glow flares (a "time to move on" nudge). A green flare marks a card
-  finished for the day. Intensity and timing are adjustable.
 - **Quick Zoom** — for whatever god forsaken reason Anki does not have **`Cmd+`**
   or **`Cmd-`** hotkeys to zoom card contents so that exists now...
 - **[Rephrase](docs/rephrase.md)** — automatically re-word the same card
