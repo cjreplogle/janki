@@ -130,12 +130,18 @@ def _side_of(kind) -> "str | None":
     return None
 
 
+# The mobile-reword template block (reword_mobile) renders a hidden base64 payload into every
+# card; it's metadata, not content — keep it out of hashes and exported prompt text.
+_MOBILE_BLOCK_RE = re.compile(r"(?is)<!-- janki-reword:start -->.*?<!-- janki-reword:end -->")
+
+
 def _plain(html: str) -> str:
     """Collapse rendered card HTML to comparable plain text (for hashing + as the source
     the generator paraphrases). Not used to render — display keeps full HTML."""
     if not html:
         return ""
-    txt = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    txt = _MOBILE_BLOCK_RE.sub(" ", html)
+    txt = re.sub(r"(?is)<(script|style).*?</\1>", " ", txt)
     txt = re.sub(r"(?is)<br\s*/?>", "\n", txt)
     txt = re.sub(r"(?is)<[^>]+>", " ", txt)
     txt = re.sub(r"&nbsp;", " ", txt)
@@ -694,7 +700,8 @@ def _strip_noncontent(html: str) -> str:
     """Remove <script>/<style>/<template> blocks and HTML comments — leaving only card content."""
     if not html:
         return ""
-    h = re.sub(r"(?is)<(script|style|template)\b.*?</\1>", " ", html)
+    h = _MOBILE_BLOCK_RE.sub(" ", html)
+    h = re.sub(r"(?is)<(script|style|template)\b.*?</\1>", " ", h)
     h = re.sub(r"(?is)<!--.*?-->", " ", h)
     return h
 
@@ -1230,6 +1237,135 @@ def clear_all() -> None:
     _save()
 
 
+def _stored_keys_by_card(deck_ids) -> set:
+    """Store keys ("nid:ord:side") belonging to cards in `deck_ids` (incl. filtered-deck
+    cards whose home deck is listed). One SQL pass — no card rendering."""
+    dids = sorted({int(d) for d in deck_ids or []})
+    if not dids:
+        return set()
+    ids = ",".join(map(str, dids))
+    try:
+        rows = mw.col.db.all("select nid, ord from cards where did in (%s) or odid in (%s)"
+                             % (ids, ids))
+    except Exception:
+        return set()
+    cards = {"%d:%d" % (int(n), int(o)) for n, o in rows}
+    return {k for k in _load() if k.rsplit(":", 1)[0] in cards}
+
+
+def count_for_decks(deck_ids) -> int:
+    """How many CARDS in these decks have stored rephrasings."""
+    return len({k.rsplit(":", 1)[0] for k in _stored_keys_by_card(deck_ids)})
+
+
+def clear_for_decks(deck_ids) -> int:
+    """Delete stored rephrasings for every card in `deck_ids`. Returns cards cleared."""
+    keys = _stored_keys_by_card(deck_ids)
+    store = _load()
+    for k in keys:
+        store.pop(k, None)
+    if keys:
+        _save()
+    return len({k.rsplit(":", 1)[0] for k in keys})
+
+
+def clear_rephrasings_dialog(parent=None) -> None:
+    """Pick which decks to clear stored rephrasings from (per-deck counts shown)."""
+    from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                        QCheckBox, QScrollArea, QWidget, QMessageBox)
+    from aqt.utils import tooltip
+    try:
+        from ..integrations.qbank import _decks_top_level
+        decks = _decks_top_level()                  # [(top name, [dids incl subdecks])]
+    except Exception:
+        decks = []
+    if not decks:
+        try:
+            decks = [(d.name, [int(d.id)]) for d in mw.col.decks.all_names_and_ids()]
+        except Exception:
+            decks = []
+    counts = [(name, dids, count_for_decks(dids)) for name, dids in decks]
+    counts = [c for c in counts if c[2] > 0]
+    if not counts:
+        tooltip("No stored rephrasings to clear.")
+        return
+
+    dlg = QDialog(parent or mw)
+    dlg.setWindowTitle("Clear rephrasings")
+    try:
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        pass
+    v = QVBoxLayout(dlg)
+    if getattr(dlg, "_jk_expanded", False):         # content sits in the titlebar row
+        _m = v.contentsMargins()
+        v.setContentsMargins(_m.left(), 30, _m.right(), _m.bottom())
+    lbl = QLabel("Choose which decks to clear stored rephrasings from. Cards go back to "
+                 "their original wording; you can re-import rephrasings any time.")
+    lbl.setWordWrap(True)
+    v.addWidget(lbl)
+
+    cb_all = QCheckBox("All decks")
+    v.addWidget(cb_all)
+    scroll = QScrollArea(); scroll.setWidgetResizable(True)
+    scroll.setFixedHeight(min(260, 30 * len(counts) + 12))
+    host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(16, 0, 0, 0)
+    boxes = []
+    for name, dids, n in counts:
+        cb = QCheckBox("%s  (%d card%s)" % (name, n, "" if n == 1 else "s"))
+        boxes.append((cb, dids)); hv.addWidget(cb)
+    hv.addStretch()
+    scroll.setWidget(host)
+    v.addWidget(scroll)
+
+    row = QHBoxLayout()
+    clear = QPushButton("Clear selected")
+    row.addStretch(); row.addWidget(clear)
+    v.addLayout(row)
+
+    def _sync(*_a):
+        on = cb_all.isChecked()
+        for cb, _d in boxes:
+            cb.setEnabled(not on)
+        clear.setEnabled(on or any(cb.isChecked() for cb, _d in boxes))
+    cb_all.toggled.connect(_sync)
+    for cb, _d in boxes:
+        cb.toggled.connect(_sync)
+    _sync()
+
+    def _do_clear():
+        if cb_all.isChecked():
+            picked = [(cb.text(), d) for cb, d in boxes]
+        else:
+            picked = [(cb.text(), d) for cb, d in boxes if cb.isChecked()]
+        dids = [x for _t, d in picked for x in d]
+        n = count_for_decks(dids)
+        if QMessageBox.question(
+                dlg, "Clear rephrasings",
+                "Delete stored rephrasings for %d card%s in %d deck%s?"
+                % (n, "" if n == 1 else "s", len(picked), "" if len(picked) == 1 else "s")
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        if cb_all.isChecked():
+            clear_all()                              # also drops orphaned records
+        else:
+            clear_for_decks(dids)
+        tooltip("Cleared rephrasings for %d card%s." % (n, "" if n == 1 else "s"))
+        dlg.accept()
+    clear.clicked.connect(_do_clear)
+
+    dlg.resize(460, dlg.sizeHint().height())
+    try:
+        from ..user import glass as _glass
+        _glass.bring_dialog_to_front(dlg)
+        _glass.hide_titlebar_extras(dlg)
+    except Exception:
+        dlg.show()
+    dlg.exec()
+
+
 # --------------------------------------------------------------------------- portable .rp path
 # For anyone NOT on macOS (or who'd rather use their own LLM): export a deck's raw text
 # with a built-in prompt, paste it into any chat model, and import the returned .rp file.
@@ -1258,10 +1394,14 @@ _RP_PROMPT = (
     "answer it, or reveal what belongs there — reword ONLY the text around the blanks.\n"
     "- If an item has a \"protect\" list, every string in it MUST appear UNCHANGED and verbatim "
     "in each of your phrasings (you may move it, but do not alter it).\n\n"
-    "OUTPUT (strict): reply with ONE valid JSON object and NOTHING else — no prose, no notes, "
-    "no markdown, no ``` code fences. Preserve each item's `id` verbatim. Use exactly this shape:\n"
+    "OUTPUT (strict): deliver the result as a DOWNLOADABLE FILE named `janki-rephrase.rp` "
+    "(use your file-creation / code tool) — do NOT print the JSON in the chat. The file must "
+    "contain ONE valid JSON object and NOTHING else — no prose, no notes, no markdown, no ``` "
+    "code fences. Preserve each item's `id` verbatim. Use exactly this shape:\n"
     '{"type":"janki-rephrase","version":1,"items":['
-    '{"id":"<same id>","variants":["phrasing 1","phrasing 2"]}]}\n\n'
+    '{"id":"<same id>","variants":["phrasing 1","phrasing 2"]}]}\n'
+    "In the chat itself, reply only with the file and a one-line count of items done. ONLY if "
+    "you truly cannot create files, reply with the bare JSON object instead.\n\n"
     "Items:\n"
 )
 
@@ -1278,10 +1418,12 @@ def _cards_for_deck(did: int):
             continue
 
 
-def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_done=True):
+def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_done=True,
+                    sides=("q", "a"), cloze=True, basic=True):
     """Gather the export items (and the count of cards used). `skip_done` omits a card side that
     already has valid stored variants — so successive batches cover NEW cards. `limit` caps the
-    number of CARDS contributing items (0 = no cap) so a big deck can be reworded in fast chunks."""
+    number of CARDS contributing items (0 = no cap). `sides` / `cloze` / `basic` choose what goes
+    into the prompt (front/back, cloze vs. non-cloze notes)."""
     if card_ids:
         cards = [mw.col.get_card(c) for c in card_ids]
     elif deck_ids:
@@ -1300,9 +1442,11 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
         if _is_image_occlusion(note):
             continue                          # image/mask cards have nothing to reword
         is_cloze = _is_cloze(note)
+        if (is_cloze and not cloze) or (not is_cloze and not basic):
+            continue
         terms = _cloze_terms(note, c.ord) if is_cloze else []
         card_items = []
-        for side in ("q", "a"):
+        for side in sides:
             html = c.question() if side == "q" else c.answer()
             plain = _plain(html)
             if not plain:
@@ -1312,8 +1456,9 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
                 if rec and rec.get("src") == _hash(plain) and rec.get("variants"):
                     continue
             # Export the STRUCTURE-preserving text so the external model can keep the card's
-            # shape; `src` stays keyed on _plain so edits invalidate consistently.
-            item = {"id": _key(note.id, c.ord, side), "src": _hash(plain), "text": _rich(html)}
+            # shape. No `src` hash here — the importer re-hashes the live card itself, so it
+            # would only pad the prompt.
+            item = {"id": _key(note.id, c.ord, side), "text": _rich(html)}
             if is_cloze and side == "q":
                 item["keep_blanks"] = True         # back-answer terms are NOT exported here
             elif is_cloze and side == "a" and terms:
@@ -1329,12 +1474,13 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
 
 
 def build_rp_prompt(card_ids=None, deck_id=None, deck_ids=None, n: int = 3,
-                    limit: int = 0, skip_done: bool = True) -> str:
+                    limit: int = 0, skip_done: bool = True, **filters) -> str:
     """Build the copy-paste prompt + JSON items for an external LLM. Card text stays on the
     clipboard only if the USER chooses to paste it — Janki sends nothing. See _rp_build_items
     for `limit` / `skip_done` (batching a big deck)."""
-    items, _used = _rp_build_items(card_ids, deck_id, deck_ids, limit, skip_done)
-    return (_RP_PROMPT % int(n)) + json.dumps({"items": items}, ensure_ascii=False, indent=0)
+    items, _used = _rp_build_items(card_ids, deck_id, deck_ids, limit, skip_done, **filters)
+    return (_RP_PROMPT % int(n)) + json.dumps({"items": items}, ensure_ascii=False,
+                                              separators=(",", ":"))
 
 
 def _rp_deck_count(deck_ids) -> int:
@@ -1349,6 +1495,46 @@ def _rp_deck_count(deck_ids) -> int:
             except Exception:
                 pass
     return len(seen)
+
+
+def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=True):
+    """FAST (no card rendering) estimate of (cards, items) for the prompt wizard's live
+    counter: one SQL pass over card/note-type ids. "Already done" here means a stored
+    record exists (the exact source-hash check only happens in the real build)."""
+    dids = sorted({int(d) for d in deck_ids or []})
+    if not dids or not sides:
+        return 0, 0
+    try:
+        rows = mw.col.db.all(
+            "select c.nid, c.ord, n.mid from cards c join notes n on n.id = c.nid "
+            "where c.did in (%s) or c.odid in (%s)" % (",".join(map(str, dids)),
+                                                      ",".join(map(str, dids))))
+    except Exception:
+        return 0, 0
+    kinds = {}                                       # mid → "cloze" | "basic" | None (IO)
+    for m in mw.col.models.all():
+        name = (m.get("name") or "").lower()
+        flds = {(f.get("name") or "").lower() for f in m.get("flds", [])}
+        io = ("image occlusion" in name or "occlusion" in flds
+              or bool({"question mask", "answer mask"} & flds))
+        kinds[int(m["id"])] = None if io else ("cloze" if int(m.get("type", 0)) == 1 else "basic")
+    store = _load() if skip_done else {}
+    cards = items = 0
+    for nid, ord_, mid in rows:
+        kind = kinds.get(int(mid))
+        if kind is None or (kind == "cloze" and not cloze) or (kind == "basic" and not basic):
+            continue
+        n = 0
+        for side in sides:
+            if skip_done:
+                rec = store.get(_key(nid, ord_, side))
+                if rec and rec.get("variants"):
+                    continue
+            n += 1
+        if n:
+            cards += 1
+            items += n
+    return cards, items
 
 
 def copy_rephrase_prompt_dialog(on_done=None, parent=None):
@@ -1377,8 +1563,8 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     v = QVBoxLayout(dlg)
     lbl = QLabel(
         "Builds a prompt that asks any chat model to write alternate phrasings for the cards in "
-        "the decks you check below. Paste it into Claude/ChatGPT, save the JSON reply as a .rp "
-        "file, then use “Import rephrasings (.rp)…”. Card text stays local unless you paste it.")
+        "the decks you check below. Paste it into Claude/ChatGPT — it returns a "
+        "janki-rephrase.rp file to download — then use “Import rephrasings (.rp)…”. Card text stays local unless you paste it.")
     lbl.setWordWrap(True)
     v.addWidget(lbl)
 
@@ -1386,19 +1572,27 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     top.addWidget(QLabel("Phrasings per card:"))
     spin = QSpinBox(); spin.setRange(1, 5); spin.setValue(2)
     top.addWidget(spin)
-    top.addSpacing(16)
-    top.addWidget(QLabel("Max cards per prompt:"))
-    lim = QSpinBox(); lim.setRange(0, 5000); lim.setValue(75)
-    lim.setSpecialValueText("All")                  # 0 → "All" (no cap)
-    lim.setToolTip("Big decks take a chat model many minutes. Cap each prompt to a batch (e.g. "
-                   "75); import it, then copy again to get the next batch.")
-    top.addWidget(lim)
     top.addStretch()
     v.addLayout(top)
 
-    cb_skip = QCheckBox("Skip cards that already have rephrasings (so batches cover new cards)")
+    v.addWidget(QLabel("<b>Include in prompt</b>"))
+    inc = QHBoxLayout()
+    cb_front = QCheckBox("Front"); cb_front.setChecked(True)
+    cb_back = QCheckBox("Back"); cb_back.setChecked(True)
+    cb_cloze = QCheckBox("Cloze cards"); cb_cloze.setChecked(True)
+    cb_basic = QCheckBox("Basic cards"); cb_basic.setChecked(True)
+    for w in (cb_front, cb_back, cb_cloze, cb_basic):
+        inc.addWidget(w)
+    inc.addStretch()
+    v.addLayout(inc)
+    cb_skip = QCheckBox("Skip cards that already have rephrasings")
     cb_skip.setChecked(True)
     v.addWidget(cb_skip)
+
+    def _filters():
+        sides = tuple(s for s, cb in (("q", cb_front), ("a", cb_back)) if cb.isChecked())
+        return dict(skip_done=cb_skip.isChecked(), sides=sides,
+                    cloze=cb_cloze.isChecked(), basic=cb_basic.isChecked())
 
     cb_all = QCheckBox("All decks (%d)" % len(decks)); cb_all.setChecked(True)
     v.addWidget(cb_all)
@@ -1427,49 +1621,58 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
         dids = _selected_dids()
         total = _rp_deck_count(dids)
         try:
-            items, used = _rp_build_items(deck_ids=dids, limit=lim.value(),
-                                          skip_done=cb_skip.isChecked())
+            used, nitems = _rp_estimate(dids, **_filters())
         except Exception:
-            items, used = [], 0
-        asks = len(items) * spin.value()
-        est.setText("%d cards in selection  ·  this prompt: %d cards (%d items) → ~%d "
-                    "rephrasings for the model" % (total, used, len(items), asks))
+            used, nitems = 0, 0
+        est.setText("%d cards in selection  ·  this prompt: ~%d cards (%d items) → ~%d "
+                    "rephrasings for the model" % (total, used, nitems, nitems * spin.value()))
 
     cb_all.toggled.connect(_refresh)
-    cb_skip.toggled.connect(_refresh)
-    lim.valueChanged.connect(_refresh)
+    for w in (cb_skip, cb_front, cb_back, cb_cloze, cb_basic):
+        w.toggled.connect(_refresh)
     spin.valueChanged.connect(_refresh)
     for cb, _d in deck_cbs:
         cb.toggled.connect(_refresh)
     _refresh()
 
-    def _build():
+    def _build(then):
+        """Render + assemble the prompt off the main thread, then call then(text)."""
         dids = _selected_dids()
         if not dids:
             showWarning("Check at least one deck.")
-            return None
-        items, used = _rp_build_items(deck_ids=dids, limit=lim.value(),
-                                      skip_done=cb_skip.isChecked())
-        if not items:
-            showWarning("Nothing to export — those cards already have rephrasings "
-                        "(uncheck “Skip …” to rebuild them).")
-            return None
-        return build_rp_prompt(deck_ids=dids, n=spin.value(), limit=lim.value(),
-                               skip_done=cb_skip.isChecked())
+            return
+        filt, n = _filters(), spin.value()
+
+        def op(_col):
+            items, _used = _rp_build_items(deck_ids=dids, **filt)
+            if not items:
+                return None
+            return (_RP_PROMPT % int(n)) + json.dumps({"items": items}, ensure_ascii=False,
+                                                      separators=(",", ":"))
+
+        def done(t):
+            if not t:
+                showWarning("Nothing to export with these settings — check at least one side "
+                            "and card type, or uncheck “Skip …” to rebuild existing rephrasings.")
+                return
+            then(t)
+        from aqt.operations import QueryOp
+        QueryOp(parent=dlg, op=op, success=done).with_progress(
+            "Building rephrase prompt…").run_in_background()
 
     def _copy():
-        t = _build()
-        if t is None:
-            return
+        _build(_do_copy)
+
+    def _do_copy(t):
         QApplication.clipboard().setText(t)
-        tooltip("Prompt copied — paste into any chat model, save the reply as a .rp file, "
+        tooltip("Prompt copied — paste into any chat model, download the .rp file it returns, "
                 "then import it.", period=4200)
         dlg.accept()
 
     def _save():
-        t = _build()
-        if t is None:
-            return
+        _build(_do_save)
+
+    def _do_save(t):
         path, _ = QFileDialog.getSaveFileName(dlg, "Save prompt", "rephrase-prompt.txt",
                                               "Text (*.txt)")
         if not path:

@@ -3795,6 +3795,37 @@ _CARD_CSS = (
 )
 
 
+# Blocks other Janki features stamp INTO note types (mobile theming, mobile rephrase).
+# They're not part of the Practice template itself, so ignore them when checking for
+# drift and keep them when refreshing — otherwise every launch "found a difference",
+# rewrote the note type (a ~0.5s update_dict on the startup path) and stripped the
+# mobile styling off Practice cards.
+_INJECTED_RES = [
+    re.compile(r"(?s)\s*<!--janki-mobile-start-->.*?<!--janki-mobile-end-->"),
+    re.compile(r"(?s)\s*/\*janki-mobile-start\*/.*?/\*janki-mobile-end\*/"),
+    re.compile(r"(?s)\s*<!-- janki-reword:start -->.*?<!-- janki-reword:end -->"),
+]
+
+
+def _split_injected(text):
+    """(text without Janki-injected blocks, [the injected blocks in order])."""
+    text = text or ""
+    blocks = []
+    for rx in _INJECTED_RES:
+        blocks += rx.findall(text)
+        text = rx.sub("", text)
+    return text.rstrip(), blocks
+
+
+def _sync_part(cur, want):
+    """Return (new_value, changed) for one CSS/template string, preserving injected
+    blocks and ignoring them (plus trailing whitespace) in the comparison."""
+    base, blocks = _split_injected(cur)
+    if base == want.rstrip():
+        return cur, False
+    return want + "".join(blocks), True
+
+
 def _ensure_model():
     mm = mw.col.models
     m = mm.by_name(_MODEL_NAME)
@@ -3802,9 +3833,11 @@ def _ensure_model():
         # Keep CSS/template in sync with the current add-on version (so template
         # changes like the choice-reveal animation reach already-converted decks).
         changed = False
-        if m.get("css") != _CARD_CSS:
-            m["css"] = _CARD_CSS
+        why = []
+        m["css"], c = _sync_part(m.get("css"), _CARD_CSS)
+        if c:
             changed = True
+            why.append("css")
         # Migrate: add fields introduced after this deck was built (Answer, the
         # slide number, and the slide image) so older Practice decks gain them.
         try:
@@ -3813,14 +3846,21 @@ def _ensure_model():
                 if fld not in have:
                     mm.add_field(m, mm.new_field(fld))
                     changed = True
+                    why.append("field " + fld)
         except Exception:
             pass
         try:
             t = m["tmpls"][0]
-            if t.get("qfmt") != _FRONT_TMPL or t.get("afmt") != _BACK_TMPL:
-                t["qfmt"] = _FRONT_TMPL
-                t["afmt"] = _BACK_TMPL
+            t["qfmt"], cq = _sync_part(t.get("qfmt"), _FRONT_TMPL)
+            t["afmt"], ca = _sync_part(t.get("afmt"), _BACK_TMPL)
+            if cq or ca:
                 changed = True
+                why.append("template")
+        except Exception:
+            pass
+        try:
+            from ..util import boot_timing
+            boot_timing.mark("practice sync: %s" % (", ".join(why) or "no change"))
         except Exception:
             pass
         if changed:

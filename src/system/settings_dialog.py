@@ -16,14 +16,29 @@ from ..integrations import amboss, mobilecards, qbank
 from . import stock_selfheal, updater
 
 class GlassSettings(QDialog):
-    """macOS-Terminal-style controls: background colour, opacity, blur radius."""
+    """macOS-Terminal-style controls: background color, opacity, blur radius."""
 
     def __init__(self):
         super().__init__(mw)
         self.setWindowTitle("Janki")
+        try:
+            from ..user import glass
+            glass.glass_dialog(self)             # frost like the main window (macOS)
+        except Exception:
+            pass
+        try:
+            from ..user import css as _css
+            _css.apply_widget_ui_font(self)      # use the chosen Interface font here too
+        except Exception:
+            pass
         self.cfg = _cfg()
         self.cfg.setdefault("tint_mode", "custom")
         lay = QVBoxLayout(self)
+        # Tight top: with the content extended under the titlebar the top tab row sits
+        # level with the close button; otherwise just drop Qt's default top margin.
+        _m = lay.contentsMargins()
+        lay.setContentsMargins(_m.left(), 6 if getattr(self, "_jk_expanded", False) else 2,
+                               _m.right(), _m.bottom())
 
         # On non-macOS the native visual features cleanly no-op (guarded). The
         # cross-platform features still run. Warn up front so the mac-only controls
@@ -57,7 +72,7 @@ class GlassSettings(QDialog):
         # Rephrase → subtabs: Import (build/import/manage rephrasings), Mobile (bake
         # them into note types for AnkiMobile/AnkiDroid), Experimental (on-device gen).
         rw_page = QWidget(); _rw_outer = QVBoxLayout(rw_page)
-        _rw_outer.setContentsMargins(0, 0, 0, 0)
+        _rw_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
         rw_tabs = QTabWidget(); _rw_outer.addWidget(rw_tabs)
         self._rw_tabs = rw_tabs
         rw_import_page = QWidget(); rw_import_lay = QVBoxLayout(rw_import_page)
@@ -67,22 +82,23 @@ class GlassSettings(QDialog):
         rw_tabs.addTab(rw_mobile_page, "Mobile")
         rw_tabs.addTab(rw_exp_page, "Experimental")
 
-        # Practice → subtabs: Appearance (how practice cards look/behave in review)
-        # and Question Bank (import/build/manage the .qb banks + Practice deck).
+        # Practice → subtabs: Question Bank (import/build/manage the .qb banks + Practice
+        # deck; the default), Format (how practice cards look/behave in review) and
+        # Intersperse.
         prac_page = QWidget(); _prac_outer = QVBoxLayout(prac_page)
-        _prac_outer.setContentsMargins(0, 0, 0, 0)
+        _prac_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
         prac_tabs = QTabWidget(); _prac_outer.addWidget(prac_tabs)
         self._prac_tabs = prac_tabs
         prac_app_page = QWidget(); prac_app_lay = QVBoxLayout(prac_app_page)
         prac_qb_page = QWidget();  prac_qb_lay = QVBoxLayout(prac_qb_page)
         prac_int_page = QWidget(); prac_int_lay = QVBoxLayout(prac_int_page)
-        prac_tabs.addTab(prac_app_page, "Appearance")
-        prac_tabs.addTab(prac_qb_page, "Question Bank")
+        prac_tabs.addTab(prac_qb_page, "Question Bank")    # leftmost = default
+        prac_tabs.addTab(prac_app_page, "Format")
         prac_tabs.addTab(prac_int_page, "Intersperse")
 
         # Focus → subtabs: Flare / Timer / Caption / Pomodoro / Lockdown.
         focus_page = QWidget(); _focus_outer = QVBoxLayout(focus_page)
-        _focus_outer.setContentsMargins(0, 0, 0, 0)
+        _focus_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
         focus_tabs = QTabWidget()
         _focus_outer.addWidget(focus_tabs)
         flare_page = QWidget(); flare_lay = QVBoxLayout(flare_page)
@@ -106,7 +122,7 @@ class GlassSettings(QDialog):
             from ..integrations import lectures as _lectures
             _pages, _lsave = _lectures.build_settings_pages()
             lec_page = QWidget(); _lec_outer = QVBoxLayout(lec_page)
-            _lec_outer.setContentsMargins(0, 0, 0, 0)
+            _lec_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
             lec_tabs = QTabWidget(); _lec_outer.addWidget(lec_tabs)
             for _title, _widget in _pages:
                 lec_tabs.addTab(_widget, _title)
@@ -118,15 +134,17 @@ class GlassSettings(QDialog):
 
         tabs.addTab(prac_page, "Practice")
         tabs.addTab(rw_page, "Rephrase")
-        tabs.addTab(gen_page, "General")
+        tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
+        tabs.setCurrentWidget(app_page)
 
         lay.addWidget(tabs)
 
         # === Appearance ======================================================
-        # --- Background colour picker (a colour well like Terminal) ----------
+        # --- Background color picker (a color well like Terminal) ------------
+        # Built here, placed under the Glass column below.
         col_row = QHBoxLayout()
-        col_label = QLabel("Background colour")
-        col_label.setMinimumWidth(140)
+        col_label = QLabel("Background color")
+        col_label.setMinimumWidth(90)
         col_row.addWidget(col_label)
         self._color_btn = QPushButton()
         self._color_btn.setMinimumWidth(80)
@@ -134,7 +152,6 @@ class GlassSettings(QDialog):
         self._color_btn.clicked.connect(self._pick_color)
         col_row.addWidget(self._color_btn)
         col_row.addStretch()
-        app_lay.addLayout(col_row)
 
         # --- Interface font (system-wide UI + card font) --------------------
         # Sets the font used across the whole app (deck list, toolbar, buttons,
@@ -162,6 +179,13 @@ class GlassSettings(QDialog):
             try:
                 from ..user import css as _css
                 _css.apply_native_ui_font(self.cfg)   # refresh native menu font too
+                _css.apply_widget_ui_font(self, self.cfg)   # and this window, live
+            except Exception:
+                pass
+            # New font → different text metrics; re-fit so nothing is cropped.
+            try:
+                from aqt.qt import QTimer as _QT
+                _QT.singleShot(0, self._fit_tabs)
             except Exception:
                 pass
 
@@ -169,7 +193,6 @@ class GlassSettings(QDialog):
         _uifont_row.addWidget(_uifont_name)
         _uifont_row.addWidget(self._ui_font)
         _uifont_row.addStretch()
-        app_lay.addLayout(_uifont_row)
 
         # --- Glass / Photo controls (two vertical columns) ------------------
         # Left column tunes the glass tint (Opacity + Blur radius); right column
@@ -208,6 +231,7 @@ class GlassSettings(QDialog):
                    lambda v: diagnostics._live_apply(self.cfg))
         _mk_slider(_left, "blur_radius", "Blur radius", 0, 80, 1.0,
                    lambda v: glass._set_blur(v))
+        _left.addLayout(col_row)
         _left.addStretch()
         _cols.addLayout(_left, 1)
 
@@ -280,6 +304,8 @@ class GlassSettings(QDialog):
             _cols.addLayout(_right, 1)
 
         app_lay.addLayout(_cols)
+        app_lay.addSpacing(6)
+        app_lay.addLayout(_uifont_row)
 
         # --- Text animation speed -------------------------------------------
         # Uniform multiplier on the typewriter reveal duration (1.0 = normal,
@@ -551,20 +577,6 @@ class GlassSettings(QDialog):
         ldh_row.addWidget(ldh_s)
         ldh_row.addWidget(ldh_val)
         lock_lay.addLayout(ldh_row)
-
-        # --- Global hotkeys (drive the reviewer while unfocused) -------------
-        self._gkeys = QCheckBox(
-            "Pass Tab+Z/X/C/V/Space to Anki when not focused — hold Tab as modifier (requires Accessibility permission)"
-        )
-        self._gkeys.setChecked(bool(self.cfg.get("global_keys", False)))
-
-        def on_gkeys(_state):
-            self.cfg["global_keys"] = self._gkeys.isChecked()
-            mw.addonManager.writeConfig(__name__, self.cfg)
-            keytap._apply_global_keys(self._gkeys.isChecked())
-
-        self._gkeys.stateChanged.connect(on_gkeys)
-        gen_lay.addWidget(self._gkeys)
 
         # === Caption (coherence HUD) =========================================
         cap_note = QLabel("Caption mode (Tab+\\) shows the current card in a "
@@ -982,8 +994,7 @@ class GlassSettings(QDialog):
         # Link to the practice-questions guide (how banks work + building a .qb
         # from a .docx), mirroring the Lectures tab's tutorial link.
         _prac_doc = QLabel(
-            'See the <a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
-            'practice-questions.md">practice guide &amp; how to import a document '
+            'See the <a href="https://cjre.pl/ogle/janki/practice">practice guide &amp; how to import a document '
             '↗</a> for the .qb / .docx format.')
         _prac_doc.setWordWrap(True)
         _prac_doc.setOpenExternalLinks(True)
@@ -1511,30 +1522,18 @@ class GlassSettings(QDialog):
         self._deck_stats.stateChanged.connect(on_deck_stats)
         gen_lay.addWidget(self._deck_stats)
 
-        self._menubar = QCheckBox("Show menu-bar icon (Caption / Focus / Lockdown mode controls)")
-        self._menubar.setChecked(bool(self.cfg.get("menubar_controls", True)))
-
-        def on_menubar(_state):
-            self.cfg["menubar_controls"] = self._menubar.isChecked()
-            mw.addonManager.writeConfig(__name__, self.cfg)
-            tray._apply_tray(tray._tray_should_show())
-
-        self._menubar.stateChanged.connect(on_menubar)
-        gen_lay.addWidget(self._menubar)
-
-        self._tray = QCheckBox("Keep running in the tray when the window is closed")
+        self._tray = QCheckBox("Menu-bar icon + keep running in the tray when the window is closed")
         self._tray.setToolTip(
-            "On: closing the window (red X) hides Anki to the menu-bar/tray icon and it "
-            "keeps running — click the icon or the Dock to reopen.\n"
-            "Off: the window behaves like a native app — the red X closes it and quits Anki."
+            "On: shows the menu-bar icon (tray menu), and closing the window (red X) hides "
+            "Anki there — it keeps running; click the icon or the Dock to reopen.\n"
+            "Off: no menu-bar icon; the window behaves like a native app — the red X closes it and quits Anki."
         )
         self._tray.setChecked(bool(self.cfg.get("tray_minimize", False)))
 
         def on_tray(_state):
             self.cfg["tray_minimize"] = self._tray.isChecked()
             mw.addonManager.writeConfig(__name__, self.cfg)
-            # Presence is the OR of both needs; unchecking minimize keeps the icon
-            # when the mode controls still want it.
+            # The menu-bar icon follows this setting (see tray._tray_should_show).
             tray._apply_tray(tray._tray_should_show())
 
         self._tray.stateChanged.connect(on_tray)
@@ -1561,7 +1560,7 @@ class GlassSettings(QDialog):
         # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
         # caption mode even when another app is focused/fullscreen.
         self._hid = QCheckBox(
-            "Controller input in caption mode via IOKit HID (requires Input "
+            "Controller input while unfocused (requires IOKit HID and Input "
             "Monitoring permission; takes effect on restart)"
         )
         self._hid.setChecked(bool(self.cfg.get("hid_controller", False)))
@@ -1691,9 +1690,9 @@ class GlassSettings(QDialog):
         gen_lay.addWidget(self._upd_btn)
 
         # --- Documentation --------------------------------------------------
-        # Opens the Janki docs (README + guides) on GitHub in the browser.
+        # Opens the Janki docs (README + guides) on cjre.pl in the browser.
         _doc_link = QLabel(
-            '<a href="https://github.com/cjreplogle/janki#readme" '
+            '<a href="https://cjre.pl/ogle/janki" '
             'style="color:#6ab0ff; text-decoration:none;">📖 Documentation</a>')
         _doc_link.setOpenExternalLinks(True)
         _doc_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
@@ -1784,7 +1783,7 @@ class GlassSettings(QDialog):
         _mob_row.addWidget(self._mob_revert)
         app_lay.addLayout(_mob_row)
 
-        hint = QLabel("Colour + opacity set the tint; blur radius blurs the desktop "
+        hint = QLabel("Color + opacity set the tint; blur radius blurs the desktop "
                       "behind Anki (like Terminal). Changes apply live and save "
                       "automatically.")
         hint.setWordWrap(True)
@@ -1803,18 +1802,16 @@ class GlassSettings(QDialog):
         # (after the stretch, so it sits below the installed-banks list).
         prac_qb_lay.addWidget(_deck_btn)
 
-        close = QPushButton("Close")
-
-        def _close_settings():
+        # No Close button — the window's own close (red X / Esc) ends the dialog. Save
+        # the Lectures fields however it closes (finished fires for accept AND reject).
+        def _save_on_close(*_a):
             for _fn in getattr(self, "_lecture_savers", []):
                 try:
                     _fn()
                 except Exception as _e:
                     log("lecture save failed: %s" % _e)
-            self.accept()
 
-        close.clicked.connect(_close_settings)
-        lay.addWidget(close)
+        self.finished.connect(_save_on_close)
 
         # Fit the window HEIGHT to the currently-shown tab so a short tab doesn't leave
         # a tall window with empty space at the bottom. QTabWidget's own sizeHint /
@@ -1848,27 +1845,118 @@ class GlassSettings(QDialog):
             nested = _direct_nested(page)
             if nested is not None:                     # page just hosts a nested group
                 return _eff_h(nested)
-            return page.sizeHint().height()
+            h = page.sizeHint().height()
+            # Word-wrapped explanation labels: sizeHint assumes an arbitrary width, so with
+            # a wider font (e.g. Lora) they wrap onto MORE lines than measured and the page
+            # gets cropped. Measure at the page's real width via height-for-width.
+            lay_ = page.layout()
+            if lay_ is not None and lay_.hasHeightForWidth():
+                w = page.width() if page.isVisible() and page.width() > 50 \
+                    else max(200, tabs.width() - 24)
+                hfw = lay_.totalHeightForWidth(w)
+                if hfw > 0:
+                    h = max(h, hfw)
+            return h + 6                               # small breathing room, no clipping
 
         def _eff_h(tw):
             return _page_h(tw.currentWidget()) + _tabbar_h(tw)
 
+        from aqt.qt import QVariantAnimation, QEasingCurve as _Ease
+        _fit_state = {"first": True, "anim": None}
+
+        def _set_tabs_h(h):
+            # Drive the tab area's height; the window follows it each frame, so it
+            # grows/shrinks continuously instead of snapping (resizing the window
+            # directly can't grow smoothly — Qt enforces the content's min height).
+            tabs.setFixedHeight(int(h))
+            self.layout().activate()
+            self.resize(self.width(), self.sizeHint().height())
+            glass.restyle_glass_dialog_now(self)   # keep the titlebar glassed every frame
+
         def _fit(*_a):
             try:
                 self.layout().activate()
-                tabs.setFixedHeight(_eff_h(tabs))
-                self.layout().activate()
-                self.adjustSize()
-                self.resize(self.width(), self.sizeHint().height())
+                target = _eff_h(tabs)
+                if _fit_state["first"]:            # initial open: size instantly
+                    _fit_state["first"] = False
+                    tabs.setFixedHeight(target)
+                    self.layout().activate()
+                    self.adjustSize()
+                    self.resize(self.width(), self.sizeHint().height())
+                    glass.restyle_glass_dialog(self)
+                    return
+                prev = _fit_state["anim"]
+                if prev is not None:
+                    prev.stop()
+                start = tabs.height()
+                if abs(target - start) < 2:
+                    _set_tabs_h(target)
+                    glass.restyle_glass_dialog(self)
+                    return
+                anim = QVariantAnimation(self)
+                anim.setDuration(240)
+                anim.setStartValue(float(start))
+                anim.setEndValue(float(target))
+                anim.setEasingCurve(_Ease.Type.OutCubic)
+                anim.valueChanged.connect(lambda v: _set_tabs_h(v))
+
+                def _end():
+                    _set_tabs_h(target)
+                    # Resizing the native window drops its glass (the titlebar goes
+                    # opaque); re-assert tint/blur/transparent titlebar at the end.
+                    glass.restyle_glass_dialog(self)
+                anim.finished.connect(_end)
+                _fit_state["anim"] = anim
+                anim.start()
             except Exception:
                 pass
 
+        self._fit_tabs = _fit
         for tw in tabws:
             try:
                 tw.currentChanged.connect(lambda _i, f=_fit: QTimer.singleShot(0, f))
             except Exception:
                 pass
         QTimer.singleShot(0, _fit)
+
+        # Fade the incoming page in on every tab / subtab switch. The opacity effect is
+        # removed once the fade ends, so pages render normally (and cheaply) at rest.
+        from aqt.qt import QGraphicsOpacityEffect, QPropertyAnimation, QEasingCurve
+
+        def _fade_in(tw, _i):
+            page = tw.currentWidget()
+            if page is None:
+                return
+            try:
+                old = getattr(page, "_jk_fade", None)
+                if old is not None:
+                    old.stop()
+                eff = QGraphicsOpacityEffect(page)
+                eff.setOpacity(0.0)
+                page.setGraphicsEffect(eff)
+                glass.restyle_glass_dialog_now(self)
+                anim = QPropertyAnimation(eff, b"opacity", page)
+                anim.setDuration(180)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+                def _done(p=page, e=eff):
+                    if p.graphicsEffect() is e:
+                        p.setGraphicsEffect(None)
+                    p._jk_fade = None
+                    glass.restyle_glass_dialog(self)
+                anim.finished.connect(_done)
+                page._jk_fade = anim
+                anim.start()
+            except Exception:
+                pass
+
+        for tw in self.findChildren(QTabWidget):
+            try:
+                tw.currentChanged.connect(lambda i, t=tw: _fade_in(t, i))
+            except Exception:
+                pass
 
     def _build_reword_tab(self, imp_lay, mob_lay, exp_lay):
         """Rephrase: show cards phrased differently (same card/scheduler data-space) so you
@@ -1882,7 +1970,10 @@ class GlassSettings(QDialog):
             "recall the content, not the exact sentence. It's display-only: answering a "
             "rephrased card counts exactly like the original (no extra cards, scheduler "
             "untouched). Cloze blanks and the tested term are preserved; text formatting "
-            "is kept, but images/media aren't rephrased.")
+            "is kept, but images/media aren't rephrased. "
+            '<a href="https://cjre.pl/ogle/janki/rephrase">Rephrase user guide ↗</a>')
+        intro.setOpenExternalLinks(True)
+        intro.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         intro.setWordWrap(True)
         intro.setStyleSheet("color: gray; margin-bottom: 6px;")
         imp_lay.addWidget(intro)
@@ -1919,10 +2010,9 @@ class GlassSettings(QDialog):
 
         # ---- PRIMARY WAY: build rephrasings with any chat model, import the .rp -------------
         rp = QLabel("<b>Main way — build with any chat model.</b> Pick decks and copy a prompt, "
-                    "paste it into Claude/ChatGPT/etc., then bring the reply back below. For big "
-                    "decks, SAVE the reply to a file and use “Import rephrasings…” (more reliable "
-                    "than pasting a huge reply); “Import from clipboard” is fine for small sets. "
-                    "Any text/.rp/.rtf file works. These pasted rephrasings are usually best quality.")
+                    "paste it into Claude/ChatGPT/etc. — it hands back a janki-rephrase.rp file; "
+                    "download it and use “Import rephrasings…”. If a model can't make files and "
+                    "prints the JSON instead, “Import from clipboard” (or any text/.rtf file) works too. These pasted rephrasings are usually best quality.")
         rp.setWordWrap(True)
         rp.setStyleSheet("margin-top:8px;")
         imp_lay.addWidget(rp)
@@ -1989,12 +2079,8 @@ class GlassSettings(QDialog):
         view_row.addWidget(btn_view_all, 1)
         imp_lay.addLayout(view_row)
 
-        btn_clear = QPushButton("Clear all stored rephrasings")
-
-        def _rw_clear():
-            reword.clear_all()
-            tooltip("Cleared all stored rephrasings.")
-        btn_clear.clicked.connect(lambda: _rw_clear())
+        btn_clear = QPushButton("Clear stored rephrasings…")
+        btn_clear.clicked.connect(lambda: reword.clear_rephrasings_dialog(parent=self))
         imp_lay.addWidget(btn_clear)
 
         # ================= MOBILE subtab =================
@@ -2142,7 +2228,7 @@ class GlassSettings(QDialog):
 
     def _pick_color(self):
         cur = QColor(self.cfg.get("tint_color", "#1e1e1e"))
-        col = QColorDialog.getColor(cur, self, "Background colour")
+        col = QColorDialog.getColor(cur, self, "Background color")
         if col.isValid():
             self.cfg["tint_mode"] = "custom"
             self.cfg["tint_color"] = col.name()
@@ -2185,8 +2271,8 @@ def _open_settings(section=None, float_above=False):
         try:
             if existing.isVisible():
                 _apply_settings_section(existing, section)
-                existing.raise_()
-                existing.activateWindow()
+                from ..user import glass
+                glass.bring_dialog_to_front(existing)
                 return
         except Exception:
             existing = None                       # underlying window was destroyed
@@ -2203,16 +2289,15 @@ def _open_settings(section=None, float_above=False):
         pass
 
     _apply_settings_section(d, section)
-    d.show()
-    d.raise_()
-    d.activateWindow()
     # Keep the always-in-front main window from floating over this dialog.
     try:
         from ..user import glass
         glass.hold_dialog_above(d)
+        glass.bring_dialog_to_front(d)
+        glass.hide_titlebar_extras(d)            # close button only, no title text
         # Opened from the tray (main window hidden): float the dialog above the main
         # window so restoring the main window later can't cover it.
         if float_above:
             glass.float_dialog_above(d)
     except Exception:
-        pass
+        d.show()

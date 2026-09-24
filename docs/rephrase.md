@@ -42,11 +42,14 @@ ever leaves your machine except the text you personally paste.
 Open **Tools → Janki: Settings → Rephrase**.
 
 1. **Copy rephrase prompt…** — opens a deck picker where you check which decks to
-   pull from and set a batch size (max cards per prompt). It copies a
-   ready-to-paste prompt to your clipboard. "Skip cards already done" avoids
-   re-generating ones you've already imported.
-2. **Paste it into any AI** (a chat model, a local model — your choice) and let it
-   return the reworded cards.
+   pull from and choose what goes into the prompt (**Front** / **Back**,
+   **Cloze** / **Basic** cards). It copies a ready-to-paste prompt to your
+   clipboard. "Skip cards that already have rephrasings" avoids re-generating
+   ones you've already imported.
+2. **Paste it into any AI** (a chat model, a local model — your choice). The prompt
+   asks it to hand back a downloadable **`janki-rephrase.rp`** file — just download
+   it. (Models that can't create files print the JSON instead; use Import from
+   clipboard for those.)
 3. **Import** the result:
    - **Import (.rp)…** — pick a saved file (`.rp`, `.json`, `.txt`, `.rtf`,
      `.md`). The parser is deliberately forgiving: it handles messy or

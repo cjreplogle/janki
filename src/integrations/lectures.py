@@ -42,6 +42,7 @@ LOG_PATH = os.path.join(ADDON_DIR, "janki-lectures.log")
 
 # Live reference to the non-modal Lectures dialog so Qt doesn't garbage-collect it.
 _lectures_dlg = None
+_opening = False          # guards against a second click while the window is building
 
 # Tag/deck families that appear in the spreadsheet cells, in settings-display
 # order. Each is (config-suffix, match-string, settings label): a tag line is
@@ -1342,8 +1343,7 @@ def _prompt_and_load_tag_map(day_offset=0):
             "It can be an <b>.xlsx</b> spreadsheet (lecture names in one column, "
             "tags in the next), a plain <b>.txt</b> file, or a <b>.json</b> file. "
             "Nothing leaves your computer — the file is only read locally.<br><br>"
-            'See the <a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
-            'load-todays-lectures.md">quick tutorial &amp; format guide ↗</a> for '
+            'See the <a href="https://cjre.pl/ogle/janki/load">quick tutorial &amp; format guide ↗</a> for '
             "an example."
         )
         body.setWordWrap(True)
@@ -1438,11 +1438,25 @@ def _open_today_dialog(day_offset=0, auto=False):
 
     dlg = QDialog(mw)
     dlg.setWindowTitle("Lectures")
+    # Same look as Janki Settings: glass, Interface font, close-only titlebar with the
+    # content extended under it (drag the empty background to move the window).
+    try:
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        pass
     dlg.resize(760, 460)
     v = QVBoxLayout(dlg)
+    _expanded = bool(getattr(dlg, "_jk_expanded", False))
+    if _expanded:                    # content sits up in the titlebar row
+        _m = v.contentsMargins()
+        v.setContentsMargins(_m.left(), 6, _m.right(), _m.bottom())
 
     # ── Day navigation (buttons repopulate in place; the window never closes) ────
     nav = QHBoxLayout()
+    if _expanded:
+        nav.addSpacing(58)           # clear the close button in the top-left corner
     btn_prev = QPushButton("◀ Prev day")
     btn_today = QPushButton("Today")
     btn_next = QPushButton("Next day ▶")
@@ -1685,9 +1699,26 @@ def _open_today_dialog(day_offset=0, auto=False):
     btn_resusp = QPushButton("Re-suspend day")
     btn_unsusp = QPushButton("Apply")
     btn_unsusp.setDefault(True)
-    btn_close = QPushButton("Close")
+    # Jump to Janki Settings → Lectures (sources, tag map, behaviour).
+    btn_settings = QPushButton("Options")
+    btn_settings.setToolTip("Open Janki Settings on the Lectures tab")
+
+    def _open_lecture_settings():
+        # Close the wizard, then open Settings → Lectures (reopen the wizard afterwards
+        # to pick up any changed sources).
+        try:
+            dlg.reject()
+        except Exception:
+            pass
+        try:
+            from ..system import settings_dialog
+            settings_dialog._open_settings(section="lectures")
+        except Exception:
+            pass
+    btn_settings.clicked.connect(_open_lecture_settings)
+    # No Close button — the window's red X closes it (same as Settings).
     hb.addWidget(total_lbl); hb.addWidget(count_bar); hb.addStretch(1)
-    hb.addWidget(btn_resusp); hb.addWidget(btn_close); hb.addWidget(btn_unsusp)
+    hb.addWidget(btn_settings); hb.addWidget(btn_resusp); hb.addWidget(btn_unsusp)
     v.addLayout(hb)
 
     # Mutable per-day state (repopulated by _populate; read by _update_total/_apply).
@@ -2051,6 +2082,11 @@ def _open_today_dialog(day_offset=0, auto=False):
             evi = QTableWidgetItem(ev + ("   (~)" if fuzzy else ""))
             combo = QComboBox()
             combo.setModel(combo_model)                    # shared model — cheap
+            try:                                           # ~10 rows + glass popup
+                from ..user import glass as _glass
+                _glass.glass_combo_popup(combo)
+            except Exception:
+                combo.setMaxVisibleItems(10)
             combo.setCurrentIndex(model_row.get(resolved, 0))
             if has_day_state:
                 disp = m[resolved]["display"] if resolved else None
@@ -2211,7 +2247,6 @@ def _open_today_dialog(day_offset=0, auto=False):
 
     btn_unsusp.clicked.connect(_do_unsuspend)
     btn_resusp.clicked.connect(_do_resuspend)
-    btn_close.clicked.connect(dlg.reject)
 
     # Close this window automatically if Anki itself is closing/quitting, so a
     # lingering modal can't keep the app alive after the main window is gone.
@@ -2248,9 +2283,18 @@ def _open_today_dialog(day_offset=0, auto=False):
         dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     global _lectures_dlg
     _lectures_dlg = dlg
-    dlg.show()
-    dlg.raise_()
-    dlg.activateWindow()
+    try:
+        from ..user import glass as _glass
+        _glass.bring_dialog_to_front(dlg)
+        _glass.hide_titlebar_extras(dlg)
+        # Re-assert once the opening click / main-window activation has settled, so the
+        # main window can't end up on top of it.
+        QTimer.singleShot(150, lambda: (_glass.bring_dialog_to_front(dlg)
+                                        if dlg.isVisible() else None))
+    except Exception:
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
 
 # ----------------------------------------------------------- settings UI -------
@@ -2395,8 +2439,7 @@ def build_settings_pages():
     # Link to the step-by-step tutorial on GitHub (tag-map format, calendar,
     # manual mode, settings). blob/HEAD resolves to the repo's default branch.
     help_lbl = QLabel(
-        '<a href="https://github.com/cjreplogle/janki/blob/HEAD/docs/'
-        'load-todays-lectures.md">How to use this — tutorial &amp; tag-map format ↗</a>')
+        '<a href="https://cjre.pl/ogle/janki/load">How to use this — tutorial &amp; tag-map format ↗</a>')
     help_lbl.setOpenExternalLinks(True)
     help_lbl.setStyleSheet("color: palette(mid);")
     g.addWidget(help_lbl, 8, 1, 1, 2)
@@ -2524,7 +2567,27 @@ def run_today(interactive=True, auto=False):
         return
     try:
         if interactive:
-            _open_today_dialog(auto=auto)
+            # Already open → just bring it forward (no second window).
+            if _lectures_dlg is not None:
+                try:
+                    if _lectures_dlg.isVisible():
+                        from ..user import glass as _glass
+                        _glass.bring_dialog_to_front(_lectures_dlg)
+                        return
+                except Exception:
+                    pass
+            # A click while the window is still being built → ignore (it's coming).
+            global _opening
+            if _opening:
+                return
+            _opening = True
+            try:
+                import time as _time
+                _t = _time.perf_counter()
+                _open_today_dialog(auto=auto)
+                _log("open lectures window: %.0f ms" % ((_time.perf_counter() - _t) * 1000))
+            finally:
+                _opening = False
             return
         # Non-interactive (auto-on-launch): only the calendar drives auto-matching.
         # With no calendar there's nothing to align, so never mass-unsuspend.

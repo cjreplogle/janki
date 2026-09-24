@@ -178,7 +178,7 @@ Good to know:
   (two columns on one slide) are read a column at a time, and a shared figure
   panel ("Questions 13-15") is attached to each question in that range even
   though they live on later slides. If a question's number is garbled/dropped by
-  OCR (e.g. a coloured number label), it's filled in sequence within the section
+  OCR (e.g. a colored number label), it's filled in sequence within the section
   so its answer still binds.
 - **Section titles become lecture tags.** Banks organised under native-text title
   slides (e.g. "Cell Death and Injury") tag each question with that topic, so the

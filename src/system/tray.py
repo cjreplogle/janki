@@ -182,10 +182,9 @@ def _apply_tray(on: bool) -> None:
 
 
 def _tray_should_show() -> bool:
-    """The menu-bar icon appears if either it's wanted for its mode controls or
-    tray-minimize needs it as a minimize target."""
-    c = _cfg()
-    return bool(c.get("menubar_controls", True) or c.get("tray_minimize", False))
+    """The menu-bar icon (tray menu) appears whenever "Keep running in the tray when the
+    window is closed" is on. (The separate "Show menu-bar icon" setting was removed.)"""
+    return bool(_cfg().get("tray_minimize", False))
 
 
 def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:

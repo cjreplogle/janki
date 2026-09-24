@@ -264,6 +264,7 @@ def _apply_window_blur(radius: float):
         lib.CGSSetWindowBackgroundBlurRadius(cid, int(wid), max(0, int(radius)))
     except Exception as exc:
         log(f"window blur: {exc}")
+    _restyle_glass_dialogs()
 
 
 # Common NSVisualEffectMaterial values, roughly light→neutral→dark/opaque.
@@ -944,6 +945,764 @@ def _apply_window_tint():
             msg(None, win, b"setBackgroundColor:", (c_void_p,), (col,))
     except Exception as exc:
         log(f"window tint: {exc}")
+    _restyle_glass_dialogs()
+
+
+# ---------------------------------------------------------------------------
+# Glass dialogs (Settings etc.) — same tint/opacity/blur as the main window
+# ---------------------------------------------------------------------------
+
+_glass_dialogs = []      # live dialogs that follow the main window's glass settings
+
+def _tint_is_light(cfg=None) -> bool:
+    r, g, b = _tint_rgb(cfg)
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150
+
+
+def _glass_dialog_qss(light: bool) -> str:
+    """Qt paints opaque fills on container widgets (tab panes, lists, text boxes). Replace
+    them with faint translucent panels so the native tint + blur shows through every
+    panel, matching the main window. Small controls (buttons, fields) keep native style."""
+    ink = "0,0,0" if light else "255,255,255"       # overlay/border tone vs. the tint
+    fg = "#1c1c1e" if light else "#f2f2f7"
+    # Styling an indicator drops Qt's native tick, so reuse Anki's own themed checkmark
+    # (the same image its checkboxes use) for checked table/list cells.
+    try:
+        from aqt.theme import theme_manager
+        check = theme_manager.themed_icon("mdi:check")
+        tick = " QAbstractItemView::indicator:checked { image: url(%s); }" % check
+    except Exception:
+        tick = ""
+    return tick + (
+        "QDialog { background: transparent; }"
+        "QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget,"
+        " QStackedWidget, QStackedWidget > QWidget { background: transparent; border: none; }"
+        # Tab panes (top-level + nested subtabs) → translucent rounded panels.
+        "QTabWidget::pane { background: rgba(%(ink)s,0.05);"
+        " border: 1px solid rgba(%(ink)s,0.10); border-radius: 10px; top: -1px;"
+        # Anki's app stylesheet adds `padding-top: 1em` to every pane — override it, or
+        # each panel keeps a line of dead space above its contents / subtabs.
+        " padding: 0; }"
+        "QTabWidget::tab-bar { alignment: center; }"
+        "QTabBar { background: transparent; }"
+        "QTabBar::tab { background: transparent; color: rgba(%(ink)s,0.70);"
+        " padding: 4px 12px; margin: 0 2px 6px 2px; border-radius: 6px; border: none; }"
+        # Tab pill fills are painted smoothly by _SmoothControls (QSS fills alias).
+        "QTabBar::tab:hover { background: transparent; }"
+        "QTabBar::tab:selected { background: transparent; color: %(fg)s; }"
+        # List / tree / text panels.
+        "QTreeWidget, QTreeView, QListWidget, QListView, QTextEdit, QPlainTextEdit,"
+        " QTableWidget, QTableView { background: rgba(%(ink)s,0.05); color: %(fg)s;"
+        " border: 1px solid rgba(%(ink)s,0.10); border-radius: 6px; }"
+        "QHeaderView, QHeaderView::section { background: transparent; color: rgba(%(ink)s,0.65);"
+        " border: none; }"
+        "QGroupBox { background: rgba(%(ink)s,0.04); border: 1px solid rgba(%(ink)s,0.10);"
+        " border-radius: 8px; margin-top: 14px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
+        # Controls: replace Anki's navy fills / faint edges with glass-tone fills and a
+        # clear, consistent outline.
+        # Fills + outlines of these controls are PAINTED (anti-aliased) by
+        # _SmoothControls — Qt clips stylesheet rounded fills/borders without AA, which
+        # left jagged corners. The QSS keeps sizing/text and transparent paint so the
+        # :hover rules still make Qt repaint on hover.
+        "QPushButton { background: transparent; color: %(fg)s;"
+        " border: 1px solid transparent; border-radius: 6px; padding: 4px 12px; }"
+        "QPushButton:hover, QPushButton:pressed, QPushButton:default {"
+        " background: transparent; border: 1px solid transparent; }"
+        "QPushButton:disabled { color: rgba(%(ink)s,0.35); background: transparent;"
+        " border: 1px solid transparent; }"
+        "QComboBox { background: transparent; color: %(fg)s;"
+        " border: 1px solid transparent; border-radius: 6px; padding: 3px 8px; }"
+        "QComboBox:hover { background: transparent; }"
+        "QComboBox::drop-down { border: none; background: transparent; }"
+        # List-style popup (not the full-height macOS menu) so maxVisibleItems applies
+        # and long lists scroll instead of filling the screen.
+        "QComboBox { combobox-popup: 0; }"
+        "QComboBox QAbstractItemView { background: %(popa)s; color: %(fg)s; outline: 0;"
+        " border: 1px solid rgba(%(ink)s,0.14); border-radius: 10px; padding: 4px; }"
+        "QComboBox QAbstractItemView::item { padding: 4px 10px; min-height: 22px;"
+        " border-radius: 6px; }"
+        "QComboBox QAbstractItemView::item:hover,"
+        " QComboBox QAbstractItemView::item:selected { background: rgba(%(ink)s,0.12);"
+        " color: %(fg)s; }"
+        "QComboBox QAbstractItemView QScrollBar:vertical { width: 6px; background: transparent;"
+        " margin: 4px 2px; }"
+        "QComboBox QAbstractItemView QScrollBar::handle:vertical {"
+        " background: rgba(%(ink)s,0.22); border-radius: 3px; min-height: 24px; }"
+        "QComboBox QAbstractItemView QScrollBar::add-line,"
+        " QComboBox QAbstractItemView QScrollBar::sub-line { height: 0; }"
+        "QLineEdit, QSpinBox, QDoubleSpinBox { background: transparent; color: %(fg)s;"
+        " border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; }"
+        # Checkboxes (standalone + table/list cells): the box is painted smoothly; the
+        # QSS keeps only its size and the checkmark image. Hover/focus rules from Anki's
+        # stylesheet (2px ring) are neutralised so they can't draw an aliased ring.
+        "QCheckBox::indicator, QAbstractItemView::indicator { width: 14px; height: 14px;"
+        " border: 1px solid transparent; border-radius: 4px; background: transparent; }"
+        "QCheckBox::indicator:hover, QCheckBox::indicator:focus,"
+        " QCheckBox::indicator:checked, QCheckBox::indicator:checked:hover,"
+        " QAbstractItemView::indicator:checked {"
+        " width: 14px; height: 14px; border: 1px solid transparent; background: transparent; }"
+        "QTableView, QTableWidget { gridline-color: rgba(%(ink)s,0.08); }"
+        "QProgressBar { background: rgba(%(ink)s,0.06); color: %(fg)s; text-align: center;"
+        " border: 1px solid rgba(%(ink)s,0.14); border-radius: 4px; min-height: 8px; }"
+        "QProgressBar::chunk { background: rgba(%(ink)s,0.38); border-radius: 3px; }"
+        "QHeaderView::section { border: none; border-bottom: 1px solid rgba(%(ink)s,0.10);"
+        " padding: 2px 4px; }"
+    ) % {"ink": ink, "fg": fg,
+         "popa": "rgba(246,246,248,0.72)" if light else "rgba(30,31,36,0.62)"}
+
+
+# ---------------------------------------------------------------------------
+# Anti-aliased control painting for glass dialogs
+# ---------------------------------------------------------------------------
+
+def _ink_rgb():
+    return (0, 0, 0) if _tint_is_light() else (255, 255, 255)
+
+
+def _rr(p, rect, radius, fill_a, border_a, ink):
+    from aqt.qt import QColor, QPen, Qt as _Qt
+    if border_a > 0:
+        p.setPen(QPen(QColor(ink[0], ink[1], ink[2], int(border_a * 255)), 1.0))
+    else:
+        p.setPen(QPen(_Qt.PenStyle.NoPen))
+    p.setBrush(QColor(ink[0], ink[1], ink[2], int(fill_a * 255)))
+    p.drawRoundedRect(rect, radius, radius)
+
+
+def _paint_control(w) -> None:
+    from aqt.qt import (QPainter, QRectF, QPushButton, QComboBox, QLineEdit,
+                        QAbstractSpinBox, QCheckBox, QTabBar, QStyle, QStyleOptionButton,
+                        QCursor)
+    ink = _ink_rgb()
+    p = QPainter(w)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    try:
+        full = QRectF(w.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        hover = w.underMouse()
+        if isinstance(w, QPushButton):
+            if w.isFlat():
+                return
+            if not w.isEnabled():
+                _rr(p, full, 6, 0.04, 0.10, ink)
+            else:
+                fill = 0.05 if w.isDown() else (0.13 if hover else 0.08)
+                border = 0.45 if (w.isDefault() or w.autoDefault() and w.hasFocus()) else 0.20
+                _rr(p, full, 6, fill, border, ink)
+        elif isinstance(w, QComboBox):
+            _rr(p, full, 6, 0.10 if hover else 0.06, 0.18, ink)
+        elif isinstance(w, QAbstractSpinBox):
+            _rr(p, full, 6, 0.06, 0.18, ink)
+        elif isinstance(w, QLineEdit):
+            par = w.parentWidget()
+            if isinstance(par, (QAbstractSpinBox, QComboBox)):
+                return                                  # the parent paints the frame
+            _rr(p, full, 6, 0.06, 0.18, ink)
+        elif isinstance(w, QCheckBox):
+            opt = QStyleOptionButton()
+            w.initStyleOption(opt)
+            r = w.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, opt, w)
+            box = QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5)
+            on = w.isChecked()
+            _rr(p, box, 4, 0.16 if on else (0.10 if hover else 0.06),
+                0.55 if on else 0.40, ink)
+        elif isinstance(w, QTabBar):
+            pos = w.mapFromGlobal(QCursor.pos())
+            for i in range(w.count()):
+                tr = w.tabRect(i)
+                r = QRectF(tr).adjusted(2.5, 0.5, -2.5, -6.5)   # QSS tab margins
+                if i == w.currentIndex():
+                    _rr(p, r, 6, 0.16, 0, ink)
+                elif tr.contains(pos):
+                    _rr(p, r, 6, 0.08, 0, ink)
+    finally:
+        p.end()
+
+
+def _make_check_delegate(parent):
+    """A QStyledItemDelegate that paints the item checkbox's box anti-aliased, then lets
+    the default painting draw the text + checkmark image on top."""
+    from aqt.qt import QStyledItemDelegate, QStyleOptionViewItem, QStyle, QPainter, QRectF
+    from aqt.qt import Qt as _Qt
+
+    class _SmoothCheckDelegate(QStyledItemDelegate):
+        def paint(self, painter, option, index):
+            try:
+                if index.data(_Qt.ItemDataRole.CheckStateRole) is not None:
+                    opt = QStyleOptionViewItem(option)
+                    self.initStyleOption(opt, index)
+                    wdg = opt.widget
+                    st = wdg.style() if wdg is not None else None
+                    if st is not None:
+                        r = st.subElementRect(
+                            QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, wdg)
+                        on = opt.checkState == _Qt.CheckState.Checked
+                        painter.save()
+                        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                        _rr(painter, QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 4,
+                            0.16 if on else 0.06, 0.55 if on else 0.40, _ink_rgb())
+                        painter.restore()
+            except Exception:
+                pass
+            super().paint(painter, option, index)
+
+    return _SmoothCheckDelegate(parent)
+
+
+class _SmoothControls(QObject):
+    """App-wide filter, active ONLY for widgets inside registered glass dialogs: paints
+    anti-aliased rounded fills/outlines under buttons, combos, fields, checkboxes and tab
+    pills before they draw their own text (whose QSS fills are transparent)."""
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t != QEvent.Type.Paint and t != QEvent.Type.Polish:
+            return False
+        try:
+            if not _glass_dialogs or not hasattr(obj, "window"):
+                return False
+            if obj.window() not in _glass_dialogs:
+                return False
+            from aqt.qt import (QPushButton, QComboBox, QLineEdit, QAbstractSpinBox,
+                                QCheckBox, QTabBar, QAbstractItemView, QStyledItemDelegate)
+            if t == QEvent.Type.Polish:
+                if isinstance(obj, QAbstractItemView) and \
+                        type(obj.itemDelegate()) is QStyledItemDelegate:
+                    obj.setItemDelegate(_make_check_delegate(obj))
+                elif isinstance(obj, (QComboBox, QPushButton, QCheckBox, QTabBar)):
+                    obj.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+                return False
+            if isinstance(obj, (QPushButton, QComboBox, QLineEdit, QAbstractSpinBox,
+                                QCheckBox, QTabBar)):
+                _paint_control(obj)
+        except Exception:
+            pass
+        return False
+
+
+_smooth_controls = None
+
+
+def _install_smooth_controls() -> None:
+    global _smooth_controls
+    if _smooth_controls is None:
+        try:
+            from aqt.qt import QApplication
+            _smooth_controls = _SmoothControls()
+            QApplication.instance().installEventFilter(_smooth_controls)
+        except Exception as exc:
+            log(f"smooth controls: {exc}")
+
+
+class _DragByBackground(QObject):
+    """With the content extended under the titlebar there's no titlebar to grab, so a
+    left-press on the dialog's own empty background starts a native window drag.
+    (Presses on controls are consumed by them and never reach the dialog.)"""
+
+    def eventFilter(self, obj, ev):
+        try:
+            if ev.type() == QEvent.Type.MouseButtonPress \
+                    and ev.button() == Qt.MouseButton.LeftButton:
+                wh = obj.windowHandle()
+                if wh is not None and wh.startSystemMove():
+                    return True
+        except Exception:
+            pass
+        return False
+
+
+def glass_dialog(dialog) -> None:
+    """Frost `dialog` like the main window. Call BEFORE the dialog is first shown (the
+    translucent-background attribute has to be set before its native window exists);
+    the native half is applied on show and re-applied whenever tint/blur change."""
+    if not GLASS or sys.platform != "darwin":
+        return
+    try:
+        dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # Extend the content up under the (transparent) titlebar so there's no empty
+        # strip above it — the close button floats over the top-left (Qt 6.9+).
+        wt = Qt.WindowType
+        if hasattr(wt, "ExpandedClientAreaHint"):
+            dialog.setWindowFlag(wt.ExpandedClientAreaHint, True)
+            if hasattr(wt, "NoTitleBarBackgroundHint"):
+                dialog.setWindowFlag(wt.NoTitleBarBackgroundHint, True)
+            wa = Qt.WidgetAttribute
+            if hasattr(wa, "WA_ContentsMarginsRespectsSafeArea"):
+                dialog.setAttribute(wa.WA_ContentsMarginsRespectsSafeArea, False)
+            dialog._jk_expanded = True
+            dialog._jk_drag = _DragByBackground(dialog)
+            dialog.installEventFilter(dialog._jk_drag)
+        dialog._jk_base_qss = dialog.styleSheet() or ""
+        dialog._jk_light = _tint_is_light()
+        dialog.setStyleSheet(_glass_dialog_qss(dialog._jk_light) + dialog._jk_base_qss)
+    except Exception as exc:
+        log(f"glass dialog qt: {exc}")
+        return
+    _glass_dialogs.append(dialog)
+    _install_smooth_controls()
+
+    def _forget(*_a):
+        try:
+            _glass_dialogs.remove(dialog)
+        except ValueError:
+            pass
+    try:
+        dialog.finished.connect(_forget)
+        dialog.destroyed.connect(_forget)
+    except Exception:
+        pass
+
+
+def hide_titlebar_extras(dialog) -> None:
+    """Close-only titlebar: hide the minimize + zoom (green) buttons and the title text
+    (the title string stays set, so Mission Control / the Window menu still name it)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        msg, _cls = _bridge()
+        win = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        if not win:
+            return
+        msg(None, win, b"setTitleVisibility:", (c_long,), (1,))     # NSWindowTitleHidden
+        for which in (1, 2):             # NSWindowMiniaturizeButton, NSWindowZoomButton
+            btn = msg(c_void_p, win, b"standardWindowButton:", (c_long,), (which,))
+            if btn:
+                msg(None, btn, b"setHidden:", (c_bool,), (True,))
+    except Exception as exc:
+        log(f"titlebar extras: {exc}")
+
+
+def _style_glass_window(dialog) -> None:
+    try:
+        cfg = _cfg()
+        r, g, b = _tint_rgb(cfg)
+        # A touch more tint than the main window so form controls stay readable.
+        a = min(1.0, max(0.35, float(cfg.get("body_opacity", 0.25)) + 0.1))
+        msg, cls = _bridge()
+        win = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        if not win:
+            return
+        col = msg(c_void_p, cls("NSColor"), b"colorWithRed:green:blue:alpha:",
+                  (c_double, c_double, c_double, c_double),
+                  (r / 255.0, g / 255.0, b / 255.0, a))
+        msg(None, win, b"setOpaque:", (c_bool,), (False,))
+        if col:
+            msg(None, win, b"setBackgroundColor:", (c_void_p,), (col,))
+        msg(None, win, b"setTitlebarAppearsTransparent:", (c_bool,), (True,))
+        hide_titlebar_extras(dialog)
+        lib = _cgs()
+        if lib:
+            wid = msg(c_long, win, b"windowNumber")
+            lib.CGSSetWindowBackgroundBlurRadius(
+                lib.CGSMainConnectionID(), int(wid),
+                max(0, int(cfg.get("blur_radius", 50))))
+        msg(None, win, b"invalidateShadow")
+    except Exception as exc:
+        log(f"glass dialog native: {exc}")
+
+
+def restyle_glass_dialog_now(dialog) -> None:
+    """Synchronous variant — call right after each resize step of an animated resize so
+    the titlebar never shows a frame without its glass."""
+    if dialog in _glass_dialogs:
+        try:
+            _style_glass_window(dialog)
+        except Exception:
+            pass
+
+
+def restyle_glass_dialog(dialog) -> None:
+    """Re-assert one glass dialog's native styling (after a resize / repaint that Qt may
+    have reset). Deferred a tick so it lands after Qt finishes its own window update."""
+    if dialog not in _glass_dialogs:
+        return
+    def _go():
+        try:
+            if dialog.isVisible():
+                _style_glass_window(dialog)
+        except Exception:
+            pass
+    QTimer.singleShot(0, _go)
+
+
+def _restyle_glass_dialogs() -> None:
+    light = _tint_is_light()
+    for d in list(_glass_dialogs):
+        try:
+            if not d.isVisible():
+                continue
+            _style_glass_window(d)
+            # Only re-polish the (large) stylesheet when the tint flips light↔dark, not on
+            # every opacity/blur slider tick.
+            if getattr(d, "_jk_light", None) != light:
+                d._jk_light = light
+                import re
+                font = re.findall(r"/\*janki-widget-font\*/[^\n]*\n?", d.styleSheet() or "")
+                d.setStyleSheet(_glass_dialog_qss(light) + getattr(d, "_jk_base_qss", "")
+                                + "\n" + "".join(font))
+        except Exception:
+            pass
+
+
+class _GlassPopupShow(QObject):
+    """On each show of a combo's popup window, give it the tray menu's rounded native
+    glass (blur behind, clear corners, soft shadow)."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Show:
+            def _go(w=obj):
+                try:
+                    from ..system import tray_nav
+                    tray_nav._apply_glass_panel(w, corner=10)
+                except Exception as exc:
+                    log(f"glass popup: {exc}")
+            QTimer.singleShot(0, _go)
+        return False
+
+
+_popup_filter = None
+
+
+def glass_combo_popup(combo, max_rows: int = 10) -> None:
+    """Calmer dropdown for long lists: at most `max_rows` visible (the rest scroll) and
+    a translucent, blurred, rounded popup matching the glass theme."""
+    global _popup_filter
+    try:
+        combo.setMaxVisibleItems(max_rows)
+        # Force the scrolling list popup (not the full-height macOS menu, which ignores
+        # maxVisibleItems) on the combo itself so no app-level rule can undo it.
+        combo.setStyleSheet((combo.styleSheet() or "") + "QComboBox { combobox-popup: 0; }")
+    except Exception:
+        pass
+    if not GLASS or sys.platform != "darwin":
+        return
+    try:
+        view = combo.view()
+        cont = view.window() if view is not None else None      # the popup container
+        if cont is None or cont is combo.window():
+            return
+        # Style the list view DIRECTLY: Anki's app stylesheet (navy popup) otherwise
+        # wins over the dialog-level rule for this separate popup window.
+        light = _tint_is_light()
+        ink = "0,0,0" if light else "255,255,255"
+        fg = "#1c1c1e" if light else "#f2f2f7"
+        bg = "rgba(246,246,248,0.72)" if light else "rgba(30,31,36,0.62)"
+        view.setStyleSheet(
+            ("QAbstractItemView { background: %(bg)s; color: %(fg)s; outline: 0;"
+             " border: 1px solid rgba(%(ink)s,0.14); border-radius: 10px; padding: 4px;"
+             " selection-background-color: rgba(%(ink)s,0.12); selection-color: %(fg)s; }"
+             "QAbstractItemView::item { padding: 4px 10px; min-height: 22px;"
+             " border-radius: 6px; background: transparent; }"
+             "QAbstractItemView::item:hover, QAbstractItemView::item:selected {"
+             " background: rgba(%(ink)s,0.12); color: %(fg)s; }"
+             "QScrollBar:vertical { width: 6px; background: transparent; margin: 4px 2px; }"
+             "QScrollBar::handle:vertical { background: rgba(%(ink)s,0.22);"
+             " border-radius: 3px; min-height: 24px; }"
+             "QScrollBar::add-line, QScrollBar::sub-line { height: 0; }")
+            % {"bg": bg, "fg": fg, "ink": ink})
+        try:
+            view.viewport().setAutoFillBackground(False)
+        except Exception:
+            pass
+        if _popup_filter is None:
+            _popup_filter = _GlassPopupShow()
+        cont.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        cont.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # Scoped to the container only — the list view inside keeps its translucent tint.
+        cont.setStyleSheet("QComboBoxPrivateContainer { background: transparent;"
+                           " border: none; }")
+        cont.installEventFilter(_popup_filter)
+    except Exception as exc:
+        log(f"glass combo popup: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Glass tooltips — hover tooltips (Qt's QTipLabel) + Janki's notification tooltip
+# ---------------------------------------------------------------------------
+
+def _tip_colors():
+    light = _tint_is_light()
+    r, g, b = _tint_rgb()
+    ink = (0, 0, 0) if light else (255, 255, 255)
+    return (r, g, b, 0.55), (*ink, 0.14), ("#1c1c1e" if light else "#f2f2f7")
+
+
+def paint_glass_pill(widget, radius: float = 8.0) -> None:
+    """Anti-aliased rounded tint + hairline border across `widget` (call from a paint
+    event filter, before the widget draws its own text)."""
+    try:
+        from aqt.qt import QPainter, QColor, QPen, QRectF
+        (br, bg_, bb, ba), (ir, ig, ib, ia), _fg = _tip_colors()
+        p = QPainter(widget)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(QPen(QColor(ir, ig, ib, int(ia * 255)), 1.0))
+        p.setBrush(QColor(br, bg_, bb, int(ba * 255)))
+        p.drawRoundedRect(QRectF(widget.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        p.end()
+    except Exception:
+        pass
+
+
+def frost_popup_window(widget, corner: int = 8) -> None:
+    """Rounded native blur + clear corners + soft shadow on a small popup window (same
+    treatment as the tray menu)."""
+    def _go():
+        try:
+            from ..system import tray_nav
+            if widget.isVisible():
+                tray_nav._apply_glass_panel(widget, corner=corner)
+        except Exception as exc:
+            log(f"frost popup: {exc}")
+    QTimer.singleShot(0, _go)
+
+
+class _GlassTooltipFilter(QObject):
+    """App-wide: catches Qt's hover-tooltip window (QTipLabel) as it's created, makes it
+    translucent before its native window exists, paints a smooth rounded glass pill under
+    its text and frosts the window natively on show."""
+
+    def eventFilter(self, obj, ev):
+        try:
+            t = ev.type()
+            if t not in (QEvent.Type.Polish, QEvent.Type.Show, QEvent.Type.Paint):
+                return False
+            mo = obj.metaObject() if hasattr(obj, "metaObject") else None
+            if mo is None or mo.className() != "QTipLabel":
+                return False
+            if t == QEvent.Type.Polish and not getattr(obj, "_jk_glass_tip", False):
+                obj._jk_glass_tip = True
+                obj.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                _bg, _bd, fg = _tip_colors()
+                obj.setStyleSheet("QLabel { background: transparent; border: none;"
+                                  " color: %s; padding: 5px 9px; }" % fg)
+            elif t == QEvent.Type.Show:
+                frost_popup_window(obj, corner=8)
+            elif t == QEvent.Type.Paint:
+                paint_glass_pill(obj, 8.0)
+        except Exception:
+            pass
+        return False
+
+
+class _GlassOnShow(QObject):
+    """Re-asserts a glass dialog's native styling each time it's shown, and fades /
+    drops it in (it starts at opacity 0 — see _smooth_progress_dialog)."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Show:
+            def _go(w=obj):
+                try:
+                    if w.isVisible():
+                        _style_glass_window(w)
+                        hide_titlebar_extras(w)
+                except Exception:
+                    pass
+            QTimer.singleShot(0, _go)
+            _fade_window(obj, 0.0, 1.0, 200, drop=8)
+        return False
+
+
+def _fade_window(w, frm, to, ms, drop=0, then=None):
+    """Animate a top-level window's opacity (and optionally a small vertical drop-in)."""
+    try:
+        from aqt.qt import (QPropertyAnimation, QEasingCurve, QParallelAnimationGroup,
+                            QPoint)
+        grp = QParallelAnimationGroup(w)
+        fade = QPropertyAnimation(w, b"windowOpacity", w)
+        fade.setDuration(ms)
+        fade.setStartValue(float(frm))
+        fade.setEndValue(float(to))
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic if to > frm
+                            else QEasingCurve.Type.InCubic)
+        grp.addAnimation(fade)
+        if drop:
+            end = w.pos()
+            mv = QPropertyAnimation(w, b"pos", w)
+            mv.setDuration(ms + 40)
+            mv.setStartValue(QPoint(end.x(), end.y() - drop))
+            mv.setEndValue(end)
+            mv.setEasingCurve(QEasingCurve.Type.OutCubic)
+            grp.addAnimation(mv)
+        if then is not None:
+            grp.finished.connect(then)
+        w._jk_fade_anim = grp                      # keep a ref while running
+        grp.start()
+    except Exception:
+        try:
+            w.setWindowOpacity(to)
+        except Exception:
+            pass
+        if then is not None:
+            then()
+
+
+_PB_SCALE = 1000   # progress bars run on a finer internal scale so steps can glide
+
+
+def _smooth_progress_dialog(dlg) -> None:
+    """Make Anki's progress window feel smooth: start transparent (faded in on show),
+    fade out on close instead of vanishing, glide the bar between values, and drop
+    Anki's navy striped bar style so the glass progress-bar style applies."""
+    try:
+        dlg.setWindowOpacity(0.0)
+    except Exception:
+        pass
+    bar = getattr(getattr(dlg, "form", None), "progressBar", None)
+    if bar is None:
+        return
+    try:
+        from aqt.qt import QPropertyAnimation, QEasingCurve
+        bar.setStyleSheet("")                   # Anki's per-bar navy stripes → glass QSS
+        o_min, o_max, o_val = bar.setMinimum, bar.setMaximum, bar.setValue
+        anim = QPropertyAnimation(bar, b"value", bar)
+        anim.setDuration(240)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def setMinimum(v):
+            o_min(int(v) * _PB_SCALE)
+
+        def setMaximum(v):
+            v = int(v)
+            if v <= 0:                           # busy / indeterminate
+                anim.stop()
+                o_min(0); o_max(0)
+            else:
+                o_max(v * _PB_SCALE)
+
+        def setValue(v):
+            if bar.maximum() <= 0:
+                return                           # indeterminate: nothing to glide
+            target = int(v) * _PB_SCALE
+            anim.stop()
+            anim.setStartValue(bar.value())
+            anim.setEndValue(target)
+            anim.start()
+
+        bar.setMinimum, bar.setMaximum, bar.setValue = setMinimum, setMaximum, setValue
+        # Anki's start() already set the range before we wrapped — rescale it now.
+        mx = bar.maximum()
+        if mx > 0:
+            o_max(mx * _PB_SCALE)
+    except Exception as exc:
+        log(f"progress smooth: {exc}")
+
+
+def _wrap_progress_cancel(cls) -> None:
+    """ProgressDialog.cancel() = hide + deleteLater (an abrupt vanish). Fade out first."""
+    if getattr(cls, "_jk_cancel_wrapped", False):
+        return
+    orig = cls.cancel
+
+    def cancel(self):
+        if getattr(self, "_jk_fading_out", False):
+            return
+        self._jk_fading_out = True
+        try:
+            self._closingDown = True             # what orig sets — lets it close now
+            if not self.isVisible():
+                return orig(self)
+            _fade_window(self, self.windowOpacity(), 0.0, 160,
+                         then=lambda s=self: orig(s))
+        except Exception:
+            orig(self)
+    cls.cancel = cancel
+    cls._jk_cancel_wrapped = True
+
+
+_glass_on_show = None
+
+
+def install_anki_dialog_glass() -> None:
+    """Give Anki's own progress window ("Syncing…", "Processing…") the same glass as
+    Janki's windows by wrapping ProgressDialog.__init__ — its layout exists by then but
+    its native window doesn't, so translucency can still be set. Installed at add-on
+    import so the launch sync's window is caught too."""
+    if not GLASS or sys.platform != "darwin":
+        return
+    try:
+        from aqt import progress as _prog
+        cls = getattr(_prog, "ProgressDialog", None)
+        if cls is None or getattr(cls, "_jk_glass_wrapped", False):
+            return
+        orig = cls.__init__
+
+        def __init__(self, *a, **k):
+            orig(self, *a, **k)
+            global _glass_on_show
+            try:
+                glass_dialog(self)
+                from . import css as _css
+                _css.apply_widget_ui_font(self)
+                lay = self.layout()
+                if lay is not None and getattr(self, "_jk_expanded", False):
+                    m = lay.contentsMargins()      # clear the close button / titlebar
+                    lay.setContentsMargins(m.left(), m.top() + 22, m.right(), m.bottom())
+                # Fade-in handler FIRST: _smooth_progress_dialog starts the window at
+                # opacity 0, so it must never be left without the handler that shows it.
+                if _glass_on_show is None:
+                    _glass_on_show = _GlassOnShow()
+                self.installEventFilter(_glass_on_show)
+                _smooth_progress_dialog(self)
+            except Exception as exc:
+                log(f"progress glass: {exc}")
+
+        cls.__init__ = __init__
+        cls._jk_glass_wrapped = True
+        _wrap_progress_cancel(cls)
+    except Exception as exc:
+        log(f"anki dialog glass: {exc}")
+
+
+_tip_filter = None
+
+
+def install_glass_tooltips() -> None:
+    global _tip_filter
+    if not GLASS or sys.platform != "darwin" or _tip_filter is not None:
+        return
+    try:
+        from aqt.qt import QApplication
+        app = QApplication.instance()
+        if app is None:
+            return
+        _tip_filter = _GlassTooltipFilter()
+        app.installEventFilter(_tip_filter)
+    except Exception as exc:
+        log(f"glass tooltips: {exc}")
+
+
+def bring_dialog_to_front(dialog) -> None:
+    """Show `dialog` in front of the Janki window, even when Anki isn't the active app
+    (opened via a global hotkey / tray) or the main window sits at a raised level
+    (always-in-front, lockdown, caption). Also applies the glass styling if registered."""
+    try:
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+    except Exception:
+        pass
+    if sys.platform != "darwin":
+        return
+    if dialog in _glass_dialogs:
+        _style_glass_window(dialog)
+    try:
+        msg, cls = _bridge()
+        nsapp = msg(c_void_p, cls("NSApplication"), b"sharedApplication")
+        if nsapp:
+            msg(None, nsapp, b"activateIgnoringOtherApps:", (c_bool,), (True,))
+        win = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        if not win:
+            return
+        # Match a raised main window's level so ordering-front actually lands above it.
+        main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if main:
+            lvl = int(msg(c_long, main, b"level"))
+            if lvl > int(msg(c_long, win, b"level")):
+                msg(None, win, b"setLevel:", (c_long,), (lvl,))
+        msg(None, win, b"makeKeyAndOrderFront:", (c_void_p,), (None,))
+        msg(None, win, b"orderFrontRegardless")
+    except Exception as exc:
+        log(f"bring dialog front: {exc}")
 
 
 # ---------------------------------------------------------------------------

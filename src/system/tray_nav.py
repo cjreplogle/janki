@@ -16,6 +16,7 @@ from ctypes import (
 
 from aqt import mw
 from aqt.qt import (
+    QEvent, QObject,
     Qt, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QScrollArea, QCursor, QPoint, QTimer,
     QPropertyAnimation, QEasingCurve,
@@ -38,8 +39,11 @@ QPushButton {
 QPushButton:hover  { background: rgba(255,255,255,0.15); }
 QPushButton:pressed{ background: rgba(255,255,255,0.22); }
 QPushButton#tgl        { padding:7px 10px; }
-QPushButton#tglOn      { background: rgba(96,156,246,0.38); border-color: rgba(130,178,252,0.65); color:#ffffff; }
-QPushButton#tglOnGreen { background: rgba(52,199,89,0.13); border-color: rgba(90,214,124,0.32); color:#ffffff; }
+QPushButton#tglOn       { background: rgba(96,156,246,0.38); border-color: rgba(130,178,252,0.65); color:#ffffff; }
+QPushButton#tglOnBlue   { background: rgba(96,156,246,0.22); border-color: rgba(130,178,252,0.48); color:#ffffff; }
+QPushButton#tglOnGreen  { background: rgba(52,199,89,0.20); border-color: rgba(90,214,124,0.45); color:#ffffff; }
+QPushButton#tglOnRed    { background: rgba(235,87,87,0.22); border-color: rgba(245,125,125,0.48); color:#ffffff; }
+QPushButton#tglOnOrange { background: rgba(255,159,10,0.20); border-color: rgba(255,186,90,0.46); color:#ffffff; }
 QPushButton#foot       { color:#cdd7ea; }
 QPushButton#quit:hover { background: rgba(230,90,90,0.30); border-color: rgba(240,120,120,0.6); }
 QPushButton#practice {
@@ -49,6 +53,7 @@ QPushButton#practice {
 QPushButton#practice:hover  { background: rgba(74,200,130,0.20); }
 QPushButton#practice:pressed{ background: rgba(74,200,130,0.30); }
 QLabel#cnt { color:#9fb4d8; font-size:11px; }
+QLabel#hint { color: rgba(233,238,247,0.34); font-size:9px; background: transparent; }
 QPushButton#expander {
     padding:0 0 2px 0; margin:0; font-size:13px; font-weight:700; text-align:center;
     color:#aebbd2; background: transparent; border: none;
@@ -85,12 +90,141 @@ QScrollBar::add-line, QScrollBar::sub-line { height:0; }
 """
 
 
+# --------------------------------------------------------------------------- smooth fills
+# Qt stylesheets clip a rounded widget's BACKGROUND to its border-radius WITHOUT
+# anti-aliasing, so filled buttons (Rephrase, Practice, toggles) and the panel itself
+# showed stair-stepped corners. We paint those rounded fills + outlines ourselves with
+# anti-aliasing and let the stylesheet do only text/padding (its fills are made
+# transparent below). (bg rgba, hover-bg alpha|None, pressed-bg alpha|None,
+# border rgba|None, radius) keyed by objectName; "" = a plain button.
+_W = (255, 255, 255)
+_PAINT = {
+    "":           ((*_W, .06), .15, .22, (*_W, .10), 9),
+    "tgl":        ((*_W, .06), .15, .22, (*_W, .10), 9),
+    "foot":       ((*_W, .06), .15, .22, (*_W, .10), 9),
+    "quit":       ((*_W, .06), None, .22, (*_W, .10), 9),     # hover handled below
+    "tglOn":      ((96, 156, 246, .38), None, None, (130, 178, 252, .65), 9),
+    "tglOnBlue":   ((96, 156, 246, .22), None, None, (130, 178, 252, .48), 9),
+    "tglOnGreen":  ((52, 199, 89, .20), None, None, (90, 214, 124, .45), 9),
+    "tglOnRed":    ((235, 87, 87, .22), None, None, (245, 125, 125, .48), 9),
+    "tglOnOrange": ((255, 159, 10, .20), None, None, (255, 186, 90, .46), 9),
+    "practice":   ((74, 200, 130, .11), .20, .30, (108, 222, 160, .30), 9),
+    "posCell":    ((*_W, .06), .15, None, (*_W, .10), 7),
+    "posCellOn":  ((96, 156, 246, .38), None, None, (130, 178, 252, .65), 7),
+    "icon":       ((*_W, 0.0), .14, .22, None, 8),
+}
+_ROOT_BG = (26, 28, 34, .60)
+_ROOT_RADIUS = 16
+
+
+def _painted_qss(qss: str) -> str:
+    """Blank the fills/outline colours of the rules we paint ourselves (keeps widths,
+    padding and the :hover rules, so Qt still tracks hover and repaints)."""
+    import re
+    out = []
+    for rule in re.findall(r"[^{}]+\{[^}]*\}", qss):
+        sel = rule.split("{", 1)[0]
+        if "QPushButton" in sel and "expander" not in sel or "#navRoot" in sel:
+            rule = re.sub(r"background:\s*[^;]+;", "background: transparent;", rule)
+            rule = re.sub(r"border-color:\s*[^;]+;", "border-color: transparent;", rule)
+            rule = re.sub(r"border:\s*1px solid [^;]+;", "border:1px solid transparent;", rule)
+        out.append(rule.strip())
+    return "\n".join(out)
+
+
+class _SmoothPainter(QObject):
+    """Paints anti-aliased rounded fills/outlines under buttons + the panel root, then
+    lets the widget's normal (now fill-less) stylesheet painting draw text on top."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() != QEvent.Type.Paint:
+            return False
+        try:
+            from aqt.qt import QPainter, QColor, QPen, QRectF
+            name = obj.objectName()
+            if name == "navRoot":
+                bg, bd, r = _ROOT_BG, None, _ROOT_RADIUS
+            else:
+                spec = _PAINT.get(name, _PAINT[""] if name not in ("expander",) else None)
+                if spec is None:
+                    return False
+                base, hov, prs, bd, r = spec
+                a = base[3]
+                if obj.isDown() and prs is not None:
+                    a = prs
+                elif obj.underMouse() and hov is not None:
+                    a = hov
+                bg = (*base[:3], a)
+                # An OFF mode toggle previews its own colour on hover: a pale version of
+                # its lit (on) fill + border.
+                on_name = getattr(obj, "_jk_on_name", None)
+                if name == "tgl" and on_name and obj.underMouse() and not obj.isDown():
+                    ob, _h, _p, obd, _r = _PAINT[on_name]
+                    bg = (*ob[:3], ob[3] * 0.5)
+                    bd = (*obd[:3], obd[3] * 0.6)
+                if name == "quit" and obj.underMouse():
+                    bg, bd = (230, 90, 90, .30), (240, 120, 120, .6)
+            p = QPainter(obj)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            rect = QRectF(obj.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            p.setPen(QPen(QColor(bd[0], bd[1], bd[2], int(bd[3] * 255)), 1.0)
+                     if bd else QPen(Qt.PenStyle.NoPen))
+            p.setBrush(QColor(bg[0], bg[1], bg[2], int(bg[3] * 255)))
+            p.drawRoundedRect(rect, r, r)
+            p.end()
+        except Exception:
+            pass
+        return False                           # widget still paints its text/icon
+
+
+_smooth = None
+
+
+def _install_smooth_painting(win) -> None:
+    global _smooth
+    try:
+        from aqt.qt import QPushButton
+        if _smooth is None:
+            _smooth = _SmoothPainter()
+        root = win.findChild(QFrame, "navRoot")
+        if root is not None:
+            root.installEventFilter(_smooth)
+        for b in win.findChildren(QPushButton):
+            b.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            b.installEventFilter(_smooth)
+    except Exception as exc:
+        log(f"tray-nav smooth paint: {exc}")
+
+
 # --------------------------------------------------------------------------- glass
 _glass_keeper = None
 
 
+def _glass_lost(w) -> bool:
+    """True if Qt has reset the panel to opaque or dropped its rounded content clip."""
+    try:
+        msg, _cls = _bridge()
+        win = msg(c_void_p, c_void_p(int(w.winId())), b"window")
+        if not win:
+            return False
+        if msg(c_bool, win, b"isOpaque"):
+            return True
+        ev = getattr(w, "_jk_blur_view", None)
+        if ev:
+            cv = msg(c_void_p, win, b"contentView")
+            sup = msg(c_void_p, cv, b"superview") if cv else None
+            return msg(c_void_p, ev, b"superview") != sup    # dropped by a reconfigure
+        cv = msg(c_void_p, win, b"contentView")
+        layer = msg(c_void_p, cv, b"layer") if cv else None
+        if not layer:
+            return True
+        return msg(c_double, layer, b"cornerRadius") < 1.0
+    except Exception:
+        return False
+
+
 def _start_glass_keeper(w) -> None:
-    """Re-assert the glass every ~120ms for ~1.2s after show so a late Qt window
+    """Re-assert the glass every ~120ms for ~2s after show so a late Qt window
     reconfigure (which turns the panel opaque with square corners) is corrected
     whenever it lands — including after a fullscreen Space animation."""
     global _glass_keeper
@@ -107,10 +241,19 @@ def _start_glass_keeper(w) -> None:
 
     def _tick():
         state["n"] += 1
-        if _nav is not w or not w.isVisible() or state["n"] > 10:
+        if _nav is not w or not w.isVisible():
             t.stop()
             return
-        _apply_glass_panel(w)
+        if state["n"] <= 16:                  # burst: re-assert unconditionally
+            _apply_glass_panel(w)
+            return
+        # After the burst, keep WATCHING while the popup is open: over another app's
+        # fullscreen Space the opaque/square reconfigure can land much later (or more
+        # than once). Re-apply only when it has actually happened — cheap check.
+        if state["n"] == 17:
+            t.setInterval(300)
+        if _glass_lost(w):
+            _apply_glass_panel(w)
     t.timeout.connect(_tick)
     t.start()
     _glass_keeper = t
@@ -232,6 +375,52 @@ def _remove_global_dismiss() -> None:
     _gm_refs = []
 
 
+def _install_rounded_blur(widget, win, cv, corner) -> bool:
+    """Install (once per popup) / re-assert a rounded NSVisualEffectView directly below
+    Qt's content view. Returns True when the rounded blur is in place."""
+    try:
+        msg, cls = _bridge()
+        if not cv:
+            return False
+        sup = msg(c_void_p, cv, b"superview")
+        if not sup:
+            return False
+        frame = msg(NSRect, sup, b"bounds")
+        ev = getattr(widget, "_jk_blur_view", None)
+        if ev:
+            # Qt can rebuild the frame view on a reconfigure — re-add if it was dropped.
+            if msg(c_void_p, ev, b"superview") != sup:
+                msg(None, sup, b"addSubview:positioned:relativeTo:",
+                    (c_void_p, c_long, c_void_p), (ev, -1, cv))
+            msg(None, ev, b"setFrame:", (NSRect,), (frame,))
+        else:
+            ev = msg(c_void_p, cls("NSVisualEffectView"), b"alloc")
+            ev = msg(c_void_p, ev, b"initWithFrame:", (NSRect,), (frame,))
+            if not ev:
+                return False
+            msg(None, ev, b"setBlendingMode:", (c_long,), (0,))    # behindWindow
+            msg(None, ev, b"setMaterial:", (c_long,), (21,))       # under-window bg
+            msg(None, ev, b"setState:", (c_long,), (1,))           # always active
+            msg(None, ev, b"setAutoresizingMask:", (c_ulong,), (18,))
+            msg(None, sup, b"addSubview:positioned:relativeTo:",
+                (c_void_p, c_long, c_void_p), (ev, -1, cv))        # -1 = below Qt view
+            widget._jk_blur_view = ev
+        msg(None, ev, b"setWantsLayer:", (c_bool,), (True,))
+        layer = msg(c_void_p, ev, b"layer")
+        if layer:
+            msg(None, layer, b"setCornerRadius:", (c_double,), (float(corner),))
+            msg(None, layer, b"setMasksToBounds:", (c_bool,), (True,))
+        # Make sure no square window-server blur is left behind from before.
+        libcgs = _cgs()
+        if libcgs:
+            wid = msg(c_long, win, b"windowNumber")
+            libcgs.CGSSetWindowBackgroundBlurRadius(libcgs.CGSMainConnectionID(), int(wid), 0)
+        return True
+    except Exception as exc:
+        log(f"tray-nav rounded blur: {exc}")
+        return False
+
+
 def _apply_glass_panel(widget, radius: int = 30, corner: int = 16) -> None:
     """Give the popup real glass: blur the desktop behind it (CGS window-server
     blur), non-opaque with a clear background, rounded corners clipped at the layer,
@@ -254,20 +443,30 @@ def _apply_glass_panel(widget, radius: int = 30, corner: int = 16) -> None:
             msg(c_void_p, win, b"setLevel:", (c_int,), (101,))
         except Exception:
             pass
-        # Rounded-rect clip on the content layer.
+        # Desktop blur behind the panel — a ROUNDED native NSVisualEffectView behind Qt's
+        # view. (The old CGS window-server blur always covers the full window RECT, so
+        # the panel read as a blurred square with a square outline — most visible over
+        # another app's fullscreen. The effect view's layer clips to the corner radius,
+        # so the blur, the alpha shape and hence the shadow are all rounded.)
         cv = msg(c_void_p, win, b"contentView")
+        rounded = _install_rounded_blur(widget, win, cv, corner)
+        if not rounded:
+            libcgs = _cgs()                    # fallback: the old square blur
+            if libcgs:
+                wid = msg(c_long, win, b"windowNumber")
+                cid = libcgs.CGSMainConnectionID()
+                libcgs.CGSSetWindowBackgroundBlurRadius(cid, int(wid), int(radius))
+        # Content-layer clip. With the rounded blur in place Qt's own ANTI-ALIASED rounded
+        # #navRoot already defines the shape, so DON'T hard-clip it again — a second mask
+        # at the same radius cuts through those soft edge pixels and leaves jaggies.
+        # Only clip in the square-blur fallback.
         if cv:
             msg(c_void_p, cv, b"setWantsLayer:", (c_bool,), (True,))
             layer = msg(c_void_p, cv, b"layer")
             if layer:
-                msg(None, layer, b"setCornerRadius:", (c_double,), (float(corner),))
-                msg(None, layer, b"setMasksToBounds:", (c_bool,), (True,))
-        # Desktop blur behind the panel.
-        libcgs = _cgs()
-        if libcgs:
-            wid = msg(c_long, win, b"windowNumber")
-            cid = libcgs.CGSMainConnectionID()
-            libcgs.CGSSetWindowBackgroundBlurRadius(cid, int(wid), int(radius))
+                msg(None, layer, b"setCornerRadius:", (c_double,),
+                    (0.0 if rounded else float(corner),))
+                msg(None, layer, b"setMasksToBounds:", (c_bool,), (not rounded,))
         # Recompute the drop shadow to match the NOW-rounded, non-opaque shape.
         # Without this the shadow keeps the earlier square shape — the "box" seen
         # around the panel (most visible over a fullscreen Space).
@@ -408,7 +607,18 @@ def _apply_deck_visibility(animate: bool = False) -> None:
                 pass
     if _deck_scroll is not None:
         try:
-            _deck_scroll.setMaximumHeight(min(4, max(1, n_visible)) * 38 + 4)
+            # Measure a real row (font-dependent — Lora rows are taller than the old
+            # hard-coded 38px, which clipped the 4th tile) + the list's spacing.
+            row_h, gap = 38, 0
+            for info in _deck_rows_widgets:
+                w = info.get("widget")
+                if w is not None and w.maximumHeight() > 0:
+                    row_h = max(row_h, w.sizeHint().height())
+                    lay_ = w.parentWidget().layout() if w.parentWidget() else None
+                    gap = max(0, lay_.spacing()) if lay_ is not None else 0
+                    break
+            n = min(4, max(1, n_visible))
+            _deck_scroll.setMaximumHeight(n * row_h + (n - 1) * gap + 6)
         except Exception:
             pass
     QTimer.singleShot(0, _resize_nav)
@@ -477,6 +687,60 @@ def _open_settings() -> None:
         settings_dialog._open_settings(float_above=True)
     except Exception as exc:
         log(f"tray-nav settings: {exc}")
+
+
+class _CornerHint(QObject):
+    """Keeps a hint label pinned to its button's bottom-right corner on resize."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            lab = getattr(obj, "_jk_hint", None)
+            if lab is not None:
+                lab.adjustSize()
+                lab.move(obj.width() - lab.width() - 7, obj.height() - lab.height() - 3)
+        return False
+
+
+_corner_hint = None
+
+
+def _add_corner_hint(btn, text: str) -> None:
+    """Faint keyboard-shortcut hint tucked into a button's bottom-right corner (a child
+    label that ignores the mouse, so clicks still hit the button)."""
+    global _corner_hint
+    try:
+        if _corner_hint is None:
+            _corner_hint = _CornerHint()
+        lab = QLabel(text, btn)
+        lab.setObjectName("hint")
+        lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        btn._jk_hint = lab
+        btn.installEventFilter(_corner_hint)
+    except Exception as exc:
+        log(f"tray-nav hint: {exc}")
+
+
+def _open_lectures() -> None:
+    # Like Settings: close the navigator and open the Load today's lectures wizard as its
+    # own window, without yanking a tray-hidden main window back.
+    _hide()
+    try:
+        from . import tray
+        tray.suppress_reopen(2.0)
+    except Exception:
+        pass
+    try:
+        from ..integrations import lectures
+        # Instant feedback — building the window (tag index + calendar) can take a
+        # moment on a cold open, which read as "the click did nothing".
+        try:
+            from aqt.utils import tooltip
+            tooltip("Loading lectures…", period=1200)
+        except Exception:
+            pass
+        QTimer.singleShot(30, lambda: lectures.run_today(interactive=True))
+    except Exception as exc:
+        log(f"tray-nav lectures: {exc}")
 
 
 # --------------------------------------------------------------------------- toggles
@@ -620,16 +884,19 @@ def _build_pos_section() -> "QWidget":
     return sect
 
 
+# Each mode lights in its own colour when on.
+_TOGGLE_ON_NAME = {"caption": "tglOnBlue", "focus": "tglOnGreen",
+                   "lockdown": "tglOnRed", "reword": "tglOnOrange"}
+
+
 def _refresh_toggles():
     st = _toggle_states()
     for key, btn in _toggle_btns.items():
         try:
             on = st.get(key, False)
-            if on and key == "reword":
-                btn.setObjectName("tglOnGreen")   # Rephrase lights green (not blue)
-            else:
-                btn.setObjectName("tglOn" if on else "tgl")
+            btn.setObjectName(_TOGGLE_ON_NAME.get(key, "tglOn") if on else "tgl")
             btn.style().unpolish(btn); btn.style().polish(btn)
+            btn.update()
         except Exception:
             pass
     # Caption-position grid follows the Caption toggle live — animated on change.
@@ -743,7 +1010,12 @@ def _build() -> "QWidget":
 
     root = QFrame(win)
     root.setObjectName("navRoot")
-    win.setStyleSheet(_QSS)
+    win.setStyleSheet(_painted_qss(_QSS))       # fills are painted smoothly instead
+    try:
+        from ..user import css as _css
+        _css.apply_widget_ui_font(win)          # inherit the chosen Interface font
+    except Exception as exc:
+        log(f"tray-nav font: {exc}")
     outer.addWidget(root)
 
     lay = QVBoxLayout(root)
@@ -853,6 +1125,9 @@ def _build() -> "QWidget":
         tb.setObjectName("tgl")
         tb.clicked.connect(lambda _c=False, k=key: _toggle(k))
         _toggle_btns[key] = tb
+        tb._jk_on_name = _TOGGLE_ON_NAME[key]
+        _add_corner_hint(tb, {"caption": "Tab+\\", "focus": "Tab+F",
+                              "lockdown": "`+⌫"}[key])
         trow.addWidget(tb)
     lay.addLayout(trow)
 
@@ -861,10 +1136,13 @@ def _build() -> "QWidget":
     rwrow = QHBoxLayout()
     rwrow.setSpacing(6)
     rwb = QPushButton("Rephrase")
-    rwb.setObjectName("tglOnGreen" if _toggle_states().get("reword", False) else "tgl")
+    rwb.setObjectName(_TOGGLE_ON_NAME["reword"] if _toggle_states().get("reword", False)
+                      else "tgl")
     rwb.setToolTip("Show cards rephrased (display-only; never edits your notes)")
     rwb.clicked.connect(lambda _c=False: _toggle("reword"))
     _toggle_btns["reword"] = rwb
+    rwb._jk_on_name = _TOGGLE_ON_NAME["reword"]
+    _add_corner_hint(rwb, "Tab+R")
     rwrow.addWidget(rwb, 1)
     cyc = QPushButton("⟳")
     cyc.setObjectName("icon")
@@ -872,6 +1150,12 @@ def _build() -> "QWidget":
     cyc.clicked.connect(lambda _c=False: _cycle_reword())
     rwrow.addWidget(cyc)
     lay.addLayout(rwrow)
+
+    # Load from Lectures → the Load today's lectures wizard (with the mode controls).
+    lb = QPushButton("Load from Lectures")
+    lb.setObjectName("tgl")                   # same size/look as the mode buttons
+    lb.clicked.connect(lambda _c=False: _open_lectures())
+    lay.addWidget(lb)
 
     # Caption position grid — only relevant/visible while caption mode is on. Set the
     # initial state statically (no animation on first open); toggling animates it.
@@ -891,6 +1175,7 @@ def _build() -> "QWidget":
     openb = QPushButton("Open Anki")
     openb.setObjectName("foot")
     openb.clicked.connect(_open_deck_browser)
+    _add_corner_hint(openb, "⌘⌥A")
     frow.addWidget(openb)
     quitb = QPushButton("Quit")
     quitb.setObjectName("quit")
@@ -907,6 +1192,7 @@ def _build() -> "QWidget":
     lay.addLayout(frow)
 
     _refresh_toggles()
+    _install_smooth_painting(win)          # anti-aliased rounded fills
     return win
 
 
@@ -929,6 +1215,98 @@ def _anchor_point(w) -> "QPoint":
 _open_anim = None
 
 
+def _make_unroll(win):
+    """Height animation for the open 'unroll'. Returns a QVariantAnimation (or None);
+    restores normal sizing when it finishes so later resizes (expanding subdecks) work."""
+    try:
+        from aqt.qt import QVariantAnimation, QEasingCurve, QLayout
+        root = win.findChild(QFrame, "navRoot")
+        lay = win.layout()
+        full = win.height()
+        if root is None or lay is None or full < 80:
+            return None
+        lay.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        root.setFixedHeight(full)
+        start = min(full, 44)
+        win.setFixedHeight(start)
+
+        anim = QVariantAnimation(win)
+        anim.setDuration(240)
+        anim.setStartValue(float(start))
+        anim.setEndValue(float(full))
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _step(v):
+            try:
+                win.setFixedHeight(int(v))
+                _apply_glass_panel(win)       # keep the glass/rounding on every frame
+            except Exception:
+                pass
+
+        def _end():
+            try:
+                root.setMinimumHeight(0)
+                root.setMaximumHeight(16777215)
+                win.setMinimumHeight(0)
+                win.setMaximumHeight(16777215)
+                lay.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
+                # Avoid a needless final resize — every native resize invites Qt's late
+                # reconfigure that turns the panel opaque/square (worst over fullscreen).
+                if abs(win.sizeHint().height() - win.height()) > 1:
+                    win.adjustSize()
+                _apply_glass_panel(win)
+                # The animation's resizes can post that reconfigure AFTER the show-time
+                # keeper; run the keeper again from here so it's always corrected.
+                _start_glass_keeper(win)
+            except Exception:
+                pass
+        anim.valueChanged.connect(_step)
+        anim.finished.connect(_end)
+        return anim
+    except Exception as exc:
+        log(f"tray-nav unroll: {exc}")
+        return None
+
+
+def _make_focus_in(win):
+    """'Focus' pull-in: the panel's contents start softly blurred and sharpen as it
+    fades/unrolls in. The blur effect is removed at the end so the panel renders
+    normally (and cheaply) at rest."""
+    try:
+        from aqt.qt import QGraphicsBlurEffect, QVariantAnimation, QEasingCurve
+        root = win.findChild(QFrame, "navRoot")
+        if root is None:
+            return None
+        eff = QGraphicsBlurEffect(root)
+        eff.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
+        eff.setBlurRadius(9.0)
+        root.setGraphicsEffect(eff)
+        anim = QVariantAnimation(win)
+        anim.setDuration(280)
+        anim.setStartValue(9.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _step(v):
+            try:
+                eff.setBlurRadius(float(v))
+            except Exception:
+                pass
+
+        def _end():
+            try:
+                if root.graphicsEffect() is eff:
+                    root.setGraphicsEffect(None)
+            except Exception:
+                pass
+        anim.valueChanged.connect(_step)
+        anim.finished.connect(_end)
+        return anim
+    except Exception as exc:
+        log(f"tray-nav focus-in: {exc}")
+        return None
+
+
 def _animate_open(win, final_pos) -> None:
     """Fade in + drop down from ~14px above to the anchor when the tray popup opens."""
     global _open_anim
@@ -937,7 +1315,7 @@ def _animate_open(win, final_pos) -> None:
                             QParallelAnimationGroup)
         start = QPoint(final_pos.x(), final_pos.y() - 14)
         fade = QPropertyAnimation(win, b"windowOpacity", win)
-        fade.setDuration(170)
+        fade.setDuration(240)                # paced with the unroll + focus-in
         fade.setStartValue(0.0)
         fade.setEndValue(1.0)
         fade.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -949,6 +1327,15 @@ def _animate_open(win, final_pos) -> None:
         grp = QParallelAnimationGroup(win)
         grp.addAnimation(fade)
         grp.addAnimation(drop)
+        # Unroll: grow the window from a short strip to full height (like Settings'
+        # tab resize). The content frame is pinned at full height and anchored top, so
+        # the growing window reveals it instead of squashing the layout.
+        grow = _make_unroll(win)
+        if grow is not None:
+            grp.addAnimation(grow)
+        sharpen = _make_focus_in(win)
+        if sharpen is not None:
+            grp.addAnimation(sharpen)
         _open_anim = grp                     # keep a ref so it isn't GC'd mid-flight
         grp.start()
     except Exception as exc:
@@ -970,6 +1357,24 @@ def _hide() -> None:
             pass
 
 
+def _natively_on_screen(w) -> bool:
+    """Qt's isVisible() can go stale: macOS may order the panel out natively (e.g. on
+    app deactivation / a Space switch) without telling Qt. Then the icon click took the
+    'visible → hide' branch and nothing opened. Ask the NSWindow itself."""
+    try:
+        msg, _cls = _bridge()
+        win = msg(c_void_p, c_void_p(int(w.winId())), b"window")
+        if not win:
+            return False
+        if not msg(c_bool, win, b"isVisible"):
+            return False
+        # On screen but fully transparent (mid-fade from a stale state) also counts as
+        # closed for the toggle.
+        return msg(c_double, win, b"alphaValue") > 0.05
+    except Exception:
+        return True                           # unknown → keep the old behaviour
+
+
 def show_navigator() -> None:
     """Rebuild fresh (decks/counts change) and pop the glass navigator."""
     global _nav
@@ -978,7 +1383,7 @@ def show_navigator() -> None:
     # Deterministic toggle: visible → hide, hidden → show. The global dismiss monitor
     # ignores menu-bar-strip clicks (see _install_global_dismiss), so it no longer races
     # this check — a click on the icon is handled here alone.
-    if _nav is not None and _nav.isVisible():
+    if _nav is not None and _nav.isVisible() and _natively_on_screen(_nav):
         _hide()
         return
     global _keep_hidden

@@ -22,6 +22,9 @@ Stack (back to front):
 Everything native is wrapped so a failure can never crash Anki.
 """
 
+from .src.util import boot_timing as _bt   # startup timing log (first, to time imports)
+_bt.mark("janki import start")
+
 import sys
 from ctypes import c_void_p, c_bool
 
@@ -41,16 +44,30 @@ except Exception as _e:
     log(f"import error: {_e}")
     raise
 
+_bt.mark("imported aqt")
 from .src.util.bridge import _bridge
 from .src.util.config import log, ACTIVE, GLASS, _cfg
 from .src.util import state
+_bt.mark("imported util")
 from .src.features import card_timer, focus, lockdown, pomodoro, intersperse, reword
+_bt.mark("imported features")
 from .src.user import css, glass, hud
+_bt.mark("imported css/glass/hud")
 from .src.system import settings_dialog, tray
+_bt.mark("imported settings/tray")
 from .src.util import diagnostics, keytap
 from .src.integrations import gamepad
 from .src.integrations import amboss, mobilecards
 from .src.system import stock_selfheal, updater
+_bt.mark("imported integrations/updater")
+
+# Catch Anki's own progress window + hover tooltips from the very start — the launch
+# sync's "Syncing…" window appears before main_window_did_init (_startup) runs.
+try:
+    glass.install_anki_dialog_glass()
+    glass.install_glass_tooltips()
+except Exception as _gl_exc:
+    log("early glass hooks: %s" % _gl_exc)
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +81,20 @@ def _patch_tooltip():
         return
     import aqt.utils as _aqtu
 
-    def _glass_tooltip(msg_text, period=3000, parent=None, y_offset=100, x_offset=0):
+    def _glass_tooltip(msg="", period=3000, parent=None, x_offset=0, y_offset=100, **_kw):
+        # Same parameter names as aqt.utils.tooltip (Anki calls it with keywords, e.g.
+        # tooltip(msg=..., parent=...)); unknown extras are ignored. Any failure falls
+        # back to Anki's own tooltip so a toast can never raise into Anki.
+        try:
+            return _glass_tooltip_impl(msg, period, parent, y_offset, x_offset)
+        except Exception:
+            try:
+                return _aqtu._janki_orig_tooltip(msg, period=period, parent=parent,
+                                                 x_offset=x_offset, y_offset=y_offset)
+            except Exception:
+                return None
+
+    def _glass_tooltip_impl(msg_text, period=3000, parent=None, y_offset=100, x_offset=0):
         from PyQt6.QtWidgets import QLabel, QWidget, QVBoxLayout
         from PyQt6.QtGui import QFont
 
@@ -79,14 +109,38 @@ def _patch_tooltip():
         win.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         win.setStyleSheet("background: transparent;")
 
+        # Rounded glass pill behind the text (smooth, anti-aliased) — same look as
+        # the hover tooltips and tray menu.
+        class _Pill(QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() == QEvent.Type.Paint:
+                    glass.paint_glass_pill(obj, 10.0)
+                return False
+        win._jk_pill = _Pill(win)
+        win.installEventFilter(win._jk_pill)
+
         label = QLabel(msg_text, win)
         label.setWordWrap(True)
         # Match Anki's UI font (SF Pro / system font, same weight as the glass HUD)
         label.setFont(QFont(".AppleSystemUIFont", 13))
         label.setStyleSheet(
             "QLabel { color: rgba(255,255,255,0.92); background: transparent; "
-            "padding: 4px 8px; }"
+            "padding: 7px 12px; }"
         )
+
+        # A word-wrapped QLabel picks a narrow width and wraps early. Size it to the
+        # text's natural one-line width (plus padding), capped at 560px — so most
+        # messages fit on one line and only long ones wrap.
+        try:
+            import re as _re
+            _plain = _re.sub(r"(?i)<br\s*/?>|</p>|</div>", "\n", str(msg_text))
+            _plain = _re.sub(r"<[^>]+>", "", _plain).replace("&nbsp;", " ")
+            _fm = label.fontMetrics()
+            _one_line = max((_fm.horizontalAdvance(ln) for ln in _plain.splitlines() or [""]),
+                            default=0)
+            label.setFixedWidth(min(_one_line + 24 + 6, 560))
+        except Exception:
+            label.setMinimumWidth(360)
 
         lay = QVBoxLayout(win)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -113,10 +167,31 @@ def _patch_tooltip():
                          (c_void_p,), (clear,))
             except Exception:
                 pass
+            if GLASS:
+                glass.frost_popup_window(win, corner=10)   # rounded blur behind the pill
         QTimer.singleShot(0, _native_clear)
         QTimer.singleShot(period, win.hide)
 
+    _orig = getattr(_aqtu, "_janki_orig_tooltip", None) or _aqtu.tooltip
+    _aqtu._janki_orig_tooltip = _orig
     _aqtu.tooltip = _glass_tooltip
+
+    # Modules that did `from aqt.utils import tooltip` (sync, browser, …) hold their own
+    # reference to the ORIGINAL function, so patching aqt.utils alone missed e.g. the
+    # "Collection sync complete." toast. Re-point every such reference — now and again
+    # shortly after, for modules Anki imports lazily.
+    def _repoint():
+        for _name, _mod in list(sys.modules.items()):
+            try:
+                if _mod is None or _mod is _aqtu:
+                    continue
+                if getattr(_mod, "tooltip", None) is _orig:
+                    setattr(_mod, "tooltip", _glass_tooltip)
+            except Exception:
+                pass
+    _repoint()
+    for _d in (2000, 8000, 30000):
+        QTimer.singleShot(_d, _repoint)
 
 
 def _warn_if_light_mode():
@@ -142,6 +217,7 @@ def _warn_if_light_mode():
 
 
 def _startup():
+    _bt.mark("main window ready → _startup begins")
     try:
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
         # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a
@@ -154,6 +230,7 @@ def _startup():
         except Exception as _sh_exc:
             log(f"self-heal: {_sh_exc}")
 
+        _bt.mark("self-heal check")
         # Expose the bundled web assets (Lora font files) via Anki's media server
         # so the desktop webviews' @font-face can load them at
         # /_addons/janki/assets/fonts/… (see css.lora_face_css). Safe/no-op if the
@@ -172,6 +249,7 @@ def _startup():
         except Exception as _nf_exc:
             log("native ui font: %s" % _nf_exc)
 
+        _bt.mark("web exports + native UI font")
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
@@ -198,14 +276,20 @@ def _startup():
         except Exception as _fw:
             log("focus-watch install: %s" % _fw)
 
+        _bt.mark("menu + focus watch")
         # Keep the Janki Practice note type's CSS/template current so styling fixes
         # reach already-converted decks on launch (no manual re-convert needed).
-        try:
-            from .src.integrations import qbank
-            qbank.sync_practice_model_if_present()
-        except Exception as _qb_exc:
-            log("practice model sync: %s" % _qb_exc)
+        # Deferred off the launch path (it can cost ~0.5s when the note type needs a
+        # rewrite) — nothing needs the Practice template in the first seconds.
+        def _deferred_practice_sync():
+            try:
+                from .src.integrations import qbank
+                qbank.sync_practice_model_if_present()
+            except Exception as _qb_exc:
+                log("practice model sync: %s" % _qb_exc)
+        QTimer.singleShot(3000, _deferred_practice_sync)
 
+        _bt.mark("practice note type sync")
         # Intersperse practice questions into normal review sessions (wraps the
         # reviewer + registers its hooks; all behaviour gated behind the
         # intersperse_enabled config). Reset per-session tracking on each open.
@@ -247,6 +331,7 @@ def _startup():
         except Exception as _rec_exc:
             log("bank reconcile hook: %s" % _rec_exc)
 
+        _bt.mark("intersperse + reword hooks + bank reconcile")
         # In-app updater: throttled once-a-day background check on launch (Janki
         # isn't on AnkiWeb, so this replaces manual GitHub reinstalls). The manual
         # "Check for updates now" trigger lives in Janki: Settings… → General.
@@ -255,6 +340,7 @@ def _startup():
         except Exception as _up_exc:
             log("updater: %s" % _up_exc)
 
+        _bt.mark("updater check")
         # Tools ▸ "Janki: Mobile cards" — stamp OLED + animation + font into every
         # note type so it syncs to AnkiMobile (which can't run add-ons). EXPERIMENTAL
         # and off by default: it rewrites every note type's templates, so it only
@@ -354,6 +440,7 @@ def _startup():
         except Exception:
             pass
 
+        _bt.mark("shortcuts, lockdown, window geometry")
         try:
             if tray._tray_should_show():
                 tray._apply_tray(True)
@@ -361,8 +448,11 @@ def _startup():
         except Exception as _tray_exc:
             log("tray apply: %s" % _tray_exc)
 
-        if _cfg().get("global_keys", False):
-            keytap._apply_global_keys(True)
+        _bt.mark("tray")
+        # Global Tab+Z/X/C/V/Space passthrough is always on (no longer a setting). The
+        # key tap is macOS-only and needs Accessibility permission.
+        keytap._apply_global_keys(True)
+        _bt.mark("global keys")
 
         # Gamepad poller DISABLED (GameController is focus-gated — can't read the
         # pad while Anki is backgrounded, so it only double-fires with Contanki).
@@ -371,6 +461,7 @@ def _startup():
         # Anki from a controller in caption mode while another app is focused.
         # Opt-in (config hid_controller) + needs Input Monitoring permission.
         gamepad._start_hid_monitor()
+        _bt.mark("gamepad HID monitor")
 
         # Pre-compile the reword helper + warm the on-device model in the background so the
         # first rephrase isn't slowed by the build + cold-start.
@@ -378,6 +469,7 @@ def _startup():
             reword.warm_up()
         except Exception:
             pass
+        _bt.mark("reword warm-up")
 
         # Auto-hide the cursor after 10s idle while fullscreen.
         focus._start_cursor_hide()
@@ -397,6 +489,7 @@ def _startup():
             pomodoro._apply_pomodoro(True)
 
         _patch_tooltip()
+        glass.install_glass_tooltips()     # hover tooltips get the rounded glass too
 
         # Warn once at launch (and on live theme changes) if Anki is in Light
         # appearance mode — the glass theme expects Dark. Delayed so it lands
@@ -419,6 +512,7 @@ def _startup():
         except Exception:
             pass
 
+        _bt.mark("cursor/focus tracking, pomodoro, tooltip")
         # Keep coherence HUD in sync with reviewer state changes.
         # _remote_active gates the 8bitdo focus-bypass: on while a card is up.
         # Last question content hash we FADED underlines for — so a re-render of the
@@ -532,6 +626,7 @@ def _startup():
         except Exception:
             pass
 
+        _bt.mark("reviewer hooks + practice toolbar/deck redraw")
         # Re-glass any mw.web page that skipped webview_will_set_content — notably
         # the deck-finished "Congratulations" page (loaded via load_sveltekit_page).
         try:
@@ -569,6 +664,7 @@ def _startup():
         # its own. Bumping the token here would fire a *second* fade on the next
         # re-render of that same screen.
 
+        _bt.mark("state hooks")
         # GLASS = window transparency (glass edition only). In the safe edition
         # GLASS is False, so none of this runs and Anki is never touched.
         if GLASS:
@@ -600,6 +696,7 @@ def _startup():
             # on. If a launch dies before this, the next start rolls glass back.
             QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
 
+        _bt.mark("glass setup")
         # ACTIVE = features (run in BOTH editions — safe edition has these without
         # any glass/patch). None of these require window transparency.
         if ACTIVE:
@@ -616,7 +713,11 @@ def _startup():
                 glass._apply_always_on_top(True)
         else:
             log("inactive (not started via AnkiGlass; no ANKI_GLASS).")
+        _bt.mark("fullscreen watcher, card timer, AMBOSS frost → _startup done")
+        _bt.startup_done()
     except Exception as exc:
+        _bt.mark("startup error")
+        _bt.startup_done()
         log(f"startup error: {exc}")
         # Always persist the full traceback (independent of JANKI_DEBUG) so a
         # startup abort — which also silently skips the glass/tray setup below the
@@ -646,3 +747,5 @@ try:
     from .src.integrations import lectures
 except Exception as _lec_exc:
     log("lectures submodule failed to load: %s" % _lec_exc)
+_bt.mark("imported lectures → janki import done")
+_bt.arm_first_render()

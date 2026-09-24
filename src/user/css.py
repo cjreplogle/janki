@@ -61,6 +61,54 @@ def ui_font_stack(cfg=None):
     return UI_FONTS.get(lbl, '"%s",-apple-system,Georgia,serif' % lbl)
 
 
+def qt_font_families(cfg=None):
+    """The chosen UI font as a Qt family list (for native widgets like the Settings
+    window): the CSS stack's named families in order, with -apple-system/system-ui
+    mapped to the macOS system font and CSS generic keywords dropped."""
+    out = []
+    for part in ui_font_stack(cfg).split(","):
+        name = part.strip().strip('"').strip("'")
+        if name in ("-apple-system", "system-ui", "BlinkMacSystemFont"):
+            name = ".AppleSystemUIFont"
+        elif name in ("serif", "sans-serif", "monospace", "cursive", "fantasy"):
+            continue
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+_WIDGET_FONT_TAG = "/*janki-widget-font*/"
+
+
+def widget_font_rule(cfg=None) -> str:
+    """A marked QSS rule setting the chosen UI font on every widget in a window. Uses the
+    first family from the stack that's actually installed (QSS takes one family), so a
+    missing name like "SF Pro Text" falls through to one that exists."""
+    _register_bundled_fonts()
+    fams = qt_font_families(cfg)
+    try:
+        from aqt.qt import QFontDatabase
+        have = set(QFontDatabase.families())
+        pick = next((f for f in fams if f in have or f.startswith(".")), None)
+    except Exception:
+        pick = fams[0] if fams else None
+    if not pick:
+        return ""
+    return '%s QWidget { font-family: "%s"; }\n' % (_WIDGET_FONT_TAG, pick)
+
+
+def apply_widget_ui_font(widget, cfg=None):
+    """Apply the chosen UI font to a Qt window and all its children, live. Goes through
+    the widget's stylesheet (a plain setFont gets overridden by Anki's app stylesheet);
+    any previous Janki font rule is replaced, other rules are kept."""
+    try:
+        import re
+        cur = re.sub(re.escape(_WIDGET_FONT_TAG) + r"[^\n]*\n?", "", widget.styleSheet() or "")
+        widget.setStyleSheet(cur.rstrip() + "\n" + widget_font_rule(cfg))
+    except Exception as e:
+        log("apply widget ui font: %s" % e)
+
+
 def lora_face_css():
     """@font-face for the bundled Lora (regular + italic). Included in every webview
     so 'Lora' resolves anywhere.
@@ -1387,9 +1435,9 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
                     web_content.body = body
                 else:
                     # Normal Decks screen: add a "Load Lectures" button that opens the
-                    # Lectures section of Janki settings (click handled in _on_js_message).
+                    # Load today's lectures wizard (click handled in _on_js_message).
                     web_content.body += (
-                        "<button title='Open Janki Lecture settings' "
+                        "<button title=\"Load today's lectures\" "
                         "onclick='pycmd(\"janki-load-lectures\");'>Load Lectures</button>")
             except Exception:
                 pass
@@ -1559,11 +1607,15 @@ def _on_js_message(handled, message, context):
                     return (True, None)
             except Exception:
                 pass
-        # "Load Lectures" button on the normal Decks screen → open Janki ▸ Lectures.
+        # "Load Lectures" button on the normal Decks screen → the Load today's lectures
+        # wizard (same as Tools ▸ Load today's lectures).
         if isinstance(message, str) and message == "janki-load-lectures":
             try:
-                from ..system import settings_dialog
-                settings_dialog._open_settings(section="lectures")
+                from ..integrations import lectures
+                from aqt.qt import QTimer as _QT
+                # Open AFTER this webview click finishes — opening mid-click let the
+                # main window come back to the front over the new window.
+                _QT.singleShot(0, lambda: lectures.run_today(interactive=True))
             except Exception:
                 pass
             return (True, None)
