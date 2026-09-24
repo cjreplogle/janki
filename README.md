@@ -79,6 +79,53 @@ so nothing is left behind.
   <p align="center">
     <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/scroll-animations.mp4" autoplay loop muted playsinline controls width="560"></video>
   </p>
+
+- **Rephrase** — automatically re-word the same card
+  slightly differently while retaining core information (Enable: **`Tab + R`**), so you
+  don't simply memorize the card without understanding it. Automatically intersperses
+  reworded cards after a single pass, while the original text is easily retrievable. All
+  rephrases fall with the same card, so making headway with the adjusted wording has the
+  same effect as getting the original card correct.
+
+  **→ [How to Use Card Rephrasing](docs/rephrase.md)**
+- **Practice questions** — pull multiple-choice questions
+  related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
+  Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
+  choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
+  100% local.
+  
+  **→ [Practice system + how to import a document as a question bank](docs/practice-questions.md)**
+- **Mobile card theming** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
+  add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
+  animation into your note types (scoped to mobile) so the look rides your normal sync
+  to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
+  `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
+  (Apply / Remove — one-click reversible).
+  
+  **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md)**
+
+  <p align="center">
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" autoplay loop muted playsinline controls width="240"></video>
+    <!-- practice mobile clip hidden for now
+    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" autoplay loop muted playsinline controls width="240"></video>
+    -->
+  </p>
+- **Load today's lectures** — reads a local `.ics`
+  calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
+  classes for the day, and adaptively unsuspends relevant tagged cards
+  (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
+  lectures manually.
+
+  **→ [Load Today's Lectures tutorial](docs/load-todays-lectures.md)**
+
+  <p align="center">
+    <img src="docs/media/load-todays-lectures.jpg" alt="Load today's lectures" width="375">
+  </p>
+
+  *This feature expects your own calendar export and tag map; set their paths on
+  the Lectures → Sources tab (or just run **Tools → Load today's lectures** and
+  pick a tag map when prompted). Nothing is uploaded — the calendar is read
+  locally (a URL source is optional and fetched only if you enter one).*
 - **Caption Mode** — Trying to multitask but still see your anki cards? Press **`Tab + \`**
   to change the Anki notecard view to be in "caption" form. **`Tab+Arrow Keys`**
   adjusts their screen position. Remains visible in this view even when other
@@ -98,47 +145,6 @@ so nothing is left behind.
   miniaturized menu with other things focused.
 - **Quick Zoom** — for whatever god forsaken reason Anki does not have **`Cmd+`**
   or **`Cmd-`** hotkeys to zoom card contents so that exists now...
-- **[Rephrase](docs/rephrase.md)** — automatically re-word the same card
-  slightly differently while retaining core information, so you don't memorize the
-  card without understanding it. Automatically intersperses reworded cards after a
-  single pass, while the original text is easily retrievable. All rephrases fall
-  under the same card so making headway with the adjusted wording has the same
-  effect as getting the original card correct.
-- **[Practice questions](docs/practice-questions.md)** — pull multiple-choice questions
-  related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
-  Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
-  choice (correct → suspend, wrong → retry, skip → bury) with a per-bank Score. Runtime is
-  100% local.
-
-  **→ [Practice system + how to import a document as a question bank](docs/practice-questions.md).**
-- **[Mobile card theming](docs/mobile-cards.md)** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
-  add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
-  animation into your note types (scoped to mobile) so the look rides your normal sync
-  to the phone/iPad. It rewrites every note type's templates, so it's opt-in: set
-  `"mobile_cards": true` in the add-on config to reveal **Tools → Janki: Mobile cards**
-  (Apply / Remove — one-click reversible).
-  **→ [Mobile cards setup + recommended AnkiMobile settings](docs/mobile-cards.md).**
-
-  <p align="center">
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-cards.mp4" autoplay loop muted playsinline controls width="240"></video>
-    <!-- practice mobile clip hidden for now
-    <video src="https://github.com/cjreplogle/janki/raw/master/docs/media/mobile-practice.mp4" autoplay loop muted playsinline controls width="240"></video>
-    -->
-  </p>
-- **[Load today's lectures](docs/load-todays-lectures.md)** — reads a local `.ics`
-  calendar (URL/file) and a local `.txt`/`.xlsx` lecture→tag map, finds your
-  classes for the day, and adaptively unsuspends relevant tagged cards
-  (AJ/#AK/Hutch decks tested). A calendar is optional — without one you pick
-  lectures manually. **→ [How to use it: Load Today's Lectures tutorial](docs/load-todays-lectures.md).**
-
-  <p align="center">
-    <img src="docs/media/load-todays-lectures.jpg" alt="Load today's lectures" width="375">
-  </p>
-
-  *This feature expects your own calendar export and tag map; set their paths on
-  the Lectures → Sources tab (or just run **Tools → Load today's lectures** and
-  pick a tag map when prompted). Nothing is uploaded — the calendar is read
-  locally (a URL source is optional and fetched only if you enter one).*
 
 ## Suggested Add-Ons
 
