@@ -67,11 +67,15 @@ class _KeyBridge(QObject):
     lockdown_chord = _pyqtSignal(bool)  # backtick+Delete chord held/released (hold-to-exit)
     lockdown_enter = _pyqtSignal(bool)  # backtick+Delete pressed while unlocked → engage lockdown
     lockdown_warn = _pyqtSignal(bool)   # during very-strict warning: True=skip (Space/Enter), False=cancel (Esc)
+    toggle_window = _pyqtSignal()       # Cmd+Opt+A → show Anki, or hide it if it's frontmost
+    reword_toggle = _pyqtSignal()       # Tab+R → toggle the reworded view of the current card
 
 _key_bridge = _KeyBridge()
 _key_bridge.send_key.connect(lambda kc: _send_key_to_anki(kc))
 _key_bridge.send_key_rf.connect(lambda kc: _send_key_to_anki(kc, reveal_first=True))
 _key_bridge.practice_or_rate.connect(lambda kc, fwd: _practice_or_rate(kc, fwd))
+_key_bridge.toggle_window.connect(lambda: _toggle_main_window())
+_key_bridge.reword_toggle.connect(lambda: _reword_toggle())
 
 def _lk_eval_chord() -> None:
     """Re-evaluate the backtick+Delete chord from the tap thread and emit the
@@ -107,6 +111,154 @@ _KC_TO_KEY = {6: 'z', 7: 'x', 8: 'c', 9: 'v', 49: ' ', 53: 'Escape', 42: '\\',
 # ease: 1=Again 2=Hard 3=Good 4=Easy; None=not a rating key
 _KC_TO_EASE = {6: 1, 7: 2, 8: 3, 9: 4, 49: None, 53: None, 42: None,
                18: 1, 19: 2, 20: 3, 21: 4}
+
+_win_anim = None      # keep the fade animation alive for its duration
+
+
+def _fade_window(mw, start: float, end: float, dur: int, on_done=None) -> None:
+    """Animate the main window's opacity (NSWindow alpha) start→end, calling on_done at the
+    finish. Falls back to setting the end value directly if the animation can't run."""
+    global _win_anim
+    try:
+        from aqt.qt import QPropertyAnimation, QEasingCurve
+        try:
+            if _win_anim is not None:
+                _win_anim.stop()
+        except Exception:
+            pass
+        mw.setWindowOpacity(start)
+        anim = QPropertyAnimation(mw, b"windowOpacity")
+        anim.setDuration(dur)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        if on_done is not None:
+            anim.finished.connect(on_done)
+        _win_anim = anim
+        anim.start()
+    except Exception:
+        try:
+            mw.setWindowOpacity(end)
+        except Exception:
+            pass
+        if on_done is not None:
+            on_done()
+
+
+def _toggle_main_window() -> None:
+    """Cmd+Opt+A toggle: if Anki is the frontmost app, fade it out and hide it (macOS
+    returns focus to the previously-active app); otherwise fade the main window in — first
+    restoring it if it was hidden to the tray / minimized, and activating over other apps /
+    Spaces. Runs on the Qt thread (via the toggle_window signal)."""
+    try:
+        import ctypes
+        from aqt import mw
+        from .bridge import _bridge
+        msg, cls = _bridge()
+        nsapp = msg(ctypes.c_void_p, cls("NSApplication"), b"sharedApplication")
+        active = bool(msg(ctypes.c_bool, nsapp, b"isActive")) if nsapp else False
+
+        if active:
+            # Frontmost → fade out, then hide the app (AppKit reactivates the prior app).
+            def _hidden():
+                if nsapp:
+                    # Suppress AppKit's own hide animation so it doesn't fight our fade
+                    # (that double-animation is what flickered).
+                    win = msg(ctypes.c_void_p, ctypes.c_void_p(int(mw.winId())), b"window")
+                    if win:
+                        msg(None, win, b"setAnimationBehavior:", (ctypes.c_long,), (2,))  # None
+                    msg(None, nsapp, b"hide:", (ctypes.c_void_p,), (None,))
+                # Reset opacity only AFTER the window is fully hidden, so the reset can't
+                # flash it opaque mid-hide. Other reopen paths then aren't invisible.
+                from aqt.qt import QTimer
+                QTimer.singleShot(350, lambda: mw.setWindowOpacity(1.0))
+            _fade_window(mw, mw.windowOpacity(), 0.0, 130, _hidden)
+            return
+
+        # Not frontmost → summon it (start transparent so it fades in, no flash).
+        mw.setWindowOpacity(0.0)
+        try:
+            from ..system import tray
+            tray.suppress_reopen(0.3)   # our own restore, not the reopen-hook's
+            if not mw.isVisible() or mw.isMinimized():
+                tray._restore_window()
+        except Exception:
+            if not mw.isVisible() or mw.isMinimized():
+                mw.showNormal()
+        mw.raise_()
+        mw.activateWindow()
+        try:
+            from ..user import glass
+            glass._wake_main_webviews()   # repaint the transparent window
+        except Exception:
+            pass
+        if nsapp:
+            msg(None, nsapp, b"activateIgnoringOtherApps:", (ctypes.c_bool,), (True,))
+        _fade_window(mw, 0.0, 1.0, 180)
+    except Exception as e:
+        log(f"toggle main window: {e}")
+        try:
+            mw.setWindowOpacity(1.0)
+        except Exception:
+            pass
+
+
+_REWORD_CYCLE_CAP = 6      # how many rephrasings Tab+R will accumulate before wrapping
+
+
+def _reword_toggle() -> None:
+    """Tab+R: jump to the next version of the current card — original → reword 1 → reword 2 →
+    … → original. When you step past the last stored reword (and we're under the cap), a NEW
+    one is generated on-device and shown. Runs on the Qt thread (reword_toggle signal)."""
+    try:
+        from ..features import reword
+        from aqt.utils import tooltip
+        r = getattr(mw, "reviewer", None)
+        if getattr(mw, "state", None) != "review" or not r or not getattr(r, "card", None):
+            return
+        card = r.card
+        cid = card.id
+        side = "a" if getattr(r, "state", None) == "answer" else "q"
+        reword.set_peek(False)               # cycle takes over from any peek
+
+        def _render():
+            if getattr(mw, "state", None) == "review" and getattr(r, "card", None):
+                try:
+                    mw.web.eval("window.__jkNoType=1;")   # cycle → swap instantly, no anim
+                except Exception:
+                    pass
+                if getattr(r, "state", None) == "answer":
+                    r._showAnswer()
+                else:
+                    r._showQuestion()
+
+        nvar = reword.variant_count(card, side)
+        nxt = reword.get_cycle(cid) + 1
+        if nxt <= nvar:                       # move to an already-stored version
+            reword.set_cycle(cid, nxt)
+            _render()
+            tooltip("Reword %d/%d" % (nxt, nvar))
+        elif nvar < _REWORD_CYCLE_CAP and reword.on_device_available():
+            tooltip("Rephrasing…")            # past the last one → try to make a fresh one
+
+            def _done(total, prev=nvar):
+                newn = reword.variant_count(card, side)
+                if newn > prev:               # got a new one → show it
+                    reword.set_cycle(cid, newn)
+                    _render()
+                    tooltip("Reword %d/%d" % (newn, newn))
+                else:                         # no new rephrase left → back to the original
+                    reword.set_cycle(cid, 0)
+                    _render()
+                    tooltip("Original")
+            reword.generate_more_async(card, _done)
+        else:                                 # at the cap (or no on-device) → back to original
+            reword.set_cycle(cid, 0)
+            _render()
+            tooltip("Original")
+    except Exception as e:
+        log(f"reword cycle: {e}")
+
 
 def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
     """Drive Anki's reviewer directly via Python API — no OS event needed.
@@ -419,6 +571,15 @@ def _start_key_tap() -> None:
             global _lk_bt_held, _lk_del_held
             # etype: 10 = kCGEventKeyDown, 11 = kCGEventKeyUp
             kc = CG.CGEventGetIntegerValueField(event, 9)  # kCGKeyboardEventKeycode
+            # Cmd+Opt+A (keycode 0 = 'A') → toggle the main Anki window: show it from
+            # anywhere, or hide it (back to the previous app) if Anki is frontmost. Handled
+            # before the global-keys gate so it works whenever the tap is running; consumed
+            # so it doesn't type an 'a' in the other app.
+            if etype == 10 and kc == 0:
+                fl = CG.CGEventGetFlags(event)
+                if (fl & 0x100000) and (fl & 0x80000):   # Command + Option
+                    _key_bridge.toggle_window.emit()
+                    return None
             # Lockdown hold-to-exit: watch Space regardless of the global-keys
             # setting (the tap is started when locking). Never swallow a plain tap
             # so normal reviewing still works; only eat Space once the hold has
@@ -489,6 +650,10 @@ def _start_key_tap() -> None:
                         _tab_used_combo = True
                         _key_bridge.send_key.emit(kc)
                         return None  # consume Shift+Tab+=/-
+                if _tab_held and kc == 15:   # Tab+R → toggle the reworded view
+                    _tab_used_combo = True
+                    _key_bridge.reword_toggle.emit()
+                    return None
                 if _tab_held and kc in _GLOBAL_KC:
                     _tab_used_combo = True
                     _key_bridge.send_key.emit(kc)

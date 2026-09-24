@@ -636,10 +636,17 @@ def _build_css(cfg, context):
         # Lists: keep items left-aligned (bullets + wrapped lines line up), but let
         # the list box shrink-to-fit so the centered card centers it as a block —
         # a left-aligned list then reads centered instead of hugging the left edge.
+        # Scope the shrink-to-fit trick to TOP-LEVEL lists only (:not(li ul/ol)).
+        # A nested list left as inline-block floats beside its parent <li> and the
+        # centering scatters the sub-items across the row; keep nested lists as normal
+        # block lists so they indent under their parent. Also hide genuinely empty
+        # <li> (a blank line in the list) which otherwise renders a stray bullet.
         parts.append("<style>\n"
-                     "#qa ul, #qa ol, .card ul, .card ol {\n"
+                     "#qa ul:not(li ul):not(li ol), #qa ol:not(li ul):not(li ol),\n"
+                     ".card ul:not(li ul):not(li ol), .card ol:not(li ul):not(li ol) {\n"
                      "  display: inline-block !important; text-align: left !important; }\n"
                      "#qa li, .card li { text-align: left !important; }\n"
+                     "#qa li:empty, .card li:empty { display: none !important; }\n"
                      "</style>\n")
         # Card font = the same system-wide font stack (default bundled Lora).
         # Applied to the card text (kbd/shortcut keys left alone).
@@ -647,6 +654,16 @@ def _build_css(cfg, context):
                      "#qa, .card, #qa *:not(kbd) {\n"
                      "  font-family: %s !important;\n}\n"
                      "</style>\n" % ui_font_stack(cfg))
+        # Practice "Show original slide" button lives on <body> (outside #qa) so the note-type
+        # CSS can lag behind the add-on. Force it here to the minimal reword-toggle look
+        # (small, sans) with high specificity so it always matches regardless of the deployed
+        # note-type CSS.
+        parts.append("<style>\n"
+                     "body .jp-slide-btn, button.jp-slide-btn {\n"
+                     "  font-size: 11px !important;\n"
+                     "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', "
+                     "sans-serif !important;\n}\n"
+                     "</style>\n")
         # Cloze deletions: recolour to a readable blue by default. Many note types
         # (incl. AnKing) colour the active cloze green, which fights the glass; a
         # calm blue reads better and matches the mobile-cards cloze colour.
@@ -775,7 +792,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    jkAmbHook();\n"
         "    function skip(node){ var p=node.parentNode;\n"
         "      while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
-        "        if(t==='SCRIPT'||t==='STYLE') return true;\n"
+        "        if(t==='SCRIPT'||t==='STYLE'||t==='TEMPLATE') return true;\n"
+        "        if((p.id||'')==='jk-rw-bar') return true;   // reword control bar (toggle + arrow)\n"
         "        if(t.indexOf('AMBOSS')===0) return true;   // AMBOSS custom elements\n"
         "        if(p.classList && (p.classList.contains('MathJax')||\n"
         "            p.classList.contains('MathJax_Preview')||p.classList.contains('mjx-chtml')||\n"
@@ -884,6 +902,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # like a new card and re-fire the reveal (double animation on the first,
         # slow-to-mark card). Stripping whitespace makes the card identity stable.
         "      var s=jkHash(raw.replace(/\\s+/g,''));\n"
+        # One-shot skip: set by Python before a Tab+R / Ctrl+Z reword-cycle re-render so
+        # jumping between card versions swaps instantly with NO type animation (the bottom-
+        # left toggle button, a client-side swap, is unaffected and still animates).
+        "      if(window.__jkNoType){ window.__jkNoType=0; setSig(s); reveal(); return; }\n"
         # PREV_HASH = last card Python actually animated (survives a full re-render/
         # new document, unlike window.name). getSig() = same-document/reload guard.
         # Either match → this exact card content already animated → just reveal.
