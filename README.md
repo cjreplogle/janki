@@ -88,7 +88,7 @@ so nothing is left behind.
   rephrases fall with the same card, so making headway with the adjusted wording has the
   same effect as getting the original card correct.
 
-  **→ [How to Use Card Rephrasing](docs/rephrase.md)**
+  **→ [How to Use Card Rephrasing](https://cjre.pl/ogle/janki/rephrase)**
 - **Practice questions** — pull multiple-choice questions
   related to the card you're reviewing (**`Tab + Q`**), or load whole question banks into
   Anki as a real, syncable Practice deck. Banks are local `.qb` files; grading is by answer
