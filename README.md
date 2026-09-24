@@ -1,8 +1,8 @@
 # Janki
 
-*A feature-rich [Anki](https://github.com/ankitects/anki) client for MacOS. Designed around
-addressing the fundamental limitations of Anki as a spaced-repetition tool and streamlining
-student workflows as much as possible.*
+<p align="center"><strong>A feature-rich <a href=https://github.com/ankitects/anki>Anki</a> client for MacOS, designed to expand
+Anki's core functionalities and simplify student workflows.</strong>
+</p>
 
 <p align="center">
   <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="360">
@@ -13,7 +13,7 @@ student workflows as much as possible.*
 
 ## Install
 
-Runs as an Anki plugin on **normal, stock Anki** — no custom build or separate app.
+Runs as an Anki plugin and patcher on **normal, stock Anki** — no custom build or separate app.
 There are two builds — pick one (each link always downloads the latest release):
 
 - **[⬇ Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)**
