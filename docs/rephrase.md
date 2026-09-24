@@ -33,7 +33,7 @@ deletions, formatting, and images are preserved; only the phrasing changes.*
 
 ---
 
-## The main way — bring your own AI (`.rp`)
+## Pick your AI model and generate-by-prompt (as `.rp`)
 
 The highest-quality rephrases come from pasting wording out of any capable AI.
 Janki gives you a ready-made prompt and a tolerant importer, so no card content
@@ -59,16 +59,18 @@ For large sets, paste from a **file** rather than into a terminal.
 
 ---
 
-## Experimental backup — on-device generation
+## On-device concurrent generation (experimental backup)
 
 Janki can also generate rephrases **entirely on your Mac** using Apple's
 on-device foundation models (no network). This is kept as an **experimental
 backup** — the bring-your-own-AI path above generally produces better wording and
-works the same on any machine. If you are a medical student, I would err with caution
-using this as from my testing things have been less consistent. I've got it
-to a functional level but local-runtime models have a bit of improving to do before I am
-confident in suggesting their use here. Details are important and the most advanced
-models **truly are important** for language specificity. In my ideal world, everything is ran locally... but I digress.
+works the same on any machine. 
+
+If you are a medical student, I would err with caution using this as results have been 
+less consistent. I've got it to a functional level but local-runtime models have a bit 
+of improving to do before I am confident in suggesting their use here. The minor
+details are what is important, and the most advanced models **are best for language 
+specificity**. In my ideal world, everything is ran locally... but I digress.
 
 Under **Tools → Janki: Settings → Rephrase → Experimental backup**, enable
 on-device generation to have rephrases prepared in the background as you study, or
