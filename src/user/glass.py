@@ -1,5 +1,7 @@
 """Native window styling (vibrancy, blur, OLED, tint) + window/webview lifecycle."""
 
+import os
+import shutil
 import sys
 from ctypes import c_void_p, c_char_p, c_bool, c_long, c_ulong, c_double
 from aqt import mw
@@ -21,6 +23,17 @@ from ..integrations import amboss
 _vibrancy_installed = False
 _vibrancy_view = None
 _desat_view = None
+# Custom background photo: two native views inserted directly behind Qt's QNSView
+# (so they show through the transparent webviews) — a layer-backed image view and,
+# on top of it, a tint overlay driven by the same Opacity/tint config as the glass,
+# so the photo reads as frosted glass over the image. Recreated if None (freed on
+# window recreate).
+_bg_image_view = None
+_bg_tint_view = None
+_bg_loaded_path = None   # path of the image currently decoded into the layer
+_bg_chosen = None        # session-picked image from the pool (stable until restart)
+_bg_blur_installed = False  # whether the named CIGaussianBlur filter is on the layer
+_bg_blur_cur = 0.0          # current effective blur radius (animate-from value)
 
 
 def _apply_native_glass():
@@ -474,11 +487,23 @@ def _reload_all_webviews():
             _msg(c_void_p, main_ns, b"makeKeyAndOrderFront:", (c_void_p,), (None,))
     except Exception:
         pass
+    # In the reviewer, the card HTML is set via JS AFTER the page loads (not from a
+    # reloadable URL), so mw.web.reload() unloads the card and nothing re-renders it.
+    # Re-show the current side instead — that re-sets content and re-fires our CSS
+    # hook, applying the new font without losing the card. Skip mw.web from the plain
+    # reload list in this case.
+    in_review = False
+    try:
+        rv = getattr(mw, 'reviewer', None)
+        if getattr(mw, 'state', None) == 'review' and rv and getattr(rv, 'card', None):
+            in_review = True
+    except Exception:
+        pass
     # Reload every known webview: mw.web (main content), toolbar, and any
     # AnkiWebView found as a child of centralWidget.
     views_to_reload = []
     try:
-        if getattr(mw, 'web', None):
+        if getattr(mw, 'web', None) and not in_review:
             views_to_reload.append(mw.web)
         tb = getattr(mw, 'toolbar', None)
         tb_web = getattr(tb, 'web', None) if tb else None
@@ -493,6 +518,27 @@ def _reload_all_webviews():
     for v in views_to_reload:
         try:
             v.reload()
+        except Exception:
+            pass
+    # The toolbar injects our CSS via the webview_will_set_content hook, which only
+    # fires when content is SET — a plain .reload() re-renders the existing HTML
+    # without re-running injection, so a font/theme change wouldn't reach the nav
+    # items until restart. Redraw it to re-set content and re-fire the hook.
+    try:
+        tb = getattr(mw, 'toolbar', None)
+        if tb:
+            tb.draw()
+    except Exception:
+        pass
+    # Re-render the open card (question or answer, whichever is showing) so the
+    # reviewer picks up the new CSS without unloading the card.
+    if in_review:
+        try:
+            rv = mw.reviewer
+            if getattr(rv, 'state', None) == 'answer':
+                rv._showAnswer()
+            else:
+                rv._showQuestion()
         except Exception:
             pass
 
@@ -858,6 +904,21 @@ def _assert_window_transparent():
     except Exception as exc:
         log(f"assert transparent: {exc}")
     _apply_window_tint()
+    _apply_bg_image()
+
+
+def _tint_rgb(cfg=None):
+    """The (r,g,b) of the current glass tint, honouring tint_mode/tint_color."""
+    cfg = cfg or _cfg()
+    mode = cfg.get("tint_mode", "custom")
+    if mode == "light":
+        return 255, 255, 255
+    if mode == "dark":
+        return 18, 20, 30
+    try:
+        return css._hex_to_rgb(cfg.get("tint_color", "#1e1e1e"))
+    except Exception:
+        return 30, 30, 30
 
 
 def _apply_window_tint():
@@ -869,16 +930,7 @@ def _apply_window_tint():
         return
     try:
         cfg = _cfg()
-        mode = cfg.get("tint_mode", "custom")
-        if mode == "light":
-            r, g, b = 255, 255, 255
-        elif mode == "dark":
-            r, g, b = 18, 20, 30
-        else:
-            try:
-                r, g, b = css._hex_to_rgb(cfg.get("tint_color", "#1e1e1e"))
-            except Exception:
-                r, g, b = 30, 30, 30
+        r, g, b = _tint_rgb(cfg)
         a = max(0.06, float(cfg.get("body_opacity", 0.25)))  # keep shape for corners
         msg, cls = _bridge()
         win = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
@@ -892,6 +944,294 @@ def _apply_window_tint():
             msg(None, win, b"setBackgroundColor:", (c_void_p,), (col,))
     except Exception as exc:
         log(f"window tint: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Custom background photo
+# ---------------------------------------------------------------------------
+
+def _bg_dir():
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # → addon root
+    return os.path.join(root, "user_files", "background")
+
+
+_BG_EXTS = (".png", ".jpg", ".jpeg", ".heic", ".gif", ".tiff", ".tif", ".bmp", ".webp")
+
+
+def _bg_files():
+    """All stored background images, sorted (a stable pool to pick from)."""
+    d = _bg_dir()
+    if not os.path.isdir(d):
+        return []
+    out = []
+    for f in sorted(os.listdir(d)):
+        if f.startswith("."):
+            continue
+        if os.path.splitext(f)[1].lower() in _BG_EXTS:
+            out.append(os.path.join(d, f))
+    return out
+
+
+def _current_bg_path(repick=False):
+    """The image to show this session. One is chosen at random from the pool and
+    cached so it stays put until the app restarts (or the pool changes)."""
+    global _bg_chosen
+    files = _bg_files()
+    if not files:
+        _bg_chosen = None
+        return None
+    if repick or _bg_chosen not in files:
+        import random
+        _bg_chosen = random.choice(files)
+    return _bg_chosen
+
+
+def add_background_images(paths):
+    """Copy one or more chosen images into the pool (does not replace existing),
+    re-pick a random one, and apply live. Returns the new pool size."""
+    try:
+        d = _bg_dir()
+        os.makedirs(d, exist_ok=True)
+        import time
+        for i, p in enumerate(paths or []):
+            if p and os.path.isfile(p):
+                ext = os.path.splitext(p)[1].lower() or ".png"
+                base = "bg_%d_%d%s" % (int(time.time() * 1000), i, ext)
+                shutil.copyfile(p, os.path.join(d, base))
+    except Exception as exc:
+        log(f"add background images: {exc}")
+    _current_bg_path(repick=True)
+    _apply_bg_image()
+    return len(_bg_files())
+
+
+def clear_background_images():
+    """Remove every stored background image and hide the backdrop."""
+    global _bg_chosen
+    try:
+        d = _bg_dir()
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                try:
+                    os.remove(os.path.join(d, f))
+                except Exception:
+                    pass
+    except Exception as exc:
+        log(f"clear background images: {exc}")
+    _bg_chosen = None
+    _apply_bg_image()
+
+
+def background_count():
+    return len(_bg_files())
+
+
+def has_background_image():
+    return bool(_bg_files())
+
+
+def _bg_blur_target():
+    """(max_radius, effective_radius) for the photo blur right now. max is the
+    configured bg_blur; effective is 0 when bg_blur_text_only is set and no card
+    text is on screen (not in the reviewer)."""
+    cfg = _cfg()
+    try:
+        maxr = float(cfg.get("bg_blur", 0) or 0)
+    except (TypeError, ValueError):
+        maxr = 0.0
+    if maxr <= 0:
+        return 0.0, 0.0
+    gated_off = False
+    if cfg.get("bg_blur_text_only", False):
+        try:
+            gated_off = getattr(mw, "state", None) != "review"
+        except Exception:
+            gated_off = True
+    return maxr, (0.0 if gated_off else maxr)
+
+
+def _bg_set_blur(animate=False):
+    """Apply the photo's Gaussian blur. The named CIGaussianBlur filter stays on
+    the layer whenever bg_blur>0 and we only vary its inputRadius, so the text-only
+    gate can smoothly animate the radius between 0 and bg_blur (fade in/out)."""
+    global _bg_blur_installed, _bg_blur_cur
+    if sys.platform != "darwin" or not _bg_image_view:
+        return
+    try:
+        msg, cls = _bridge()
+        layer = msg(c_void_p, _bg_image_view, b"layer")
+        if not layer:
+            return
+
+        def nsstr(s):
+            return msg(c_void_p, cls("NSString"), b"stringWithUTF8String:",
+                       (c_char_p,), (s.encode(),))
+
+        def num(x):
+            return msg(c_void_p, cls("NSNumber"), b"numberWithDouble:",
+                       (c_double,), (float(x),))
+
+        maxr, target = _bg_blur_target()
+
+        # Blur fully off → drop the filter entirely (no idle CI cost).
+        if maxr <= 0:
+            empty = msg(c_void_p, cls("NSArray"), b"array")
+            msg(None, layer, b"setFilters:", (c_void_p,), (empty,))
+            _bg_blur_installed = False
+            _bg_blur_cur = 0.0
+            return
+
+        if not _bg_blur_installed:
+            filt = msg(c_void_p, cls("CIFilter"), b"filterWithName:",
+                       (c_void_p,), (nsstr("CIGaussianBlur"),))
+            if not filt:
+                return
+            msg(None, filt, b"setDefaults")
+            msg(None, filt, b"setValue:forKey:", (c_void_p, c_void_p),
+                (num(target), nsstr("inputRadius")))
+            # Name the filter so we can address it as filters.blur.inputRadius.
+            msg(None, filt, b"setName:", (c_void_p,), (nsstr("blur"),))
+            arr = msg(c_void_p, cls("NSArray"), b"arrayWithObject:",
+                      (c_void_p,), (filt,))
+            msg(None, layer, b"setMasksToBounds:", (c_bool,), (True,))
+            msg(None, layer, b"setFilters:", (c_void_p,), (arr,))
+            _bg_blur_installed = True
+            _bg_blur_cur = target
+            if animate and target > 0:
+                _bg_animate_blur(msg, cls, layer, nsstr, num, 0.0, target)
+            return
+
+        # Already installed → just change the radius (optionally with a fade).
+        if animate:
+            _bg_animate_blur(msg, cls, layer, nsstr, num, _bg_blur_cur, target)
+        msg(None, layer, b"setValue:forKeyPath:", (c_void_p, c_void_p),
+            (num(target), nsstr("filters.blur.inputRadius")))
+        _bg_blur_cur = target
+    except Exception as exc:
+        log(f"bg blur: {exc}")
+
+
+def _bg_animate_blur(msg, cls, layer, nsstr, num, frm, to):
+    """Fade the photo blur radius from `frm` to `to` (CABasicAnimation)."""
+    try:
+        anim = msg(c_void_p, cls("CABasicAnimation"), b"animationWithKeyPath:",
+                   (c_void_p,), (nsstr("filters.blur.inputRadius"),))
+        if not anim:
+            return
+        msg(None, anim, b"setFromValue:", (c_void_p,), (num(frm),))
+        msg(None, anim, b"setToValue:", (c_void_p,), (num(to),))
+        msg(None, anim, b"setDuration:", (c_double,), (0.18,))
+        msg(None, layer, b"addAnimation:forKey:", (c_void_p, c_void_p),
+            (anim, nsstr("blurfade")))
+    except Exception as exc:
+        log(f"bg blur anim: {exc}")
+
+
+def refresh_bg_blur(animate=True):
+    """Re-evaluate the text-only blur gate (call on state / card changes). Animated
+    by default so the blur fades in/out as text appears/leaves."""
+    if _bg_image_view:
+        _bg_set_blur(animate=animate)
+
+
+def _apply_bg_image():
+    """Show/update (or hide) the custom background photo. An image view + a tint
+    overlay are inserted as siblings just behind Qt's QNSView, so they appear
+    through the transparent webviews and cover the whole window (incl. the titlebar
+    strip). The tint overlay uses the glass tint + Opacity; the photo has its own
+    opacity (bg_opacity) and optional blur (bg_blur), so both layers are tunable."""
+    if not GLASS or sys.platform != "darwin":
+        return
+    global _bg_image_view, _bg_tint_view, _bg_loaded_path
+    try:
+        msg, cls = _bridge()
+        win = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if not win:
+            return
+        old = msg(c_void_p, win, b"contentView")            # Qt's QNSView
+        superview = msg(c_void_p, old, b"superview") if old else None
+        if not (old and superview):
+            return
+        cfg = _cfg()
+        path = _current_bg_path()
+        show = bool(path) and os.path.isfile(path)
+        # Size to the whole window frame (superview bounds), NOT Qt's content view —
+        # so the photo also covers the titlebar strip and there's no dark top bar.
+        frame = msg(NSRect, superview, b"bounds")
+
+        def nsstr(s):
+            return msg(c_void_p, cls("NSString"), b"stringWithUTF8String:",
+                       (c_char_p,), (s.encode(),))
+
+        def _mk_view():
+            NSView = cls("NSView")
+            v = msg(c_void_p, NSView, b"alloc")
+            v = msg(c_void_p, v, b"initWithFrame:", (NSRect,), (frame,))
+            msg(None, v, b"setWantsLayer:", (c_bool,), (True,))
+            msg(None, v, b"setAutoresizingMask:", (c_ulong,), (18,))  # w|h
+            # positioned NSWindowBelow(-1) relative to Qt's view → behind the
+            # webviews but in front of the desktop-blur vibrancy view.
+            msg(None, superview, b"addSubview:positioned:relativeTo:",
+                (c_void_p, c_long, c_void_p), (v, -1, old))
+            return v
+
+        if not show:
+            _bg_loaded_path = None
+            for v in (_bg_image_view, _bg_tint_view):
+                if v:
+                    msg(None, v, b"setHidden:", (c_bool,), (True,))
+            return
+
+        # --- image layer ---
+        if not _bg_image_view:
+            _bg_image_view = _mk_view()
+            _bg_loaded_path = None   # fresh view has no contents yet
+        # Only decode the file when the path actually changed — this runs on every
+        # reassert (startup retries + window activation), so re-loading each time
+        # would repeatedly alloc a (possibly large) NSImage.
+        if _bg_loaded_path != path:
+            img = msg(c_void_p, cls("NSImage"), b"alloc")
+            img = msg(c_void_p, img, b"initWithContentsOfFile:",
+                      (c_void_p,), (nsstr(path),))
+            if img:
+                cg = msg(c_void_p, img, b"CGImageForProposedRect:context:hints:",
+                         (c_void_p, c_void_p, c_void_p), (None, None, None))
+                layer = msg(c_void_p, _bg_image_view, b"layer")
+                if layer and cg:
+                    msg(None, layer, b"setContents:", (c_void_p,), (cg,))
+                    # cover-crop, centered
+                    msg(None, layer, b"setContentsGravity:", (c_void_p,),
+                        (nsstr("resizeAspectFill"),))
+                    msg(None, layer, b"setMasksToBounds:", (c_bool,), (True,))
+                    _bg_loaded_path = path
+        # Photo's own opacity (independent of the glass tint).
+        try:
+            bo = max(0.0, min(1.0, float(cfg.get("bg_opacity", 1.0))))
+        except (TypeError, ValueError):
+            bo = 1.0
+        msg(None, _bg_image_view, b"setAlphaValue:", (c_double,), (bo,))
+        _bg_set_blur(animate=False)
+        msg(None, _bg_image_view, b"setHidden:", (c_bool,), (False,))
+
+        # --- tint overlay (integrates with the glass translucency) ---
+        if not _bg_tint_view:
+            _bg_tint_view = _mk_view()
+        else:
+            # keep it ordered directly in front of the image (below Qt's view)
+            msg(None, superview, b"addSubview:positioned:relativeTo:",
+                (c_void_p, c_long, c_void_p), (_bg_tint_view, -1, old))
+        r, g, b = _tint_rgb(cfg)
+        a = max(0.0, min(1.0, float(cfg.get("body_opacity", 0.25))))
+        col = msg(c_void_p, cls("NSColor"), b"colorWithRed:green:blue:alpha:",
+                  (c_double, c_double, c_double, c_double),
+                  (r / 255.0, g / 255.0, b / 255.0, a))
+        cgc = msg(c_void_p, col, b"CGColor") if col else None
+        tlayer = msg(c_void_p, _bg_tint_view, b"layer")
+        if tlayer and cgc:
+            msg(None, tlayer, b"setBackgroundColor:", (c_void_p,), (cgc,))
+        msg(None, _bg_tint_view, b"setHidden:", (c_bool,), (False,))
+    except Exception as exc:
+        log(f"bg image: {exc}")
 
 
 def _force_recreate_translucent():
@@ -908,8 +1248,14 @@ def _force_recreate_translucent():
             central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             central.setAutoFillBackground(False)
 
-        global _vibrancy_installed
+        global _vibrancy_installed, _bg_image_view, _bg_tint_view, _bg_loaded_path
+        global _bg_blur_installed, _bg_blur_cur
         _vibrancy_installed = False  # native tree is rebuilt; allow re-insert
+        _bg_image_view = None        # freed with the old window; recreate on next apply
+        _bg_tint_view = None
+        _bg_loaded_path = None
+        _bg_blur_installed = False
+        _bg_blur_cur = 0.0
 
         # Force Qt to rebuild the platform window with the current attributes.
         flags = mw.windowFlags()

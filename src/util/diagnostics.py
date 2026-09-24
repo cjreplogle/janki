@@ -270,3 +270,4 @@ def _live_apply(cfg):
     webview). Persist config and re-apply the native window tint."""
     mw.addonManager.writeConfig(__name__, cfg)
     glass._apply_window_tint()
+    glass._apply_bg_image()   # re-dim any custom background with the new opacity/tint

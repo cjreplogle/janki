@@ -3,7 +3,7 @@
 import re
 import sys
 from aqt import mw
-from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QHBoxLayout, QLabel, QSlider, QSpinBox, Qt, QVBoxLayout
+from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QSlider, QSpinBox, Qt, QVBoxLayout
 from aqt.utils import tooltip
 
 from ..util.config import log, _cfg, SAFE
@@ -159,36 +159,115 @@ class GlassSettings(QDialog):
         _uifont_row.addStretch()
         app_lay.addLayout(_uifont_row)
 
-        # --- Opacity + Blur sliders -----------------------------------------
-        for key, label, lo, hi, scale in [
-            ("body_opacity", "Opacity", 0, 100, 100.0),
-            ("blur_radius", "Blur radius", 0, 80, 1.0),
-        ]:
+        # --- Glass / Photo controls (two vertical columns) ------------------
+        # Left column tunes the glass tint (Opacity + Blur radius); right column
+        # tunes the optional background photo (its own Opacity + Blur radius),
+        # divided by a vertical rule.
+        def _mk_slider(parent_lay, key, label, lo, hi, scale, on_change):
             row = QHBoxLayout()
             name = QLabel(label)
-            name.setMinimumWidth(140)
+            name.setMinimumWidth(90)
             val = QLabel()
             s = QSlider(Qt.Orientation.Horizontal)
             s.setMinimum(lo)
             s.setMaximum(hi)
             s.setValue(int(self.cfg.get(key, 0) * (scale if scale != 1.0 else 1)))
 
-            def make_cb(k=key, sc=scale, lbl=val):
-                def cb(v):
-                    self.cfg[k] = (v / sc) if sc != 1.0 else v
-                    lbl.setText(f"{self.cfg[k]:.2f}" if sc != 1.0 else str(v))
-                    if k == "blur_radius":
-                        glass._set_blur(self.cfg[k])
-                    else:
-                        diagnostics._live_apply(self.cfg)
-                return cb
+            def cb(v, k=key, sc=scale, lbl=val, fn=on_change):
+                self.cfg[k] = (v / sc) if sc != 1.0 else v
+                lbl.setText(f"{self.cfg[k]:.2f}" if sc != 1.0 else str(v))
+                fn(self.cfg[k])
 
-            s.valueChanged.connect(make_cb())
+            s.valueChanged.connect(cb)
             val.setText(f"{self.cfg.get(key,0):.2f}" if scale != 1.0 else str(self.cfg.get(key,0)))
             row.addWidget(name)
             row.addWidget(s)
             row.addWidget(val)
-            app_lay.addLayout(row)
+            parent_lay.addLayout(row)
+
+        _cols = QHBoxLayout()
+
+        # LEFT — glass tint
+        _left = QVBoxLayout()
+        _lh = QLabel("Glass")
+        _lh.setStyleSheet("font-weight:600;")
+        _left.addWidget(_lh)
+        _mk_slider(_left, "body_opacity", "Opacity", 0, 100, 100.0,
+                   lambda v: diagnostics._live_apply(self.cfg))
+        _mk_slider(_left, "blur_radius", "Blur radius", 0, 80, 1.0,
+                   lambda v: glass._set_blur(v))
+        _left.addStretch()
+        _cols.addLayout(_left, 1)
+
+        if sys.platform == "darwin":
+            _cols.addSpacing(24)
+
+            # RIGHT — background photo
+            _right = QVBoxLayout()
+            _rh = QLabel("Photo")
+            _rh.setStyleSheet("font-weight:600;")
+            _right.addWidget(_rh)
+            def _apply_photo_opacity(_v):
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                glass._apply_bg_image()
+
+            def _apply_photo_blur(_v):
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                glass.refresh_bg_blur(animate=False)
+
+            _mk_slider(_right, "bg_opacity", "Opacity", 0, 100, 100.0,
+                       _apply_photo_opacity)
+            _mk_slider(_right, "bg_blur", "Blur radius", 0, 80, 1.0,
+                       _apply_photo_blur)
+
+            self._bg_txt = QCheckBox("Blur only when text is present")
+            self._bg_txt.setChecked(bool(self.cfg.get("bg_blur_text_only", False)))
+
+            def _on_bg_txt(_st):
+                self.cfg["bg_blur_text_only"] = self._bg_txt.isChecked()
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                glass.refresh_bg_blur()
+
+            self._bg_txt.stateChanged.connect(_on_bg_txt)
+            _right.addWidget(self._bg_txt)
+
+            _btns = QHBoxLayout()
+            self._bg_choose = QPushButton()
+            self._bg_clear = QPushButton()
+
+            def _refresh_bg_btn():
+                n = glass.background_count()
+                self._bg_choose.setText("Add…" if n else "Choose…")
+                self._bg_clear.setText(f"Clear all ({n})" if n else "Clear all")
+                self._bg_clear.setEnabled(n > 0)
+
+            def _on_bg_choose():
+                paths, _ = QFileDialog.getOpenFileNames(
+                    self, "Choose background image(s)", "",
+                    "Images (*.png *.jpg *.jpeg *.heic *.gif *.tiff *.bmp *.webp)")
+                if paths:
+                    glass.add_background_images(paths)
+                    self.cfg = _cfg()
+                    _refresh_bg_btn()
+                    tooltip("Added — one is shown at random each launch.")
+
+            def _on_bg_clear():
+                glass.clear_background_images()
+                self.cfg = _cfg()
+                _refresh_bg_btn()
+                tooltip("Backgrounds cleared.")
+
+            self._bg_choose.clicked.connect(_on_bg_choose)
+            self._bg_clear.clicked.connect(_on_bg_clear)
+            _refresh_bg_btn()
+            _btns.addWidget(self._bg_choose)
+            _btns.addWidget(self._bg_clear)
+            _btns.addStretch()
+            _right.addLayout(_btns)
+            _right.addStretch()
+            _cols.addLayout(_right, 1)
+
+        app_lay.addLayout(_cols)
 
         # --- Text animation speed -------------------------------------------
         # Uniform multiplier on the typewriter reveal duration (1.0 = normal,

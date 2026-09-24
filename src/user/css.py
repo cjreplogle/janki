@@ -37,6 +37,18 @@ UI_FONTS = {
     "Helvetica": 'Helvetica,Arial,sans-serif',
     "Times New Roman": '"Times New Roman",Times,serif',
 }
+
+# SF Pro (San Francisco) is Apple's system UI font, shipped with macOS
+# (/System/Library/Fonts/SFNS.ttf). We only *reference* the already-installed
+# font — nothing is bundled or redistributed — so it's offered as an option on
+# macOS only. -apple-system/system-ui resolve to it in the webview; the named
+# families are a belt-and-suspenders fallback.
+if sys.platform == "darwin":
+    UI_FONTS["SF Pro"] = (
+        '"SF Pro Text","SF Pro Display","SF Pro",'
+        '-apple-system,system-ui,sans-serif'
+    )
+
 DEFAULT_UI_FONT = "Lora"
 
 
@@ -716,6 +728,13 @@ def _build_css(cfg, context):
             "html body .header .hitem, html body a.hitem {\n"
             "  background: transparent !important; box-shadow: none !important;\n"
             "  border: none !important; border-radius: 9px !important; }\n"
+            # Anki declares font-family directly on the nav links, so the global
+            # `html body{font-family}` rule (which relies on inheritance) can't reach
+            # them — name them explicitly so the chosen UI font applies to the
+            # Decks/Add/Browse/Stats/Practice/Sync items.
+            "html body #header, html body #header *,\n"
+            "html body .header .hitem, html body a.hitem {\n"
+            "  font-family: %s !important; }\n" % _stack +
             "html body .header .hitem:hover, html body a.hitem:hover {\n"
             "  background: rgba(255,255,255,0.12) !important; }\n"
             # AMBOSS injects an absolutely-positioned 108px-wide toggle (.amboss-indicator,

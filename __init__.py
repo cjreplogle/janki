@@ -558,6 +558,10 @@ def _startup():
                 if new_state == 'overview' or (
                         old_state == 'review' and new_state == 'deckBrowser'):
                     hud._arm_menu_fade()
+                try:
+                    glass.refresh_bg_blur()  # toggle text-only photo blur on/off review
+                except Exception:
+                    pass
             gui_hooks.state_did_change.append(_on_state_change)
 
         # NOTE: do NOT arm the fade at startup. The initial token (1) already

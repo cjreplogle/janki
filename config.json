@@ -37,6 +37,9 @@
     "bottom_bar": true
   },
   "body_opacity": 0.52,
+  "bg_opacity": 1.0,
+  "bg_blur": 0,
+  "bg_blur_text_only": false,
   "oled_fullscreen": true,
   "neutralize": 0.0,
   "desat_gray": 0.3,
