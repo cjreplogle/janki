@@ -1,7 +1,8 @@
 # Janki
 
-A macOS-focused [Anki](https://github.com/ankitects/anki) add-on that reskins the reviewer with native frosted-glass
-transparency, throws in some focused study tool add-ons (for if you lose focus easily like me!), integrates a practice question/review system, and provides a card scheduler that works with your calendar!
+A feature-rich macOS-focused [Anki](https://github.com/ankitects/anki) client. Designed around
+addressing the fundamental limitations of Anki as a spaced-repetition tool and streamlining
+student workflows as much as possible. 
 
 <p align="center">
   <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="360">
@@ -153,7 +154,8 @@ These extra installs help tie together some theming:
 * [AMBOSS](https://www.amboss.com/us/anki) (Card underlines can explain terms, another integrated question bank)
 
 ## Support
-*If I sent this to you for testing. Just text ((513)-502-9361) or email me if there are any issues/features you think will be helpful to other people!* 
+*If I sent this to you for testing. Just text me @ (513)-502-9361 if there are any issues/features
+you think will be helpful to other people!* 
 
 Janki is an independent, unofficial project. It is **not affiliated with, endorsed
 by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
