@@ -44,8 +44,13 @@ Open **Tools → Janki: Settings → Rephrase**.
 1. **Copy rephrase prompt…** — opens a deck picker where you check which decks to
    pull from and choose what goes into the prompt (**Front** / **Back**,
    **Cloze** / **Basic** cards). It copies a ready-to-paste prompt to your
-   clipboard. "Skip cards that already have rephrasings" avoids re-generating
-   ones you've already imported.
+   clipboard. Decks with subdecks have a **+** to expand and pick subdecks
+   individually. "Skip cards that already have rephrasings" avoids re-generating
+   ones you've already imported. **Minimize duplicated text** (on by default)
+   sends each card's text only once — a cloze note once for all of its cards, a
+   basic card as just its back (which already shows the front) — and Janki
+   rebuilds every front and back from that on import, so prompts are several
+   times smaller and the model finishes much faster.
 2. **Paste it into any AI** (a chat model, a local model — your choice). The prompt
    asks it to hand back a downloadable **`janki-rephrase.rp`** file — just download
    it. (Models that can't create files print the JSON instead; use Import from

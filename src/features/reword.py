@@ -270,8 +270,8 @@ def apply(text: str, card, kind) -> str:
         def _disp(varhtml):
             if is_html:
                 return varhtml
-            v = varhtml.replace("\n", "<br>")          # rich variants keep line structure
-            v = _cloze_wrap(v, side, note, card.ord) if is_cz else v
+            # rich variants keep line structure; bold/lists come back from the original
+            v = _format_text_variant(varhtml, text, side, note, card.ord, is_cz)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)
@@ -642,6 +642,134 @@ def _preserve_style(original_html: str) -> "tuple[str,str]":
     if not props:
         return "", ""
     return '<div style="%s">' % "; ".join(props), "</div>"
+
+
+# Text rewords are stored as plain lines (that's what the model rewrites), so on display the
+# original's formatting is re-derived from the ORIGINAL card: which lines were list items, which
+# lines were entirely bold (titles/headings), and which phrases were bold. Lines are matched by
+# position within their kind (list items ↔ list items, other lines ↔ other lines); bold phrases
+# that survive verbatim in the reword (e.g. a bolded term) are re-bolded wherever they appear.
+_B_ON, _B_OFF, _LI_MARK = "\x01", "\x02", "\x03"
+_BLOCK_END_TAGS = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "li", "ul", "ol",
+                   "section", "header", "blockquote"}
+_VOID_TAGS = {"br", "img", "hr", "input", "meta", "link", "wbr", "source", "col", "area"}
+_BOLD_WEIGHT_RE = re.compile(r"font-weight\s*:\s*(bold|bolder|[6-9]00)", re.I)
+
+
+def _line_shells(html: str) -> list:
+    """Per visible line of the original (same line split as _rich): {"li", "full_bold",
+    "bold": [bold phrases]}."""
+    from html.parser import HTMLParser
+    out = []
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.buf, self.stack, self.bold = [], [], 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "li":
+                self.buf.append("\n" + _LI_MARK)
+            elif tag == "br":
+                self.buf.append("\n")
+            if tag in _VOID_TAGS:
+                return
+            style = dict(attrs).get("style") or ""
+            b = tag in ("b", "strong", "h1", "h2", "h3", "h4", "h5", "h6") \
+                or bool(_BOLD_WEIGHT_RE.search(style))
+            self.stack.append((tag, b))
+            self.bold += b
+
+        def handle_endtag(self, tag):
+            if tag in _BLOCK_END_TAGS:
+                self.buf.append("\n")
+            for i in range(len(self.stack) - 1, -1, -1):
+                if self.stack[i][0] == tag:
+                    for _t, b in self.stack[i:]:
+                        self.bold -= b
+                    del self.stack[i:]
+                    break
+
+        def handle_data(self, data):
+            if data:
+                self.buf.append(_B_ON + data + _B_OFF if self.bold > 0 else data)
+
+    try:
+        p = P()
+        p.feed(_IMG_RE.sub(" ", _strip_noncontent(html or "")))
+        p.close()
+    except Exception:
+        return out
+    for raw in "".join(p.buf).split("\n"):
+        li = _LI_MARK in raw
+        ln = re.sub(r"[ \t\r\f\v]+", " ", raw.replace(_LI_MARK, "")).strip()
+        ln = re.sub(_B_OFF + r"(\s*)" + _B_ON, r"\1", ln)          # merge adjacent bold runs
+        plain = ln.replace(_B_ON, "").replace(_B_OFF, "").strip()
+        if not plain:
+            continue
+        bold = [re.sub(r"\s+", " ", b).strip()
+                for b in re.findall(_B_ON + "(.*?)" + _B_OFF, ln, re.S)]
+        bold = [b for b in bold if b]
+        out.append({"li": li, "bold": bold,
+                    "full_bold": _norm(" ".join(bold)) == _norm(plain)})
+    return out
+
+
+def _bold_phrases(body: str, phrases) -> str:
+    """Re-bold original bold phrases found verbatim (case-insensitive, whole words) in a line,
+    outside regions that are already bold."""
+    for ph in phrases:
+        pat = re.compile(r"(?<!\w)" + re.escape(ph) + r"(?!\w)", re.I)
+        parts = re.split("(" + _B_ON + ".*?" + _B_OFF + ")", body)
+        body = "".join(x if x.startswith(_B_ON) else
+                       pat.sub(lambda m: _B_ON + m.group(0) + _B_OFF, x) for x in parts)
+    return body
+
+
+def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
+                         is_cz: bool) -> str:
+    """Plain reword → HTML carrying the original's list structure and bold (see _line_shells),
+    plus Anki's cloze styling."""
+    shells = _line_shells(original_html)
+    lines = [ln.strip() for ln in (v or "").split("\n") if ln.strip()]
+    li_sh = [sh for sh in shells if sh["li"]]
+    tx_sh = [sh for sh in shells if not sh["li"]]
+    is_li = [ln.startswith("\u2022") for ln in lines]
+    n_li = sum(is_li)
+    li_map = len(li_sh) == n_li
+    tx_map = len(tx_sh) == len(lines) - n_li
+    phrases = sorted({b for sh in shells for b in sh["bold"] if len(_norm(b)) >= 3},
+                     key=len, reverse=True)
+    out, in_ul, li_i, tx_i = [], False, 0, 0
+    for ln, li in zip(lines, is_li):
+        sh = None
+        if li:
+            sh = li_sh[li_i] if li_map else None
+            li_i += 1
+            ln = ln.lstrip("\u2022").strip()
+        else:
+            sh = tx_sh[tx_i] if tx_map else None
+            tx_i += 1
+        if sh is not None and sh["full_bold"]:
+            ln = _B_ON + ln + _B_OFF
+        elif phrases:
+            ln = _bold_phrases(ln, phrases)
+        if is_cz:
+            ln = _cloze_wrap(ln, side, note, ord_)
+        ln = ln.replace(_B_ON, "<b>").replace(_B_OFF, "</b>")
+        if li:
+            if not in_ul:
+                out.append("<ul>")
+                in_ul = True
+            out.append("<li>%s</li>" % ln)
+        else:
+            if in_ul:
+                out.append("</ul>")
+                in_ul = False
+            out.append("<div>%s</div>" % ln)
+    if in_ul:
+        out.append("</ul>")
+    return "".join(out)
 
 
 def _cloze_wrap(variant: str, side: str, note, ord_) -> str:
@@ -1389,13 +1517,19 @@ _RP_PROMPT = (
     "every heading and bullet, and rephrase only the wording within each line. Never merge lines "
     "into one, drop a line, or reorder headings.\n\n"
     "Cloze rules (CRITICAL):\n"
+    "- If an item has \"cloze\": true, its `text` contains cloze markers written "
+    "{{c1::term}}, {{c2::term}}, … Keep EVERY marker exactly: the same count, the same cN label, "
+    "and the term inside copied verbatim. You may move a marker within the wording, but never "
+    "edit, merge, split, drop, or add one. Reword only the text outside the markers.\n"
     "- If an item has \"keep_blanks\": true, its `text` contains blanks written as [...]. "
     "Keep EVERY [...] EXACTLY, in the same count and order. NEVER fill a blank in, guess it, "
     "answer it, or reveal what belongs there — reword ONLY the text around the blanks.\n"
     "- If an item has a \"protect\" list, every string in it MUST appear UNCHANGED and verbatim "
     "in each of your phrasings (you may move it, but do not alter it).\n\n"
     "OUTPUT (strict): deliver the result as a DOWNLOADABLE FILE named `janki-rephrase.rp` "
-    "(use your file-creation / code tool) — do NOT print the JSON in the chat. The file must "
+    "(use your file-creation / code tool) — do NOT print the JSON in the chat. Just write the "
+    "file directly: do NOT write or run a script (Python etc.) to generate it, and don't draft "
+    "it first — write each item's phrasings straight into the file. The file must "
     "contain ONE valid JSON object and NOTHING else — no prose, no notes, no markdown, no ``` "
     "code fences. Preserve each item's `id` verbatim. Use exactly this shape:\n"
     '{"type":"janki-rephrase","version":1,"items":['
@@ -1418,8 +1552,65 @@ def _cards_for_deck(did: int):
             continue
 
 
+# A cloze note with k deletions renders k near-identical cards, and each card's BACK repeats its
+# front (some note types even render the text twice). Exporting per card side sent the same
+# sentence up to ~2k times. Instead a cloze note goes out ONCE, as its cloze field with bare
+# {{cN::term}} markers; the importer expands each returned variant into every card's front
+# (own deletion → [...]) and back (all filled, Extra kept as-is).
+_MARK_RE = re.compile(r"\{\{c(\d+)::(.*?)\}\}", re.S)
+
+
+def _cloze_field_idx(note) -> "int | None":
+    """Index of the note's ONLY cloze-bearing field (None if zero or several)."""
+    idx = [i for i, v in enumerate(note.fields) if _CLOZE_RE.search(v or "")]
+    return idx[0] if len(idx) == 1 else None
+
+
+def _marked_text(field_html: str) -> str:
+    """The cloze field as structure-preserving text with bare {{cN::term}} markers (hints
+    dropped, terms plain)."""
+    h = _CLOZE_RE.sub(lambda m: "{{c%s::%s}}" % (m.group(1), _plain(m.group(2) or "")),
+                      field_html or "")
+    return _rich(h)
+
+
+def _expand_marked(text: str, k=None) -> str:
+    """Render marked text: cloze k → [...], every other marker → its term."""
+    return _MARK_RE.sub(lambda m: "[...]" if k is not None and int(m.group(1)) == k
+                        else m.group(2), text or "")
+
+
+def _marker_sig(text: str) -> list:
+    return sorted((int(m.group(1)), _termnorm(m.group(2))) for m in _MARK_RE.finditer(text or ""))
+
+
+def _cloze_side_text(rendered: str, side: str, k: int, orig_marked: str, var_marked: str) -> str:
+    """Map a note-level variant onto one card side, keeping whatever the template adds around
+    the cloze text (headers, Extra) verbatim. A second (hidden) copy of the text is dropped."""
+    old = _expand_marked(orig_marked, k if side == "q" else None)
+    new = _expand_marked(var_marked, k if side == "q" else None)
+    if not old or old not in rendered:
+        return new
+    head = rendered[:rendered.find(old)].strip()
+    tail = rendered[rendered.rfind(old) + len(old):].strip()
+    return "\n".join(x for x in (head, new, tail) if x)
+
+
+def _dedupe_lines(text: str) -> str:
+    """Drop a substantial line that already appeared earlier (templates that render a field
+    twice) — export-only, keeps the prompt from carrying the same text again."""
+    out, seen = [], set()
+    for ln in (text or "").split("\n"):
+        key = ln.strip()
+        if len(key) >= 20 and key in seen:
+            continue
+        seen.add(key)
+        out.append(ln)
+    return "\n".join(out)
+
+
 def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_done=True,
-                    sides=("q", "a"), cloze=True, basic=True):
+                    sides=("q", "a"), cloze=True, basic=True, compact=True):
     """Gather the export items (and the count of cards used). `skip_done` omits a card side that
     already has valid stored variants — so successive batches cover NEW cards. `limit` caps the
     number of CARDS contributing items (0 = no cap). `sides` / `cloze` / `basic` choose what goes
@@ -1437,6 +1628,7 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
         cards = list(_cards_for_deck(deck_id))
     store = _load()
     items, used = [], 0
+    cloze_notes = set()
     for c in cards:
         note = c.note()
         if _is_image_occlusion(note):
@@ -1445,7 +1637,52 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
         if (is_cloze and not cloze) or (not is_cloze and not basic):
             continue
         terms = _cloze_terms(note, c.ord) if is_cloze else []
+        fidx = _cloze_field_idx(note) if (is_cloze and compact) else None
+        if fidx is not None:
+            # One item per NOTE (see _MARK_RE). Needed if any requested side of this card
+            # lacks a current rephrasing; siblings are covered by the same item.
+            if note.id in cloze_notes:
+                continue
+            need = not skip_done
+            for side in sides:
+                if need:
+                    break
+                rec = store.get(_key(note.id, c.ord, side))
+                html = c.question() if side == "q" else c.answer()
+                if not (rec and rec.get("src") == _hash(_plain(html)) and rec.get("variants")):
+                    need = True
+            if not need or not sides:
+                continue
+            if limit and used >= limit:
+                break
+            marked = _marked_text(note.fields[fidx])
+            if not _MARK_RE.search(marked):
+                continue
+            cloze_notes.add(note.id)
+            items.append({"id": "%d:n" % note.id, "text": marked, "cloze": True})
+            used += 1
+            continue
         card_items = []
+        if compact and not is_cloze and "q" in sides and "a" in sides:
+            # The BACK already shows the front (FrontSide) — send only the back, once; the
+            # importer takes the front's rephrasing from its first lines (id suffix ":b").
+            q_html, a_html = c.question(), c.answer()
+            q_txt, a_txt = _dedupe_lines(_rich(q_html)), _dedupe_lines(_rich(a_html))
+            if q_txt and a_txt.startswith(q_txt) and a_txt != q_txt:
+                need = not skip_done
+                for side, h in (("q", q_html), ("a", a_html)):
+                    if need:
+                        break
+                    rec = store.get(_key(note.id, c.ord, side))
+                    if not (rec and rec.get("src") == _hash(_plain(h)) and rec.get("variants")):
+                        need = True
+                if not need:
+                    continue
+                if limit and used >= limit:
+                    break
+                items.append({"id": _key(note.id, c.ord, "b"), "text": a_txt})
+                used += 1
+                continue
         for side in sides:
             html = c.question() if side == "q" else c.answer()
             plain = _plain(html)
@@ -1458,7 +1695,7 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
             # Export the STRUCTURE-preserving text so the external model can keep the card's
             # shape. No `src` hash here — the importer re-hashes the live card itself, so it
             # would only pad the prompt.
-            item = {"id": _key(note.id, c.ord, side), "text": _rich(html)}
+            item = {"id": _key(note.id, c.ord, side), "text": _dedupe_lines(_rich(html))}
             if is_cloze and side == "q":
                 item["keep_blanks"] = True         # back-answer terms are NOT exported here
             elif is_cloze and side == "a" and terms:
@@ -1497,7 +1734,8 @@ def _rp_deck_count(deck_ids) -> int:
     return len(seen)
 
 
-def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=True):
+def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=True,
+                 compact=True):
     """FAST (no card rendering) estimate of (cards, items) for the prompt wizard's live
     counter: one SQL pass over card/note-type ids. "Already done" here means a stored
     record exists (the exact source-hash check only happens in the real build)."""
@@ -1520,6 +1758,7 @@ def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=T
         kinds[int(m["id"])] = None if io else ("cloze" if int(m.get("type", 0)) == 1 else "basic")
     store = _load() if skip_done else {}
     cards = items = 0
+    cz_notes = set()                                 # cloze notes export ONE item per note
     for nid, ord_, mid in rows:
         kind = kinds.get(int(mid))
         if kind is None or (kind == "cloze" and not cloze) or (kind == "basic" and not basic):
@@ -1533,8 +1772,96 @@ def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=T
             n += 1
         if n:
             cards += 1
-            items += n
-    return cards, items
+            if kind == "cloze" and compact:
+                cz_notes.add(nid)
+            elif kind == "basic" and compact and len(sides) == 2:
+                items += 1                           # back only (it includes the front)
+            else:
+                items += n
+    return cards, items + len(cz_notes)
+
+
+def _deck_tree_widgets(decks, lay) -> list:
+    """Checkable deck tree for the prompt wizard: a deck with subdecks gets a [+] button that
+    expands them. Checking a deck checks all its subdecks; a partly-checked branch shows as
+    indeterminate. Returns [(checkbox, [that deck's own id])] for every node."""
+    from aqt.qt import QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QToolButton, Qt
+    CS = Qt.CheckState
+    root = {"kids": {}}
+    for top, dids in decks:
+        for did in dids:
+            try:
+                name = mw.col.decks.name(int(did))
+            except Exception:
+                continue
+            node = root
+            for part in name.split("::"):
+                node = node["kids"].setdefault(part, {"kids": {}, "did": None, "parent": node})
+            node["did"] = int(did)
+    out = []
+
+    def _sync_up(node):
+        par = node.get("parent")
+        while par is not None and par.get("cb") is not None:
+            states = {k["cb"].checkState() for k in par["kids"].values()}
+            st = states.pop() if len(states) == 1 else CS.PartiallyChecked
+            par["cb"].blockSignals(True)
+            par["cb"].setTristate(st == CS.PartiallyChecked)
+            par["cb"].setCheckState(st)
+            par["cb"].blockSignals(False)
+            par = par.get("parent")
+
+    def _set_down(node, st):
+        for k in node["kids"].values():
+            k["cb"].blockSignals(True)
+            k["cb"].setTristate(False)
+            k["cb"].setCheckState(st)
+            k["cb"].blockSignals(False)
+            _set_down(k, st)
+
+    def _build(node, into, depth):
+        for label in sorted(node["kids"], key=str.lower):
+            k = node["kids"][label]
+            row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(4)
+            btn = None
+            if k["kids"]:
+                btn = QToolButton(); btn.setText("+"); btn.setAutoRaise(True)
+                btn.setFixedSize(18, 18); btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setToolTip("Show subdecks")
+                row.addWidget(btn)
+            else:
+                row.addSpacing(18)
+            cb = QCheckBox(label); cb.setChecked(True); cb.setEnabled(False)
+            k["cb"] = cb
+            row.addWidget(cb); row.addStretch()
+            into.addLayout(row)
+            out.append((cb, [k["did"]] if k["did"] is not None else []))
+
+            def _clicked(_on, k=k, cb=cb):
+                st = cb.checkState()
+                if st == CS.PartiallyChecked:      # a click never lands on "partial"
+                    st = CS.Checked
+                cb.blockSignals(True); cb.setTristate(False); cb.setCheckState(st)
+                cb.blockSignals(False)
+                _set_down(k, st)
+                _sync_up(k)
+                cb.toggled.emit(cb.isChecked())    # re-run the estimate after the cascade
+            cb.clicked.connect(_clicked)
+            if btn is not None:
+                sub = QWidget(); sl = QVBoxLayout(sub)
+                sl.setContentsMargins(22, 0, 0, 0); sl.setSpacing(2)
+                _build(k, sl, depth + 1)
+                sub.setVisible(False)
+                into.addWidget(sub)
+
+                def _toggle(_c=False, sub=sub, btn=btn):
+                    show = not sub.isVisible()
+                    sub.setVisible(show)
+                    btn.setText("\u2212" if show else "+")
+                    btn.setToolTip("Hide subdecks" if show else "Show subdecks")
+                btn.clicked.connect(_toggle)
+    _build(root, lay, 0)
+    return out
 
 
 def copy_rephrase_prompt_dialog(on_done=None, parent=None):
@@ -1588,20 +1915,26 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     cb_skip = QCheckBox("Skip cards that already have rephrasings")
     cb_skip.setChecked(True)
     v.addWidget(cb_skip)
+    cb_compact = QCheckBox("Minimize duplicated text (recommended)")
+    cb_compact.setChecked(True)
+    cb_compact.setToolTip(
+        "Sends each card's text only once: a basic card sends just its back (which already "
+        "shows the front), and a cloze note is sent once for all of its cards. Janki rebuilds "
+        "every front and back from that on import, so the model has less to write.")
+    v.addWidget(cb_compact)
 
     def _filters():
         sides = tuple(s for s, cb in (("q", cb_front), ("a", cb_back)) if cb.isChecked())
         return dict(skip_done=cb_skip.isChecked(), sides=sides,
-                    cloze=cb_cloze.isChecked(), basic=cb_basic.isChecked())
+                    cloze=cb_cloze.isChecked(), basic=cb_basic.isChecked(),
+                    compact=cb_compact.isChecked())
 
     cb_all = QCheckBox("All decks (%d)" % len(decks)); cb_all.setChecked(True)
     v.addWidget(cb_all)
     scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFixedHeight(240)
-    host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(16, 0, 0, 0)
-    deck_cbs = []                                   # (checkbox, [dids])
-    for name, dids in decks:
-        cb = QCheckBox(name); cb.setChecked(True); cb.setEnabled(False)
-        deck_cbs.append((cb, dids)); hv.addWidget(cb)
+    host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(4, 0, 0, 0)
+    hv.setSpacing(2)
+    deck_cbs = _deck_tree_widgets(decks, hv)        # (checkbox, [own did]) for every node
     hv.addStretch()
     scroll.setWidget(host)
     v.addWidget(scroll)
@@ -1628,7 +1961,7 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
                     "rephrasings for the model" % (total, used, nitems, nitems * spin.value()))
 
     cb_all.toggled.connect(_refresh)
-    for w in (cb_skip, cb_front, cb_back, cb_cloze, cb_basic):
+    for w in (cb_skip, cb_front, cb_back, cb_cloze, cb_basic, cb_compact):
         w.toggled.connect(_refresh)
     spin.valueChanged.connect(_refresh)
     for cb, _d in deck_cbs:
@@ -1866,6 +2199,77 @@ def import_rp(path: str):
     return import_rp_text(raw)
 
 
+def _import_cloze_note(nid, variants, store, _skip) -> int:
+    """Expand a note-level cloze item into every card's front/back record. Returns how many
+    card sides were stored (0 → counted as a skip)."""
+    try:
+        note = mw.col.get_note(int(nid))
+    except Exception:
+        _skip("card not found (deleted/moved)"); return 0
+    fidx = _cloze_field_idx(note)
+    if fidx is None:
+        _skip("note no longer has one cloze field"); return 0
+    orig = _marked_text(note.fields[fidx])
+    sig = _marker_sig(orig)
+    good = [v for v in variants if _marker_sig(v) == sig]
+    if not good:
+        _skip("cloze markers changed"); return 0
+    stored = 0
+    now = int(time.time())
+    for card in note.cards():
+        terms = _cloze_terms(note, card.ord)
+        for side in ("q", "a"):
+            html = card.question() if side == "q" else card.answer()
+            plain = _plain(html)
+            rendered = _rich(html)
+            cand = [_cloze_side_text(rendered, side, card.ord + 1, orig, v) for v in good]
+            valid = _valid_variants(cand, side, True, terms, plain.count("[...]"), plain,
+                                    lenient=True)
+            if valid:
+                store[_key(note.id, card.ord, side)] = {"src": _hash(plain), "variants": valid,
+                                                        "ts": now, "html": False}
+                stored += 1
+    if not stored:
+        _skip("cloze variants failed validation")
+    return stored
+
+
+def _import_basic_back(nid, ordn, variants, store, _skip) -> int:
+    """A ':b' item is a basic card's whole BACK (front lines + answer). Store it as the back's
+    rephrasing, and its first lines (as many as the front has) as the front's."""
+    card = None
+    try:
+        for c in mw.col.get_note(int(nid)).cards():
+            if c.ord == int(ordn):
+                card = c
+                break
+    except Exception:
+        card = None
+    if card is None:
+        _skip("card not found (deleted/moved)"); return 0
+    q_html, a_html = card.question(), card.answer()
+    q_lines = [ln for ln in _dedupe_lines(_rich(q_html)).split("\n") if ln.strip()]
+    a_lines = [ln for ln in _dedupe_lines(_rich(a_html)).split("\n") if ln.strip()]
+    q_cands, a_cands = [], []
+    for v in variants:
+        lines = [ln.strip() for ln in v.split("\n") if ln.strip()]
+        a_cands.append("\n".join(lines))
+        if len(lines) == len(a_lines) and q_lines:          # structure kept → front splits off
+            q_cands.append("\n".join(lines[:len(q_lines)]))
+    stored = 0
+    now = int(time.time())
+    for side, html, cands in (("q", q_html, q_cands), ("a", a_html, a_cands)):
+        plain = _plain(html)
+        valid = _valid_variants(cands, side, False, [], 0, plain, lenient=True)
+        if valid:
+            store[_key(card.note().id, card.ord, side)] = {"src": _hash(plain), "variants": valid,
+                                                           "ts": now, "html": False}
+            stored += 1
+    if not stored:
+        _skip("variant identical to original or leaked prompt text")
+    return stored
+
+
 def import_rp_text(raw: str):
     """Import rephrasings from a raw string (a pasted model reply or a .rp file's contents).
     Maps each item back to its live card by id and stores variants ONLY if the card's current
@@ -1889,6 +2293,15 @@ def import_rp_text(raw: str):
             _skip("no id / no variants"); continue
         try:
             parts = str(key).split(":")
+            if len(parts) == 2 and parts[1] == "n":
+                n_ok = _import_cloze_note(parts[0], variants, store, _skip)
+                if n_ok:
+                    imported += 1
+                continue
+            if len(parts) == 3 and parts[2] == "b":
+                if _import_basic_back(parts[0], parts[1], variants, store, _skip):
+                    imported += 1
+                continue
             if len(parts) != 3 or parts[2] not in ("q", "a"):
                 _skip("bad id format"); continue
             nid, ordn, side = parts
@@ -2110,8 +2523,7 @@ def _inject_live_current() -> None:
         def _disp(varhtml):
             if is_html:
                 return varhtml
-            v = varhtml.replace("\n", "<br>")
-            v = _cloze_wrap(v, side, note, cur.ord) if is_cz else v
+            v = _format_text_variant(varhtml, text, side, note, cur.ord, is_cz)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)

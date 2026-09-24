@@ -1846,16 +1846,17 @@ class GlassSettings(QDialog):
             if nested is not None:                     # page just hosts a nested group
                 return _eff_h(nested)
             h = page.sizeHint().height()
-            # Word-wrapped explanation labels: sizeHint assumes an arbitrary width, so with
-            # a wider font (e.g. Lora) they wrap onto MORE lines than measured and the page
-            # gets cropped. Measure at the page's real width via height-for-width.
+            # Word-wrapped explanation labels: sizeHint guesses a wrap width, so it can
+            # be far too tall (dead space under text-heavy pages like Rephrase) or too
+            # short with a wide font (cropping). Height-for-width at the page's REAL
+            # width is exact either way, so prefer it whenever the layout supports it.
             lay_ = page.layout()
             if lay_ is not None and lay_.hasHeightForWidth():
                 w = page.width() if page.isVisible() and page.width() > 50 \
                     else max(200, tabs.width() - 24)
                 hfw = lay_.totalHeightForWidth(w)
                 if hfw > 0:
-                    h = max(h, hfw)
+                    h = hfw
             return h + 6                               # small breathing room, no clipping
 
         def _eff_h(tw):
@@ -2122,6 +2123,22 @@ class GlassSettings(QDialog):
         mob_row.addWidget(btn_mob_apply, 1)
         mob_row.addWidget(btn_mob_remove, 1)
         mob_lay.addLayout(mob_row)
+
+        self._rw_mob_hide = QCheckBox("Toggle Rephrase Button for Original Cards")
+        self._rw_mob_hide.setToolTip(
+            "When checked, cards with no rephrasing don't show the Original / Reworded "
+            "button on mobile. Unchecked, they show a faint, inactive Original button.")
+        self._rw_mob_hide.setChecked(bool(self.cfg.get("reword_mobile_hide_unrephrased", True)))
+
+        def _rw_mob_hide_changed(*_a):
+            self.cfg["reword_mobile_hide_unrephrased"] = bool(self._rw_mob_hide.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            from ..features import reword_mobile
+            if reword_mobile.is_applied():
+                reword_mobile.restamp_templates()
+                tooltip("Mobile rephrase button updated — Sync to push it to your devices.")
+        self._rw_mob_hide.toggled.connect(_rw_mob_hide_changed)
+        mob_lay.addWidget(self._rw_mob_hide)
 
         # ================= EXPERIMENTAL subtab =================
         if reword.on_device_available():

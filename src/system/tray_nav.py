@@ -54,6 +54,7 @@ QPushButton#practice:hover  { background: rgba(74,200,130,0.20); }
 QPushButton#practice:pressed{ background: rgba(74,200,130,0.30); }
 QLabel#cnt { color:#9fb4d8; font-size:11px; }
 QLabel#hint { color: rgba(233,238,247,0.34); font-size:9px; background: transparent; }
+QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:8px; background: transparent; }
 QPushButton#expander {
     padding:0 0 2px 0; margin:0; font-size:13px; font-weight:700; text-align:center;
     color:#aebbd2; background: transparent; border: none;
@@ -690,29 +691,31 @@ def _open_settings() -> None:
 
 
 class _CornerHint(QObject):
-    """Keeps a hint label pinned to its button's bottom-right corner on resize."""
+    """Keeps a hint label pinned to its button's top-right corner on resize (top, not
+    bottom: the label text is vertically centred, so the top strip is free — at the
+    bottom, tall glyphs like the ` in `+⌫ ran into the label)."""
 
     def eventFilter(self, obj, ev):
         if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
             lab = getattr(obj, "_jk_hint", None)
             if lab is not None:
                 lab.adjustSize()
-                lab.move(obj.width() - lab.width() - 7, obj.height() - lab.height() - 3)
+                lab.move(obj.width() - lab.width() - 6, 1)
         return False
 
 
 _corner_hint = None
 
 
-def _add_corner_hint(btn, text: str) -> None:
-    """Faint keyboard-shortcut hint tucked into a button's bottom-right corner (a child
+def _add_corner_hint(btn, text: str, small: bool = False) -> None:
+    """Faint keyboard-shortcut hint tucked into a button's top-right corner (a child
     label that ignores the mouse, so clicks still hit the button)."""
     global _corner_hint
     try:
         if _corner_hint is None:
             _corner_hint = _CornerHint()
         lab = QLabel(text, btn)
-        lab.setObjectName("hint")
+        lab.setObjectName("hintSm" if small else "hint")
         lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         btn._jk_hint = lab
         btn.installEventFilter(_corner_hint)
@@ -1127,7 +1130,7 @@ def _build() -> "QWidget":
         _toggle_btns[key] = tb
         tb._jk_on_name = _TOGGLE_ON_NAME[key]
         _add_corner_hint(tb, {"caption": "Tab+\\", "focus": "Tab+F",
-                              "lockdown": "`+⌫"}[key])
+                              "lockdown": "`+⌫"}[key], small=True)   # narrow buttons
         trow.addWidget(tb)
     lay.addLayout(trow)
 

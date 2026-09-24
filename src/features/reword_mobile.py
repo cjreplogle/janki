@@ -21,7 +21,7 @@ import re
 
 from aqt import mw
 
-from ..util.config import log
+from ..util.config import log, _cfg
 from . import reword
 
 FIELD = "_JankiRW"
@@ -44,6 +44,13 @@ _BTN_STYLE = (
 # Template block. {{_JankiRW}} emits the note's base64 payload (empty on notes with
 # no reword → the button stays hidden). Guarded so the FrontSide copy on the back
 # doesn't double-init, and it de-dupes stray nodes from that copy.
+def _tpl() -> str:
+    """The template block, with the "hide the button on cards that have no rephrasing"
+    setting (Settings → Rephrase → Mobile) baked in."""
+    hide = "true" if _cfg().get("reword_mobile_hide_unrephrased", True) else "false"
+    return _TPL.replace("__JKRW_HIDE__", hide)
+
+
 _TPL = (
     _START + "\n"
     '<div id="jkrw-b64" hidden>{{' + FIELD + '}}</div>\n'
@@ -81,10 +88,27 @@ _TPL = (
     "    var data=null;\n"
     "    try{data=JSON.parse(decodeURIComponent(escape(atob((el.textContent||'').trim()))));}"
     "catch(e){data=null;}\n"
-    "    if(!data){btn.remove();return;}\n"
+    "    var hideOrig=__JKRW_HIDE__;\n"
     "    var back=!!document.getElementById('answer');\n"
-    "    var list=(back?data.a:data.q)||[];\n"
-    "    if(!list.length){btn.remove();return;}\n"
+    # Per-card payload ({o:{ord:{q,a}}}): pick THIS card's ord from the cardN class Anki
+    # puts on the card (cloze siblings each have their own rephrasings). No class → merge.
+    # Old payloads ({q,a} merged per note) still work.
+    "    var list=[];\n"
+    "    if(data&&data.o){\n"
+    "      var cc=(document.body.className||'')+' '+"
+    "((document.querySelector('.card')||{}).className||'');\n"
+    "      var om=cc.match(/\\bcard(\\d+)\\b/);\n"
+    "      if(om){var d0=data.o[String(parseInt(om[1],10)-1)];"
+    "list=(d0&&(back?d0.a:d0.q))||[];}\n"
+    "      else{Object.keys(data.o).forEach(function(k){"
+    "((back?data.o[k].a:data.o[k].q)||[]).forEach(function(v){"
+    "if(list.indexOf(v)<0)list.push(v);});});}\n"
+    "    }else if(data){list=(back?data.a:data.q)||[];}\n"
+    # No rephrasing for this card: hide the button, or (setting off) keep a faint, inert
+    # "Original" so the button sits in the same place on every card.
+    "    if(!list.length){if(hideOrig){btn.remove();return;}"
+    "btn.textContent='Original';btn.style.opacity='0.3';btn.style.pointerEvents='none';"
+    "btn.style.display='';return;}\n"
     "    function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}\n"
     # Escape, colour cloze blanks blue (like real clozes), and keep line breaks.
     "    function fmt(s){return esc(s)"
@@ -121,13 +145,13 @@ def _stripped(s: str) -> str:
 
 
 def _by_note():
-    """{note_id: {"q":[variants], "a":[variants]}} from the reword store, merging
-    across card ords."""
+    """{note_id: {ord: {"q":[variants], "a":[variants]}}} from the reword store — kept per
+    card ord so a cloze sibling without its own rephrasing doesn't borrow another's."""
     out = {}
     for key, rec in reword._load().items():
         try:
-            nid, _ord, side = key.split(":")
-            nid = int(nid)
+            nid, ordn, side = key.split(":")
+            nid, ordn = int(nid), int(ordn)
         except (ValueError, AttributeError):
             continue
         if side not in ("q", "a"):
@@ -135,7 +159,7 @@ def _by_note():
         vs = [v for v in (rec.get("variants") or []) if v]
         if not vs:
             continue
-        d = out.setdefault(nid, {"q": [], "a": []})
+        d = out.setdefault(nid, {}).setdefault(ordn, {"q": [], "a": []})
         for v in vs:
             if v not in d[side]:
                 d[side].append(v)
@@ -143,9 +167,29 @@ def _by_note():
 
 
 def _payload(dd) -> str:
-    raw = json.dumps({"q": dd.get("q", []), "a": dd.get("a", [])},
-                     ensure_ascii=False).encode("utf-8")
+    raw = json.dumps({"o": {str(k): v for k, v in dd.items()}},
+                     ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(raw).decode("ascii")
+
+
+def restamp_templates() -> int:
+    """Re-write the template block (e.g. after the hide-button setting changes) on note
+    types that already carry it. No note/field changes, so it's a normal (not full) sync."""
+    n = 0
+    try:
+        for m in mw.col.models.all():
+            touched = False
+            for t in m.get("tmpls", []):
+                for k in ("qfmt", "afmt"):
+                    if _START in (t.get(k, "") or ""):
+                        t[k] = _stripped(t.get(k, "")) + "\n" + _tpl() + "\n"
+                        touched = True
+            if touched:
+                mw.col.models.update_dict(m)
+                n += 1
+    except Exception as exc:
+        log(f"reword mobile restamp: {exc}")
+    return n
 
 
 def is_applied() -> bool:
@@ -186,8 +230,8 @@ def apply():
             if FIELD not in names:
                 col.models.add_field(model, col.models.new_field(FIELD))
             for t in model["tmpls"]:
-                t["qfmt"] = _stripped(t.get("qfmt", "")) + "\n" + _TPL + "\n"
-                t["afmt"] = _stripped(t.get("afmt", "")) + "\n" + _TPL + "\n"
+                t["qfmt"] = _stripped(t.get("qfmt", "")) + "\n" + _tpl() + "\n"
+                t["afmt"] = _stripped(t.get("afmt", "")) + "\n" + _tpl() + "\n"
             col.models.update_dict(model)
             nmodels += 1
         except Exception as exc:
