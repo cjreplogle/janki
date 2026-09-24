@@ -53,7 +53,19 @@ class GlassSettings(QDialog):
         self._tabs = tabs
         app_page = QWidget();   app_lay = QVBoxLayout(app_page)
         gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
-        rw_page = QWidget();    rw_lay = QVBoxLayout(rw_page)
+
+        # Rephrase → subtabs: Import (build/import/manage rephrasings), Mobile (bake
+        # them into note types for AnkiMobile/AnkiDroid), Experimental (on-device gen).
+        rw_page = QWidget(); _rw_outer = QVBoxLayout(rw_page)
+        _rw_outer.setContentsMargins(0, 0, 0, 0)
+        rw_tabs = QTabWidget(); _rw_outer.addWidget(rw_tabs)
+        self._rw_tabs = rw_tabs
+        rw_import_page = QWidget(); rw_import_lay = QVBoxLayout(rw_import_page)
+        rw_mobile_page = QWidget(); rw_mobile_lay = QVBoxLayout(rw_mobile_page)
+        rw_exp_page = QWidget();    rw_exp_lay = QVBoxLayout(rw_exp_page)
+        rw_tabs.addTab(rw_import_page, "Import")
+        rw_tabs.addTab(rw_mobile_page, "Mobile")
+        rw_tabs.addTab(rw_exp_page, "Experimental")
 
         # Practice → subtabs: Appearance (how practice cards look/behave in review)
         # and Question Bank (import/build/manage the .qb banks + Practice deck).
@@ -105,7 +117,7 @@ class GlassSettings(QDialog):
             log("lecture settings tabs failed: %s" % _e)
 
         tabs.addTab(prac_page, "Practice")
-        tabs.addTab(rw_page, "Reword")
+        tabs.addTab(rw_page, "Rephrase")
         tabs.addTab(gen_page, "General")
 
         lay.addWidget(tabs)
@@ -1778,12 +1790,13 @@ class GlassSettings(QDialog):
         hint.setWordWrap(True)
         app_lay.addWidget(hint)
 
-        # === Reword =========================================================
-        self._build_reword_tab(rw_lay)
+        # === Rephrase =======================================================
+        self._build_reword_tab(rw_import_lay, rw_mobile_lay, rw_exp_lay)
 
         # Push each page's controls to the top.
         for pl in (app_lay, flare_lay, timer_lay, cap_lay, pomo_lay, lock_lay,
-                   prac_app_lay, prac_qb_lay, gen_lay, rw_lay):
+                   prac_app_lay, prac_qb_lay, gen_lay,
+                   rw_import_lay, rw_mobile_lay, rw_exp_lay):
             pl.addStretch()
 
         # Pin "Load Question Banks to Anki" to the bottom of the Question Bank page
@@ -1810,7 +1823,7 @@ class GlassSettings(QDialog):
         # content height ourselves — recursing through the nested tab groups — and pin
         # the outer tab widget to it with setFixedHeight (which overrides that min).
         from aqt.qt import QTimer
-        tabws = [tabs, prac_tabs, focus_tabs]
+        tabws = [tabs, prac_tabs, focus_tabs, rw_tabs]
         _lt = locals().get("lec_tabs")
         if _lt is not None:
             tabws.append(_lt)
@@ -1857,21 +1870,22 @@ class GlassSettings(QDialog):
                 pass
         QTimer.singleShot(0, _fit)
 
-    def _build_reword_tab(self, lay):
-        """Reword: show cards phrased differently (same card/scheduler data-space) so you
-        learn content, not exact words. On-device on macOS; portable .rp import elsewhere."""
+    def _build_reword_tab(self, imp_lay, mob_lay, exp_lay):
+        """Rephrase: show cards phrased differently (same card/scheduler data-space) so you
+        learn content, not exact words. Split across Import / Mobile / Experimental subtabs."""
         from aqt.qt import QPushButton, QApplication
         from aqt.utils import tooltip, getFile
 
+        # ================= IMPORT subtab =================
         intro = QLabel(
-            "Reword shows your cards rephrased — different wording, same meaning — so you "
+            "Rephrase shows your cards reworded — different wording, same meaning — so you "
             "recall the content, not the exact sentence. It's display-only: answering a "
-            "reworded card counts exactly like the original (no extra cards, scheduler "
+            "rephrased card counts exactly like the original (no extra cards, scheduler "
             "untouched). Cloze blanks and the tested term are preserved; text formatting "
             "is kept, but images/media aren't rephrased.")
         intro.setWordWrap(True)
         intro.setStyleSheet("color: gray; margin-bottom: 6px;")
-        lay.addWidget(intro)
+        imp_lay.addWidget(intro)
 
         # Big obvious ON/OFF switch (green = on, grey = off).
         self._rw_enable = QPushButton()
@@ -1880,7 +1894,7 @@ class GlassSettings(QDialog):
 
         def _rw_style():
             on = self._rw_enable.isChecked()
-            self._rw_enable.setText("Reword mode:  ON" if on else "Reword mode:  OFF")
+            self._rw_enable.setText("Rephrase mode:  ON" if on else "Rephrase mode:  OFF")
             self._rw_enable.setStyleSheet(
                 "QPushButton{padding:10px 16px;border-radius:8px;font-weight:700;font-size:14px;%s}"
                 % ("background:rgba(52,199,89,0.28);color:#1a7f37;"
@@ -1892,11 +1906,16 @@ class GlassSettings(QDialog):
             self.cfg["reword_enabled"] = bool(checked)
             mw.addonManager.writeConfig(__name__, self.cfg)
             _rw_style()
+            try:
+                from . import tray_nav
+                tray_nav._refresh_toggles()   # re-tint the tray "Rephrase" entry (green)
+            except Exception:
+                pass
             if mw.state == "review":
                 mw.reviewer._showQuestion()
         self._rw_enable.toggled.connect(on_rw_enable)
         _rw_style()
-        lay.addWidget(self._rw_enable)
+        imp_lay.addWidget(self._rw_enable)
 
         # ---- PRIMARY WAY: build rephrasings with any chat model, import the .rp -------------
         rp = QLabel("<b>Main way — build with any chat model.</b> Pick decks and copy a prompt, "
@@ -1906,12 +1925,12 @@ class GlassSettings(QDialog):
                     "Any text/.rp/.rtf file works. These pasted rephrasings are usually best quality.")
         rp.setWordWrap(True)
         rp.setStyleSheet("margin-top:8px;")
-        lay.addWidget(rp)
+        imp_lay.addWidget(rp)
 
         btn_prompt = QPushButton("Copy rephrase prompt…")
         # Opens a separate window to CHECK which decks to pull from (like the qbank prompt tools).
         btn_prompt.clicked.connect(lambda: reword.copy_rephrase_prompt_dialog(parent=self))
-        lay.addWidget(btn_prompt)
+        imp_lay.addWidget(btn_prompt)
 
         def _rw_import_report(imp, skip, reasons):
             if not skip:
@@ -1951,7 +1970,7 @@ class GlassSettings(QDialog):
                 tooltip("Import failed: %s" % e)
         btn_import_clip.clicked.connect(lambda: _rw_import_clip())
         import_row.addWidget(btn_import_clip, 1)
-        lay.addLayout(import_row)
+        imp_lay.addLayout(import_row)
 
         # Preview the current card's rewords, or browse every stored reword.
         view_row = QHBoxLayout()
@@ -1965,15 +1984,60 @@ class GlassSettings(QDialog):
         btn_prev.clicked.connect(lambda: _rw_preview())
         view_row.addWidget(btn_prev, 1)
 
-        btn_view_all = QPushButton("View all rewords…")
+        btn_view_all = QPushButton("View all rephrasings…")
         btn_view_all.clicked.connect(lambda: reword.view_all_rewords_dialog(parent=self))
         view_row.addWidget(btn_view_all, 1)
-        lay.addLayout(view_row)
+        imp_lay.addLayout(view_row)
 
-        # ---- EXPERIMENTAL BACKUP: on-device generation (macOS / Apple Intelligence) ---------
-        exp = QLabel("— Experimental backup —")
-        exp.setStyleSheet("color:#9aa0aa; margin-top:12px; font-weight:600;")
-        lay.addWidget(exp)
+        btn_clear = QPushButton("Clear all stored rephrasings")
+
+        def _rw_clear():
+            reword.clear_all()
+            tooltip("Cleared all stored rephrasings.")
+        btn_clear.clicked.connect(lambda: _rw_clear())
+        imp_lay.addWidget(btn_clear)
+
+        # ================= MOBILE subtab =================
+        mob_desc = QLabel(
+            "Bakes your rephrasings into your note types so a small Original / Reworded "
+            "button appears on AnkiMobile / AnkiDroid (like the Practice slide button). "
+            "The data rides your normal sync inside your own notes — nothing is uploaded "
+            "elsewhere. Re-run after importing new rephrasings. Adds a hidden field, so "
+            "the next sync is a one-way full sync.")
+        mob_desc.setWordWrap(True)
+        mob_desc.setStyleSheet("color: gray;")
+        mob_lay.addWidget(mob_desc)
+
+        mob_row = QHBoxLayout()
+        btn_mob_apply = QPushButton("Enable / update on mobile")
+        btn_mob_remove = QPushButton("Remove from mobile")
+
+        def _rw_mobile_apply():
+            from ..features import reword_mobile
+            try:
+                nm, nn = reword_mobile.apply()
+            except Exception as exc:
+                tooltip("Mobile rephrasings failed: %s" % exc); return
+            if nm == 0:
+                tooltip("No rephrasings to sync yet — import or generate some first.")
+            else:
+                tooltip("Baked into %d note type(s), %d note(s). Now Sync." % (nm, nn))
+
+        def _rw_mobile_remove():
+            from ..features import reword_mobile
+            try:
+                n = reword_mobile.remove()
+            except Exception as exc:
+                tooltip("Remove failed: %s" % exc); return
+            tooltip("Removed from %d note type(s). Sync to update devices." % n)
+
+        btn_mob_apply.clicked.connect(lambda: _rw_mobile_apply())
+        btn_mob_remove.clicked.connect(lambda: _rw_mobile_remove())
+        mob_row.addWidget(btn_mob_apply, 1)
+        mob_row.addWidget(btn_mob_remove, 1)
+        mob_lay.addLayout(mob_row)
+
+        # ================= EXPERIMENTAL subtab =================
         if reword.on_device_available():
             self._rw_ondevice = QCheckBox("Generate on-device automatically (experimental, "
                                           "Apple Intelligence — lower quality than pasted AI)")
@@ -1985,13 +2049,13 @@ class GlassSettings(QDialog):
                 if checked:
                     reword.warm_up()
             self._rw_ondevice.toggled.connect(on_ondevice)
-            lay.addWidget(self._rw_ondevice)
+            exp_lay.addWidget(self._rw_ondevice)
 
             od = QLabel("Runs Apple's on-device model in the background; nothing is uploaded. "
-                        "Off by default — use the pasted-AI path above for best results.")
+                        "Off by default — use the pasted-AI (Import) path for best results.")
             od.setWordWrap(True)
             od.setStyleSheet("color: gray;")
-            lay.addWidget(od)
+            exp_lay.addWidget(od)
 
             btn_now = QPushButton("Rephrase current card on-device (one-off)")
 
@@ -2005,21 +2069,13 @@ class GlassSettings(QDialog):
                     on_done=lambda n: (tooltip("Rephrase: %d side(s) stored." % n),
                                        mw.state == "review" and mw.reviewer._showQuestion()))
             btn_now.clicked.connect(lambda: _rw_now())
-            lay.addWidget(btn_now)
+            exp_lay.addWidget(btn_now)
         else:
             od = QLabel("On-device generation needs macOS with Apple Intelligence. On other "
-                        "systems, use the pasted-AI (.rp) path above — it's the main way anyway.")
+                        "systems, use the pasted-AI (Import) path — it's the main way anyway.")
             od.setWordWrap(True)
             od.setStyleSheet("color: gray;")
-            lay.addWidget(od)
-
-        btn_clear = QPushButton("Clear all stored rephrasings")
-
-        def _rw_clear():
-            reword.clear_all()
-            tooltip("Cleared all stored rephrasings.")
-        btn_clear.clicked.connect(lambda: _rw_clear())
-        lay.addWidget(btn_clear)
+            exp_lay.addWidget(od)
 
     def _show_reword_preview(self, card):
         """A read-only dialog showing a card's original text and its stored rephrasings per

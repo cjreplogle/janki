@@ -39,6 +39,7 @@ QPushButton:hover  { background: rgba(255,255,255,0.15); }
 QPushButton:pressed{ background: rgba(255,255,255,0.22); }
 QPushButton#tgl        { padding:7px 10px; }
 QPushButton#tglOn      { background: rgba(96,156,246,0.38); border-color: rgba(130,178,252,0.65); color:#ffffff; }
+QPushButton#tglOnGreen { background: rgba(52,199,89,0.13); border-color: rgba(90,214,124,0.32); color:#ffffff; }
 QPushButton#foot       { color:#cdd7ea; }
 QPushButton#quit:hover { background: rgba(230,90,90,0.30); border-color: rgba(240,120,120,0.6); }
 QPushButton#practice {
@@ -624,7 +625,10 @@ def _refresh_toggles():
     for key, btn in _toggle_btns.items():
         try:
             on = st.get(key, False)
-            btn.setObjectName("tglOn" if on else "tgl")
+            if on and key == "reword":
+                btn.setObjectName("tglOnGreen")   # Rephrase lights green (not blue)
+            else:
+                btn.setObjectName("tglOn" if on else "tgl")
             btn.style().unpolish(btn); btn.style().polish(btn)
         except Exception:
             pass
@@ -852,12 +856,12 @@ def _build() -> "QWidget":
         trow.addWidget(tb)
     lay.addLayout(trow)
 
-    # Reword on/off — a full-width switch (display-only card rephrasing). Lit blue when on,
-    # matching the mode toggles above.
+    # Rephrase on/off — a full-width switch (display-only card rephrasing). Lit GREEN when
+    # on (distinct from the blue mode toggles above).
     rwrow = QHBoxLayout()
     rwrow.setSpacing(6)
-    rwb = QPushButton("Reword")
-    rwb.setObjectName("tgl")
+    rwb = QPushButton("Rephrase")
+    rwb.setObjectName("tglOnGreen" if _toggle_states().get("reword", False) else "tgl")
     rwb.setToolTip("Show cards rephrased (display-only; never edits your notes)")
     rwb.clicked.connect(lambda _c=False: _toggle("reword"))
     _toggle_btns["reword"] = rwb
