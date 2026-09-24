@@ -176,6 +176,7 @@ def _startup():
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
 
+
         # Practice questions are bound to Tab+Q, handled by the global key tap
         # (src/util/keytap.py, keycode 12) so it rides the Tab modifier like the
         # other reviewer binds — each press asks the next related question for the
@@ -213,6 +214,19 @@ def _startup():
             intersperse.reset_session()
         except Exception as _int_exc:
             log("intersperse install: %s" % _int_exc)
+
+        # Undo (Ctrl+Z) steps back through the Tab+R reword cycle; installed AFTER
+        # intersperse so it wraps outermost and chains to the real undo.
+        try:
+            reword.install_undo_hook()
+        except Exception as _rw_undo_exc:
+            log("reword undo hook: %s" % _rw_undo_exc)
+
+        # Bottom-left "Original/Reworded" toggle button posts a pycmd we handle here.
+        try:
+            gui_hooks.webview_did_receive_js_message.append(reword.on_js_message)
+        except Exception as _rw_js_exc:
+            log("reword js hook: %s" % _rw_js_exc)
 
         # Keep bank names in sync when a Practice deck is renamed in the main window.
         # Only reconcile on deck-affecting operations (not every card answer).
@@ -358,6 +372,13 @@ def _startup():
         # Opt-in (config hid_controller) + needs Input Monitoring permission.
         gamepad._start_hid_monitor()
 
+        # Pre-compile the reword helper + warm the on-device model in the background so the
+        # first rephrase isn't slowed by the build + cold-start.
+        try:
+            reword.warm_up()
+        except Exception:
+            pass
+
         # Auto-hide the cursor after 10s idle while fullscreen.
         focus._start_cursor_hide()
 
@@ -406,13 +427,22 @@ def _startup():
         # Inject the Focus-Mode trailing-trim INTO the card HTML (runs before first
         # paint) so trimming dead space doesn't visibly reflow the card after it shows.
         if hasattr(gui_hooks, 'card_will_show'):
+            # Force the practice "Show original slide" button to the minimal reword-toggle look
+            # LIVE (its JS/CSS lives in the note-type template, which can lag behind the add-on;
+            # injecting here reaches every card render regardless). Harmless when no such button.
+            _SLIDE_BTN_STYLE = (
+                "<style>body .jp-slide-btn,button.jp-slide-btn{"
+                "font-size:11px !important;"
+                "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;}"
+                "</style>")
+
             def _card_will_show(text, card, kind):
                 try:
                     if isinstance(kind, str) and "review" in kind.lower():
                         # Reword is a DISPLAY-ONLY swap (same card data-space, no
                         # scheduler impact); no-op unless enabled + a variant exists.
                         text = reword.apply(text, card, kind)
-                        return text + focus.FOCUS_TRIM_SCRIPT
+                        return text + focus.FOCUS_TRIM_SCRIPT + _SLIDE_BTN_STYLE
                 except Exception:
                     pass
                 return text
@@ -447,10 +477,15 @@ def _startup():
                     qbank.sync_contanki_for_card() # suspend Contanki on remote practice cards
                     qbank.sync_practice_bottom()   # question side: restore native buttons
                     qbank.cleanup_slide_button_if_not_practice()  # drop stale slide btn
+                    qbank.enforce_slide_btn_style()  # minimal reword-toggle look, live
                 except Exception:
                     pass
                 if pomodoro._pomo_instance:
                     pomodoro._pomo_instance.enter_review()
+                try:
+                    reword.prefetch_upcoming()   # background-generate rewords ahead of time
+                except Exception:
+                    pass
             gui_hooks.reviewer_did_show_question.append(_on_show_question)
         if hasattr(gui_hooks, 'reviewer_did_show_answer'):
             def _on_show_answer(_r):
@@ -467,6 +502,7 @@ def _startup():
                     qbank.sync_contanki_for_card()  # keep Contanki suspended on the back
                     qbank.sync_practice_bottom()    # hide native ease buttons (binary grade)
                     qbank.cleanup_slide_button_if_not_practice()  # drop stale slide btn
+                    qbank.enforce_slide_btn_style()  # minimal reword-toggle look, live
                 except Exception:
                     pass
             gui_hooks.reviewer_did_show_answer.append(_on_show_answer)

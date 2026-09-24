@@ -742,6 +742,19 @@ def _make_card_timer():
 
         def set_active(self, on):
             if on:
+                # Don't let the flare surface a hidden/minimized/background main window.
+                # When it's NOT hosted on the caption HUD (a floating panel), the flare
+                # attaches as a child of the MAIN window, and doing that while the window is
+                # minimized / behind another app pulls it to the front and steals focus. So
+                # only flare on the main window when it's the visible, focused foreground.
+                if not hud._caption_visible():
+                    try:
+                        if (not mw.isVisible() or mw.isMinimized()
+                                or not getattr(state, "_anki_focused", True)):
+                            self.hide()
+                            return
+                    except Exception:
+                        pass
                 self.reposition()
                 self._prog = 0.0
                 self._cycles_done = 0

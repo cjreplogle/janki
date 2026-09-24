@@ -3250,6 +3250,12 @@ _JP_SLIDE_JS = (
     "setTimeout(function(){window.jankiApplySlide(true);},250);}}"
     "var btn=document.getElementById('jp-slide-btn');"
     "if(btn)btn.textContent=open?'Show question':'Show original slide';"
+    # slide OPEN → keep the button visible; slide closed (desktop) → hover-reveal only
+    "try{window.__jpSlideOpen=open;if(btn){var _m=/(mobile|iphone|ipad|ipod|android)/i.test("
+    "(document.body&&document.body.className||'')+' '+(document.documentElement&&"
+    "document.documentElement.className||''));if(open){btn.style.opacity='0.55';"
+    "btn.style.pointerEvents='auto';}else if(!_m){btn.style.opacity='0';"
+    "btn.style.pointerEvents='none';}}}catch(_){}"
     # Showing the slide = the parse is untrusted → restore Anki's real Again/Hard/
     # Good/Easy to self-grade; put the binary Continue back in normal mode.
     "try{if(typeof pycmd!=='undefined')pycmd('janki-slide:'+(open?'1':'0'));}catch(_){}};"
@@ -3294,6 +3300,20 @@ _JP_SLIDE_JS = (
     "visualViewport.addEventListener('scroll',place);}"
     "setTimeout(place,0);setTimeout(place,300);}"
     "else if(isMob&&btn._jpplace){setTimeout(btn._jpplace,0);}"
+    # DESKTOP: hover-reveal — hide the button until the cursor is near the bottom-left corner
+    # (mirrors the reword bar). Mobile keeps it visible (no hover there).
+    "if(!isMob){"
+    # Force the minimal reword-toggle look INLINE (beats the inherited serif card font without
+    # depending on the note-type CSS deploy or a stylesheet override winning specificity).
+    "btn.style.fontSize='11px';"
+    "btn.style.fontFamily=\"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif\";"
+    "if(!btn._jphover){btn._jphover=true;btn.style.opacity='0';btn.style.pointerEvents='none';}"
+    "if(!window.__jpSlideHoverBound){window.__jpSlideHoverBound=true;"
+    "document.addEventListener('mousemove',function(e){"
+    "var b=document.getElementById('jp-slide-btn');if(!b)return;"
+    "if(window.__jpSlideOpen){b.style.opacity='0.55';b.style.pointerEvents='auto';return;}"
+    "var near=(e.clientX<220&&e.clientY>window.innerHeight-90);"
+    "b.style.opacity=near?'0.55':'0';b.style.pointerEvents=near?'auto':'none';});}}"
     "var rem=false;try{rem=sessionStorage.getItem('jp_show_slide')==='1';}catch(_){}"
     "window.jankiApplySlide(rem);};}"
 )
@@ -3744,14 +3764,18 @@ _CARD_CSS = (
     "body.jp-slide-open #qa{visibility:hidden!important;}"
     # Original-slide fallback button: pinned bottom-left on desktop (low, just above
     # the bottom bar), and bottom-CENTER on mobile (AnkiMobile has no such bar).
+    # Minimal chrome to match the reword toggle: small, subtle grey, sans (this button lives on
+    # <body>, so without an explicit family it'd inherit the serif card font).
     ".jp-slide-btn{position:fixed;left:10px;bottom:0;z-index:30;cursor:pointer;"
-    "font-size:0.52em;color:#9fb4d8;opacity:0.55;background:rgba(28,29,33,0.7);"
-    "border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 9px;}"
+    "font-size:11px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "color:#9fb4d8;opacity:0.55;background:rgba(28,29,33,0.7);"
+    "border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 9px;"
+    "transition:opacity .15s;}"
     ".jp-slide-btn:hover{opacity:1;color:#fff;}"
     ".mobile .jp-slide-btn,.iphone .jp-slide-btn,.ipad .jp-slide-btn,"
     ".android .jp-slide-btn{left:50%;right:auto;"
     "bottom:calc(env(safe-area-inset-bottom, 0px));"
-    "transform:translateX(-50%);font-size:0.62em;padding:5px 12px;}"
+    "transform:translateX(-50%);font-size:13px;padding:5px 12px;}"
     ".jp-slide img{display:block;max-width:100%;max-height:80vh;height:auto;"
     "width:auto;margin:0 auto;border-radius:8px;}"
     # Answer/explanation slide shown on the back.
@@ -3819,6 +3843,58 @@ def _ensure_model():
     m["css"] = _CARD_CSS
     mm.add(m)
     return m
+
+
+def enforce_slide_btn_style():
+    """Force the 'Show original slide' button to the minimal reword-toggle look by setting its
+    font INLINE with !important on the live element — beats any stylesheet rule and doesn't depend
+    on the note-type template/CSS (which is baked into the model and can lag the add-on). The
+    button is created by the template's jankiSlideInit and persists on <body>; retry briefly in
+    case it isn't in the DOM yet. Called from reviewer_did_show_question/answer (fires for
+    practice cards)."""
+    try:
+        import json as _json
+        # The reword toggle inherits the card font stack (#qa * → ui_font_stack); match it so the
+        # two buttons use the SAME font. Fall back to a system sans if that lookup fails.
+        try:
+            from ..user.css import ui_font_stack
+            from ..util.config import _cfg
+            _font = ui_font_stack(_cfg())
+            _zoom = float(_cfg().get("card_zoom", 1.0))    # #qa carries this; body button doesn't
+        except Exception:
+            _font = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+            _zoom = 1.0
+        fj = _json.dumps(_font)                     # safe JS string literal (escapes the quotes)
+        mw.web.eval(
+            "(function(){function f(){var b=document.getElementById('jp-slide-btn');if(!b)return;"
+            "b.style.setProperty('font-size','11px','important');"
+            "b.style.setProperty('font-family'," + fj + ",'important');"
+            # match the reword toggle's box exactly (rounding/border/padding), overriding whatever
+            # the note-type CSS deployed
+            "b.style.setProperty('border-radius','6px','important');"
+            "b.style.setProperty('border','1px solid rgba(255,255,255,0.2)','important');"
+            "b.style.setProperty('padding','3px 9px','important');"
+            "b.style.setProperty('background','rgba(28,29,33,0.7)','important');"
+            # strip native <button> metrics so its height matches the reword <div> exactly
+            "b.style.setProperty('-webkit-appearance','none','important');"
+            "b.style.setProperty('appearance','none','important');"
+            "b.style.setProperty('box-sizing','content-box','important');"
+            "b.style.setProperty('line-height','normal','important');"
+            "b.style.setProperty('margin','0','important');"
+            "b.style.setProperty('min-height','0','important');"
+            # match the card zoom the reword button gets from #qa{zoom:z} so the sizes agree
+            "b.style.setProperty('zoom','" + ("%g" % _zoom) + "','important');"
+            # font color = the reword toggle's muted blue-grey (match the deck reword button)
+            "b.style.setProperty('color','#9fb4d8','important');"
+            # white hover, like the reword buttons (must use !important to beat the base color;
+            # opacity stays non-important so the hover-reveal mousemove can still hide the button)
+            "b.onmouseenter=function(){this.style.setProperty('color','#fff','important');"
+            "this.style.opacity='1';};"
+            "b.onmouseleave=function(){this.style.setProperty('color','#9fb4d8','important');"
+            "this.style.opacity='0.55';};}"
+            "f();setTimeout(f,120);setTimeout(f,400);})();")
+    except Exception:
+        pass
 
 
 def apply_practice_prefs(persist=False):

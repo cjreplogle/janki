@@ -157,5 +157,7 @@
   "intersperse_tag_window": 25,
   "intersperse_nomatch": "skip",
   "reword_enabled": false,
-  "reword_variants": 3
+  "reword_variants": 1,
+  "reword_prefetch": false,
+  "reword_prefetch_count": 3
 }

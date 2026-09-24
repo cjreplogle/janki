@@ -490,10 +490,39 @@ def _toggle(which: str) -> None:
         elif which == "lockdown":
             from ..features import lockdown
             lockdown.toggle()
+        elif which == "reword":
+            from ..features import reword
+            cfg = mw.addonManager.getConfig(__name__) or {}
+            new = not bool(cfg.get("reword_enabled", False))
+            cfg["reword_enabled"] = new
+            mw.addonManager.writeConfig(__name__, cfg)
+            if new:                       # warm the on-device model so the first reword is quick
+                try:
+                    reword.warm_up()
+                except Exception:
+                    pass
     except Exception as exc:
         log(f"tray-nav toggle {which}: {exc}")
     # Reflect the new state without closing the popup.
     QTimer.singleShot(0, _refresh_toggles)
+
+
+def _cycle_reword() -> None:
+    """Cycle the CURRENT reviewer card to its next rephrasing — the same jump as Tab+R
+    (original → reword 1 → reword 2 → … → original, generating a fresh one when past the
+    last). Keeps the popup open so you can keep cycling. No-op outside review."""
+    if getattr(mw, "state", None) != "review":
+        try:
+            from aqt.utils import tooltip
+            tooltip("Cycle rephrasings while reviewing a card")
+        except Exception:
+            pass
+        return
+    try:
+        from ..util import keytap
+        keytap._reword_toggle()
+    except Exception as exc:
+        log(f"tray-nav reword cycle: {exc}")
 
 
 def _toggle_states():
@@ -511,6 +540,11 @@ def _toggle_states():
     try:
         from ..features import lockdown
         st["lockdown"] = bool(lockdown.is_locked())
+    except Exception:
+        pass
+    try:
+        from ..features import reword
+        st["reword"] = bool(reword._enabled())
     except Exception:
         pass
     return st
@@ -818,6 +852,23 @@ def _build() -> "QWidget":
         trow.addWidget(tb)
     lay.addLayout(trow)
 
+    # Reword on/off — a full-width switch (display-only card rephrasing). Lit blue when on,
+    # matching the mode toggles above.
+    rwrow = QHBoxLayout()
+    rwrow.setSpacing(6)
+    rwb = QPushButton("Reword")
+    rwb.setObjectName("tgl")
+    rwb.setToolTip("Show cards rephrased (display-only; never edits your notes)")
+    rwb.clicked.connect(lambda _c=False: _toggle("reword"))
+    _toggle_btns["reword"] = rwb
+    rwrow.addWidget(rwb, 1)
+    cyc = QPushButton("⟳")
+    cyc.setObjectName("icon")
+    cyc.setToolTip("Cycle the current card through its rephrasings")
+    cyc.clicked.connect(lambda _c=False: _cycle_reword())
+    rwrow.addWidget(cyc)
+    lay.addLayout(rwrow)
+
     # Caption position grid — only relevant/visible while caption mode is on. Set the
     # initial state statically (no animation on first open); toggling animates it.
     global _pos_shown
@@ -871,6 +922,40 @@ def _anchor_point(w) -> "QPoint":
     return QPoint(x, y)
 
 
+_open_anim = None
+
+
+def _animate_open(win, final_pos) -> None:
+    """Fade in + drop down from ~14px above to the anchor when the tray popup opens."""
+    global _open_anim
+    try:
+        from aqt.qt import (QPropertyAnimation, QEasingCurve, QPoint,
+                            QParallelAnimationGroup)
+        start = QPoint(final_pos.x(), final_pos.y() - 14)
+        fade = QPropertyAnimation(win, b"windowOpacity", win)
+        fade.setDuration(170)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        drop = QPropertyAnimation(win, b"pos", win)
+        drop.setDuration(200)
+        drop.setStartValue(start)
+        drop.setEndValue(final_pos)
+        drop.setEasingCurve(QEasingCurve.Type.OutCubic)
+        grp = QParallelAnimationGroup(win)
+        grp.addAnimation(fade)
+        grp.addAnimation(drop)
+        _open_anim = grp                     # keep a ref so it isn't GC'd mid-flight
+        grp.start()
+    except Exception as exc:
+        log(f"tray-nav open anim: {exc}")
+        try:
+            win.move(final_pos)
+            win.setWindowOpacity(1.0)
+        except Exception:
+            pass
+
+
 def _hide() -> None:
     global _nav
     _remove_global_dismiss()
@@ -915,11 +1000,15 @@ def show_navigator() -> None:
             _nav = None
         _nav = _build()
         _nav.adjustSize()
-        _nav.move(_anchor_point(_nav))
+        _final_pos = _anchor_point(_nav)
+        # Start slightly ABOVE the anchor and transparent so it drops down + fades in.
+        _nav.move(_final_pos.x(), _final_pos.y() - 14)
+        _nav.setWindowOpacity(0.0)
         # Set Space/level behavior BEFORE showing so the popup lands on the active
         # Space (even another app's fullscreen) rather than switching to Anki's.
         _prepare_over_fullscreen(_nav)
         _nav.show()
+        _animate_open(_nav, _final_pos)
         # Re-assert AFTER show: Qt rewrites the NSPanel's style mask / collection
         # behavior during show(), which would clobber the non-activating + all-Spaces
         # flags and let a visible Anki window pull its Space forward. No raise_()/
