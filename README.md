@@ -1,8 +1,8 @@
 # Janki
 
-A feature-rich macOS-focused [Anki](https://github.com/ankitects/anki) client. Designed around
+*A feature-rich [Anki](https://github.com/ankitects/anki) client for MacOS. Designed around
 addressing the fundamental limitations of Anki as a spaced-repetition tool and streamlining
-student workflows as much as possible. 
+student workflows as much as possible.*
 
 <p align="center">
   <img src="docs/media/reviewer.jpg" alt="Frosted-glass reviewer" width="360">
