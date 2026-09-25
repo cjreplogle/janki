@@ -154,6 +154,133 @@ def remove_bank(bid):
             log("remove bank deck sync: %s" % e)
 
 
+# ---------------------------------------------------------------------------
+# Deleting a bank's cards in Anki (the Practice tab / deck list / Browser) removes
+# the bank too, so the two never drift apart (Settings → Remove already deletes the
+# deck). Keyed on the cards themselves (QID = <bid>_<n>), NOT the deck name, so
+# renaming/moving a Practice deck never counts as a delete. A removed bank goes to
+# a trash folder first: if Undo brings its cards back, the bank is restored; the
+# trash is emptied on the next profile load.
+# ---------------------------------------------------------------------------
+_banks_seen = None          # bids that had Practice cards at the last check
+
+
+def _trash_dir():
+    return os.path.join(_qbanks_dir(), ".trash")
+
+
+def _banks_with_cards():
+    """Set of bank ids that currently have at least one Janki Practice note."""
+    m = mw.col.models.by_name(_MODEL_NAME)
+    if not m:
+        return set()
+    names = [f["name"] for f in m["flds"]]
+    if "QID" not in names:
+        return set()
+    qi = names.index("QID")
+    out = set()
+    for flds in mw.col.db.list("select flds from notes where mid=?", m["id"]):
+        parts = flds.split("\x1f")
+        if qi < len(parts) and "_" in parts[qi]:
+            out.add(parts[qi].rsplit("_", 1)[0])
+    return out
+
+
+def _bank_key_map():
+    """_safe(bid) → bid for installed banks (QIDs carry the _safe()'d id)."""
+    return {_safe(b): b for b in _load_registry()["banks"]}
+
+
+def _trash_bank(bid):
+    reg = _load_registry()
+    meta = reg["banks"].pop(bid, None)
+    if not meta:
+        return
+    t = _trash_dir()
+    os.makedirs(t, exist_ok=True)
+    src = os.path.join(_qbanks_dir(), meta["dir"])
+    dst = os.path.join(t, meta["dir"])
+    shutil.rmtree(dst, ignore_errors=True)
+    try:
+        if os.path.isdir(src):
+            shutil.move(src, dst)
+        with open(dst + ".meta.json", "w", encoding="utf-8") as f:
+            json.dump({"bid": bid, "meta": meta}, f)
+    except Exception as e:
+        log("qbank trash: %s" % e)
+    _Q_CACHE.pop(meta["dir"], None)
+    _save_registry(reg)
+    log("qbank: bank %s removed (its Practice cards were deleted)" % bid)
+
+
+def _restore_bank(key):
+    """Bring a trashed bank back (its cards reappeared — e.g. Undo)."""
+    t = _trash_dir()
+    if not os.path.isdir(t):
+        return
+    for fn in os.listdir(t):
+        if not fn.endswith(".meta.json"):
+            continue
+        try:
+            with open(os.path.join(t, fn), encoding="utf-8") as f:
+                rec = json.load(f)
+        except Exception:
+            continue
+        bid, meta = rec.get("bid"), rec.get("meta") or {}
+        if _safe(bid) != key or not meta.get("dir"):
+            continue
+        reg = _load_registry()
+        src = os.path.join(t, meta["dir"])
+        if bid not in reg["banks"] and os.path.isdir(src):
+            dst = os.path.join(_qbanks_dir(), meta["dir"])
+            if not os.path.exists(dst):
+                shutil.move(src, dst)
+                reg["banks"][bid] = meta
+                _save_registry(reg)
+                log("qbank: bank %s restored (its cards came back)" % bid)
+        try:
+            os.remove(os.path.join(t, fn))
+        except OSError:
+            pass
+        shutil.rmtree(src, ignore_errors=True)
+
+
+def sync_banks_with_cards(changes=None, handler=None):
+    """operation_did_execute hook: drop banks whose cards were all deleted, and
+    restore trashed banks whose cards came back. Only banks that HAD cards count
+    — an installed bank not yet loaded into Anki is never touched."""
+    global _banks_seen
+    if changes is not None and not (getattr(changes, "deck", False)
+                                    or getattr(changes, "note", False)):
+        return
+    try:
+        now = _banks_with_cards()
+    except Exception as e:
+        log("qbank sync check: %s" % e)
+        return
+    prev, _banks_seen = _banks_seen, now
+    if prev is None:
+        return
+    keys = _bank_key_map()
+    for key in prev - now:
+        if key in keys:
+            _trash_bank(keys[key])
+    for key in now - prev:
+        if key not in keys:
+            _restore_bank(key)
+
+
+def install_bank_sync():
+    """Hook bank↔card sync (idempotent) and empty the previous session's trash."""
+    global _banks_seen
+    from aqt import gui_hooks
+    shutil.rmtree(_trash_dir(), ignore_errors=True)
+    _banks_seen = None
+    sync_banks_with_cards()                      # baseline snapshot
+    if sync_banks_with_cards not in gui_hooks.operation_did_execute._hooks:
+        gui_hooks.operation_did_execute.append(sync_banks_with_cards)
+
+
 def reorder_banks(ordered_bids):
     """Persist a new registry/display order for installed banks. Any bank not named
     in `ordered_bids` keeps its old relative position at the end."""
@@ -1113,14 +1240,64 @@ _OCR_SWIFT = r'''import Foundation
 import Vision
 import AppKit
 
-struct OCRBox { let y: CGFloat; let minX: CGFloat; let maxX: CGFloat; let s: String }
+struct OCRBox { let y: CGFloat; let h: CGFloat; let minX: CGFloat; let maxX: CGFloat; let s: String }
 
-// Sort one column's boxes into reading order: top-to-bottom, left-to-right.
-func columnOrder(_ items: [OCRBox]) -> [String] {
+func rowOrder(_ items: [OCRBox]) -> [OCRBox] {
     return items.sorted {
         if abs($0.y - $1.y) > 0.02 { return $0.y > $1.y }
         return $0.minX < $1.minX
-    }.map { $0.s }
+    }
+}
+
+// Sort one column's boxes into reading order: top-to-bottom, left-to-right —
+// except a block whose lines themselves sit side by side (a matching set: the
+// numbered stems on the left, their shared (A)–(E) list on the right). Such a
+// block is found as a vertical run of lines that a narrow inner gutter splits
+// into two overlapping stacks; each stack is read whole so the two don't
+// interleave row by row. Prose lines span the gutter, so they bound the run.
+func columnOrder(_ items: [OCRBox]) -> [String] {
+    let rows = rowOrder(items)
+    guard rows.count >= 6 else { return rows.map { $0.s } }
+    let lo = rows.map { $0.minX }.min()!, hi = rows.map { $0.maxX }.max()!
+    let w = hi - lo
+    var best: (n: Int, gap: CGFloat, a: Int, b: Int, x: CGFloat)? = nil
+    var x = lo + 0.2 * w
+    while x <= hi - 0.2 * w {
+        var start = 0
+        var i = 0
+        while i <= rows.count {
+            // a run ends at a line crossing x, at a big vertical gap, or at the end
+            let brk = i == rows.count || (rows[i].minX < x && rows[i].maxX > x)
+                || (i > start && rows[i - 1].y - (rows[i].y + rows[i].h) > 0.02)
+            if brk {
+                let run = Array(rows[start..<i])
+                let L = run.filter { $0.maxX <= x }, R = run.filter { $0.minX >= x }
+                if L.count >= 3 && R.count >= 3 {
+                    let gap = R.map { $0.minX }.min()! - L.map { $0.maxX }.max()!
+                    let lTop = L.map { $0.y + $0.h }.max()!, lBot = L.map { $0.y }.min()!
+                    let rTop = R.map { $0.y + $0.h }.max()!, rBot = R.map { $0.y }.min()!
+                    let ov = min(lTop, rTop) - max(lBot, rBot)
+                    if gap >= 0.012 && ov >= 0.5 * min(lTop - lBot, rTop - rBot) {
+                        let n = run.count
+                        if best == nil || n > best!.n || (n == best!.n && gap > best!.gap) {
+                            best = (n, gap, start, i, x)
+                        }
+                    }
+                }
+                // a crossing line belongs to no run; a gap starts a new run at i
+                if i < rows.count && rows[i].minX < x && rows[i].maxX > x { start = i + 1 }
+                else { start = i }
+            }
+            i += 1
+        }
+        x += 0.005
+    }
+    guard let b = best else { return rows.map { $0.s } }
+    let run = Array(rows[b.a..<b.b])
+    let L = run.filter { ($0.minX + $0.maxX) / 2 < b.x }, R = run.filter { ($0.minX + $0.maxX) / 2 >= b.x }
+    return columnOrder(Array(rows[..<b.a]))
+        + rowOrder(L).map { $0.s } + rowOrder(R).map { $0.s }
+        + columnOrder(Array(rows[b.b...]))
 }
 
 func ocr(_ path: String) -> [String] {
@@ -1137,7 +1314,7 @@ func ocr(_ path: String) -> [String] {
     for o in (req.results ?? []) {
         guard let t = o.topCandidates(1).first else { continue }
         let bb = o.boundingBox
-        boxes.append(OCRBox(y: bb.origin.y, minX: bb.minX, maxX: bb.maxX, s: t.string))
+        boxes.append(OCRBox(y: bb.origin.y, h: bb.height, minX: bb.minX, maxX: bb.maxX, s: t.string))
     }
     if boxes.isEmpty { return [] }
     // Detect a vertical gutter in the central region that no text box spans, so
@@ -1153,7 +1330,8 @@ func ocr(_ path: String) -> [String] {
         }
         x += 0.01
     }
-    if bestSplit > 0 && bestGap > 0.05 {
+    // (a textbook page's gutter can be under 4% of the width, e.g. 0.49 → 0.53)
+    if bestSplit > 0 && bestGap > 0.025 {
         let left = boxes.filter { ($0.minX + $0.maxX) / 2 < bestSplit }
         let right = boxes.filter { ($0.minX + $0.maxX) / 2 >= bestSplit }
         if left.count >= 3 && right.count >= 3 {
@@ -1523,6 +1701,21 @@ def _choice_letter(l):
     return None
 
 
+# A section header between question groups on one page ("Board-style Questions",
+# "Review Questions") — short, no sentence punctuation, ends in "Question(s)".
+_RE_P_SECTION = re.compile(r"(?i)^\s*[A-Za-z][\w\s/&-]{0,40}\bquestions?\s*$")
+
+
+def _is_case_break(l):
+    """True for a line that opens a new question group — a shared-case lead-in
+    ("Questions 11 through 13 are based on…") or a section header — so the text
+    that follows is never glued onto the previous question's last choice."""
+    if _RE_P_SECTION.match(l) and len(l.split()) <= 5:
+        return True
+    return bool(re.match(r"(?i)^\s*(?:for\s+)?questions?\s+\d", l)
+                and _RE_P_QRANGE.search(l))
+
+
 def _split_question_segments(lines):
     """Split a slide's lines into one segment per question. A new question begins
     at a numbered stem ('N. …') OR — for slides whose question numbers OCR dropped
@@ -1531,7 +1724,7 @@ def _split_question_segments(lines):
     (that new question's stem is the trailing non-choice lines before the '(A)')."""
     segs, cur = [], []
     for l in lines:
-        if _RE_P_NUM.match(l):
+        if _RE_P_NUM.match(l) or _is_case_break(l):
             if cur:
                 segs.append(cur)
             cur = [l]
@@ -1560,6 +1753,12 @@ def _extract_questions(lines):
     parenthesised choices). `_num` is None when the number couldn't be read; the
     caller fills it in sequence within the section."""
     lines = _merge_bare_numbers(lines)
+    # A matching set ("An answer may be used once, more than once, or not at
+    # all"): several numbered stems share ONE lettered list printed after them,
+    # so a stem with no choices of its own borrows the next question's list.
+    matching = bool(re.search(r"(?i)more\s+than\s+once|once,?\s+or\s+not\s+at\s+all",
+                              " ".join(lines)))
+    shared = []             # choiceless numbered stems waiting for a shared list
     out = []
     for seg in _split_question_segments(lines):
         if not seg:
@@ -1597,9 +1796,19 @@ def _extract_questions(lines):
             elif field == "stem":
                 q["stem"] = _join(q["stem"], l)
         q["choices"] = [c.strip() for c in q["choices"]]
+        if matching and num is not None and not q["choices"] and q["stem"]:
+            if shared and shared[-1]["_num"] != num - 1:
+                shared = []
+            shared.append(q)
+            continue
         if (len(q["choices"]) >= 2 and all(q["choices"])
                 and not _looks_like_answer_text(q["stem"])):
+            if shared and num is not None and shared[-1]["_num"] == num - 1:
+                for sq in shared:
+                    sq["choices"] = list(q["choices"])
+                    out.append(sq)
             out.append(q)
+        shared = []
     return out
 
 
@@ -1671,6 +1880,22 @@ def _match_choice_to_rationale(choices, rat):
         if score > best:
             best, best_i = score, i
     return best_i, best
+
+
+_OVERLAP_STOP = frozenset(
+    "which would following these their there about other being because after "
+    "before where while could should most least none also than that this with "
+    "from have been into only more such they them then when were will what your "
+    "each both between during".split())
+
+
+def _rationale_overlap(q, rat):
+    """How many distinct content words a rationale shares with a question's stem
+    and choices (a related answer shares several; another chapter's shares ~0-3)."""
+    def toks(s):
+        return {t for t in re.findall(r"[a-z0-9]+", (s or "").lower())
+                if len(t) > 3 and t not in _OVERLAP_STOP}
+    return len(toks(rat) & toks(q["stem"] + " " + " ".join(q["choices"])))
 
 
 def _is_expl_answer_slide(lines):
@@ -1776,33 +2001,48 @@ def _looks_like_prose(lines):
     return words >= 12 and words >= 4 * max(1, len(body))
 
 
-def _shared_case(lines):
-    """A '(For) Questions X-Y refer to the following case: …' lead-in shared by a
-    range of questions (a clinical vignette above the first question). Returns
-    (lo, hi, case_text) or None."""
+def _shared_cases(lines):
+    """Every '(For) Questions X-Y refer to / are based on the following case: …'
+    lead-in on a slide (a clinical vignette shared by a range of questions; a
+    textbook page can carry two). The lead-in may wrap mid-word ("fol-" /
+    "lowing case:"). Returns [(lo, hi, case_text), …]."""
+    out = []
     for i, l in enumerate(lines):
         m = _RE_P_QRANGE.search(l)
-        if not m or not re.search(r"(?i)refer|following|case|patient|scenario", l):
+        if not m:
+            continue
+        # the lead-in runs to its colon, at most two wrapped lines further
+        lead, k = l, i
+        while (":" not in lead and k + 1 < len(lines) and k < i + 2
+               and not _RE_P_NUM.match(lines[k + 1])
+               and (lead.endswith("-") or ":" in lines[k + 1][:40])):
+            k += 1
+            lead = _join(lead, lines[k])
+        if not re.search(r"(?i)refer|following|based\s+on|case|patient|scenario", lead):
             continue
         # A figure range ("refer to the following graph/diagram") is not a case.
-        if re.search(r"(?i)graph|diagram|figure|table|chart|curve|tracing", l):
-            return None
+        if re.search(r"(?i)graph|diagram|figure|table|chart|curve|tracing", lead):
+            continue
         lo, hi = int(m.group(1)), int(m.group(2))
         if not (0 < lo <= hi <= lo + 20):
-            return None
-        buf = []
-        for nx in lines[i + 1:]:            # case text up to the first question
-            if _RE_P_NUM.match(nx) or _choice_letter(nx):
+            continue
+        # text after the lead-in's colon on its own last line is case text too
+        tail = lead.split(":", 1)[1].strip() if ":" in lead else ""
+        buf = [tail] if tail else []
+        for nx in lines[k + 1:]:            # case text up to the first question
+            if _RE_P_NUM.match(nx) or _choice_letter(nx) or _is_case_break(nx):
                 break
             buf.append(nx)
         # Only a genuine prose vignette — not a figure's scattered labels.
         if not _looks_like_prose(buf):
-            return None
-        text = re.sub(r"(?i)^\s*(?:refer[^:]*:|case)?\s*:?\s*",
-                      "", " ".join(buf)).strip()
+            continue
+        text = ""
+        for b in buf:
+            text = _join(text, b)
+        text = text.strip()
         if text:
-            return lo, hi, text
-    return None
+            out.append((lo, hi, text))
+    return out
 
 
 def _continues_choices(q, lines):
@@ -1832,6 +2072,24 @@ def _append_choices(q, lines):
             q["choices"][-1] = _join(q["choices"][-1], l)
 
 
+_RE_PLOIDY = re.compile(r"(?<![A-Za-z0-9])[24]N(?![A-Za-z0-9])")
+_RE_PLOIDY_1 = re.compile(r"(?<![A-Za-z0-9])[Il]N(?![A-Za-z0-9])")
+_RE_PLOIDY_DNA = re.compile(r"\bDNA\b[^.]{0,20}?(?<![A-Za-z0-9])[Il]N(?![A-Za-z0-9])")
+
+
+def _fix_ploidy(q):
+    """OCR reads DNA content '1N' as 'IN'/'lN'. Repair it only in a question that
+    also speaks of 2N/4N, or right after "DNA" ("amount of DNA to IN") — where a
+    standalone capital 'IN' can't be the word."""
+    texts = [q.get("stem", ""), q.get("explanation", "")] + list(q.get("choices") or [])
+    if not any(_RE_PLOIDY.search(t or "") or _RE_PLOIDY_DNA.search(t or "")
+               for t in texts):
+        return
+    q["stem"] = _RE_PLOIDY_1.sub("1N", q.get("stem", ""))
+    q["explanation"] = _RE_PLOIDY_1.sub("1N", q.get("explanation", ""))
+    q["choices"] = [_RE_PLOIDY_1.sub("1N", c) for c in q.get("choices") or []]
+
+
 def _parse_ocr_blocks(blocks):
     """blocks = [(path, [lines], category, slide_id), …] in slide order →
     (questions, n_detected). A slide that yields questions (stem + ≥2 choices) is
@@ -1852,14 +2110,18 @@ def _parse_ocr_blocks(blocks):
                             # question whose opening text is on the previous image)
     last_q = None           # most recent question (for choices split across images)
     last_q_sid = None
+    prev_img = None         # (sid, lines, answers-before, answers-after) of the last
+                            # non-question image — to recover a misfiled stem opening
     for path, raw, category, sid in blocks:
         lines = [l.strip() for l in raw if l.strip()]
+        n_ans_before = len(answers)
         # A shared clinical vignette ("Questions 26-28 refer to the following
         # case: …") can appear on its own panel or inline above the first
         # question — record it either way so it prepends to that whole range.
-        case = _shared_case(lines)
-        if case:
-            range_cases.setdefault((category, case[0], case[1]), case[2])
+        cases = _shared_cases(lines)
+        for lo, hi, text in cases:          # applies from this slide onward
+            range_cases.setdefault((category, lo, hi), (len(questions), text))
+        case = cases[0] if cases else None
         qs = _extract_questions(lines)
         if qs:                              # → a question slide
             for n, q in enumerate(qs):
@@ -1876,6 +2138,28 @@ def _parse_ocr_blocks(blocks):
                     q["stem"] = _join(pending[0], q["stem"])
                     if q["_num"] is None:
                         q["_num"] = pending[1]
+                    q["_slide_prefix"] = list(pending[2])   # stitched above the slide
+                elif (n == 0 and q["_num"] is None and q["stem"][:1].islower()
+                      and prev_img and prev_img[0] == sid):
+                    # A numberless stem opening mid-sentence ("and muscle weakness…")
+                    # continues the previous image on this slide — even when that
+                    # image was misfiled (its "33. A 4-month-old…" reads like a
+                    # "N. X rationale" key). Take its text + number, and withdraw
+                    # any answers it was credited with.
+                    pl = prev_img[1]
+                    mnum = _RE_P_NUM.match(pl[0]) if pl else None
+                    head = ""
+                    for l in ([mnum.group(2)] + pl[1:]) if mnum else pl:
+                        head = _join(head, l)
+                    if head and _looks_like_prose(pl):
+                        q["stem"] = _join(head, q["stem"])
+                        if mnum:
+                            q["_num"] = int(mnum.group(1))
+                        q["_slide_prefix"] = [prev_img[4]]
+                        del answers[prev_img[2]:prev_img[3]]
+                        figs = slide_figs.get(sid, [])
+                        if prev_img[4] in figs:     # …or filed as a figure
+                            figs.remove(prev_img[4])
                 # OCR may drop a question's number (blue label / faint digit); fill
                 # it in sequence within the section so its answer still binds.
                 if q["_num"] is None:
@@ -1916,7 +2200,8 @@ def _parse_ocr_blocks(blocks):
             body = " ".join(l for l in lines if not _RE_P_STD.match(l)).strip()
             if body[:1].isupper() or body[:1].isdigit():
                 pending = (_join(pending[0], body) if pending else body,
-                           (pending[1] if pending and pending[1] else pnum))
+                           (pending[1] if pending and pending[1] else pnum),
+                           (pending[2] if pending else []) + [path])
             else:
                 pending = None              # rationale continuation → drop
         else:                               # → a figure/other image
@@ -1930,6 +2215,7 @@ def _parse_ocr_blocks(blocks):
                     lo, hi = int(mr.group(1)), int(mr.group(2))
                     if 0 < lo <= hi <= lo + 20:
                         range_figs.append((category, lo, hi, [path]))
+        prev_img = None if qs else (sid, lines, n_ans_before, len(answers), path)
 
     for pos, num, letter, rat, category, ans_path in answers:
         pool = [q for q in questions[:pos]
@@ -1940,6 +2226,14 @@ def _parse_ocr_blocks(blocks):
                 if q["_num"] == num:
                     target, idx = q, ord(letter) - 65
                     break
+            # A number match far back in the deck (another chapter reusing "7.")
+            # must also agree on content — a deck that omits a set's answers would
+            # otherwise hand it an unrelated chapter's key. Unverified → unanswered.
+            if target is not None:
+                back = pos - next(k for k, qq in enumerate(questions) if qq is target)
+                if back > 6 and _match_choice_to_rationale(target["choices"], rat)[1] < 0.7 \
+                        and _rationale_overlap(target, rat) < 5:
+                    target = idx = None
         if target is None and pool:
             # pass 2: no number match. Verify against the most-recent open question
             # by matching the answer's rationale text to one of its choices — the
@@ -1974,15 +2268,28 @@ def _parse_ocr_blocks(blocks):
             # Embedded figure: the graph/table is baked into the question
             # screenshot, so OCR dragged its labels/cells into the stem. Show the
             # screenshot itself and render image-only (drop the garbled stem text).
-            q["_media_paths"] = [q["_src"]]
+            # a stem that began on earlier screenshot(s) shows them all, in order
+            q["_media_paths"] = list(q.get("_slide_prefix") or []) + [q["_src"]]
             q["figure_only"] = True
 
-    # Prepend a shared clinical vignette to every question in its range.
+    # Prepend a shared clinical vignette to the questions of its range that
+    # FOLLOW it — once each, stopping when the numbering leaves the range (a later
+    # chapter reusing the same numbers is a different case).
+    for (cat, lo, hi), (start, text) in range_cases.items():
+        done = set()
+        for q in questions[start:]:
+            if q["_cat"] != cat:
+                continue
+            n = q["_num"] or -1
+            if not (lo <= n <= hi) or n in done:
+                if done:
+                    break
+                continue
+            q["stem"] = _join(text, q["stem"])
+            done.add(n)
+
     for q in questions:
-        for (cat, lo, hi), text in range_cases.items():
-            if q["_cat"] == cat and lo <= (q["_num"] or -1) <= hi:
-                q["stem"] = _join(text, q["stem"])
-                break
+        _fix_ploidy(q)
 
     good, incomplete = [], []
     for q in questions:
@@ -2038,6 +2345,41 @@ def _shrink_image_bytes(path, max_w=1400, quality=80):
         return None
 
 
+def _stitch_image_bytes(paths, max_w=1400, quality=80):
+    """Stack images top-to-bottom (a question whose stem runs across several
+    screenshots on one slide) into one downscaled JPEG, for the reference slide.
+    None on any failure — the caller then keeps the last image alone."""
+    try:
+        from aqt.qt import (Qt, QImage, QPainter, QColor, QByteArray, QBuffer,
+                            QIODevice)
+        imgs = [QImage(p) for p in paths]
+        imgs = [i for i in imgs if not i.isNull()]
+        if len(imgs) < 2:
+            return None
+        w = min(max_w, max(i.width() for i in imgs))
+        imgs = [i.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
+                if i.width() > w else i for i in imgs]
+        gap = 12
+        out = QImage(w, sum(i.height() for i in imgs) + gap * (len(imgs) - 1),
+                     QImage.Format.Format_RGB32)
+        out.fill(QColor("white"))
+        p = QPainter(out)
+        y = 0
+        for i in imgs:
+            p.drawImage(0, y, i)
+            y += i.height() + gap
+        p.end()
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not out.save(buf, "JPG", quality):
+            return None
+        return bytes(ba)
+    except Exception as e:
+        log("qbank stitch image: %s" % e)
+        return None
+
+
 def _write_qb_plain(out_path, base_name, qs):
     """Write a .qb from already-parsed question dicts, copying any attached figure
     images (from each question's `_media_paths`) into media/ and recording their
@@ -2070,6 +2412,18 @@ def _write_qb_plain(out_path, base_name, qs):
             # reference image, not study content, so downscale + JPEG-compress it to
             # keep the .qb light (raw slide PNGs would bloat a bank by 10-100×).
             sp = q.get("_slide_src")
+            pre = [p for p in q.get("_slide_prefix") or [] if p != sp]
+            if sp and pre:
+                # the stem began on earlier image(s): show them stacked above
+                data = _stitch_image_bytes(pre + [sp])
+                key = tuple(pre + [sp])
+                if data is not None and key not in written:
+                    arc = "s%d.jpg" % len(written)
+                    z.writestr("media/" + arc, data)
+                    written[key] = arc
+                if key in written:
+                    q["slide"] = written[key]
+                    sp = None               # done — skip the single-image path
             if sp:
                 if sp not in written:
                     arc = "s%d.jpg" % len(written)
@@ -2209,7 +2563,10 @@ def pptx_import_dialog(on_done=None, path=None):
                     for i, q in enumerate(crop_qs):
                         mw.progress.update(label="Cropping figures… %d/%d"
                                            % (i + 1, len(crop_qs)))
-                        q["_media_paths"] = [_crop_figure(q["_media_paths"][0])]
+                        # crop only the LAST screenshot (it holds the choices);
+                        # earlier ones of a stitched stem are kept whole
+                        mp = q["_media_paths"]
+                        q["_media_paths"] = mp[:-1] + [_crop_figure(mp[-1])]
                 finally:
                     mw.progress.finish()
             out = os.path.splitext(path)[0] + ".qb"

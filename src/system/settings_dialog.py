@@ -1554,10 +1554,13 @@ class GlassSettings(QDialog):
         # One file for a whole content drop: decks (.apkg), question banks (.qb), lecture
         # tag maps (.json) and rephrasings (.rp), imported in the right order.
         _jank_lbl = QLabel(
-            "<b>Import a content bundle</b> — a <code>.jank</code> file packs new decks, "
+            "<b>Import a content bundle</b> — a "
+            "<a href=\"https://cjre.pl/ogle/janki/jank\">.jank file</a> packs new decks, "
             "question banks, lecture tag maps and rephrasings into one download. Your "
             "review progress is kept. You can also drag a .jank onto this tab.")
         _jank_lbl.setWordWrap(True)
+        _jank_lbl.setOpenExternalLinks(True)            # ".jank file" → the guide on cjre.pl
+        _jank_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         gen_lay.addWidget(_jank_lbl)
         _jank_row = QHBoxLayout()
         _jank_btn = QPushButton("Import .jank…")

@@ -294,6 +294,10 @@ def _startup():
                 qbank.sync_practice_model_if_present()
             except Exception as _qb_exc:
                 log("practice model sync: %s" % _qb_exc)
+            try:
+                qbank.install_bank_sync()   # deleting a bank's cards removes the bank
+            except Exception as _bs_exc:
+                log("bank sync install: %s" % _bs_exc)
         QTimer.singleShot(3000, _deferred_practice_sync)
 
         _bt.mark("practice note type sync")
