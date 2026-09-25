@@ -67,7 +67,18 @@ class GlassSettings(QDialog):
                             QPushButton, QButtonGroup)
         tabs = QTabWidget()
         self._tabs = tabs
-        app_page = QWidget();   app_lay = QVBoxLayout(app_page)
+        # Appearance → subtabs: Window (glass / photo / OLED), Text (interface + mobile card
+        # font, text animation) and Mobile (theming for AnkiMobile/AnkiDroid cards).
+        app_page = QWidget(); _app_outer = QVBoxLayout(app_page)
+        _app_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
+        app_tabs = QTabWidget(); _app_outer.addWidget(app_tabs)
+        self._app_tabs = app_tabs
+        app_win_page = QWidget();  app_win_lay = QVBoxLayout(app_win_page)
+        app_text_page = QWidget(); app_text_lay = QVBoxLayout(app_text_page)
+        app_mob_page = QWidget();  app_mob_lay = QVBoxLayout(app_mob_page)
+        app_tabs.addTab(app_win_page, "Window")
+        app_tabs.addTab(app_text_page, "Text")
+        app_tabs.addTab(app_mob_page, "Mobile")
         gen_page = QWidget();   gen_lay = QVBoxLayout(gen_page)
 
         # Rephrase → subtabs: Import (build/import/manage rephrasings), Mobile (bake
@@ -241,7 +252,7 @@ class GlassSettings(QDialog):
 
             # RIGHT — background photo
             _right = QVBoxLayout()
-            _rh = QLabel("Photo")
+            _rh = QLabel("Photo Background")
             _rh.setStyleSheet("font-weight:600;")
             _right.addWidget(_rh)
             def _apply_photo_opacity(_v):
@@ -304,9 +315,8 @@ class GlassSettings(QDialog):
             _right.addStretch()
             _cols.addLayout(_right, 1)
 
-        app_lay.addLayout(_cols)
-        app_lay.addSpacing(6)
-        app_lay.addLayout(_uifont_row)
+        app_win_lay.addLayout(_cols)
+        app_text_lay.addLayout(_uifont_row)
 
         # --- Text animation speed -------------------------------------------
         # Uniform multiplier on the typewriter reveal duration (1.0 = normal,
@@ -331,7 +341,33 @@ class GlassSettings(QDialog):
         ta_row.addWidget(ta_name)
         ta_row.addWidget(ta_s)
         ta_row.addWidget(ta_val)
-        app_lay.addLayout(ta_row)
+        app_text_lay.addLayout(ta_row)
+
+        # Uniform text size: every note type shows card text at the same base size (note
+        # types otherwise range from ~20px to 48px). Inline emphasis (bigger key phrases),
+        # headings and Janki's own card UI keep their sizes.
+        self._uniform = QCheckBox("Uniform text size across card types")
+        self._uniform.setToolTip(
+            "Show every note type's card text at the same base size (24px desktop, 20px on "
+            "phones), overriding each note type's own font size. Emphasis you typed into a "
+            "card (larger key phrases), headings and practice-card UI are kept.")
+        self._uniform.setChecked(bool(self.cfg.get("uniform_text", False)))
+
+        def on_uniform(_s):
+            self.cfg["uniform_text"] = bool(self._uniform.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._reload_all_webviews()          # desktop: re-inject card CSS now
+            except Exception:
+                pass
+            try:                                      # mobile: re-stamp the theming CSS
+                if mobilecards.is_applied():
+                    mobilecards.refresh_quiet()
+                    tooltip("Text size updated — Sync to push it to your devices.")
+            except Exception:
+                pass
+        self._uniform.stateChanged.connect(on_uniform)
+        app_text_lay.addWidget(self._uniform)
 
         # === Focus ===========================================================
         # --- Card timer curve ------------------------------------------------
@@ -528,6 +564,30 @@ class GlassSettings(QDialog):
 
         self._green_flare.stateChanged.connect(on_green_flare)
         flare_lay.addWidget(self._green_flare)
+
+        # Green flare intensity (peak edge alpha), same scale as the red one. Fullscreen has
+        # no chrome/glass to read against, so it stays proportionally stronger (+30).
+        gf_row = QHBoxLayout()
+        gf_name = QLabel("Green flare intensity")
+        gf_name.setMinimumWidth(140)
+        gf_val = QLabel()
+        gf_s = QSlider(Qt.Orientation.Horizontal)
+        gf_s.setMinimum(2)
+        gf_s.setMaximum(40)
+        gf_s.setValue(int(self.cfg.get("card_timer_green_alpha", 16)))
+
+        def _gf_cb(v):
+            self.cfg["card_timer_green_alpha"] = v
+            self.cfg["card_timer_green_alpha_fullscreen"] = min(255, v + 30)
+            gf_val.setText(str(v))
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        gf_s.valueChanged.connect(_gf_cb)
+        gf_val.setText(str(int(self.cfg.get("card_timer_green_alpha", 16))))
+        gf_row.addWidget(gf_name)
+        gf_row.addWidget(gf_s)
+        gf_row.addWidget(gf_val)
+        flare_lay.addLayout(gf_row)
 
         # --- Lockdown / kiosk focus mode (macOS) -----------------------------
         from aqt.qt import QComboBox as _QComboBox
@@ -1488,7 +1548,51 @@ class GlassSettings(QDialog):
             glass._sync_oled()
 
         self._oled.stateChanged.connect(on_oled)
-        app_lay.addWidget(self._oled)
+        app_win_lay.addWidget(self._oled)
+
+        # --- Content bundle (.jank) ------------------------------------------------
+        # One file for a whole content drop: decks (.apkg), question banks (.qb), lecture
+        # tag maps (.json) and rephrasings (.rp), imported in the right order.
+        _jank_lbl = QLabel(
+            "<b>Import a content bundle</b> — a <code>.jank</code> file packs new decks, "
+            "question banks, lecture tag maps and rephrasings into one download. Your "
+            "review progress is kept. You can also drag a .jank onto this tab.")
+        _jank_lbl.setWordWrap(True)
+        gen_lay.addWidget(_jank_lbl)
+        _jank_row = QHBoxLayout()
+        _jank_btn = QPushButton("Import .jank…")
+        _jank_btn.setAutoDefault(False)
+        # The main action: big (taller, larger text, fills the row).
+        _jank_btn.setMinimumHeight(42)
+        _jf = _jank_btn.font(); _jf.setPointSizeF(_jf.pointSizeF() * 1.2); _jank_btn.setFont(_jf)
+
+        def _do_jank(path=None):
+            from ..features import jank
+            if path:
+                jank.import_jank(path, parent=self)
+            else:
+                jank.import_jank_dialog(parent=self)
+        _jank_btn.clicked.connect(lambda: _do_jank())
+        _jank_row.addWidget(_jank_btn, 1)
+        # Secondary: small, on the right.
+        _jank_build = QPushButton("Build .jank…")
+        _jank_build.setAutoDefault(False)
+        _bf = _jank_build.font(); _bf.setPointSizeF(_bf.pointSizeF() * 0.85); _jank_build.setFont(_bf)
+        _jank_build.setFixedHeight(24)
+        _jank_build.setToolTip("Pack .qb banks, lecture tag maps (.json), rephrasings (.rp) "
+                               "and decks (.apkg) into one .jank to share.")
+
+        def _do_build():
+            from ..features import jank
+            jank.packager_dialog(parent=self)
+        _jank_build.clicked.connect(_do_build)
+        gen_lay.addLayout(_jank_row)
+        _build_row = QHBoxLayout()                    # below Import, small, on the right
+        _build_row.addStretch()
+        _build_row.addWidget(_jank_build)
+        gen_lay.addLayout(_build_row)
+        self._install_file_drop(gen_lay.parentWidget(), (".jank", ".tgz", ".tar.gz"),
+                                "Drop to import the bundle", lambda ps: _do_jank(ps[0]))
 
         self._aot = QCheckBox("Keep Anki window always on top")
         self._aot.setChecked(bool(self.cfg.get("always_on_top", False)))
@@ -1499,7 +1603,7 @@ class GlassSettings(QDialog):
             glass._apply_always_on_top(self._aot.isChecked())
 
         self._aot.stateChanged.connect(on_aot)
-        gen_lay.addWidget(self._aot)
+        app_win_lay.addWidget(self._aot)
 
         self._deck_stats = QCheckBox(
             "Show review history chart on the deck screen (Reviews plot)")
@@ -1521,7 +1625,7 @@ class GlassSettings(QDialog):
                 pass
 
         self._deck_stats.stateChanged.connect(on_deck_stats)
-        gen_lay.addWidget(self._deck_stats)
+        app_win_lay.addWidget(self._deck_stats)
 
         self._tray = QCheckBox("Menu-bar icon + keep running in the tray when the window is closed")
         self._tray.setToolTip(
@@ -1538,7 +1642,7 @@ class GlassSettings(QDialog):
             tray._apply_tray(tray._tray_should_show())
 
         self._tray.stateChanged.connect(on_tray)
-        gen_lay.addWidget(self._tray)
+        app_win_lay.addWidget(self._tray)
 
         self._tray_login = QCheckBox("Open Janki to the tray at login")
         self._tray_login.setToolTip(
@@ -1556,7 +1660,7 @@ class GlassSettings(QDialog):
                 tray._apply_tray(True)   # ensure a tray target exists to launch into
 
         self._tray_login.stateChanged.connect(on_tray_login)
-        gen_lay.addWidget(self._tray_login)
+        app_win_lay.addWidget(self._tray_login)
 
         # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
         # caption mode even when another app is focused/fullscreen.
@@ -1575,7 +1679,7 @@ class GlassSettings(QDialog):
             # daemon and torn down on quit)
 
         self._hid.stateChanged.connect(on_hid)
-        gen_lay.addWidget(self._hid)
+        cap_lay.addWidget(self._hid)             # Focus → Caption
 
         # AMBOSS integrations: frost the hover tip and auto-hide the QBank box when
         # the window is too narrow. One toggle governs both effects; uncheck it if
@@ -1598,7 +1702,7 @@ class GlassSettings(QDialog):
                 pass
 
         self._amboss.stateChanged.connect(on_amboss)
-        gen_lay.addWidget(self._amboss)
+        app_text_lay.addWidget(self._amboss)          # Appearance → Text
 
         # --- Glass patch / uninstall ----------------------------------------
         # On stock Anki the glass needs a small patch to Anki's own files (applied
@@ -1711,8 +1815,8 @@ class GlassSettings(QDialog):
             "are saved locally, and Revert restores them exactly. Sync afterwards; "
             "desktop is unaffected.")
         _mob_note.setWordWrap(True)
-        _mob_note.setStyleSheet("color: gray; margin-top: 8px;")
-        app_lay.addWidget(_mob_note)
+        _mob_note.setStyleSheet("color: gray;")
+        app_mob_lay.addWidget(_mob_note)
 
         # Card font used on mobile. Changing it re-stamps the note types live if the
         # theming is already applied (so it shows on the next sync).
@@ -1736,7 +1840,7 @@ class GlassSettings(QDialog):
         _mfont_row.addWidget(_mfont_name)
         _mfont_row.addWidget(self._mob_font)
         _mfont_row.addStretch()
-        app_lay.addLayout(_mfont_row)
+        app_text_lay.insertLayout(1, _mfont_row)     # interface font, mobile font, animation
 
         # Tap feedback: the subtle ripple dot shown when you tap to reveal an answer
         # on mobile. Re-stamps the templates live (silent) so it lands on next sync.
@@ -1751,7 +1855,7 @@ class GlassSettings(QDialog):
                 tooltip("Mobile tap feedback updated — Sync to push it to your devices.")
 
         self._mob_tapfb.stateChanged.connect(on_mob_tapfb)
-        app_lay.addWidget(self._mob_tapfb)
+        app_mob_lay.addWidget(self._mob_tapfb)
 
         _mob_row = QHBoxLayout()
         self._mob_apply = QPushButton("Apply UI theming to mobile cards")
@@ -1782,19 +1886,20 @@ class GlassSettings(QDialog):
         _refresh_mob()
         _mob_row.addWidget(self._mob_apply)
         _mob_row.addWidget(self._mob_revert)
-        app_lay.addLayout(_mob_row)
+        app_mob_lay.addLayout(_mob_row)
 
         hint = QLabel("Color + opacity set the tint; blur radius blurs the desktop "
                       "behind Anki (like Terminal). Changes apply live and save "
                       "automatically.")
         hint.setWordWrap(True)
-        app_lay.addWidget(hint)
+        app_win_lay.addWidget(hint)
 
         # === Rephrase =======================================================
         self._build_reword_tab(rw_import_lay, rw_mobile_lay, rw_exp_lay)
 
         # Push each page's controls to the top.
-        for pl in (app_lay, flare_lay, timer_lay, cap_lay, pomo_lay, lock_lay,
+        for pl in (app_win_lay, app_text_lay, app_mob_lay, flare_lay, timer_lay, cap_lay,
+                   pomo_lay, lock_lay,
                    prac_app_lay, prac_qb_lay, gen_lay,
                    rw_import_lay, rw_mobile_lay, rw_exp_lay):
             pl.addStretch()
@@ -1821,7 +1926,7 @@ class GlassSettings(QDialog):
         # content height ourselves — recursing through the nested tab groups — and pin
         # the outer tab widget to it with setFixedHeight (which overrides that min).
         from aqt.qt import QTimer
-        tabws = [tabs, prac_tabs, focus_tabs, rw_tabs]
+        tabws = [tabs, app_tabs, prac_tabs, focus_tabs, rw_tabs]
         _lt = locals().get("lec_tabs")
         if _lt is not None:
             tabws.append(_lt)
@@ -1959,6 +2064,59 @@ class GlassSettings(QDialog):
                 tw.currentChanged.connect(lambda i, t=tw: _fade_in(t, i))
             except Exception:
                 pass
+
+    def _install_file_drop(self, target, exts, label, on_drop) -> None:
+        """Make `target` accept dropped files with one of `exts` (glass drop highlight while
+        dragging); calls on_drop([paths])."""
+        from aqt.qt import QObject, QEvent, QLabel, Qt
+        if target is None:
+            return
+        try:
+            light = glass._tint_is_light()
+        except Exception:
+            light = False
+        ink = "0,0,0" if light else "255,255,255"
+        overlay = QLabel(label, target)
+        overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.setStyleSheet(
+            "QLabel { background: rgba(%(i)s,0.08); border: 2px dashed rgba(%(i)s,0.45);"
+            " border-radius: 12px; color: rgba(%(i)s,0.85); font-size: 15px; }" % {"i": ink})
+        overlay.hide()
+
+        def _paths(ev):
+            md = ev.mimeData()
+            if md is None or not md.hasUrls():
+                return []
+            return [u.toLocalFile() for u in md.urls()
+                    if u.isLocalFile() and u.toLocalFile().lower().endswith(tuple(exts))]
+
+        class _Drop(QObject):
+            def eventFilter(self_, obj, ev):
+                t = ev.type()
+                if t in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                    if _paths(ev):
+                        ev.acceptProposedAction()
+                        if not overlay.isVisible():
+                            overlay.setGeometry(target.rect().adjusted(4, 4, -4, -4))
+                            overlay.raise_()
+                            overlay.show()
+                        return True
+                elif t == QEvent.Type.DragLeave:
+                    overlay.hide()
+                elif t == QEvent.Type.Drop:
+                    overlay.hide()
+                    ps = _paths(ev)
+                    if ps:
+                        ev.acceptProposedAction()
+                        on_drop(ps)
+                        return True
+                return False
+
+        target.setAcceptDrops(True)
+        f = _Drop(self)
+        target.installEventFilter(f)
+        self.__dict__.setdefault("_drop_filters", []).append(f)
 
     def _install_rp_drop(self, report) -> None:
         """Drag a .rp (or .json/.txt/.rtf/.md) file anywhere onto the Rephrase tab to import

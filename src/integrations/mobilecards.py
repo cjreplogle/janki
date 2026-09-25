@@ -61,6 +61,19 @@ def current_font() -> str:
     return lbl if lbl in FONTS else DEFAULT_FONT
 
 
+def _uniform_text_css() -> str:
+    """Uniform card text size on phones/tablets (Settings → Appearance → Text)."""
+    try:
+        c = _cfg()
+        if not c.get("uniform_text", False):
+            return ""
+        from ..user.css import uniform_text_css
+        return uniform_text_css((".mobile", ".iphone", ".ipad", ".android"),
+                                c.get("uniform_text_px_mobile", 20))
+    except Exception:
+        return ""
+
+
 def _black_text_css() -> str:
     try:
         from ..user.css import black_text_css
@@ -196,6 +209,7 @@ def _css_block() -> str:
         # Hard-coded black text (e.g. <font color="#000000"> in pasted KCOM cards) was
         # invisible on the black mobile card → use the card's white text instead.
         + _black_text_css() + "\n"
+        + _uniform_text_css() + "\n"
         # Cloze deletions (incl. the hidden [...] preview) in light blue, not green.
         ".mobile .cloze,.iphone .cloze,.ipad .cloze,.android .cloze{color:#6db3ff !important;}\n"
         # AnKing: hide the broken hyperlink watermark photo (#pic / _AnKingRound.png).

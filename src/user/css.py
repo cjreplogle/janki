@@ -374,6 +374,23 @@ def _qbank_fit_js(dbg=False):
     )
 
 
+def uniform_text_css(scopes=("",), px: int = 24) -> str:
+    """Same base text size on every note type: the card is set to `px`, and sizes that a
+    note type's STYLESHEET puts on the card's containers are neutralised. Kept on purpose:
+    emphasis typed into the card itself (inline font-size / <font size> / <big>/<small>),
+    headings, sub/superscript, and Janki's own UI inside the card (practice choices, the
+    reword button…). Relative sizes inside those keep scaling from the new base."""
+    px = max(10, min(60, int(px)))
+    keep = (':not([style*="font-size"]):not(font[size]):not(big):not(small):not(sub):not(sup)'
+            ':not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(kbd)'
+            ':not([class*="jp-"]):not([id^="jp-"]):not([id^="jk"]):not([class*="jk"])')
+    base = ",".join(("%s " % sc if sc else "") + x for sc in scopes
+                    for x in ("html body.card", ".card", "#qa"))
+    kids = ",".join(("%s " % sc if sc else "") + "#qa *" + keep for sc in scopes)
+    return (base + "{font-size:%dpx !important;}" % px
+            + kids + "{font-size:inherit !important;}")
+
+
 def black_text_css(scopes=("",)) -> str:
     """CSS that makes HARD-CODED black text (e.g. <font color="#000000"> pasted into KCOM /
     Cloze+ cards, or inline color:black) use the card's normal text colour instead — on a
@@ -686,6 +703,10 @@ def _build_css(cfg, context):
             "html .night_mode .card *, html .nightMode.card * {\n"
             "  background: transparent !important;\n"
             "  background-color: transparent !important;\n}\n</style>\n")
+        # Uniform text size across note types (Settings → Appearance → Text).
+        if cfg.get("uniform_text", False):
+            parts.append("<style>\n" + uniform_text_css(("",), cfg.get("uniform_text_px", 24))
+                         + "\n</style>\n")
         # Hard-coded black text → the card's (white) text colour from the FIRST frame, so it
         # doesn't flash black before the contrast script repaints it. Dark tint only.
         try:
