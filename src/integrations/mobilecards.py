@@ -389,6 +389,10 @@ _TPL_BLOCK = (
     "    if(t==='U'||t==='INS') return true;\n"
     "    if(p.style&&(p.style.textDecoration||'').indexOf('underline')>=0) return true;\n"
     "    p=p.parentNode; } return false; }\n"
+    # Janki Practice cards never type out: like desktop, the stem fades in, the choices
+    # fade in one by one and the explanation slides up (all practice CSS). Typing would
+    # also replay the whole question on the back ({{FrontSide}}, no <hr id=answer>).
+    "  if(qa.querySelector('.jp-answered,#jp-choices')) return;\n"
     "  var w=document.createTreeWalker(qa,NodeFilter.SHOW_TEXT,null),nodes=[],n;\n"
     "  while(n=w.nextNode()){ var p=n.parentNode,t=(p.tagName||'').toUpperCase();\n"
     "    if(t==='SCRIPT'||t==='STYLE'||t==='TEMPLATE') continue;\n"
@@ -630,6 +634,43 @@ def refresh_quiet() -> int:
             n += 1
     except Exception as exc:
         log("mobilecards refresh: %s" % exc)
+    return n
+
+
+def refresh_if_stale() -> int:
+    """Launch-time: re-stamp the mobile CSS + template blocks on note types that already
+    carry them, saving ONLY the ones whose block is out of date (so fixes to the card
+    script reach the phone after an add-on update, without touching every note type on
+    every launch). Never themes new note types. Returns note types updated."""
+    if mw is None or mw.col is None or not is_applied():
+        return 0
+    n = 0
+    css_blk, blk = _css_block(), _tpl_block()
+    try:
+        for m in mw.col.models.all():
+            changed = False
+            css = m.get("css", "") or ""
+            if _CSS_START in css:
+                new = _stripped(css, _CSS_START, _CSS_END).rstrip() + "\n\n" + css_blk + "\n"
+                if new != css:
+                    m["css"] = new
+                    changed = True
+            for t in m["tmpls"]:
+                for k in ("qfmt", "afmt"):
+                    cur = t.get(k, "") or ""
+                    if _TPL_START in cur:
+                        new = _stripped(cur, _TPL_START, _TPL_END).rstrip() + "\n" + blk + "\n"
+                        if new != cur:
+                            t[k] = new
+                            changed = True
+            if changed:
+                try:
+                    mw.col.models.update_dict(m)
+                except Exception:
+                    mw.col.models.save(m)
+                n += 1
+    except Exception as exc:
+        log("mobilecards stale refresh: %s" % exc)
     return n
 
 

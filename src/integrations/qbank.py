@@ -3513,22 +3513,13 @@ _JP_TINT_JS = (
 # little for readability (short A/B/C/D answers look cramped at the base size on a
 # phone). Guarded so it never wraps: if the larger size pushes any choice onto a
 # second line, it reverts. Desktop (add-on sets jankiPracticeAutoFlip) is untouched.
+# Choices keep ONE size on both sides. (The old mobile "bump single-line choices up"
+# re-measured on the back, where the collapsed choices changed the result, so the
+# answers resized as the explanation appeared.) Kept as a function that only clears
+# the class, because existing templates call it.
 _JP_SIZE_JS = (
     "if(!window.jankiSizeChoices){window.jankiSizeChoices=function(){"
-    "if(typeof window.jankiPracticeAutoFlip!=='undefined')return;"       # desktop → skip
-    "var box=document.getElementById('jp-choices');if(!box)return;"
-    "box.classList.remove('jp-big');"
-    "var cs=box.querySelectorAll('.jp-choice');"
-    "var vis=function(el){return el.offsetParent!==null"
-    "&&!el.classList.contains('jp-dropped')&&!el.classList.contains('jp-collapsed');};"
-    "var one=function(el){var st=getComputedStyle(el);var lh=parseFloat(st.lineHeight);"
-    "if(isNaN(lh))lh=parseFloat(st.fontSize)*1.3;"
-    "var pt=parseFloat(st.paddingTop)||0,pb=parseFloat(st.paddingBottom)||0;"
-    "return (el.clientHeight-pt-pb)<=lh*1.6;};"
-    "var any=false,all=true,i;"
-    "for(i=0;i<cs.length;i++){if(!vis(cs[i]))continue;any=true;if(!one(cs[i])){all=false;break;}}"
-    "if(any&&all){box.classList.add('jp-big');"
-    "for(i=0;i<cs.length;i++){if(!vis(cs[i]))continue;if(!one(cs[i])){box.classList.remove('jp-big');break;}}}"
+    "var box=document.getElementById('jp-choices');if(box)box.classList.remove('jp-big');"
     "};}"
 )
 # Correct answer is stored in the editable {{Answer}} field (a letter A–F, or a
@@ -3577,12 +3568,21 @@ _JP_SLIDE_JS = (
     # card/reveal, which let the text flash through between renders). With it, CSS hides
     # the text from the very first paint of any card that has a slide.
     "try{document.documentElement.classList.toggle('jp-slide-mode',!!open);}catch(_){}"
-    "if(!open){if(ov)ov.style.display='none';"
+    # Closing: fade the overlay out (the text is already revealed underneath it), then hide.
+    "if(!open){if(ov&&ov.style.display!=='none'){"
+    "ov.className=ov.className.replace(' jp-anim','')+' jp-closing';"
+    "clearTimeout(ov._jpct);ov._jpct=setTimeout(function(){"
+    "if(!document.documentElement.classList.contains('jp-slide-mode'))ov.style.display='none';"
+    "ov.classList.remove('jp-closing');},160);}"
     "document.body.classList.remove('jp-slide-open');}"        # reveal the card text
     "else{"
-    "var srcs=[];"
-    "if(isBack){if(qi&&qi.src)srcs.push(qi.src);if(ai&&ai.src)srcs.push(ai.src);}"
-    "else{if(qi&&qi.src)srcs.push(qi.src);else if(ai&&ai.src)srcs.push(ai.src);}"
+    # Card with an answer slide → two fixed half-height slots from the FRONT on (the empty
+    # bottom slot is reserved), so the question slide keeps its size and place on reveal and
+    # only the answer slide fades in. #jp-has-ans marks the answer slide on the front.
+    "var two=!!(qi&&(ai||document.getElementById('jp-has-ans')));"
+    "var s0=(qi&&qi.src)?qi.src:((!qi&&ai&&ai.src)?ai.src:'');"
+    "var s1=(two&&isBack&&ai&&ai.src)?ai.src:'';"
+    "var srcs=[];if(s0)srcs.push(s0);if(s1)srcs.push(s1);"
     # Enter slide mode as soon as the card HAS a slide (q||a already checked above) —
     # cover the text with the opaque overlay + hide #qa IMMEDIATELY, even before the
     # image src has resolved. Anki rewrites document.body.className on every card render,
@@ -3591,15 +3591,35 @@ _JP_SLIDE_JS = (
     "if(!ov){ov=document.createElement('div');ov.id='jp-slide-ov';"
     "document.body.appendChild(ov);}"
     "else if(ov.parentNode!==document.body)document.body.appendChild(ov);"
+    "clearTimeout(ov._jpct);"                                  # reopened mid-fade-out
     "var anim=!!window.__jpAnimNext;window.__jpAnimNext=false;"
-    "ov.className='jp-slide-ov'+(srcs.length>1?' jp-two':'')+(anim?' jp-anim':'');"
+    "ov.className='jp-slide-ov'+(two?' jp-two':'')+(anim?' jp-anim':'');"
     "document.body.classList.add('jp-slide-open');"          # hide card text NOW
     "ov.style.display='flex';"
-    # Rebuild only when the set changed, so re-asserting per render doesn't reload imgs.
-    "var key=srcs.join('|');"
-    "if(srcs.length&&ov._jpkey!==key){ov._jpkey=key;ov.innerHTML='';"
-    "srcs.forEach(function(s){var im=document.createElement('img');im.src=s;"
-    "ov.appendChild(im);});}"
+    # One slot per slide. A slot whose image changed (next card) fades the old one out and
+    # the new one in once loaded; an unchanged slot is left alone (no reload, no fade).
+    # The overlay stays opaque, so card text never flashes through between slides.
+    "var n=two?2:1;"
+    "if(ov._jpn!==n){ov.innerHTML='';for(var k=0;k<n;k++){var sd=document.createElement('div');"
+    "sd.className='jp-slot';ov.appendChild(sd);}ov._jpn=n;}"
+    # delay: hold this slot's fade-in so the answer fades in AFTER the question when both
+    # arrive together (a fresh overlay on the back).
+    "var setSlot=function(d,src,delay){if(!d||(d._jpsrc||'')===src)return false;d._jpsrc=src;"
+    "var old=d.querySelector('img');"
+    "var put=function(){if(d._jpsrc!==src)return;d.innerHTML='';if(!src)return;"
+    "var im=document.createElement('img');im.style.opacity='0';"
+    "var shown=false,t0=Date.now();var show=function(){if(shown)return;shown=true;"
+    "var w=Math.max(0,(delay||0)-(Date.now()-t0));"
+    "setTimeout(function(){im.style.opacity='';},w);};"
+    "im.onload=show;im.onerror=show;setTimeout(show,400);im.src=src;d.appendChild(im);"
+    # Commit opacity 0 now: a cached image can load before the next frame, and without
+    # this the browser never sees the 0 and the fade is skipped.
+    "try{getComputedStyle(im).opacity;}catch(_){}};"
+    "clearTimeout(d._jpft);"
+    "if(old&&!anim){old.classList.add('jp-out');d._jpft=setTimeout(put,120);}else put();"
+    "return true;};"
+    "var q0=s0?setSlot(ov.children[0],s0,0):false;"
+    "if(n>1)setSlot(ov.children[1],s1,q0?220:0);"
     # Replay the fade/slide-up in (same jpSlideUp the answer slides + photos use) each
     # time it opens — reflow between animation:none and '' restarts the CSS animation.
     "if(anim){ov.style.animation='none';void ov.offsetWidth;ov.style.animation='';}"
@@ -3652,12 +3672,18 @@ _JP_SLIDE_JS = (
     "(document.body&&document.body.className||'')+' '+"
     "(document.documentElement&&document.documentElement.className||''));"
     "if(isMob&&!btn._jpmob){btn._jpmob=true;"
+    # Measure against the button's REAL containing block (top:0 → its viewport y) instead
+    # of assuming document coords: when <body> has a margin/transform, sy+vh overshot the
+    # page end, grew the document, and each scroll re-placed it lower — a page that
+    # opened scrolled down and kept scrolling on short questions.
     "var place=function(){var vv=window.visualViewport;"
     "var vh=vv?vv.height:window.innerHeight;var voff=vv?vv.offsetTop:0;"
-    "var sy=window.pageYOffset||document.documentElement.scrollTop||0;"
     "btn.style.position='absolute';btn.style.bottom='auto';btn.style.left='50%';"
-    "btn.style.transform='translateX(-50%)';"
-    "btn.style.top=(sy+voff+vh-btn.offsetHeight-6)+'px';};"
+    "btn.style.transform='translateX(-50%)';btn.style.top='0px';"
+    "var r=btn.getBoundingClientRect();"
+    "var s=(btn.offsetHeight&&r.height)?r.height/btn.offsetHeight:1;"
+    "var t=(voff+vh-r.height-18-r.top)/(s||1);"
+    "btn.style.top=Math.max(0,t)+'px';};"
     "btn._jpplace=place;"
     "window.addEventListener('scroll',place,{passive:true});"
     "window.addEventListener('resize',place);"
@@ -3687,6 +3713,10 @@ _FRONT_JS = (
     "var box=document.getElementById('jp-choices');if(!box)return;"
     + _JP_ANSWER_JS + "window.jankiMarkCorrect();"
     + _JP_SLIDE_JS + "window.jankiSlideInit();"
+    # Mobile: a new question starts at the top (AnkiMobile can carry the previous
+    # card's scroll offset into the next render).
+    "try{if(/(mobile|iphone|ipad|ipod|android)/i.test(document.body.className+' '+"
+    "document.documentElement.className))window.scrollTo(0,0);}catch(_){}"
     # Tint a choice box via INLINE styles (not just a class) so the fill shows even
     # when an older/stale note-type CSS is deployed — inline beats a non-!important
     # stylesheet rule, so the box always colours in step with the whole-card tint.
@@ -3977,6 +4007,9 @@ _FRONT_TMPL = ('<div class="jp-stem">{{Question}}</div>\n'
                # screen bottom, incl. AnkiMobile). Only when a slide exists ({{#Slide}}).
                '{{#Slide}}<div class="jp-slide" id="jp-slide" style="display:none">'
                '{{Slide}}</div>{{/Slide}}\n'
+               # Marks "this card has an answer slide" on the FRONT, so slide mode reserves
+               # the answer's half of the screen before the reveal.
+               '{{#AnsSlide}}<i id="jp-has-ans" style="display:none"></i>{{/AnsSlide}}\n'
                '<script>' + _FRONT_JS + '</script>')
 _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
               '{{#Explanation}}<div class="jp-explain">'
@@ -4126,10 +4159,29 @@ _CARD_CSS = (
     # Phones/tablets: the card is pure OLED black, so the overlay must be too (the desktop
     # #1c1d21 read as a grey panel there).
     ".mobile #jp-slide-ov,.iphone #jp-slide-ov,.ipad #jp-slide-ov,.android #jp-slide-ov"
-    "{background:#000!important;}"
-    "#jp-slide-ov img{display:block;max-width:100%;max-height:100%;width:auto;"
-    "height:auto;object-fit:contain;border-radius:6px;}"
-    "#jp-slide-ov.jp-two img{max-height:calc(50% - 8px);}"
+    "{background:#000!important;justify-content:flex-start!important;"
+    "padding-top:max(12px,env(safe-area-inset-top,0px))!important;}"
+    # Slots: one fills the overlay; two split it into fixed halves (the answer's half is
+    # reserved on the front too), so neither slide resizes or moves on reveal. The image
+    # is absolutely fitted inside its slot, which is centred on desktop and top-aligned on phones.
+    "#jp-slide-ov .jp-slot{position:relative;flex:1 1 0;min-height:0;width:100%;}"
+    "#jp-slide-ov img{position:absolute;top:0;right:0;bottom:0;left:0;margin:auto;"
+    "display:block;max-width:100%;max-height:100%;width:auto;height:auto;"
+    "object-fit:contain;border-radius:6px;}"
+    ".mobile #jp-slide-ov img,.iphone #jp-slide-ov img,.ipad #jp-slide-ov img,"
+    ".android #jp-slide-ov img{margin:0 auto auto;}"
+    # Two slides: the question slide sits at the top, capped at half the screen by
+    # viewport units only (so its size never changes on reveal). Its slot hugs it, and
+    # the answer slide sits directly below in the remaining space, not centred in a half
+    # of its own. 42px = the overlay's 2x16px padding + 10px gap.
+    "#jp-slide-ov.jp-two .jp-slot:first-child{flex:0 0 auto;}"
+    "#jp-slide-ov.jp-two .jp-slot:first-child img{position:static;margin:0 auto;"
+    "max-height:calc((100vh - 42px) / 2);max-height:calc((100dvh - 42px) / 2);}"
+    "#jp-slide-ov.jp-two .jp-slot:last-child img{margin:0 auto auto;}"
+    # Quick fades: images in/out between slides, the whole overlay out on close.
+    "#jp-slide-ov img{transition:opacity .18s ease-out;}"
+    "#jp-slide-ov img.jp-out{opacity:0!important;transition-duration:.12s;}"
+    "#jp-slide-ov.jp-closing{opacity:0;transition:opacity .16s ease-out;}"
     # While the overlay is open, hide the card text behind it (the overlay lives on
     # <body>, so hiding #qa is safe and guarantees nothing bleeds through).
     "body.jp-slide-open #qa{visibility:hidden!important;}"
@@ -4156,8 +4208,15 @@ _CARD_CSS = (
     ".jp-slide-btn:hover{opacity:1;color:#fff;}"
     ".mobile .jp-slide-btn,.iphone .jp-slide-btn,.ipad .jp-slide-btn,"
     ".android .jp-slide-btn{left:50%;right:auto;"
-    "bottom:calc(env(safe-area-inset-bottom, 0px));"
+    "bottom:calc(env(safe-area-inset-bottom, 0px) + 12px);"
     "transform:translateX(-50%);font-size:13px;padding:5px 12px;}"
+    # Phones: the mobile theme (mobilecards) vertically centres every card (#qa margin
+    # auto inside a full-height body). A practice question should start at the TOP. Only
+    # #qa's margins change: the body keeps its full height, because the theme sets
+    # overflow:hidden on a card that fits, and a shorter body clipped the
+    # bottom-pinned "Show original slide" button. Practice note type only.
+    "html:is(.mobile,.iphone,.ios,.ipad,.android) body #qa"
+    "{margin-top:0!important;margin-bottom:0!important;}"
     ".jp-slide img{display:block;max-width:100%;max-height:80vh;height:auto;"
     "width:auto;margin:0 auto;border-radius:8px;}"
     # Answer/explanation slide shown on the back.

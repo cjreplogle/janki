@@ -302,6 +302,10 @@ def _startup():
             except Exception as _qb_exc:
                 log("practice model sync: %s" % _qb_exc)
             try:
+                mobilecards.refresh_if_stale()   # push card-script fixes to mobile themes
+            except Exception as _mc_exc:
+                log("mobile theme refresh: %s" % _mc_exc)
+            try:
                 qbank.install_bank_sync()   # deleting a bank's cards removes the bank
             except Exception as _bs_exc:
                 log("bank sync install: %s" % _bs_exc)
