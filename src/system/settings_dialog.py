@@ -1,5 +1,6 @@
 """The GlassSettings dialog and its opener."""
 
+import os
 import re
 import sys
 from aqt import mw
@@ -1959,6 +1960,79 @@ class GlassSettings(QDialog):
             except Exception:
                 pass
 
+    def _install_rp_drop(self, report) -> None:
+        """Drag a .rp (or .json/.txt/.rtf/.md) file anywhere onto the Rephrase tab to import
+        it — same importer + report as the Import button. A glass drop highlight shows while
+        a file is dragged over."""
+        from aqt.qt import QObject, QEvent, QLabel, Qt
+        from aqt.utils import tooltip
+        target = getattr(self, "_rw_tabs", None)
+        if target is None:
+            return
+        exts = (".rp", ".json", ".txt", ".rtf", ".md")
+        try:
+            light = glass._tint_is_light()
+        except Exception:
+            light = False
+        ink = "0,0,0" if light else "255,255,255"
+        overlay = QLabel("Drop to import rephrasings", target)
+        overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.setStyleSheet(
+            "QLabel { background: rgba(%(i)s,0.08); border: 2px dashed rgba(%(i)s,0.45);"
+            " border-radius: 12px; color: rgba(%(i)s,0.85); font-size: 15px; }" % {"i": ink})
+        overlay.hide()
+
+        def _paths(ev):
+            md = ev.mimeData()
+            if md is None or not md.hasUrls():
+                return []
+            return [u.toLocalFile() for u in md.urls()
+                    if u.isLocalFile() and u.toLocalFile().lower().endswith(exts)]
+
+        class _Drop(QObject):
+            def eventFilter(self_, obj, ev):
+                t = ev.type()
+                if t in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                    if _paths(ev):
+                        ev.acceptProposedAction()
+                        if not overlay.isVisible():
+                            overlay.setGeometry(target.rect().adjusted(4, 4, -4, -4))
+                            overlay.raise_()
+                            overlay.show()
+                        return True
+                elif t == QEvent.Type.DragLeave:
+                    overlay.hide()
+                elif t == QEvent.Type.Drop:
+                    overlay.hide()
+                    paths = _paths(ev)
+                    if not paths:
+                        return False
+                    ev.acceptProposedAction()
+                    try:
+                        target.setCurrentIndex(0)          # show the Import subtab
+                    except Exception:
+                        pass
+                    tot_imp, tot_skip, reasons = 0, 0, {}
+                    for pth in paths:
+                        try:
+                            imp, skip, rs = reword.import_rp(pth)
+                        except Exception as exc:
+                            tooltip("Import failed (%s): %s" % (os.path.basename(pth), exc))
+                            continue
+                        tot_imp += imp
+                        tot_skip += skip
+                        for k, v in (rs or {}).items():
+                            reasons[k] = reasons.get(k, 0) + v
+                    if tot_imp or tot_skip:
+                        report(tot_imp, tot_skip, reasons)
+                    return True
+                return False
+
+        target.setAcceptDrops(True)
+        self._rp_drop_filter = _Drop(self)
+        target.installEventFilter(self._rp_drop_filter)
+
     def _build_reword_tab(self, imp_lay, mob_lay, exp_lay):
         """Rephrase: show cards phrased differently (same card/scheduler data-space) so you
         learn content, not exact words. Split across Import / Mobile / Experimental subtabs."""
@@ -2046,7 +2120,9 @@ class GlassSettings(QDialog):
             except Exception as e:
                 tooltip("Import failed: %s" % e)
         btn_import.clicked.connect(lambda: _rw_import())
+        btn_import.setToolTip("Pick a .rp file — or just drag one onto this tab.")
         import_row.addWidget(btn_import, 1)
+        self._install_rp_drop(_rw_import_report)
 
         btn_import_clip = QPushButton("Import from clipboard")
 

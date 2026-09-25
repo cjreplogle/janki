@@ -1515,7 +1515,8 @@ class _GlassOnShow(QObject):
     drops it in (it starts at opacity 0 — see _smooth_progress_dialog)."""
 
     def eventFilter(self, obj, ev):
-        if ev.type() == QEvent.Type.Show:
+        t = ev.type()
+        if t == QEvent.Type.Show:
             def _go(w=obj):
                 try:
                     if w.isVisible():
@@ -1524,8 +1525,41 @@ class _GlassOnShow(QObject):
                 except Exception:
                     pass
             QTimer.singleShot(0, _go)
+            if getattr(obj, "_jk_center", False):
+                _center_window(obj)
             _fade_window(obj, 0.0, 1.0, 200, drop=8)
+        elif t == QEvent.Type.Resize and getattr(obj, "_jk_center", False):
+            # The progress window grows/shrinks as its label changes; Qt keeps the top-left
+            # fixed, so it drifts off center — re-center (not mid drop-in animation).
+            anim = getattr(obj, "_jk_fade_anim", None)
+            try:
+                running = anim is not None and anim.state() == anim.State.Running
+            except Exception:
+                running = False
+            if not running and obj.isVisible():
+                _center_window(obj, adjust=False)
         return False
+
+
+def _center_window(w, adjust: bool = True) -> None:
+    """Center a top-level window over the main window — or over the screen when the main
+    window isn't up yet (first launch: Qt centers on the not-yet-shown/sized main window,
+    so the startup progress window landed off center)."""
+    try:
+        from aqt.qt import QApplication
+        if adjust:
+            w.adjustSize()
+        size = w.frameGeometry().size() if w.isVisible() else w.sizeHint()
+        area = None
+        if mw is not None and mw.isVisible() and not mw.isMinimized():
+            area = mw.frameGeometry()
+        if area is None or area.width() < 200:
+            scr = (mw.screen() if mw is not None else None) or QApplication.primaryScreen()
+            area = scr.availableGeometry()
+        c = area.center()
+        w.move(c.x() - size.width() // 2, c.y() - size.height() // 2)
+    except Exception:
+        pass
 
 
 def _fade_window(w, frm, to, ms, drop=0, then=None):
@@ -1667,6 +1701,7 @@ def install_anki_dialog_glass() -> None:
                 # opacity 0, so it must never be left without the handler that shows it.
                 if _glass_on_show is None:
                     _glass_on_show = _GlassOnShow()
+                self._jk_center = True             # keep it centered (see _GlassOnShow)
                 self.installEventFilter(_glass_on_show)
                 _smooth_progress_dialog(self)
             except Exception as exc:

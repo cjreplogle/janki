@@ -61,6 +61,14 @@ def current_font() -> str:
     return lbl if lbl in FONTS else DEFAULT_FONT
 
 
+def _black_text_css() -> str:
+    try:
+        from ..user.css import black_text_css
+        return black_text_css((".mobile", ".iphone", ".ipad", ".android"))
+    except Exception:
+        return ""
+
+
 def _font_stack() -> str:
     return FONTS.get(current_font(), FONTS[DEFAULT_FONT])
 
@@ -185,6 +193,9 @@ def _css_block() -> str:
         "}\n"
         ".mobile .card a,.card.mobile a,.iphone .card a,.card.iphone a,"
         ".ipad .card a,.card.ipad a,.android .card a,.card.android a{color:#6db3ff !important;}\n"
+        # Hard-coded black text (e.g. <font color="#000000"> in pasted KCOM cards) was
+        # invisible on the black mobile card → use the card's white text instead.
+        + _black_text_css() + "\n"
         # Cloze deletions (incl. the hidden [...] preview) in light blue, not green.
         ".mobile .cloze,.iphone .cloze,.ipad .cloze,.android .cloze{color:#6db3ff !important;}\n"
         # AnKing: hide the broken hyperlink watermark photo (#pic / _AnKingRound.png).
@@ -243,15 +254,18 @@ _TPL_BLOCK = (
     # IO cards have no <hr id=answer> marker, so front/back can't be told apart —
     # give them the edge-glow directly (detected via IO's container elements).
     "    window.__jkIsIO=function(){ try{ return !!document.querySelector('[id^=\"io-\"],#io-overlay,#io-wrapper,[class*=occlus]'); }catch(e){ return false; } };\n"
+    # Taps on Janki's own card buttons (Original/Reworded toggle, Practice slide button)
+    # are button presses, not grade/reveal taps — no flare for those.
+    "    window.__jkOnBtn=function(ev){ try{ var t=ev.target; return !!(t&&t.closest&&t.closest('#jkrw-btn,.jkrw-floating,.jp-slide-btn')); }catch(e){ return false; } };\n"
     "    window.__jkH={\n"
     # Draw the flare IMMEDIATELY on touchstart (visible before the card advances). If
     # the touch becomes a scroll, remove it. Nothing has to survive the card change.
-    "      ts:function(ev){ try{ var t=ev.touches&&ev.touches[0]; if(!t)return; window.__jkMoved=false; window.__jkSX=t.clientX; window.__jkSY=t.clientY;\n"
+    "      ts:function(ev){ try{ if(window.__jkOnBtn(ev))return; var t=ev.touches&&ev.touches[0]; if(!t)return; window.__jkMoved=false; window.__jkSX=t.clientX; window.__jkSY=t.clientY;\n"
     "          window.__jkFlareDraw({x:t.clientX,y:t.clientY,wasBack:!!document.getElementById('answer')}); }catch(e){} },\n"
     "      tm:function(ev){ try{ var t=ev.touches&&ev.touches[0]; if(!t)return; if(!window.__jkMoved&&(Math.abs(t.clientX-window.__jkSX)>12||Math.abs(t.clientY-window.__jkSY)>12)){ window.__jkMoved=true; var el=window.__jkEl; if(el&&el.parentNode) el.parentNode.removeChild(el); } }catch(e){} },\n"
     # Pointer events as a fallback trigger: they often still fire when an overlay (e.g.
     # Image Occlusion) swallows the touch events. Deduped against touch via __jkLast.
-    "      pd:function(ev){ try{ window.__jkMoved=false; window.__jkSX=ev.clientX; window.__jkSY=ev.clientY; window.__jkFlareDraw({x:ev.clientX,y:ev.clientY,wasBack:!!document.getElementById('answer')}); }catch(e){} },\n"
+    "      pd:function(ev){ try{ if(window.__jkOnBtn(ev))return; window.__jkMoved=false; window.__jkSX=ev.clientX; window.__jkSY=ev.clientY; window.__jkFlareDraw({x:ev.clientX,y:ev.clientY,wasBack:!!document.getElementById('answer')}); }catch(e){} },\n"
     "      pm:function(ev){ try{ if(!window.__jkMoved&&(Math.abs(ev.clientX-window.__jkSX)>12||Math.abs(ev.clientY-window.__jkSY)>12)){ window.__jkMoved=true; var el=window.__jkEl; if(el&&el.parentNode) el.parentNode.removeChild(el); } }catch(e){} }\n"
     "    };\n"
     # Draw: neutral/subtle for a reveal (front->back); grade-coloured for a grade
@@ -347,6 +361,13 @@ _TPL_BLOCK = (
     "  })(); }catch(e){}\n"
     "  var SPEED=1.25;                                         // higher = faster\n"
     "  var marker=document.getElementById('answer');\n"
+    # Answer side WITHOUT an <hr id=answer> (cloze back templates like {{cloze:Text}}<br>
+    # {{Extra}}): recognised by a revealed cloze (text that isn't a [...]/[hint] blank) or
+    # the reword block's back marker. Only the revealed cloze answers type in then — the
+    # rest was already read on the front, so the whole card no longer replays.
+    "  var backNoHr=false; if(!marker){ var czs=qa.querySelectorAll('.cloze');\n"
+    "    for(var ci=0;ci<czs.length;ci++){ if(!/^\\s*\\[[^\\]]*\\]\\s*$/.test(czs[ci].textContent||'')){ backNoHr=true; break; } }\n"
+    "    if(document.querySelector('#jkrw-b64[data-side=\"a\"]')) backNoHr=true; }\n"
     # Underlined text is revealed as one whole span (below), not char-split: on
     # desktop glass, fragmenting a <u> into many inline boxes triggers a ~150ms
     # underline recompute. Mirrored here for consistency (cheap either way).
@@ -356,9 +377,14 @@ _TPL_BLOCK = (
     "    p=p.parentNode; } return false; }\n"
     "  var w=document.createTreeWalker(qa,NodeFilter.SHOW_TEXT,null),nodes=[],n;\n"
     "  while(n=w.nextNode()){ var p=n.parentNode,t=(p.tagName||'').toUpperCase();\n"
-    "    if(t==='SCRIPT'||t==='STYLE') continue;\n"
+    "    if(t==='SCRIPT'||t==='STYLE'||t==='TEMPLATE') continue;\n"
     "    if(!n.nodeValue||!n.nodeValue.trim()) continue;\n"
+    # Never type out Janki's reword UI (the Original/Reworded label must show at once) or
+    # hidden content — e.g. the reword data field, thousands of characters that were being
+    # split letter by letter, slowing the whole reveal.
+    "    if(p.closest&&p.closest('#jkrw-b64,#jkrw-btn,.jkrw-floating,[hidden]')) continue;\n"
     "    if(marker && !(marker.compareDocumentPosition(n)&4)) continue;  // back: only after <hr id=answer>\n"
+    "    if(backNoHr && !(p.closest&&p.closest('.cloze'))) continue;       // back w/o marker: cloze answers only\n"
     "    nodes.push([n,n.nodeValue,jkUL(n)]); }\n"
     "  var holders=[],spans=[];\n"
     "  nodes.forEach(function(e){ var h=document.createElement('span');\n"
@@ -486,32 +512,7 @@ def apply_all() -> None:
     n_types = n_tmpls = 0
     try:
         for m in mw.col.models.all():
-            mid = str(m["id"])
-            # Back up the ORIGINAL (our fenced block stripped), once per note type.
-            if mid not in backup:
-                backup[mid] = {
-                    "name": m.get("name", ""),
-                    "css": _stripped(m.get("css", ""), _CSS_START, _CSS_END),
-                    "tmpls": {
-                        str(t["ord"]): {
-                            "qfmt": _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END),
-                            "afmt": _stripped(t.get("afmt", ""), _TPL_START, _TPL_END),
-                        } for t in m["tmpls"]
-                    },
-                }
-            m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
-                + "\n\n" + _css_block() + "\n"
-            blk = _tpl_block()
-            for t in m["tmpls"]:
-                qf = _strip_anking_decorations(_stripped(t.get("qfmt", ""), _TPL_START, _TPL_END))
-                af = _strip_anking_decorations(_stripped(t.get("afmt", ""), _TPL_START, _TPL_END))
-                t["qfmt"] = qf.rstrip() + "\n" + blk + "\n"
-                t["afmt"] = af.rstrip() + "\n" + blk + "\n"
-                n_tmpls += 1
-            try:
-                mw.col.models.update_dict(m)
-            except Exception:
-                mw.col.models.save(m)
+            n_tmpls += _theme_model(m, backup)
             n_types += 1
         _save_backup(backup)
         mw.reset()
@@ -520,6 +521,64 @@ def apply_all() -> None:
         showInfo("Janki: couldn't apply mobile styling (%s)." % exc,
                  title="Janki: Mobile cards")
         return
+    _apply_all_done(n_types, n_tmpls)
+
+
+def _theme_model(m, backup) -> int:
+    """Add the mobile styling to one note type (backing up its original first). Returns
+    the number of templates stamped."""
+    n_tmpls = 0
+    mid = str(m["id"])
+    # Back up the ORIGINAL (our fenced block stripped), once per note type.
+    if mid not in backup:
+        backup[mid] = {
+            "name": m.get("name", ""),
+            "css": _stripped(m.get("css", ""), _CSS_START, _CSS_END),
+            "tmpls": {
+                str(t["ord"]): {
+                    "qfmt": _stripped(t.get("qfmt", ""), _TPL_START, _TPL_END),
+                    "afmt": _stripped(t.get("afmt", ""), _TPL_START, _TPL_END),
+                } for t in m["tmpls"]
+            },
+        }
+    m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
+        + "\n\n" + _css_block() + "\n"
+    blk = _tpl_block()
+    for t in m["tmpls"]:
+        qf = _strip_anking_decorations(_stripped(t.get("qfmt", ""), _TPL_START, _TPL_END))
+        af = _strip_anking_decorations(_stripped(t.get("afmt", ""), _TPL_START, _TPL_END))
+        t["qfmt"] = qf.rstrip() + "\n" + blk + "\n"
+        t["afmt"] = af.rstrip() + "\n" + blk + "\n"
+        n_tmpls += 1
+    try:
+        mw.col.models.update_dict(m)
+    except Exception:
+        mw.col.models.save(m)
+    return n_tmpls
+
+
+def theme_missing() -> int:
+    """Theme note types that don't carry the mobile styling yet (e.g. created or imported
+    after "Apply UI theming" was run) — silently, only when theming is already applied.
+    Returns how many note types were added."""
+    if mw is None or mw.col is None or not is_applied():
+        return 0
+    backup = _load_backup()
+    n = 0
+    try:
+        for m in mw.col.models.all():
+            if _CSS_START in (m.get("css", "") or ""):
+                continue
+            _theme_model(m, backup)
+            n += 1
+        if n:
+            _save_backup(backup)
+    except Exception as exc:
+        log("mobilecards theme_missing: %s" % exc)
+    return n
+
+
+def _apply_all_done(n_types, n_tmpls):
     showInfo(
         "Applied mobile styling to %d note types (%d templates).\n\n"
         "Syncing now to push it to your iPad (set AnkiMobile to a Dark theme for the "
@@ -529,6 +588,35 @@ def apply_all() -> None:
         title="Janki: Mobile cards",
     )
     _sync_now()
+
+
+def refresh_quiet() -> int:
+    """Bring the mobile styling up to date without prompts, reset or sync: theme note types
+    that lack it, and re-stamp the CSS + template blocks on the rest (picks up fixes such as
+    the black-text rule). No-op if theming isn't applied. Returns note types touched."""
+    if mw is None or mw.col is None or not is_applied():
+        return 0
+    n = theme_missing()
+    try:
+        for m in mw.col.models.all():
+            if _CSS_START not in (m.get("css", "") or ""):
+                continue
+            m["css"] = _stripped(m.get("css", ""), _CSS_START, _CSS_END).rstrip() \
+                + "\n\n" + _css_block() + "\n"
+            blk = _tpl_block()
+            for t in m["tmpls"]:
+                for k in ("qfmt", "afmt"):
+                    if _TPL_START in (t.get(k, "") or ""):
+                        t[k] = _stripped(t.get(k, ""), _TPL_START, _TPL_END).rstrip() \
+                            + "\n" + blk + "\n"
+            try:
+                mw.col.models.update_dict(m)
+            except Exception:
+                mw.col.models.save(m)
+            n += 1
+    except Exception as exc:
+        log("mobilecards refresh: %s" % exc)
+    return n
 
 
 def restyle_font() -> None:
@@ -555,6 +643,12 @@ def restyle_font() -> None:
             _sync_now()
     except Exception as exc:
         log("mobilecards restyle: %s" % exc)
+    try:                                   # the reword block embeds the font too
+        from ..features import reword_mobile
+        if reword_mobile.is_applied():
+            reword_mobile.restamp_templates()
+    except Exception as exc:
+        log("mobile font → reword restamp: %s" % exc)
 
 
 def restamp_templates() -> None:

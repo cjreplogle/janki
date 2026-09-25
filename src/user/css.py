@@ -374,6 +374,20 @@ def _qbank_fit_js(dbg=False):
     )
 
 
+def black_text_css(scopes=("",)) -> str:
+    """CSS that makes HARD-CODED black text (e.g. <font color="#000000"> pasted into KCOM /
+    Cloze+ cards, or inline color:black) use the card's normal text colour instead — on a
+    dark card it was invisible (mobile) or flashed black until a script repainted it
+    (desktop). Only exact black is touched; real colours are left alone."""
+    sels = ['font[color="#000000" i]', 'font[color="#000" i]', 'font[color="black" i]',
+            '[style*="color: rgb(0, 0, 0)"]', '[style*="color:rgb(0,0,0)"]',
+            '[style*="color: #000000" i]', '[style*="color:#000000" i]',
+            '[style*="color: #000;" i]', '[style*="color:#000;" i]',
+            '[style*="color: black" i]', '[style*="color:black" i]']
+    full = ",".join((sc + " " if sc else "") + x for sc in scopes for x in sels)
+    return full + "{color:inherit !important;}"
+
+
 def _build_css(cfg, context):
     if not GLASS or not cfg.get("enabled", True):
         return ""
@@ -672,6 +686,13 @@ def _build_css(cfg, context):
             "html .night_mode .card *, html .nightMode.card * {\n"
             "  background: transparent !important;\n"
             "  background-color: transparent !important;\n}\n</style>\n")
+        # Hard-coded black text → the card's (white) text colour from the FIRST frame, so it
+        # doesn't flash black before the contrast script repaints it. Dark tint only.
+        try:
+            if not glass._tint_is_light(cfg):
+                parts.append("<style>\n" + black_text_css(("#qa",)) + "\n</style>\n")
+        except Exception:
+            pass
         # Strip the card CONTAINER outline(s). Some note types (AnKing/AnKingMed and
         # bundled templates) border both `.card` and the inner `#qa`, which reads as a
         # "box within a box" on the glass. Scoped to the two containers ONLY (not

@@ -57,7 +57,7 @@ Open **Tools → Janki: Settings → Rephrase**.
    clipboard for those.)
 3. **Import** the result:
    - **Import (.rp)…** — pick a saved file (`.rp`, `.json`, `.txt`, `.rtf`,
-     `.md`). The parser is deliberately forgiving: it handles messy or
+     `.md`), or simply **drag the file onto the Rephrase tab**. The parser is deliberately forgiving: it handles messy or
      plaintext JSON, code fences, prose around the JSON, and even salvages
      malformed output, and it reports how many cards were imported vs. skipped
      (and why).

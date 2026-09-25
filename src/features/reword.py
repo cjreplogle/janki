@@ -47,20 +47,32 @@ def _store_path() -> str:
 # --------------------------------------------------------------------------- store
 # Loaded lazily and cached; written back on every mutation. Small enough to keep in mem.
 _store = None
+_load_failed = False       # the store file exists but couldn't be read → never overwrite it
 
 
 def _load() -> dict:
-    global _store
+    global _store, _load_failed
     if _store is not None:
         return _store
+    path = _store_path()
     try:
-        with open(_store_path(), encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             _store = json.load(f)
         if not isinstance(_store, dict):
-            _store = {}
+            raise ValueError("store is not a JSON object")
+        _load_failed = False
         _sanitize_store(_store)
-    except Exception:
+    except FileNotFoundError:
         _store = {}
+    except Exception as exc:
+        # Unreadable (mid-write, corrupt…). Work from an empty store in memory, but mark it
+        # so _save() will NOT write that empty store over the real file.
+        _store = {}
+        try:
+            _load_failed = os.path.getsize(path) > 2
+        except Exception:
+            _load_failed = True
+        log(f"reword store unreadable ({exc}); saves are blocked until it loads")
     return _store
 
 
@@ -84,16 +96,43 @@ def _sanitize_store(store: dict) -> None:
                 store.pop(key, None)
     if changed:
         try:
-            with open(_store_path(), "w", encoding="utf-8") as f:
+            path = _store_path()
+            shutil.copy2(path, path + ".bak")
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(store, f, ensure_ascii=False)
+            os.replace(tmp, path)
         except Exception:
             pass
 
 
 def _save() -> None:
+    """Write the store safely: never over a file that failed to load, atomically (temp file
+    + replace), keeping the previous version as rewords.json.bak — and a timestamped copy
+    whenever a save would drop more than half of the stored card sides (clears, or anything
+    unexpected), so rephrasings can always be recovered."""
+    data = _load()
+    path = _store_path()
+    if _load_failed:
+        log("reword save skipped: the store file couldn't be read, not overwriting it")
+        return
     try:
-        with open(_store_path(), "w", encoding="utf-8") as f:
-            json.dump(_load(), f, ensure_ascii=False)
+        old_n = None
+        if os.path.exists(path) and os.path.getsize(path) > 2:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    old = json.load(f)
+                old_n = len(old) if isinstance(old, dict) else None
+            except Exception:
+                old_n = None
+            shutil.copy2(path, path + ".bak")
+            if old_n and len(data) < old_n / 2:
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                shutil.copy2(path, path.replace(".json", ".%s.json" % stamp))
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
     except Exception as exc:
         log(f"reword save: {exc}")
 
@@ -267,15 +306,20 @@ def apply(text: str, card, kind) -> str:
         is_html = bool(rec.get("html"))
         imgs = "".join(_IMG_RE.findall(text))
 
+        # The card HTML carries the note type's <style> (e.g. .card{font-size; text-align}).
+        # Swapping in a reword must keep it, or the reworded card loses the note's size and
+        # centering.
+        styles = "".join(re.findall(r"(?is)<style\b.*?</style>", text))
+
         def _disp(varhtml):
             if is_html:
-                return varhtml
+                return styles + varhtml
             # rich variants keep line structure; bold/lists come back from the original
             v = _format_text_variant(varhtml, text, side, note, card.ord, is_cz)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)
-            return pre + v + suf
+            return styles + pre + v + suf
 
         if variant is not None:
             # Auto one-per-view regen only when NOT manually cycling (cycling accumulates
@@ -629,14 +673,18 @@ def _valid_variants(variants, side: str, is_cloze: bool, terms, orig_blanks: int
 
 # --------------------------------------------------------------------------- formatting preservation
 def _preserve_style(original_html: str) -> "tuple[str,str]":
-    """(prefix, suffix) that re-wrap the reworded text in the ORIGINAL's inline SIZE/FONT/
-    ALIGNMENT (font-size / font-family / text-align) so the rephrased card keeps the same
-    size and centering. Deliberately NOT font-weight or color — copying those bolded the
+    """(prefix, suffix) that re-wrap the reworded text in the ORIGINAL's inline SIZE /
+    ALIGNMENT (font-size / text-align) so the rephrased card keeps the same size and
+    centering. Deliberately NOT font-weight or color — copying those bolded the
     whole block and fought the cloze highlight. Template CSS handles the rest (we only swap
     field content). No match → no wrapper (template CSS alignment still applies)."""
+    # Only the card's CONTENT counts — not the note type's <style> block (its .card rule,
+    # e.g. Anki's default font-family: arial, would override Janki's chosen font, which is
+    # what happened on mobile). Font FAMILY is left to Janki's font setting entirely.
+    content = _strip_noncontent(original_html or "")
     props = []
-    for prop in ("font-size", "font-family", "text-align"):
-        m = re.search(prop + r"\s*:\s*([^;\"'>]+)", original_html or "", re.I)
+    for prop in ("font-size", "text-align"):
+        m = re.search(prop + r"\s*:\s*([^;\"'>]+)", content, re.I)
         if m:
             props.append("%s:%s" % (prop, m.group(1).strip()))
     if not props:
@@ -656,43 +704,88 @@ _VOID_TAGS = {"br", "img", "hr", "input", "meta", "link", "wbr", "source", "col"
 _BOLD_WEIGHT_RE = re.compile(r"font-weight\s*:\s*(bold|bolder|[6-9]00)", re.I)
 
 
+_FONT_SIZE_RE = re.compile(r"font-size\s*:\s*([^;\"']+)", re.I)
+_FONT_TAG_SIZES = {"1": "x-small", "2": "small", "3": "medium", "4": "large",
+                   "5": "x-large", "6": "xx-large", "7": "xxx-large"}
+_HEADING_SIZES = {"h1": "2em", "h2": "1.5em", "h3": "1.17em"}
+
+
+def _size_of(tag: str, attrs: dict):
+    """A font size an element sets on its text (inline style, <font size>, <big>,
+    headings) — None if it doesn't change the size."""
+    m = _FONT_SIZE_RE.search(attrs.get("style") or "")
+    if m:
+        return m.group(1).strip()
+    if tag == "font" and attrs.get("size"):
+        return _FONT_TAG_SIZES.get(str(attrs.get("size")).strip().lstrip("+"), None)
+    if tag == "big":
+        return "larger"
+    return _HEADING_SIZES.get(tag)
+
+
 def _line_shells(html: str) -> list:
     """Per visible line of the original (same line split as _rich): {"li", "full_bold",
-    "bold": [bold phrases]}."""
+    "bold": [bold phrases], "size": font size of the whole line or None,
+    "sized": [(phrase, size)]} — so a reword can carry the original's list structure, bold
+    and enlarged key phrases."""
     from html.parser import HTMLParser
     out = []
 
     class P(HTMLParser):
         def __init__(self):
             super().__init__(convert_charrefs=True)
-            self.buf, self.stack, self.bold = [], [], 0
+            self.buf, self.stack = [], []          # buf: "\n" | ("LI", depth, ordered) | chunk
+            self.lists = []                        # open <ul>/<ol> (for nesting + numbering)
+
+        def _bold(self):
+            return any(b for _t, b, _s in self.stack)
+
+        def _size(self):
+            for _t, _b, sz in reversed(self.stack):
+                if sz:
+                    return sz
+            return None
+
+        def _heading(self):
+            for t, _b, _sz in reversed(self.stack):
+                if t in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                    return t
+            return None
 
         def handle_starttag(self, tag, attrs):
+            if tag in ("ul", "ol"):
+                self.lists.append(tag)
             if tag == "li":
-                self.buf.append("\n" + _LI_MARK)
+                self.buf += ["\n", ("LI", max(1, len(self.lists)),
+                                    bool(self.lists) and self.lists[-1] == "ol")]
             elif tag == "br":
-                self.buf.append("\n")
+                self.buf.append("BR")               # a newline that can make a blank line
             if tag in _VOID_TAGS:
                 return
-            style = dict(attrs).get("style") or ""
+            a = dict(attrs)
+            style = a.get("style") or ""
             b = tag in ("b", "strong", "h1", "h2", "h3", "h4", "h5", "h6") \
                 or bool(_BOLD_WEIGHT_RE.search(style))
-            self.stack.append((tag, b))
-            self.bold += b
+            self.stack.append((tag, b, _size_of(tag, a)))
 
         def handle_endtag(self, tag):
             if tag in _BLOCK_END_TAGS:
                 self.buf.append("\n")
+            if tag in ("ul", "ol") and tag in self.lists:
+                del self.lists[len(self.lists) - 1 - self.lists[::-1].index(tag):]
             for i in range(len(self.stack) - 1, -1, -1):
                 if self.stack[i][0] == tag:
-                    for _t, b in self.stack[i:]:
-                        self.bold -= b
                     del self.stack[i:]
                     break
 
         def handle_data(self, data):
-            if data:
-                self.buf.append(_B_ON + data + _B_OFF if self.bold > 0 else data)
+            # Literal newlines in the text split lines too (same as _rich's line split).
+            parts = (data or "").split("\n")
+            for k, part in enumerate(parts):
+                if k:
+                    self.buf.append("\n")
+                if part:
+                    self.buf.append((part, self._bold(), self._size(), self._heading()))
 
     try:
         p = P()
@@ -700,19 +793,67 @@ def _line_shells(html: str) -> list:
         p.close()
     except Exception:
         return out
-    for raw in "".join(p.buf).split("\n"):
-        li = _LI_MARK in raw
-        ln = re.sub(r"[ \t\r\f\v]+", " ", raw.replace(_LI_MARK, "")).strip()
-        ln = re.sub(_B_OFF + r"(\s*)" + _B_ON, r"\1", ln)          # merge adjacent bold runs
-        plain = ln.replace(_B_ON, "").replace(_B_OFF, "").strip()
+    lines, cur = [], {"li": False, "depth": 0, "ol": False, "chunks": [], "br": False}
+    for item in p.buf:
+        if item in ("\n", "BR"):
+            cur["br"] = item == "BR"                # this line was ended by a <br>
+            lines.append(cur)
+            cur = {"li": False, "depth": 0, "ol": False, "chunks": [], "br": False}
+        elif isinstance(item, tuple) and item and item[0] == "LI":
+            cur["li"], cur["depth"], cur["ol"] = True, item[1], item[2]
+        else:
+            cur["chunks"].append(item)
+    lines.append(cur)
+
+    def _runs(chunks, key):
+        """Merge consecutive chunks sharing a (truthy) attribute into phrases."""
+        runs, buf, val = [], [], None
+        for text, b, sz, _h in chunks + [("", None, None, None)]:
+            v = b if key == "b" else sz
+            if text.strip() == "" and buf and text:
+                buf.append(text)                   # whitespace joins a run
+                continue
+            if v and v == val:
+                buf.append(text)
+            else:
+                if val and buf:
+                    runs.append((re.sub(r"\s+", " ", "".join(buf)).strip(), val))
+                buf, val = ([text], v) if v else ([], None)
+        return [(t, v) for t, v in runs if t]
+
+    br_blank = False                             # a <br> made an empty line since the last one
+    for ln in lines:
+        plain = re.sub(r"\s+", " ", "".join(c[0] for c in ln["chunks"])).strip()
         if not plain:
+            br_blank = br_blank or ln["br"]
             continue
-        bold = [re.sub(r"\s+", " ", b).strip()
-                for b in re.findall(_B_ON + "(.*?)" + _B_OFF, ln, re.S)]
-        bold = [b for b in bold if b]
-        out.append({"li": li, "bold": bold,
-                    "full_bold": _norm(" ".join(bold)) == _norm(plain)})
+        gap = bool(out) and br_blank             # the original has a blank line before it
+        br_blank = False
+        bold = [t for t, _v in _runs(ln["chunks"], "b")]
+        sized = _runs(ln["chunks"], "s")
+        vis = [c for c in ln["chunks"] if c[0].strip()]
+        sizes = {c[2] for c in vis}
+        full_size = sizes.pop() if len(sizes) == 1 else None
+        heads = {c[3] for c in vis}
+        heading = heads.pop() if len(heads) == 1 else None
+        out.append({"li": ln["li"], "depth": ln["depth"], "ol": ln["ol"], "gap": gap,
+                    "bold": bold, "full_bold": _norm(" ".join(bold)) == _norm(plain),
+                    "size": full_size, "sized": sized, "heading": heading})
     return out
+
+
+def _css_val(v: str) -> str:
+    """Sanitize a CSS value copied from the card into a style attribute."""
+    return re.sub(r"[^0-9a-zA-Z.%\- ]", "", v or "")[:24]
+
+
+def _wrap_outside_tags(html_s: str, phrase: str, open_t: str, close_t: str) -> str:
+    """Wrap whole-word, case-insensitive occurrences of `phrase` found in the TEXT parts of
+    html_s (never inside a tag's markup)."""
+    pat = re.compile(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", re.I)
+    parts = re.split(r"(<[^>]*>)", html_s)
+    return "".join(p if p.startswith("<") else
+                   pat.sub(lambda m: open_t + m.group(0) + close_t, p) for p in parts)
 
 
 def _bold_phrases(body: str, phrases) -> str:
@@ -731,6 +872,17 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     """Plain reword → HTML carrying the original's list structure and bold (see _line_shells),
     plus Anki's cloze styling."""
     shells = _line_shells(original_html)
+    # Front of a cloze: number the blanks across the WHOLE reword first (lines are handled
+    # one by one below), so each gets the right hint ([increase/decrease]) back.
+    seq = None
+    if is_cz and side == "q":
+        seq = _hint_seq(_cloze_hints(note, ord_), (v or "").count("[...]"))
+        cnt = [0]
+
+        def _tok(_m):
+            cnt[0] += 1
+            return "\x04%d\x05" % (cnt[0] - 1)
+        v = re.sub(r"\[\.\.\.\]", _tok, v or "")
     lines = [ln.strip() for ln in (v or "").split("\n") if ln.strip()]
     li_sh = [sh for sh in shells if sh["li"]]
     tx_sh = [sh for sh in shells if not sh["li"]]
@@ -740,7 +892,22 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     tx_map = len(tx_sh) == len(lines) - n_li
     phrases = sorted({b for sh in shells for b in sh["bold"] if len(_norm(b)) >= 3},
                      key=len, reverse=True)
-    out, in_ul, li_i, tx_i = [], False, 0, 0
+    # Enlarged key phrases / lines. A size shared by EVERY line is card-wide — _preserve_style
+    # already carries that, and re-applying a relative size (1.2em) would compound.
+    line_sizes = {sh["size"] for sh in shells}
+    card_wide = line_sizes.pop() if len(line_sizes) == 1 else None
+    sized = sorted({(t, z) for sh in shells for t, z in sh.get("sized", [])
+                    if z and z != card_wide and len(_norm(t)) >= 3},
+                   key=lambda tz: len(tz[0]), reverse=True)
+    out, li_i, tx_i = [], 0, 0
+    stack, open_li = [], []                     # open list tags / whether each has an open <li>
+
+    def _close_to(depth):
+        while len(stack) > depth:
+            if open_li[-1]:
+                out.append("</li>")
+            open_li.pop()
+            out.append("</%s>" % stack.pop())
     for ln, li in zip(lines, is_li):
         sh = None
         if li:
@@ -750,26 +917,86 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
         else:
             sh = tx_sh[tx_i] if tx_map else None
             tx_i += 1
-        if sh is not None and sh["full_bold"]:
+        heading = sh.get("heading") if (sh is not None and not li) else None
+        if heading:
+            pass                                    # the <hN> itself carries bold + size
+        elif sh is not None and sh["full_bold"]:
             ln = _B_ON + ln + _B_OFF
         elif phrases:
             ln = _bold_phrases(ln, phrases)
         if is_cz:
             ln = _cloze_wrap(ln, side, note, ord_)
         ln = ln.replace(_B_ON, "<b>").replace(_B_OFF, "</b>")
+        if heading:
+            pass
+        elif sh is not None and sh.get("size") and sh["size"] != card_wide:
+            ln = '<span style="font-size:%s">%s</span>' % (_css_val(sh["size"]), ln)
+        elif sized:
+            for t, z in sized:
+                ln = _wrap_outside_tags(ln, t, '<span style="font-size:%s">' % _css_val(z),
+                                        "</span>")
         if li:
-            if not in_ul:
-                out.append("<ul>")
-                in_ul = True
-            out.append("<li>%s</li>" % ln)
+            # Same nesting + list type as the original item (a numbered sub-list stays a
+            # numbered sub-list inside its parent item); unmatched → a top-level bullet.
+            d = max(1, int(sh.get("depth") or 1)) if sh is not None else 1
+            t = "ol" if (sh is not None and sh.get("ol")) else "ul"
+            _close_to(d)
+            if len(stack) == d and stack[-1] != t:
+                _close_to(d - 1)
+            while len(stack) < d:
+                tag = t if len(stack) == d - 1 else "ul"
+                out.append("<%s>" % tag)
+                stack.append(tag)
+                open_li.append(False)
+            if open_li[-1]:
+                out.append("</li>")
+            out.append("<li>%s" % ln)
+            open_li[-1] = True
         else:
-            if in_ul:
-                out.append("</ul>")
-                in_ul = False
-            out.append("<div>%s</div>" % ln)
-    if in_ul:
-        out.append("</ul>")
-    return "".join(out)
+            _close_to(0)
+            if sh is not None and sh.get("gap"):
+                out.append("<br>")                  # the original's blank line
+            out.append("<%s>%s</%s>" % (heading, ln, heading) if heading
+                       else "<div>%s</div>" % ln)
+    _close_to(0)
+    html_out = "".join(out)
+    if seq is not None:
+        import html as _h
+
+        def _blank(m):
+            i = int(m.group(1))
+            h = seq[i] if i < len(seq) else None
+            return '<span class="cloze">[%s]</span>' % (_h.escape(h) if h else "...")
+        html_out = re.sub("\x04(\\d+)\x05", _blank, html_out)
+    return html_out
+
+
+def _cloze_hints(note, ord_) -> list:
+    """Hints for this card's own cloze deletions, in order of appearance ({{c1::increase::
+    increase/decrease}} → "increase/decrease"; None where a deletion has no hint)."""
+    num = int(ord_) + 1
+    out = []
+    try:
+        for fld in note.fields:
+            for m in _CLOZE_RE.finditer(fld or ""):
+                if int(m.group(1)) == num:
+                    h = _plain(m.group(3) or "").strip() if m.group(3) else ""
+                    out.append(h or None)
+    except Exception:
+        pass
+    return out
+
+
+def _hint_seq(hints, n: int) -> list:
+    """Which hint goes in each of a reword's n blanks: one per deletion when the counts
+    match, the shared hint when they're all the same, otherwise none."""
+    if not hints or not any(hints) or n <= 0:
+        return [None] * max(n, 0)
+    if len(hints) == n:
+        return list(hints)
+    if len(set(hints)) == 1:
+        return [hints[0]] * n
+    return [None] * n
 
 
 def _cloze_wrap(variant: str, side: str, note, ord_) -> str:
@@ -778,7 +1005,16 @@ def _cloze_wrap(variant: str, side: str, note, ord_) -> str:
     the answer term case-INSENSITIVELY (the model may re-case it) and wraps every occurrence,
     keeping the text's own casing; longest terms first so overlaps wrap cleanly."""
     if side == "q":
-        return variant.replace("[...]", '<span class="cloze">[...]</span>')
+        # Put the card's own cloze HINTS back ([increase/decrease] instead of [...]) —
+        # rewords store plain [...] blanks.
+        import html as _h
+        parts = variant.split("[...]")
+        seq = _hint_seq(_cloze_hints(note, ord_), len(parts) - 1)
+        out = parts[0]
+        for i, rest in enumerate(parts[1:]):
+            label = _h.escape(seq[i]) if seq[i] else "..."
+            out += '<span class="cloze">[%s]</span>' % label + rest
+        return out
     for t in sorted((t for t in _cloze_terms(note, ord_) if t), key=len, reverse=True):
         variant = re.sub(re.escape(t),
                          lambda m: '<span class="cloze">%s</span>' % m.group(0),
@@ -1210,14 +1446,30 @@ def delete_reword_variant(key: str, variant: str) -> bool:
 
 def view_all_rewords_dialog(on_done=None, parent=None):
     """A scrollable, filterable browser of EVERY stored reword — each card's original text (per
-    side) and its stored rephrasings, each with a delete (✕) button so individual rewords can be
-    removed. Skips stale entries (card edited since stored)."""
+    side) and its stored rephrasings, each with a delete (✕) button.
+
+    Opens instantly: the list is built from the store alone (no card rendering), and card
+    groups are created PAGE BY PAGE (50 at a time, more as you scroll). Only the groups on
+    screen render their card — for the header text and the stale check (a card edited since
+    its reword was stored is labelled; review already ignores such rewords)."""
     from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                        QScrollArea, QWidget, QFrame, Qt)
+                        QScrollArea, QWidget, QFrame, Qt, QTimer)
     store = _load()
+    entries = []                               # (key, variants, search_text_lower)
+    for key in sorted(store.keys()):
+        variants = (store.get(key) or {}).get("variants") or []
+        if variants:
+            entries.append((key, variants, " ".join(variants).lower()))
+    page_size = 50
 
     dlg = QDialog(parent or mw)
     dlg.setWindowTitle("All stored rewords")
+    try:
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        pass
     v = QVBoxLayout(dlg)
     count = QLabel("")
     count.setStyleSheet("color:#9aa0aa;")
@@ -1227,23 +1479,18 @@ def view_all_rewords_dialog(on_done=None, parent=None):
     v.addWidget(filt)
     scroll = QScrollArea(); scroll.setWidgetResizable(True)
     host = QWidget(); hostv = QVBoxLayout(host)
+    hostv.addStretch()
     scroll.setWidget(host)
     v.addWidget(scroll, 1)
 
-    groups = []          # (search_text_lower, group_widget, variant_row_count_getter)
-    cards_seen = set()
+    state = {"match": entries, "shown": 0, "total_v": sum(len(e[1]) for e in entries)}
 
     def _refresh_count():
-        q = filt.text().strip().lower()
-        shown = sum(1 for s, _g, _n in groups if not q or q in s)
-        total_v = sum(_n() for _s, _g, _n in groups)
-        count.setText("%d card-sides shown · %d rewords total" % (shown, total_v))
+        count.setText("%d card-sides%s · %d rewords total"
+                      % (len(state["match"]), " match" if filt.text().strip() else "",
+                         state["total_v"]))
 
-    for key in sorted(store.keys()):
-        rec = store.get(key) or {}
-        variants = rec.get("variants") or []
-        if not variants:
-            continue
+    def _make_group(key, variants):
         try:
             nid, ordn, side = key.split(":")
             card = None
@@ -1252,27 +1499,26 @@ def view_all_rewords_dialog(on_done=None, parent=None):
                     card = cc
                     break
             if card is None:
-                continue
+                return None
+            rec = store.get(key) or {}
             html = card.question() if side == "q" else card.answer()
-            if rec.get("src") != _hash(_plain(html)):
-                continue                           # stale — card changed since stored
+            stale = rec.get("src") != _hash(_plain(html))
             orig = _rich(html)
             is_html = bool(rec.get("html"))
         except Exception:
-            continue
-        cards_seen.add((nid, ordn))
-
+            return None
         group = QFrame()
         group.setFrameShape(QFrame.Shape.StyledPanel)
         gv = QVBoxLayout(group)
-        hdr = QLabel("<b>%s</b> · %s" % ("Q" if side == "q" else "A",
-                                         (orig.replace("\n", " ")[:120] or "(empty)")))
+        hdr = QLabel("<b>%s</b> · %s%s" % (
+            "Q" if side == "q" else "A", (orig.replace("\n", " ")[:120] or "(empty)"),
+            "  <span style='color:#e0a060'>(card edited since — not shown in review)</span>"
+            if stale else ""))
         hdr.setWordWrap(True)
         gv.addWidget(hdr)
         rows_alive = {"n": 0}
 
-        def _add_variant_row(raw, gv=gv, key=key, is_html=is_html, group=group,
-                             rows_alive=rows_alive):
+        def _add_variant_row(raw):
             disp = _rich(raw) if is_html else raw
             row_w = QWidget(); rh = QHBoxLayout(row_w); rh.setContentsMargins(0, 0, 0, 0)
             lab = QLabel(disp.replace("\n", "  ")); lab.setWordWrap(True)
@@ -1285,11 +1531,11 @@ def view_all_rewords_dialog(on_done=None, parent=None):
                             "background:rgba(255,90,90,0.22);color:#e6e6e6;"
                             "font-size:16px;font-weight:bold;}")
 
-            def _del(_=None, raw=raw, key=key, row_w=row_w, group=group,
-                     rows_alive=rows_alive):
+            def _del(_=None, raw=raw, row_w=row_w):
                 if delete_reword_variant(key, raw):
                     row_w.setParent(None); row_w.deleteLater()
                     rows_alive["n"] -= 1
+                    state["total_v"] -= 1
                     if rows_alive["n"] <= 0:       # last one gone → drop the whole card group
                         group.setParent(None); group.deleteLater()
                     _refresh_count()
@@ -1300,22 +1546,48 @@ def view_all_rewords_dialog(on_done=None, parent=None):
 
         for raw in variants:
             _add_variant_row(raw)
-        hostv.addWidget(group)
-        search = (orig + " " + " ".join(variants)).lower()
-        groups.append((search, group, lambda ra=rows_alive: ra["n"]))
+        return group
 
-    hostv.addStretch()
+    def _load_more():
+        start = state["shown"]
+        chunk = state["match"][start:start + page_size]
+        if not chunk:
+            return
+        host.setUpdatesEnabled(False)
+        for key, variants, _s in chunk:
+            g = _make_group(key, variants)
+            if g is not None:
+                hostv.insertWidget(hostv.count() - 1, g)   # before the trailing stretch
+        state["shown"] = start + len(chunk)
+        host.setUpdatesEnabled(True)
+        # If this page didn't fill the view (no scrollbar yet), keep loading.
+        QTimer.singleShot(0, lambda: _on_scroll(scroll.verticalScrollBar().value()))
 
-    def _filter(*_a):
-        q = filt.text().strip().lower()
-        for s, g, _n in groups:
-            try:
-                g.setVisible(not q or q in s)
-            except Exception:
-                pass
+    def _reset():
+        while hostv.count() > 1:                  # keep the trailing stretch
+            it = hostv.takeAt(0)
+            w = it.widget() if it else None
+            if w is not None:
+                w.setParent(None); w.deleteLater()
+        state["shown"] = 0
+        scroll.verticalScrollBar().setValue(0)
+        _load_more()
         _refresh_count()
-    filt.textChanged.connect(_filter)
-    _refresh_count()
+
+    def _on_scroll(val):
+        sb = scroll.verticalScrollBar()
+        if val >= sb.maximum() - 300 and state["shown"] < len(state["match"]):
+            _load_more()
+    scroll.verticalScrollBar().valueChanged.connect(_on_scroll)
+
+    deb = QTimer(dlg); deb.setSingleShot(True); deb.setInterval(200)
+
+    def _apply_filter():
+        q = filt.text().strip().lower()
+        state["match"] = [e for e in entries if not q or q in e[2]] if q else entries
+        _reset()
+    deb.timeout.connect(_apply_filter)
+    filt.textChanged.connect(lambda *_a: deb.start())
 
     row = QHBoxLayout()
     close = QPushButton("Close")
@@ -1325,6 +1597,7 @@ def view_all_rewords_dialog(on_done=None, parent=None):
     row.addWidget(close)
     v.addLayout(row)
     dlg.resize(680, 560)
+    _reset()
     dlg.exec()
     if on_done:
         try:
@@ -2520,14 +2793,16 @@ def _inject_live_current() -> None:
         is_cz = _is_cloze(note)
         imgs = "".join(_IMG_RE.findall(text))
 
+        styles = "".join(re.findall(r"(?is)<style\b.*?</style>", text))  # keep note CSS
+
         def _disp(varhtml):
             if is_html:
-                return varhtml
+                return styles + varhtml
             v = _format_text_variant(varhtml, text, side, note, cur.ord, is_cz)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)
-            return pre + v + suf
+            return styles + pre + v + suf
 
         alt_idx = _cycle_last.get(cur.id, 1)       # the reword the toggle will reveal
         other_html = _disp(variants[(alt_idx - 1) % len(variants)])
