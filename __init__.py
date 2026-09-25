@@ -69,6 +69,13 @@ try:
 except Exception as _gl_exc:
     log("early glass hooks: %s" % _gl_exc)
 
+# .jank / .qb / .rp opened from Finder (Open With → Anki) go to Janki's importers.
+try:
+    from .src.features import file_open as _file_open
+    _file_open.install()
+except Exception as _fo_exc:
+    log("file open: %s" % _fo_exc)
+
 # Statistics opens inside the main window (glassed) instead of its own window.
 try:
     from .src.features import stats_embed as _stats_embed
