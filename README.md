@@ -96,6 +96,12 @@ so nothing is left behind.
   100% local.
   
   **→ [Practice system + how to import a document as a question bank](docs/practice-questions.md)**
+- **.jank bundles** — one file per content drop: decks (`.apkg`), question banks (`.qb`),
+  lecture tag maps (`.json`) and rephrasings (`.rp`) imported together, in the right order,
+  without touching your review history. **Settings → General → Import .jank…**, and
+  **Build .jank…** to package your own.
+
+  **→ [.jank bundles: importing and building](https://cjre.pl/ogle/janki/jank)**
 - **Mobile card theming** *(experimental, off by default)* — AnkiMobile/AnkiDroid can't run
   add-ons, so this can stamp an OLED-dark background, a serif font, and the text-reveal
   animation into your note types (scoped to mobile) so the look rides your normal sync
