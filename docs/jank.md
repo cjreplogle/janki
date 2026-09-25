@@ -13,6 +13,7 @@ General tab. Janki imports, in order:
 | `.apkg` decks | Imported with Anki's own importer (no dialogs). New notes are added; existing notes update only if the bundle's copy is newer. **Your review history, scheduling and deck options are never touched.** |
 | `.qb` question banks | Installed; a bank with the same id is **replaced** (so a new drop is an update). |
 | `.json` lecture tag maps | Saved to `user_files/tagmaps/` and used by **Load today's lectures** (a same-named map from an earlier drop is replaced). |
+| `.json` AI tag-matching replies | Applied to the matching banks (from this bundle or already installed), so interspersing and Tab+Q match right away. Only tags that exist in your collection are kept. |
 | `.rp` rephrasings | Merged into your rephrasings (last — they point at the notes the decks bring in). |
 
 A summary shows what came in, plus the bundle's name, version and notes. After a drop
@@ -25,6 +26,9 @@ update on mobile** and sync.
 
 - Tick what to include **from your Janki**: installed question banks (re-packed as
   `.qb`), your lecture tag maps, and all stored rephrasings (one `.rp`).
+- **Include tag matches** (on by default) ships banks with their tag matches — AI
+  results you applied plus lecture tags — so they arrive already matched to cards.
+  Untick it to share banks untagged.
 - **Add files from disk** (or drag them in) for decks (`.apkg`) or anything else.
 - Give it a name, version and notes (shown on import), then **Export .jank…**.
 

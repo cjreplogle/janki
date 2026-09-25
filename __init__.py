@@ -267,6 +267,15 @@ def _startup():
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
+        # Optional top-right gear → Settings (Appearance → Window). Deferred so the
+        # toolbar webview has its final size.
+        def _gear():
+            try:
+                from .src.features import settings_button
+                settings_button.apply()
+            except Exception as _gb_exc:
+                log("settings button: %s" % _gb_exc)
+        QTimer.singleShot(800, _gear)
 
 
         # Practice questions are bound to Tab+Q, handled by the global key tap
@@ -301,6 +310,15 @@ def _startup():
                 qbank.sync_practice_model_if_present()
             except Exception as _qb_exc:
                 log("practice model sync: %s" % _qb_exc)
+            try:
+                qbank.clean_stored_tags()   # repair quote/bracket-damaged bank tags (no-op once clean)
+            except Exception as _ct_exc:
+                log("bank tag repair: %s" % _ct_exc)
+            try:
+                if qbank.content_tags_missing():   # first run / banks from an older Janki
+                    qbank.assign_content_tags()
+            except Exception as _cn_exc:
+                log("content tags: %s" % _cn_exc)
             try:
                 mobilecards.refresh_if_stale()   # push card-script fixes to mobile themes
             except Exception as _mc_exc:

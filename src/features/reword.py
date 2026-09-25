@@ -1398,7 +1398,7 @@ def reword_card(card, sides=("q", "a"), n: int = 1) -> int:
         if vs and plain:
             store[_key(note.id, card.ord, side)] = {
                 "src": _hash(plain), "variants": list(vs), "ts": int(time.time()),
-                "html": is_html}
+                "html": is_html, "set": SET_ONDEVICE}
             made += 1
     if made:
         _save()
@@ -1615,7 +1615,7 @@ def set_variants(card, side: str, variants: list) -> None:
         html = card.question() if side == "q" else card.answer()
         _load()[_key(note.id, card.ord, side)] = {
             "src": _hash(_plain(html)), "variants": list(variants), "ts": int(time.time()),
-            "html": False}
+            "html": False, "set": "Manual"}
         _save()
     except Exception as exc:
         log(f"reword set: {exc}")
@@ -2054,6 +2054,75 @@ def _rp_estimate(deck_ids, sides=("q", "a"), cloze=True, basic=True, skip_done=T
     return cards, items + len(cz_notes)
 
 
+_RP_AVG_CACHE = {}
+
+
+def _rp_avg_chars(deck_ids, sample: int = 250) -> float:
+    """Average plain-text length of a note in these decks, from a random sample (cheap SQL,
+    no card rendering). Cached per deck selection for the wizard's live estimate."""
+    key = tuple(sorted({int(d) for d in deck_ids or []}))
+    if not key:
+        return 0.0
+    if key in _RP_AVG_CACHE:
+        return _RP_AVG_CACHE[key]
+    ids = ",".join(map(str, key))
+    try:
+        rows = mw.col.db.all(
+            "select n.mid, n.flds from notes n where n.id in (select distinct nid from cards "
+            "where did in (%s) or odid in (%s)) order by random() limit %d"
+            % (ids, ids, int(sample)))
+    except Exception:
+        rows = []
+    try:
+        from ..integrations.qbank import content_fields
+    except Exception:
+        content_fields = None
+    lens = []
+    for mid, flds in rows:
+        # Content fields only: the hidden _JankiRW base64 (and other metadata) would
+        # inflate the estimate, and never goes into the prompt anyway.
+        if content_fields is not None:
+            t = " ".join(content_fields(mid, flds))
+        else:
+            t = re.sub(r"<[^>]+>", " ", flds.replace("\x1f", " "))
+        lens.append(min(len(re.sub(r"\s+", " ", t).strip()), 1500))
+    avg = (sum(lens) / len(lens)) if lens else 0.0
+    _RP_AVG_CACHE[key] = avg
+    return avg
+
+
+# One chat reply tops out around here on most models; bigger replies get cut off.
+_RP_REPLY_LIMIT = 30000
+
+
+def _rp_cost_text(deck_ids, nitems: int, n_variants: int) -> str:
+    """Rough tokens in/out + generation time for the rephrase prompt (≈4 chars/token;
+    ~40–90 output tokens/s for chat models; the model's WRITING dominates the wait)."""
+    if not nitems:
+        return ""
+    avg = _rp_avg_chars(deck_ids)
+    per_item_in = avg + 40                            # card text + JSON id/keys
+    tok_in = int((len(_RP_PROMPT) + nitems * per_item_in) / 4)
+    tok_out = int(nitems * (n_variants * (avg + 6) + 30) / 4)
+
+    def _k(n):
+        return ("%.1fk" % (n / 1000.0)) if n >= 1000 else str(n)
+
+    def _dur(sec):
+        if sec < 90:
+            return "%d s" % max(5, round(sec / 5.0) * 5)
+        m = sec / 60.0
+        return ("%d min" % round(m)) if m < 90 else ("%.1f h" % (m / 60.0))
+    lo, hi = tok_out / 90.0, tok_out / 40.0
+    txt = ("≈ %s tokens in  ·  ≈ %s tokens out  ·  model time ≈ %s–%s"
+           % (_k(tok_in), _k(tok_out), _dur(lo), _dur(hi)))
+    if tok_out > _RP_REPLY_LIMIT:
+        parts = -(-tok_out // _RP_REPLY_LIMIT)
+        txt += ("\n⚠ Likely too long for one reply: split into ~%d smaller prompts "
+                "(fewer decks) so the model doesn't stop part-way." % parts)
+    return txt
+
+
 def _deck_tree_widgets(decks, lay) -> list:
     """Checkable deck tree for the prompt wizard: a deck with subdecks gets a [+] button that
     expands them. Checking a deck checks all its subdecks; a partly-checked branch shows as
@@ -2100,6 +2169,12 @@ def _deck_tree_widgets(decks, lay) -> list:
             if k["kids"]:
                 btn = QToolButton(); btn.setText("+"); btn.setAutoRaise(True)
                 btn.setFixedSize(18, 18); btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                # A bare "+"/"−" glyph, no button box (the glass theme drew an empty
+                # square and hid the sign).
+                btn.setStyleSheet(
+                    "QToolButton{border:none;background:transparent;padding:0;"
+                    "color:rgba(255,255,255,0.75);font-size:15px;font-weight:600;}"
+                    "QToolButton:hover{color:#ffffff;}")
                 btn.setToolTip("Show subdecks")
                 row.addWidget(btn)
             else:
@@ -2142,7 +2217,7 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     from, choose phrasings-per-card, then copy the external-LLM rephrase prompt to the clipboard
     or save it as .txt. Nothing leaves the machine unless the user pastes it into a chat model."""
     from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QApplication,
-                        QFileDialog, QCheckBox, QScrollArea, QWidget, QSpinBox)
+                        QFileDialog, QCheckBox, QScrollArea, QWidget, QSpinBox, Qt)
     from aqt.utils import tooltip, showWarning
     try:
         from ..integrations.qbank import _decks_top_level
@@ -2205,6 +2280,7 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     cb_all = QCheckBox("All decks (%d)" % len(decks)); cb_all.setChecked(True)
     v.addWidget(cb_all)
     scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFixedHeight(240)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(4, 0, 0, 0)
     hv.setSpacing(2)
     deck_cbs = _deck_tree_widgets(decks, hv)        # (checkbox, [own did]) for every node
@@ -2214,6 +2290,13 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
 
     est = QLabel(""); est.setStyleSheet("color:#9aa0aa; margin-top:4px;")
     v.addWidget(est)
+    v.addStretch()
+    # Bottom-of-window cost line (added just above the buttons below).
+    cost = QLabel(""); cost.setWordWrap(True)
+    cost.setStyleSheet("color:#9aa0aa; margin: 2px 0 6px 0;")
+    cost.setToolTip("Rough: ≈4 characters per token, card length sampled from your decks, "
+                    "and ~40–90 tokens/s for the model to write the reply (the slow part). "
+                    "Actual time depends on the model and how busy it is.")
 
     def _selected_dids():
         if cb_all.isChecked():
@@ -2232,6 +2315,10 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
             used, nitems = 0, 0
         est.setText("%d cards in selection  ·  this prompt: ~%d cards (%d items) → ~%d "
                     "rephrasings for the model" % (total, used, nitems, nitems * spin.value()))
+        try:
+            cost.setText(_rp_cost_text(dids, nitems, spin.value()))
+        except Exception:
+            cost.setText("")
 
     cb_all.toggled.connect(_refresh)
     for w in (cb_skip, cb_front, cb_back, cb_cloze, cb_basic, cb_compact):
@@ -2292,6 +2379,7 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
         tooltip("Saved rephrase prompt.", period=3000)
         dlg.accept()
 
+    v.addWidget(cost)
     row = QHBoxLayout()
     close = QPushButton("Close"); save = QPushButton("Save .txt…"); copy = QPushButton("Copy to clipboard")
     for b in (save, copy):
@@ -2465,11 +2553,45 @@ def _rp_variants(it: dict) -> list:
     return out
 
 
+# Rephrasing SETS: every stored rephrasing records where it came from ("set"), so a .jank
+# can package chosen sets. One store stays the runtime source of truth (display, Tab+R,
+# mobile); the set is just a label. Unlabelled (older) records form SET_UNSORTED.
+SET_ONDEVICE = "On-device"
+SET_UNSORTED = "Earlier rephrasings"
+_import_set = SET_UNSORTED       # set label for the import in progress
+
+
+def rec_set(rec) -> str:
+    return (rec.get("set") if isinstance(rec, dict) else None) or SET_UNSORTED
+
+
+def rephrase_sets() -> dict:
+    """{set name: number of stored card sides} for exportable (plain-text) rephrasings."""
+    out = {}
+    for r in _load().values():
+        if isinstance(r, dict) and r.get("variants") and not r.get("html"):
+            out[rec_set(r)] = out.get(rec_set(r), 0) + 1
+    return out
+
+
+def _embedded_set(raw: str):
+    """The "set" name a Janki-built .rp carries at its top level, if any."""
+    try:
+        doc = json.loads(raw.lstrip("\ufeff"))
+        if isinstance(doc, dict) and isinstance(doc.get("set"), str) and doc["set"].strip():
+            return doc["set"].strip()[:80]
+    except Exception:
+        pass
+    return None
+
+
 def import_rp(path: str):
-    """Import a .rp FILE's variants into the local rewords store. See import_rp_text."""
+    """Import a .rp FILE's variants into the local rewords store. The file's set name is
+    the one it carries (a Janki-built .rp), else its file name. See import_rp_text."""
     with open(path, encoding="utf-8") as f:
         raw = f.read()
-    return import_rp_text(raw)
+    name = _embedded_set(raw) or os.path.splitext(os.path.basename(path))[0].strip()
+    return import_rp_text(raw, set_name=name or None)
 
 
 def _import_cloze_note(nid, variants, store, _skip) -> int:
@@ -2500,7 +2622,8 @@ def _import_cloze_note(nid, variants, store, _skip) -> int:
                                     lenient=True)
             if valid:
                 store[_key(note.id, card.ord, side)] = {"src": _hash(plain), "variants": valid,
-                                                        "ts": now, "html": False}
+                                                        "ts": now, "html": False,
+                                                        "set": _import_set}
                 stored += 1
     if not stored:
         _skip("cloze variants failed validation")
@@ -2536,19 +2659,43 @@ def _import_basic_back(nid, ordn, variants, store, _skip) -> int:
         valid = _valid_variants(cands, side, False, [], 0, plain, lenient=True)
         if valid:
             store[_key(card.note().id, card.ord, side)] = {"src": _hash(plain), "variants": valid,
-                                                           "ts": now, "html": False}
+                                                           "ts": now, "html": False,
+                                                           "set": _import_set}
             stored += 1
     if not stored:
         _skip("variant identical to original or leaked prompt text")
     return stored
 
 
-def import_rp_text(raw: str):
+def _resolve_nid(nid, guid):
+    """The LOCAL note id for an exported item. Note ids differ between collections (the same
+    shared deck imported on two devices), so a .rp built by Janki also carries each note's
+    GUID, which Anki keeps identical across devices. Use the id when its note has that GUID,
+    otherwise find the note by GUID. Items without a GUID (older files, pasted model replies)
+    keep the old id-only behaviour. Returns None when the note isn't in this collection."""
+    try:
+        nid = int(nid)
+    except Exception:
+        return None
+    if not guid:
+        return nid
+    try:
+        if mw.col.db.scalar("select guid from notes where id=?", nid) == guid:
+            return nid
+        return mw.col.db.scalar("select id from notes where guid=?", guid)
+    except Exception:
+        return nid
+
+
+def import_rp_text(raw: str, set_name=None):
     """Import rephrasings from a raw string (a pasted model reply or a .rp file's contents).
     Maps each item back to its live card by id and stores variants ONLY if the card's current
     text still matches the exported source hash (so edits since export safely skip). Tolerant of
     messy model output (see _rp_items / _rp_variants). Returns (imported, skipped, reasons) where
     `reasons` is a {reason: count} breakdown of the skips (also logged)."""
+    global _import_set
+    _import_set = (set_name or _embedded_set(raw)
+                   or time.strftime("Pasted %b %d %H:%M"))
     items = _rp_items(raw)                          # raises only if no JSON at all is present
     store = _load()
     imported = 0
@@ -2566,6 +2713,12 @@ def import_rp_text(raw: str):
             _skip("no id / no variants"); continue
         try:
             parts = str(key).split(":")
+            local = _resolve_nid(parts[0], it.get("guid"))
+            if local is None:
+                _skip("card not found (deleted/moved)"); continue
+            if str(local) != parts[0]:                  # same note, different id on this device
+                parts[0] = str(local)
+                key = ":".join(parts)
             if len(parts) == 2 and parts[1] == "n":
                 n_ok = _import_cloze_note(parts[0], variants, store, _skip)
                 if n_ok:
@@ -2608,7 +2761,8 @@ def import_rp_text(raw: str):
                     _skip("variant identical to original or leaked prompt text")
                 continue
             store[key] = {"src": cur_hash, "variants": valid, "ts": int(time.time()),
-                          "html": False}          # .rp variants are plain text (rebuilt on display)
+                          "html": False,           # .rp variants are plain text (rebuilt on display)
+                          "set": _import_set}
             imported += 1
         except Exception:
             _skip("error")
@@ -2958,10 +3112,12 @@ def generate_more_async(card, on_done=None) -> None:
                     rec["variants"] = existing
                     rec["ts"] = int(time.time())
                     rec["html"] = is_html
+                    rec.setdefault("set", SET_ONDEVICE)
                     added = max(added, len(existing))
                 else:
                     store[key] = {"src": src, "variants": list(new),
-                                  "ts": int(time.time()), "html": is_html}
+                                  "ts": int(time.time()), "html": is_html,
+                                  "set": SET_ONDEVICE}
                     added = max(added, len(new))
             _save()
         except Exception as exc:
@@ -3050,7 +3206,8 @@ def _prefetch_store(job, out, is_html=False):
     store = _load()
     for side, (src, variants) in out.items():
         store[_key(job["nid"], job["ord"], side)] = {
-            "src": src, "variants": variants, "ts": int(time.time()), "html": is_html}
+            "src": src, "variants": variants, "ts": int(time.time()), "html": is_html,
+            "set": SET_ONDEVICE}
     _save()
 
 

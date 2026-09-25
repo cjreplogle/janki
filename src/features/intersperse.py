@@ -41,6 +41,10 @@ _WINDOW_DEFAULT = 25
 _recent_leaves = collections.deque(maxlen=_WINDOW_DEFAULT)
 _recent_tokens = collections.deque(maxlen=_WINDOW_DEFAULT)
 _cards_since = 0
+# Tab+Q's own memory of recently reviewed real cards (leaf-key sets), kept even when
+# automatic interspersing is off. Size = practice_q_recent_n.
+_TABQ_DEFAULT = 15
+_tabq_recent = collections.deque(maxlen=_TABQ_DEFAULT)
 
 
 def _window_size():
@@ -216,6 +220,7 @@ def _serve_next_inline(reviewer):
             log("intersperse serve: %s" % e)
             _inline_active.discard(cid)
             continue
+        _refresh_undo_action()
         return True
     return False
 
@@ -295,14 +300,24 @@ def practice_now():
         exit_inline()
         return
     try:
-        leaves = qbank._leaf_keys(list(card.note().tags))
+        leaves = qbank.card_leaf_keys(card)
         tokens = qbank._tokens((card.question() or "") + " " + (card.answer() or ""))
     except Exception:
         leaves, tokens = set(), set()
+    # The current card's concepts dominate (weight 5); the recently reviewed cards'
+    # concepts are also fair game (weight 1 per card they appeared on), so their
+    # questions fill in after the current card's own matches.
+    weights = collections.Counter({l: 5.0 for l in leaves})
+    if _cfg().get("practice_q_recent", True):
+        for s in _tabq_recent:
+            for l in s:
+                weights[l] += 1.0
+        leaves = set(weights)
     _, hi = _target_size()
     # Explicit request → always allow the text fallback so something relevant shows.
     cids = qbank.intersperse_card_ids(
-        leaves, tokens, hi, use_text_fallback=True, exclude_cids=_seen)
+        leaves, tokens, hi, use_text_fallback=True, exclude_cids=_seen,
+        leaf_weights=weights)
     if not cids:
         tooltip("No related practice questions found for this card.\n"
                 "Build the Practice deck first: Settings ▸ Practice ▸ Question Bank ▸ "
@@ -318,7 +333,11 @@ def practice_now():
 def exit_inline():
     """Abandon any in-flight inline practice cards and return to the real review
     card. The underlying real card was never answered, so bypassing the wrap makes
-    the scheduler serve it again (you land back where you were)."""
+    the scheduler serve it again (you land back where you were). Practice questions you
+    leave without answering go back into the pool, so Tab+Q can offer them again."""
+    for cid in set(_inline_active) | set(_inline_queue):
+        if cid not in _inline_resolved:
+            _seen.discard(cid)
     _inline_queue.clear()
     _inline_active.clear()
     _clear_inline_history()
@@ -328,6 +347,7 @@ def exit_inline():
             _orig_nextcard(r)          # bypass the wrap → next real (unanswered) card
         except Exception as e:
             log("intersperse exit_inline: %s" % e)
+    _refresh_undo_action()
 
 
 def resolve_inline(cid, correct, answered):
@@ -354,6 +374,7 @@ def resolve_inline(cid, correct, answered):
             r.nextCard()
         except Exception as e:
             log("intersperse advance: %s" % e)
+    _refresh_undo_action()
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +388,7 @@ def resolve_inline(cid, correct, answered):
 # card's resolution (unsuspend / un-requeue) so it can be answered again.
 def _step_back_inline(reviewer):
     if len(_inline_history) < 2:
-        tooltip("Nothing earlier to undo in this practice set.")
+        exit_inline()                    # first question → back to the card you were on
         return
     cur = _inline_history.pop()          # the (unresolved) card currently on screen
     _inline_active.discard(cur)
@@ -398,6 +419,7 @@ def _step_back_inline(reviewer):
         reviewer._showQuestion()
     except Exception as e:
         log("intersperse undo show: %s" % e)
+    _refresh_undo_action()
 
 
 def _intercept_undo(*args, **kwargs):
@@ -415,6 +437,36 @@ def _intercept_undo(*args, **kwargs):
     if _orig_undo is not None:
         return _orig_undo()
     return None
+
+
+def _refresh_undo_action():
+    try:
+        mw.update_undo_actions()
+    except Exception:
+        pass
+
+
+def _install_undo_state_wrap():
+    """Anki disables Edit ▸ Undo when ITS history is empty (e.g. the start of a session),
+    and a disabled menu action swallows Ctrl+Z, so undo could never step back off a
+    practice question. Keep it enabled, and say what it will do, while one is showing."""
+    if getattr(mw, "_janki_undo_state_wrapped", False):
+        return
+    orig = mw.update_undo_actions
+
+    def update_undo_actions(*a, **k):
+        res = orig(*a, **k)
+        try:
+            if _inline_active:
+                act = mw.form.actionUndo
+                act.setEnabled(True)
+                act.setText("Undo: Back to Card" if len(_inline_history) < 2
+                            else "Undo: Previous Question")
+        except Exception:
+            pass
+        return res
+    mw.update_undo_actions = update_undo_actions
+    mw._janki_undo_state_wrapped = True
 
 
 def _install_undo_wrap():
@@ -557,16 +609,31 @@ def _finish_pre_break():
 # ---------------------------------------------------------------------------
 # hooks
 # ---------------------------------------------------------------------------
+def _tabq_track(card):
+    """Remember this reviewed card's match keys for Tab+Q (see practice_now)."""
+    global _tabq_recent
+    try:
+        if not _cfg().get("practice_q_recent", True):
+            return
+        n = max(1, int(_cfg().get("practice_q_recent_n", _TABQ_DEFAULT)))
+        if _tabq_recent.maxlen != n:
+            _tabq_recent = collections.deque(list(_tabq_recent)[-n:], maxlen=n)
+        _tabq_recent.append(qbank.card_leaf_keys(card))
+    except Exception:
+        pass
+
+
 def _on_answered(reviewer, card, ease):
     global _cards_since
-    if not _enabled():
-        return
     if _is_practice_note(card):
         return                         # never count practice/interspersed cards
+    _tabq_track(card)
+    if not _enabled():
+        return
     _ensure_window()                   # honor a changed tag-memory window size
     try:
         note = card.note()
-        _recent_leaves.append(qbank._leaf_keys(list(note.tags)))
+        _recent_leaves.append(qbank.card_leaf_keys(card))
         _recent_tokens.append(
             qbank._tokens((card.question() or "") + " " + (card.answer() or "")))
     except Exception:
@@ -596,6 +663,10 @@ def install():
     global _hooks_installed
     _install_nextcard_wrap()
     _install_undo_wrap()
+    try:
+        _install_undo_state_wrap()
+    except Exception as e:
+        log("intersperse undo state wrap: %s" % e)
     if _hooks_installed:
         return
     try:

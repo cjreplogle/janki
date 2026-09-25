@@ -1442,6 +1442,34 @@ def glass_combo_popup(combo, max_rows: int = 10) -> None:
         log(f"glass combo popup: {exc}")
 
 
+def glass_menu_popup(menu) -> None:
+    """Give a QMenu popup (e.g. a toolbutton dropdown holding checkboxes) the same
+    translucent, blurred, rounded look as glass_combo_popup's lists."""
+    global _popup_filter
+    if not GLASS or sys.platform != "darwin":
+        return
+    try:
+        light = _tint_is_light()
+        ink = "0,0,0" if light else "255,255,255"
+        fg = "#1c1c1e" if light else "#f2f2f7"
+        bg = "rgba(246,246,248,0.72)" if light else "rgba(30,31,36,0.62)"
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+        menu.setStyleSheet(
+            ("QMenu { background: %(bg)s; color: %(fg)s; border: 1px solid rgba(%(ink)s,0.14);"
+             " border-radius: 10px; padding: 4px; }"
+             "QMenu::item { padding: 4px 10px; border-radius: 6px; background: transparent; }"
+             "QMenu::item:selected { background: rgba(%(ink)s,0.12); }"
+             "QMenu QWidget { background: transparent; color: %(fg)s; }")
+            % {"bg": bg, "fg": fg, "ink": ink})
+        if _popup_filter is None:
+            _popup_filter = _GlassPopupShow()
+        menu.installEventFilter(_popup_filter)
+    except Exception as exc:
+        log(f"glass menu popup: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Glass tooltips — hover tooltips (Qt's QTipLabel) + Janki's notification tooltip
 # ---------------------------------------------------------------------------

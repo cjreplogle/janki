@@ -81,6 +81,14 @@ QPushButton#icon {
     text-align:center; qproperty-flat:true;
 }
 QPushButton#icon:hover  { background: rgba(255,255,255,0.14); color:#ffffff; }
+QPushButton#gear {
+    background: transparent; border: none; border-radius:9px;
+    padding:0; margin:0; font-size:21px; color:#c9d4e8;
+    min-width:32px; max-width:32px; min-height:32px; max-height:32px;
+    text-align:center; qproperty-flat:true;
+}
+QPushButton#gear:hover  { background: rgba(255,255,255,0.14); color:#ffffff; }
+QPushButton#gear:pressed{ background: rgba(255,255,255,0.22); }
 QPushButton#icon:pressed{ background: rgba(255,255,255,0.22); }
 QFrame#sep { background: rgba(255,255,255,0.10); max-height:1px; min-height:1px; border:none; }
 QScrollArea { background: transparent; border: none; }
@@ -113,6 +121,7 @@ _PAINT = {
     "posCell":    ((*_W, .06), .15, None, (*_W, .10), 7),
     "posCellOn":  ((96, 156, 246, .38), None, None, (130, 178, 252, .65), 7),
     "icon":       ((*_W, 0.0), .14, .22, None, 8),
+    "gear":       ((*_W, 0.0), .14, .22, None, 9),
 }
 _ROOT_BG = (26, 28, 34, .60)
 _ROOT_RADIUS = 16
@@ -677,17 +686,44 @@ def _open_settings() -> None:
     # window. The dialog is parented to mw but is its own top-level window, so it shows
     # fine while mw stays hidden in the tray. Keep reopen suppressed so activating the
     # app for the dialog doesn't yank the main window back.
+    #
+    # Open on the NEXT tick, after the panel has been ordered out, then CHECK the dialog
+    # really reached the screen and re-front it if not. Opening in the same event as the
+    # panel hide (plus the app activation and the tray's main-window re-hide timers) could
+    # leave the dialog created but never ordered on screen, so the first press looked dead
+    # and only the second (which found and fronted the existing dialog) worked.
     _hide()
     try:
         from . import tray
         tray.suppress_reopen(2.0)
     except Exception:
         pass
-    try:
-        from . import settings_dialog
-        settings_dialog._open_settings(float_above=True)
-    except Exception as exc:
-        log(f"tray-nav settings: {exc}")
+
+    def _verify(attempt=0):
+        try:
+            from . import settings_dialog
+            from ..user import glass
+            d = settings_dialog._settings_instance
+            if d is None:
+                return
+            if not (d.isVisible() and _natively_on_screen(d)):
+                log("tray-nav settings: dialog not on screen, re-fronting (%d)" % attempt)
+                glass.bring_dialog_to_front(d)
+                if attempt < 3:
+                    QTimer.singleShot(250, lambda: _verify(attempt + 1))
+        except Exception as exc:
+            log(f"tray-nav settings verify: {exc}")
+
+    def _go():
+        try:
+            from . import settings_dialog
+            settings_dialog._open_settings(float_above=True)
+        except Exception as exc:
+            log(f"tray-nav settings: {exc}")
+            return
+        QTimer.singleShot(200, _verify)
+        QTimer.singleShot(650, _verify)    # after the tray's last main-window re-hide (550ms)
+    QTimer.singleShot(0, _go)
 
 
 class _CornerHint(QObject):
@@ -1059,7 +1095,7 @@ def _build() -> "QWidget":
     hrow.addStretch(1)
     # Gear: U+FE0E forces the monochrome (text) glyph instead of a colour emoji.
     opts_btn = QPushButton("⚙︎")
-    opts_btn.setObjectName("icon")
+    opts_btn.setObjectName("gear")            # 1.5× the header's other icon buttons
     opts_btn.setToolTip("Janki settings")
     opts_btn.clicked.connect(_open_settings)
     hrow.addWidget(opts_btn)

@@ -76,6 +76,22 @@ def _practice_dids():
     return dids
 
 
+def _amboss_dids():
+    """Decks named AMBOSS (any path segment, e.g. "AMBOSS Qbank" or "Step 1::AMBOSS")
+    plus their subdecks — shown under Practice instead of Decks when
+    practice_hide_amboss is on (default)."""
+    try:
+        if not _cfg().get("practice_hide_amboss", True):
+            return set()
+        decks = list(mw.col.decks.all_names_and_ids())
+    except Exception:
+        return set()
+    roots = [d.name for d in decks
+             if "amboss" in d.name.split("::")[-1].lower()]
+    return {int(d.id) for d in decks
+            if any(d.name == r or d.name.startswith(r + "::") for r in roots)}
+
+
 def _practice_banks():
     """List of (did, display_name, total) for each question-bank deck, sorted."""
     out = []
@@ -284,6 +300,7 @@ def hide_practice_rows(deck_browser, content):
     import re
     try:
         dids = _practice_dids()
+        amb = _amboss_dids()               # AMBOSS decks live under Practice too
         html = content.tree
         if _practice_view:
             # Show the banks as the top decks (each expandable by lecture), dropping the
@@ -326,6 +343,8 @@ def hide_practice_rows(deck_browser, content):
                     if did in deindent:
                         row = re.sub(r"(<td class=decktd colspan=5>)(?:&nbsp;){6}", r"\1",
                                      row, count=1)
+                    if did in amb:                  # AMBOSS deck: keep its real counts
+                        return row
                     # Replace the Due count with % accuracy for this bank/subbank subtree.
                     pct = _acc_pct(did, names)
                     label = ("%d%%" % pct) if pct is not None else "—"
@@ -338,18 +357,32 @@ def hide_practice_rows(deck_browser, content):
                     return row
                 return re.sub(r"<tr[^>]*>.*?</tr>", _row, content.tree, flags=re.DOTALL)
 
-            out = _filter(children, children) if children else ""
+            out = _filter(children | amb, children) if (children or amb) else ""
             # Fallback: nothing survived (no bank rows in the tree) → show the whole
             # Practice subtree, parent included, so it's never invisible.
             if not out or not re.search(r"<tr[^>]*id='\d+'", out):
                 out = _filter(dids, children)
             html = out
         else:
-            for did in dids:
+            for did in dids | amb:
                 html = re.sub(
                     r"<tr[^>]*>(?:(?!</tr>).)*?open:%d\b.*?</tr>" % did,
                     "", html, flags=re.DOTALL)
         content.tree = html
+        # The AMBOSS add-on's "Qbank" tile (appended to the deck browser's stats area):
+        # shown in the Practice view, hidden from the normal deck list.
+        if not _practice_view and _cfg().get("practice_hide_amboss", True):
+            st_html = content.stats or ""
+            st_html = re.sub(r'(?is)<script[^>]*amboss-anki-qbank-widget[^>]*>\s*</script>',
+                             "", st_html)
+            st_html = re.sub(r'(?is)<amboss-component-wrapper\b[^>]*id="amboss-qbank-widget"'
+                             r'[^>]*>.*?</amboss-component-wrapper>', "", st_html)
+            # Fallback if the tile is added after this hook runs: drop it once loaded.
+            st_html += ("<script>(function(){function k(){var e=document.getElementById("
+                        "'amboss-qbank-widget');if(e)e.remove();}"
+                        "document.addEventListener('DOMContentLoaded',k);"
+                        "setTimeout(k,0);setTimeout(k,300);})();</script>")
+            content.stats = st_html
     except Exception as e:
         log("hide practice rows: %s" % e)
 

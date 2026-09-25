@@ -859,6 +859,26 @@ class GlassSettings(QDialog):
         prac_app_lay.addWidget(self._prac_no_amboss)
         prac_app_lay.addWidget(self._prac_amboss_back)
 
+        # AMBOSS Qbank decks live under the Practice tab, not the main deck list.
+        self._prac_hide_amboss = QCheckBox(
+            "Show the AMBOSS Qbank tile under Practice (hide it from Decks)")
+        self._prac_hide_amboss.setToolTip(
+            "The AMBOSS add-on's Qbank tile (and any deck with “AMBOSS” in its name) "
+            "shows in the Practice view instead of the main deck list.")
+        self._prac_hide_amboss.setChecked(bool(self.cfg.get("practice_hide_amboss", True)))
+
+        def _on_prac_hide_amboss():
+            self.cfg["practice_hide_amboss"] = self._prac_hide_amboss.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                if getattr(mw, "state", None) == "deckBrowser":
+                    mw.deckBrowser.refresh()          # apply to the list on screen now
+            except Exception:
+                pass
+
+        self._prac_hide_amboss.stateChanged.connect(_on_prac_hide_amboss)
+        prac_app_lay.addWidget(self._prac_hide_amboss)
+
         # Clicking a choice both grades AND flips the card to the explanation.
         self._prac_click_flips = QCheckBox(
             "Clicking an answer flips the card to the explanation")
@@ -1017,6 +1037,38 @@ class GlassSettings(QDialog):
         nomatch_row.addWidget(self._int_nomatch)
         nomatch_row.addStretch()
         prac_int_lay.addLayout(nomatch_row)
+
+        # Tab+Q (on-demand) — independent of automatic interspersing above.
+        _tq_h = QLabel("Tab+Q (on demand)")
+        _tq_h.setStyleSheet("font-weight:600; margin-top: 14px;")
+        prac_int_lay.addWidget(_tq_h)
+        self._tq_recent = QCheckBox("Also pull from recently reviewed cards")
+        self._tq_recent.setChecked(bool(self.cfg.get("practice_q_recent", True)))
+        self._tq_recent.setToolTip(
+            "Questions for the current card come first; questions tied to the cards you "
+            "just reviewed fill in after them, so a card with no match of its own still "
+            "gets questions from what you've been studying.")
+        prac_int_lay.addWidget(self._tq_recent)
+        tq_row = QHBoxLayout()
+        tq_row.addSpacing(22)
+        tq_row.addWidget(QLabel("Remember the last"))
+        self._tq_recent_n = QSpinBox()
+        self._tq_recent_n.setRange(1, 200)
+        self._tq_recent_n.setValue(int(self.cfg.get("practice_q_recent_n", 15)))
+        self._tq_recent_n.setSuffix(" cards")
+        tq_row.addWidget(self._tq_recent_n)
+        tq_row.addWidget(QLabel("reviewed"))
+        tq_row.addStretch()
+        prac_int_lay.addLayout(tq_row)
+
+        def _tq_save():
+            self.cfg["practice_q_recent"] = self._tq_recent.isChecked()
+            self.cfg["practice_q_recent_n"] = self._tq_recent_n.value()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            self._tq_recent_n.setEnabled(self._tq_recent.isChecked())
+        self._tq_recent.stateChanged.connect(lambda _s: _tq_save())
+        self._tq_recent_n.valueChanged.connect(lambda _v: _tq_save())
+        self._tq_recent_n.setEnabled(self._tq_recent.isChecked())
         prac_int_lay.addStretch()
 
         def _int_sync_enabled():
@@ -1166,7 +1218,7 @@ class GlassSettings(QDialog):
             lambda: qbank.convert_to_deck_dialog(on_done=_refresh_banks))
 
         _banks_label = QLabel("Installed banks  —  drag a .qb/.docx/.pptx here to "
-                              "import or build · "
+                              "import or build (or an AI tag-results .json to apply it) · "
                               "drag rows to reorder · drop one bank onto another to "
                               "nest it as a subbank · “+” to see subbanks · "
                               "right-click for options "
@@ -1196,7 +1248,7 @@ class GlassSettings(QDialog):
                     return []
                 return [u.toLocalFile() for u in md.urls()
                         if u.toLocalFile().lower().endswith(
-                            (".qb", ".zip", ".docx", ".pptx"))]
+                            (".qb", ".zip", ".docx", ".pptx", ".json", ".jsonl"))]
 
             def dragEnterEvent(self, ev):
                 if self._paths(ev):
@@ -1488,6 +1540,10 @@ class GlassSettings(QDialog):
                    if p.lower().endswith((".qb", ".zip"))]
             docs = [p for p in paths if p.lower().endswith(".docx")]
             ppts = [p for p in paths if p.lower().endswith(".pptx")]
+            # AI tag-matching replies (from “Copy AI tag-matching prompt…”).
+            for p in paths:
+                if p.lower().endswith((".json", ".jsonl")):
+                    qbank.apply_tag_results_dialog(on_done=_refresh_banks, path=p)
             ok = 0
             for p in qbs:
                 try:
@@ -1536,6 +1592,7 @@ class GlassSettings(QDialog):
         except Exception:
             pass
         _refresh_banks()
+        self._refresh_banks_cb = _refresh_banks      # .jank import (General tab) refreshes it
 
         # === Appearance (cont.) / General ===================================
         # --- OLED mode -------------------------------------------------------
@@ -1571,10 +1628,12 @@ class GlassSettings(QDialog):
 
         def _do_jank(path=None):
             from ..features import jank
+            # Refresh the Practice tab's Installed Banks list after the import.
+            ref = getattr(self, "_refresh_banks_cb", None)
             if path:
-                jank.import_jank(path, parent=self)
+                jank.import_jank(path, parent=self, on_done=ref)
             else:
-                jank.import_jank_dialog(parent=self)
+                jank.import_jank_dialog(parent=self, on_done=ref)
         _jank_btn.clicked.connect(lambda: _do_jank())
         _jank_row.addWidget(_jank_btn, 1)
         # Secondary: small, on the right.
@@ -1607,6 +1666,21 @@ class GlassSettings(QDialog):
 
         self._aot.stateChanged.connect(on_aot)
         app_win_lay.addWidget(self._aot)
+
+        self._gear = QCheckBox("Settings button in the top-right corner of the main window")
+        self._gear.setChecked(bool(self.cfg.get("main_settings_button", False)))
+
+        def on_gear(_state):
+            self.cfg["main_settings_button"] = self._gear.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                from ..features import settings_button
+                settings_button.apply(self._gear.isChecked())
+            except Exception:
+                pass
+
+        self._gear.stateChanged.connect(on_gear)
+        app_win_lay.addWidget(self._gear)
 
         self._deck_stats = QCheckBox(
             "Show review history chart on the deck screen (Reviews plot)")

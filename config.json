@@ -142,6 +142,7 @@
   "practice_num_questions": 5,
   "practice_shortcut": "Ctrl+Shift+Q",
   "practice_no_amboss": true,
+  "practice_hide_amboss": true,
   "practice_amboss_on_back": false,
   "practice_click_flips": true,
   "practice_click_flip_delay_ms": 600,
@@ -162,5 +163,6 @@
   "reword_enabled": false,
   "reword_variants": 1,
   "reword_prefetch": false,
-  "reword_prefetch_count": 3
+  "reword_prefetch_count": 3,
+  "main_settings_button": false
 }

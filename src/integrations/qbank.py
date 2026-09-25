@@ -71,9 +71,11 @@ def _safe(s):
 # ---------------------------------------------------------------------------
 # Import
 # ---------------------------------------------------------------------------
-def import_qb(path):
+def import_qb(path, build_deck=False):
     """Validate + extract a .qb into user_files/qbanks/<id>/ and register it.
-    Re-importing the same id replaces it (an update). Returns the manifest."""
+    Re-importing the same id replaces it (an update). Returns the manifest.
+    build_deck: also load it into Anki as Practice::<bank> even when no Practice
+    deck exists yet (used by .jank / Finder imports, which should just work)."""
     with zipfile.ZipFile(path) as z:
         try:
             man = json.loads(z.read("manifest.json"))
@@ -106,12 +108,13 @@ def import_qb(path):
     try:
         assign_deck_tags_from_headers()
         mine_concepts_from_banks()
+        assign_content_tags()
         _Q_CACHE.pop(dir_name, None)
     except Exception as e:
         log("qbank import enrich: %s" % e)
     # Keep the Practice deck in sync: if one already exists, fold this (new or
     # re-imported) bank into it right away.
-    if _practice_deck_exists():
+    if build_deck or _practice_deck_exists():
         try:
             convert_bank_to_deck(bid)
             mw.reset()
@@ -270,11 +273,34 @@ def sync_banks_with_cards(changes=None, handler=None):
             _restore_bank(key)
 
 
+_TRASH_KEEP_DAYS = 7
+
+
+def _prune_trash():
+    """Forget trashed banks older than _TRASH_KEEP_DAYS. (Emptying the whole trash on
+    every launch made a deleted bank unrecoverable after a restart.)"""
+    import time
+    t = _trash_dir()
+    if not os.path.isdir(t):
+        return
+    cutoff = time.time() - _TRASH_KEEP_DAYS * 86400
+    for fn in os.listdir(t):
+        if not fn.endswith(".meta.json"):
+            continue
+        meta_p = os.path.join(t, fn)
+        try:
+            if os.path.getmtime(meta_p) < cutoff:
+                shutil.rmtree(os.path.join(t, fn[:-len(".meta.json")]), ignore_errors=True)
+                os.remove(meta_p)
+        except OSError:
+            pass
+
+
 def install_bank_sync():
-    """Hook bank↔card sync (idempotent) and empty the previous session's trash."""
+    """Hook bank↔card sync (idempotent) and prune old entries from the trash."""
     global _banks_seen
     from aqt import gui_hooks
-    shutil.rmtree(_trash_dir(), ignore_errors=True)
+    _prune_trash()
     _banks_seen = None
     sync_banks_with_cards()                      # baseline snapshot
     if sync_banks_with_cards not in gui_hooks.operation_did_execute._hooks:
@@ -622,19 +648,87 @@ def _rewrite_bank(dir_name, qs):
     _Q_CACHE.pop(dir_name, None)
 
 
+# Folder-style AnKing leaves that name no concept; as a bare tag they'd link a question to
+# every card filed under any "…::Extra".
+_GENERIC_LEAVES = {"extra", "extras", "misc", "miscellaneous", "other", "others",
+                   "general", "notes", "review"}
+
+
+def _clean_leaf(s):
+    """Strip search syntax off a tag/leaf: quotes, and brackets only when unbalanced
+    (so 'Treatment_Resistant_(Clozapine)' survives but 'Extra")' → 'Extra')."""
+    s = str(s or "").strip().strip("\"'").strip()
+    while s.startswith("(") and s.count("(") > s.count(")"):
+        s = s[1:].strip().strip("\"'").strip()
+    while s.endswith(")") and s.count(")") > s.count("("):
+        s = s[:-1].strip().strip("\"'").strip()
+    return s
+
+
 def _leaves_from_searches(searches):
     """Recover the concept-leaf tokens (last ::-segment) from a lecture's Anki
-    search fragments (e.g. 'tag:B&B::…::DNA_Structure OR tag:*DNA_Structure*')."""
+    search fragments (e.g. 'tag:B&B::…::DNA_Structure OR tag:*DNA_Structure*', or
+    the AnKing form '("tag:#AK…::DNA_Structure" OR "tag:#AK…::Extra")')."""
     out = set()
     for frag in searches or []:
         for part in str(frag).split(" OR "):
-            part = part.strip()
+            part = _clean_leaf(part)
             if ":" in part:                       # drop tag:/deck: prefix
                 part = part.split(":", 1)[1]
-            leaf = part.strip().strip("*").split("::")[-1].strip().strip("*")
-            if leaf and " " not in leaf:
+            leaf = _clean_leaf(part.strip().strip("*").split("::")[-1]).strip("*")
+            if leaf and " " not in leaf and leaf.lower() not in _GENERIC_LEAVES:
                 out.add(leaf)
     return out
+
+
+def clean_stored_tags():
+    """One-off repair for banks tagged before _leaves_from_searches handled quoted
+    searches: clean every stored tag and drop bare generic leaves. Rewrites only banks
+    that change, then refreshes those banks' Practice notes (their tags come from the
+    bank) and forgets the broken tag names. Returns the bank ids repaired."""
+    fixed, junk = [], set()
+    for bid, meta in list_banks().items():
+        dir_name = meta.get("dir", "")
+        qs = _bank_questions(dir_name)
+        changed = False
+        for q in qs:
+            if not isinstance(q, dict):
+                continue
+            for fld in ("tags", "mined_tags"):
+                cur = q.get(fld)
+                if not cur:
+                    continue
+                new = []
+                for t in cur:
+                    c = _clean_leaf(t)
+                    if not c or ("::" not in c and c.lower() in _GENERIC_LEAVES):
+                        c = ""
+                    if c != t:
+                        junk.add(str(t))
+                    if c and c not in new:
+                        new.append(c)
+                if new != list(cur):
+                    q[fld] = sorted(new)
+                    changed = True
+        if changed:
+            _rewrite_bank(dir_name, qs)
+            fixed.append(bid)
+    if fixed and _practice_deck_exists():
+        for bid in fixed:
+            try:
+                convert_bank_to_deck(bid)          # re-stamps the notes' tags from the bank
+            except Exception as e:
+                log("tag repair convert %s: %s" % (bid, e))
+        try:
+            gone = [t for t in junk if not mw.col.find_notes(
+                "tag:" + t.replace('"', '\\"').replace("(", "\\(").replace(")", "\\)"))]
+            if gone:
+                mw.col.tags.remove(" ".join(gone))   # drop the now-unused broken names
+        except Exception as e:
+            log("tag repair cleanup: %s" % e)
+    if fixed:
+        log("qbank: repaired tags in %s" % ", ".join(fixed))
+    return fixed
 
 
 def retag_from_lecture_map():
@@ -731,6 +825,9 @@ def _leaf_keys(tags):
     out = set()
     for t in tags or []:
         if not t:
+            continue
+        if str(t).startswith("deck:"):             # deck lecture: match the exact deck
+            out.add(str(t).lower())
             continue
         seg = str(t).split("::")[-1]
         k = lec._leaf_key(seg) if lec is not None else seg.strip().lower()
@@ -903,6 +1000,8 @@ _FUZZY_LEAF_MIN = 0.6
 
 
 def _leaf_words(leaf):
+    if (leaf or "").startswith("deck:"):
+        return frozenset()     # decks match exactly only (paths share "sfom", "biweekly", …)
     return frozenset(w for w in re.split(r"[_\s]+", leaf or "") if w)
 
 
@@ -983,7 +1082,8 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
             if qid in exclude_qids:
                 continue
             score = 0.0
-            qleaves = _leaf_keys(q.get("tags")) | _leaf_keys(q.get("mined_tags"))
+            qleaves = (_leaf_keys(q.get("tags")) | _leaf_keys(q.get("mined_tags"))
+                       | _leaf_keys(q.get("content_tags")))
             inter = leaves & qleaves
             if inter:
                 score = 10.0 + _w(inter)             # exact tag/concept match wins
@@ -1005,12 +1105,23 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
     return [q for _s, q in scored]
 
 
+def card_leaf_keys(card):
+    """Match keys for a review card: its tags' concept leaves plus its (home) deck, so
+    cards organised by deck rather than tags can match questions tagged "deck:<name>"."""
+    keys = _leaf_keys(list(card.note().tags))
+    try:
+        did = getattr(card, "odid", 0) or card.did
+        keys.add(("deck:" + mw.col.decks.name(did)).lower())
+    except Exception:
+        pass
+    return keys
+
+
 def find_for_card(card, limit=5):
     """Return up to `limit` normalized questions related to `card`, best first.
     Prefers concept-tag overlap; falls back to text-token overlap for untagged
     banks/questions."""
-    note = card.note()
-    leaves = _leaf_keys(list(note.tags))
+    leaves = card_leaf_keys(card)
     tokens = _tokens((card.question() or "") + " " + (card.answer() or ""))
     ranked = _rank_questions(leaves, tokens, use_text_fallback=True)
     return [_normalize_q(q) for q in ranked[:limit]]
@@ -1566,6 +1677,36 @@ def _pptx_native_paragraphs(z, sx):
     return out
 
 
+def _pptx_title_text(z, sx):
+    """The slide's TITLE-placeholder text (first paragraph), or "". Section-title slides
+    put the topic in the title placeholder (ctrTitle/title); the author's comments on
+    question slides ("Might be out of scope", "Great question") are plain text boxes."""
+    xml = z.read(sx).decode("utf-8", "ignore")
+    for sp in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
+        if not re.search(r'<p:ph\b[^>]*type="(?:ctrTitle|title)"', sp):
+            continue
+        for p in re.split(r"</a:p>", sp):
+            runs = re.findall(r"<a:t>(.*?)</a:t>", p, re.S)
+            t = re.sub(r"\s+", " ", " ".join(re.sub(r"<[^>]+>", "", x) for x in runs))
+            t = (t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                  .replace("&quot;", '"').replace("&#8217;", "’").replace("&apos;", "'")).strip()
+            if t:
+                return t
+    return ""
+
+
+# Author commentary that recurs on question slides — never a section name.
+_RE_COMMENTARY = re.compile(
+    r"(?i)\b(out(side)? (of |a )?scope|in the weeds|too specific|great q(uestion)?|"
+    r"exam style|explanation continued|briefly mentioned|next slide)\b")
+
+
+# Per-slide titles that aren't section names ("Question 12", "Q5", "Answer", "3.").
+_RE_NOT_SECTION = re.compile(
+    r"(?i)^\s*(q(uestion)?s?\s*#?\s*\d+([\s\-–—]+\d+)?|answers?|explanations?|"
+    r"rationales?|solutions?|key|answer key|\d+[.)]?)\s*[:.]?\s*$")
+
+
 def _pptx_content_images(pptx_path, tmpdir):
     """Extract content images from a .pptx in slide order, dropping page chrome.
     Returns a per-slide sequence of **(temp_path, category)** — with repeats: a
@@ -1598,7 +1739,17 @@ def _pptx_content_images(pptx_path, tmpdir):
     for paras in per_text:
         for p in set(paras):
             pfreq[p] = pfreq.get(p, 0) + 1
-    topics = {p for p, c in pfreq.items() if c >= 2 and 2 <= len(p) <= 80}
+    topics = {p for p, c in pfreq.items() if c >= 2 and 2 <= len(p) <= 80
+              and not _RE_COMMENTARY.search(p)}
+    # Title placeholders are the reliable section signal: every section-title slide
+    # uses one, commentary never does. Slide 1 is the deck's cover (deck name/author).
+    titles = [_pptx_title_text(z, sx) if i else "" for i, sx in enumerate(slide_xmls)]
+    titles = ["" if (t and (_RE_COMMENTARY.search(t) or _RE_NOT_SECTION.match(t))) else t
+              for t in titles]
+    n_titled = sum(1 for t in titles if t)
+    # A deck that titles EVERY slide (a "Title Only" layout throughout) isn't marking
+    # sections with them — fall back to the recurring-topic rule there.
+    use_titles = 0 < n_titled <= max(8, len(slide_xmls) * 0.35)
 
     # Chrome images: present on > half the slides (min 5).
     ifreq = {}
@@ -1612,7 +1763,12 @@ def _pptx_content_images(pptx_path, tmpdir):
     category = ""
     for sid, (pics, paras) in enumerate(zip(per_slide, per_text)):
         full = " ".join(paras).strip()
-        if full in topics:                 # a section-title slide
+        if use_titles:
+            t = titles[sid]
+            if t:
+                # a section-title slide ("?????"-style titles start an unnamed section)
+                category = t if re.search(r"[A-Za-z]", t) else ""
+        elif full in topics:               # (decks without title placeholders)
             category = full
         for arc, dims in pics:
             if arc in chrome or dims == _PPTX_LOGO_DIMS:
@@ -2247,6 +2403,7 @@ def _parse_ocr_blocks(blocks):
                 target, idx = cand, mi
             elif num is None:
                 target, idx = cand, ord(letter) - 65
+
         if target is not None and idx is not None and 0 <= idx < len(target["choices"]):
             target["answer"] = idx
             target["explanation"] = rat
@@ -2464,7 +2621,7 @@ def _write_qb_plain(out_path, base_name, qs):
     return man
 
 
-def pptx_import_dialog(on_done=None, path=None):
+def pptx_import_dialog(on_done=None, path=None, build_deck=False):
     """Pick a .pptx, OCR its slides locally, parse MCQs, and build+import a .qb
     in one step. OCR is macOS Vision (offline); imperfect slides may be skipped.
     Pass ``path`` to skip the file picker (e.g. a file dropped onto the list)."""
@@ -2572,7 +2729,7 @@ def pptx_import_dialog(on_done=None, path=None):
             out = os.path.splitext(path)[0] + ".qb"
             try:
                 man = _write_qb_plain(out, base, final_qs)
-                import_qb(out)
+                import_qb(out, build_deck=build_deck)
             except Exception as e:
                 showWarning("Could not create/import .qb:\n\n%s" % e)
                 return
@@ -2733,11 +2890,98 @@ def _is_anking_tags(tagset):
     return any(m in t for t in tagset for m in _ANKING_MARKS)
 
 
-def _card_snippet(flds, max_len=160):
-    """A short plain-text preview of a note's fields (\x1f-separated), so the AI
-    can see what a candidate tag actually covers. Read locally; never uploaded on
+# Fields that are metadata, not card content: never sent in a prompt. Underscore-prefixed
+# fields are hidden add-on data (e.g. _JankiRW, the base64 rephrasings for mobile).
+_META_FIELD_RE = re.compile(
+    r"^(_.*|sources?|references?|refs?|citations?|tags?|ids?|guid|uuid|links?|urls?|"
+    r"audio|sounds?|video|"
+    r"personal ?notes?|notes? ?\(personal\)|lectures?|lecture ?(name|title|id)|"
+    r"one ?by ?one|additional ?resources?|missed ?questions?|author|created|updated|"
+    r"slide ?(no|number|#)?|qid|answer ?key)$", re.I)
+_B64_RE = re.compile(r"[A-Za-z0-9+/=_-]{60,}")
+# Image-occlusion data: masks (old add-on: SVG) are pure geometry → dropped; the new
+# built-in "Occlusion" field is shape coordinates, of which only TEXT shapes' labels matter.
+_MASK_FIELD_RE = re.compile(r"^(question|answer|original) ?mask$", re.I)
+_OCCL_FIELD_RE = re.compile(r"^occlusions?$", re.I)
+_FIELD_CAP = 800        # chars per field: nothing heavy ever reaches a prompt
+_FIELD_NAMES = {}
+
+
+def content_text(value):
+    """One field's human-readable text, safe for a prompt: HTML, embedded (data:)
+    images, [sound:…] tags and base64-looking blobs removed; cloze syntax flattened to
+    its answer text. Image FILENAMES are kept (in place of the image) — they often name
+    the structure/topic."""
+    h = re.sub(r"(?is)<(script|style|template|svg|iframe|object|video|audio|canvas)\b.*?"
+               r"</\1>", " ", value or "")
+    h = re.sub(r"(?is)<(embed|source|track)\b[^>]*>", " ", h)
+    names = []
+
+    def _attr(tag, name):
+        m_ = re.search(r"""(?is)\b%s\s*=\s*(["'])(.*?)\1""" % name, tag) or \
+            re.search(r"""(?is)\b%s\s*=\s*([^"'\s>]+)""" % name, tag)
+        return (m_.group(m_.lastindex) if m_ else "").strip()
+
+    def _img(m):
+        tag = m.group(0)
+        src = _attr(tag, "src")
+        label = _attr(tag, "alt") or _attr(tag, "title")   # alt/title text is real info
+        label = re.sub(r"\s+", " ", label)[:120]
+        name = "" if (not src or src.lower().startswith("data:")) else src.rsplit("/", 1)[-1]
+        if not name and not label:
+            return " "
+        names.append(name + ((', "%s"' % label) if (label and label != name) else ""))
+        return " \x00IMG%d\x00 " % (len(names) - 1)
+    h = re.sub(r"(?is)<img\b[^>]*>", _img, h)
+    h = re.sub(r"\[sound:[^\]]*\]", " ", h)
+    h = re.sub(r"\{\{c\d+::(.*?)(?:::[^}]*)?\}\}", r"\1", h)
+    h = _plain(h)
+    h = re.sub(r"data:[\w/+.-]+;base64,\S*", " ", h)
+    h = _B64_RE.sub(" ", h)                      # before the filenames go back in
+    h = re.sub("\x00IMG(\\d+)\x00", lambda m: "[image: %s]" % names[int(m.group(1))].lstrip(", "), h)
+    h = re.sub(r"\s+", " ", h).strip()
+    return (h[:_FIELD_CAP].rstrip() + "…") if len(h) > _FIELD_CAP else h
+
+
+def _occlusion_labels(value):
+    """Text labels from Anki's built-in image-occlusion field (text shapes only)."""
+    labels = re.findall(r"(?i)image-occlusion:text:[^}]*?:text=([^:}]+)", value or "")
+    return " / ".join(l.strip() for l in labels if l.strip())
+
+
+def content_fields(mid, flds):
+    """The note's CONTENT field texts (metadata / hidden fields skipped), in order."""
+    names = _FIELD_NAMES.get(mid)
+    if names is None:
+        try:
+            m = mw.col.models.get(int(mid))
+            names = [f.get("name", "") for f in (m or {}).get("flds", [])]
+        except Exception:
+            names = []
+        _FIELD_NAMES[mid] = names
+    out = []
+    for i, v in enumerate((flds or "").split("\x1f")):
+        nm = names[i].strip() if i < len(names) else ""
+        if nm and (_META_FIELD_RE.match(nm) or _MASK_FIELD_RE.match(nm)):
+            continue
+        if nm and _OCCL_FIELD_RE.match(nm):
+            t = _occlusion_labels(v)
+            if t:
+                out.append("[labels: %s]" % t)
+            continue
+        t = content_text(v)
+        if t:
+            out.append(t)
+    return out
+
+
+def _card_snippet(flds, max_len=160, mid=None):
+    """A short plain-text preview of a note's CONTENT fields (\x1f-separated), so the AI
+    can see what a candidate tag actually covers — no hidden add-on data (base64
+    rephrasings), metadata fields, images or media. Read locally; never uploaded on
     its own — it only lands in the prompt the user pastes into their own AI."""
-    parts = [p for p in (_plain(f) for f in (flds or "").split("\x1f")) if p]
+    parts = content_fields(mid, flds) if mid is not None else \
+        [p for p in (content_text(f) for f in (flds or "").split("\x1f")) if p]
     s = " / ".join(parts)
     return (s[:max_len].rstrip() + "…") if len(s) > max_len else s
 
@@ -2798,11 +3042,11 @@ def _candidate_examples(concept_leaves, hutch_tags, aj_tags, max_len=160,
         return concept_ex, hutch_ex, aj_ex
     need_leaves = set(path_leaf.values())
     try:
-        rows = mw.col.db.execute("select id, tags, flds from notes")
+        rows = mw.col.db.execute("select id, tags, flds, mid from notes")
     except Exception as e:
         log("qbank candidate examples: %s" % e)
         return concept_ex, hutch_ex, aj_ex
-    for nid, tags_str, flds in rows:
+    for nid, tags_str, flds, mid in rows:
         if not tags_str:
             continue
         if allowed_nids is not None and nid not in allowed_nids:
@@ -2818,16 +3062,16 @@ def _candidate_examples(concept_leaves, hutch_tags, aj_tags, max_len=160,
             if t in path_leaf:
                 leaf = path_leaf[t]
                 if leaf not in concept_ex:
-                    snip = snip if snip is not None else _card_snippet(flds, max_len)
+                    snip = snip if snip is not None else _card_snippet(flds, max_len, mid)
                     if snip:
                         concept_ex[leaf] = snip
                         need_leaves.discard(leaf)
             elif t in hutch_set and t not in hutch_ex:
-                snip = snip if snip is not None else _card_snippet(flds, max_len)
+                snip = snip if snip is not None else _card_snippet(flds, max_len, mid)
                 if snip:
                     hutch_ex[t] = snip
             elif t in aj_set and t not in aj_ex:
-                snip = snip if snip is not None else _card_snippet(flds, max_len)
+                snip = snip if snip is not None else _card_snippet(flds, max_len, mid)
                 if snip:
                     aj_ex[t] = snip
         if (not need_leaves and len(hutch_ex) >= len(hutch_set)
@@ -2916,6 +3160,218 @@ def assign_deck_tags_from_headers(families=("AJ_UCCOM_keep", "hUtChCOM")):
     return tagged, total
 
 
+# --- Content-based lecture tags (no AI) -----------------------------------------
+# School decks like Hutch (hUtChCOM::M1::SFOM::Week7::FattyAcids::FA2) tag by LECTURE, and a
+# slide deck's section headers rarely name the lecture ("Likely outside of scope"), so
+# header matching tags few questions. Instead, build a word profile for every lecture tag
+# from the text of the family's own cards, and give each question the lecture whose
+# profile its stem + choices + explanation fit best. Local only; nothing leaves the Mac.
+_CT_FAMILIES = ("hUtChCOM", "AJ_UCCOM_keep")
+_CT_STOP = set((
+    "the a an of to and or in on for with is are be this that as by from at it its was were "
+    "which what when who into than then also may can not no but all any each other such these "
+    "those most more less has have had will would should could does did do been being their "
+    "there they them his her he she you your our we i if so only very both between during "
+    "after before over under about through up down out off per via within without least "
+    "following true false except patient year old man woman presents shows likely best").split())
+_CT_MIN_WORDS = 40      # a lecture tag needs this much card text to get a profile
+_CT_MIN_SCORE = 0.12    # cosine floor for a confident match
+_CT_MARGIN = 1.15       # best must beat the runner-up by this factor
+_CT_HEADER_BOOST = 1.6  # lecture tags under a topic the section header names
+_CT_NEIGHBOUR_MIN = 0.06
+_CT_CLOSE = 0.87        # a runner-up this close to the best is kept too (overlapping lectures)
+# Bump when the content-tag logic changes: banks tagged by an older version re-tag on
+# the next launch (the pass used to run only for banks that had never been tagged, so
+# a logic change never reached already-tagged banks).
+_CT_VERSION = 4
+
+
+def _ct_families():
+    """Lecture-organised tag families in THIS collection: the known school decks plus any
+    top-level tag family that looks like one (enough notes, mostly ≥3-level tags such as
+    School::Block::Week::Lecture, several distinct lectures), so other schools' decks
+    match too. AnKing is left to concept mining; Janki's own tags are skipped."""
+    try:
+        tags = mw.col.tags.all()
+    except Exception:
+        return list(_CT_FAMILIES)
+    roots = collections.defaultdict(list)
+    for t in tags:
+        roots[t.split("::", 1)[0]].append(t)
+    out = [f for f in _CT_FAMILIES if f in roots]
+    for root, ts in sorted(roots.items()):
+        if root in out or root.lower().startswith(("#ak", "practice", "janki")):
+            continue
+        deep = [t for t in ts if t.count("::") >= 2]
+        leaves = {t for t in deep if not any(u.startswith(t + "::") for u in ts)}
+        if len(leaves) < 5 or len(deep) < 0.6 * len(ts):
+            continue
+        try:
+            n = mw.col.db.scalar("select count() from notes where tags like ?",
+                                 "%% %s::%%" % root)
+        except Exception:
+            n = 0
+        if n >= 30:
+            out.append(root)
+    return out
+
+
+def _ct_tokens(html):
+    h = re.sub(r"\{\{c\d+::(.*?)(::[^}]*)?\}\}", r"\1", html or "")
+    h = re.sub(r"<[^>]+>", " ", h)
+    h = re.sub(r"&\w+;", " ", h)
+    return [w for w in re.findall(r"[a-z][a-z0-9\-]{2,}", h.lower()) if w not in _CT_STOP]
+
+
+_CT_DECKS = "__decks__"   # pseudo-family: untagged notes, organised by deck instead
+
+
+def _ct_profiles(families=_CT_FAMILIES):
+    """{lecture: unit tf-idf vector}. For a tag family, one profile per deepest tag of
+    its notes. For _CT_DECKS, one per deck, built from notes with NO tags at all (decks
+    like "M1!::hutchcom + cobo::SFOM::Biweekly 3::Innate Immunity" that are organised by
+    deck, which tag matching can't see); those lectures are stored as "deck:<name>"."""
+    import math
+    prof = collections.defaultdict(collections.Counter)
+    for fam in families:
+        if fam == _CT_DECKS:
+            names = {int(d.id): d.name for d in mw.col.decks.all_names_and_ids()}
+            seen = set()
+            for nid, flds, did, odid in mw.col.db.all(
+                    "select n.id, n.flds, c.did, c.odid from cards c join notes n "
+                    "on n.id = c.nid where trim(n.tags) = ''"):
+                name = names.get(int(odid or did), "")
+                if not name or name == "Practice" or name.startswith("Practice::") \
+                        or (nid, name) in seen:
+                    continue
+                seen.add((nid, name))
+                prof["deck:" + name].update(_ct_tokens(flds.replace("\x1f", " ")))
+            continue
+        for flds, tags in mw.col.db.all(
+                "select flds, tags from notes where tags like ?", "%% %s::%%" % fam):
+            ft = [t for t in tags.split() if t.lower().startswith(fam.lower() + "::")]
+            if not ft:
+                continue
+            deep = max(ft, key=lambda t: t.count("::"))
+            prof[deep].update(_ct_tokens(flds.replace("\x1f", " ")))
+    prof = {t: c for t, c in prof.items() if sum(c.values()) >= _CT_MIN_WORDS}
+    if len(prof) < 2:
+        return {}
+    n = len(prof)
+    df = collections.Counter(w for c in prof.values() for w in c)
+    idf = {w: math.log((n + 1) / (d + 0.5)) for w, d in df.items()}
+
+    def vec(c):
+        v = {w: (1 + math.log(k)) * idf.get(w, 0) for w, k in c.items() if idf.get(w, 0) > 0}
+        nm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+        return {w: x / nm for w, x in v.items()}
+    vecs = {t: vec(c) for t, c in prof.items()}
+    return {"vecs": vecs, "idf": idf, "vec": vec}
+
+
+def _ct_header_hits(header, tags):
+    """Lecture tags with a path segment (below the family root) named by the header."""
+    norm = lambda x: re.sub(r"[^a-z0-9]", "", str(x).lower())
+    hn = norm(header)
+    if len(hn) < 4:
+        return set()
+    words = [norm(w) for w in re.findall(r"[A-Za-z]{4,}", header or "")]
+    out = set()
+    for t in tags:
+        for g in (norm(x) for x in t.split("::")[1:]):
+            if len(g) >= 4 and (g == hn or g in hn or hn in g
+                                or any(w == g or (len(w) >= 5 and w in g) for w in words)):
+                out.add(t)
+                break
+    return out
+
+
+def _ct_assign_family(qs, P):
+    """{question index: lecture tag} for one family's profiles `P` (see below)."""
+    vecs, vec = P["vecs"], P["vec"]
+    rows = []
+    for i, q in enumerate(qs):
+        if not isinstance(q, dict) or not q.get("stem") or q.get("incomplete"):
+            continue
+        txt = " ".join([_plain(q.get("stem")),
+                        " ".join(_plain(c) for c in (q.get("choices") or [])),
+                        _plain(q.get("explanation"))])
+        qv = vec(collections.Counter(_ct_tokens(txt)))
+        hh = _ct_header_hits(q.get("lecture"), vecs)
+        sc = sorted(((sum(qv[w] * x for w, x in pv.items() if w in qv)
+                      * (_CT_HEADER_BOOST if t in hh else 1.0), t)
+                     for t, pv in vecs.items()), reverse=True)
+        (s1, t1), (s2, t2) = sc[0], sc[1]
+        ok = s1 >= _CT_MIN_SCORE and s1 >= _CT_MARGIN * s2
+        # Close call between two lectures (sibling decks that cover the same material):
+        # keep both rather than neither.
+        both = (not ok and s1 >= _CT_MIN_SCORE and s2 >= _CT_MIN_SCORE
+                and s2 >= _CT_CLOSE * s1)
+        rows.append([i, q.get("lecture"), [t1, t2] if both else ([t1] if ok else None),
+                     t1, s1])
+    for k, r in enumerate(rows):
+        if r[2]:
+            continue
+        same = lambda j: rows[j][1] == r[1] and rows[j][2]
+        prv = next((rows[j][2] for j in range(k - 1, -1, -1) if same(j)), None)
+        nxt = next((rows[j][2] for j in range(k + 1, len(rows)) if same(j)), None)
+        if prv and prv == nxt:
+            r[2] = prv
+        elif r[4] >= _CT_NEIGHBOUR_MIN and ((prv and r[3] in prv) or (nxt and r[3] in nxt)):
+            r[2] = [r[3]]
+    return {r[0]: r[2] for r in rows if r[2]}
+
+
+def assign_content_tags(families=None):
+    """Store each complete question's best-fitting lecture tag PER deck family in
+    `content_tags` (recomputed every run, so it tracks the decks). Unsure questions
+    borrow the tag their confident neighbours under the same header agree on, since
+    slide decks run lecture by lecture. Returns (questions tagged, total)."""
+    if families is None:
+        families = _ct_families()
+    profs = [P for P in (_ct_profiles((f,)) for f in tuple(families) + (_CT_DECKS,)) if P]
+    tagged = total = 0
+    for _bid, meta in list_banks().items():
+        dir_name = meta.get("dir", "")
+        qs = _bank_questions(dir_name)
+        picks = [_ct_assign_family(qs, P) for P in profs]
+        changed = False
+        for i, q in enumerate(qs):
+            if not isinstance(q, dict) or not q.get("stem") or q.get("incomplete"):
+                continue
+            new = [t for p in picks if i in p for t in p[i]]
+            total += 1
+            tagged += bool(new)
+            if "content_tags" not in q or (q.get("content_tags") or []) != new:
+                q["content_tags"] = new
+                changed = True
+        if changed:
+            _rewrite_bank(dir_name, qs)
+    try:
+        reg = _load_registry()
+        reg["ct_version"] = _CT_VERSION
+        _save_registry(reg)
+    except Exception as e:
+        log("content tags version: %s" % e)
+    return tagged, total
+
+
+def content_tags_missing():
+    """True if the banks need a content-tag pass: tagged by an older version of the
+    logic, or holding a question that was never tagged."""
+    try:
+        if _load_registry().get("ct_version") != _CT_VERSION:
+            return True
+    except Exception:
+        return True
+    for _bid, meta in list_banks().items():
+        for q in _bank_questions(meta.get("dir", "")):
+            if isinstance(q, dict) and q.get("stem") and not q.get("incomplete") \
+                    and "content_tags" not in q:
+                return True
+    return False
+
+
 def mine_concepts_from_banks():
     """Deterministically detect concept leaves in each question's stem + correct
     answer + explanation using the collection's own #Subjects vocabulary, storing
@@ -2978,7 +3434,7 @@ def retag_all_banks():
 
 def build_tagging_prompt(bids, include_choices=False, include_answer=False,
                          branches=None, concepts=True, hutch_on=True, aj_on=True,
-                         include_card_text=False, card_text_decks=None):
+                         include_card_text=False, card_text_decks=None, lectures=None):
     """Build the paste-into-an-AI prompt for the given bank ids. The candidate
     list is fully modular — each part can be toggled to trade coverage for tokens:
       • concepts   — AnKing #Subjects concept leaves (optionally limited to
@@ -2993,6 +3449,10 @@ def build_tagging_prompt(bids, include_choices=False, include_answer=False,
                           each tag covers. Much larger prompt.
       • card_text_decks — restrict which decks the example snippets are drawn from
                           (list of deck ids; None = whole collection).
+      • lectures — {bid: [lecture paths]} to include only those subdecks of a bank
+                   (a path covers everything nested under it); banks not in the
+                   dict are included whole. Question ids stay numbered over the
+                   WHOLE bank, so a reply still maps back.
     Returns (prompt_text, stats)."""
     lec = _lectures()
 
@@ -3022,6 +3482,11 @@ def build_tagging_prompt(bids, include_choices=False, include_answer=False,
                 continue
             ordinal += 1
             qid = "%s#%d" % (bid, ordinal)
+            if lectures and bid in lectures:
+                lp = "::".join(s_.strip() for s_ in (q.get("lecture") or "").split("::")
+                               if s_.strip())
+                if not any(lp == w or lp.startswith(w + "::") for w in lectures[bid]):
+                    continue
             L = q.get("lecture") or "(no lecture)"
             if L not in lec_pos:
                 lec_pos[L] = len(groups)
@@ -3098,6 +3563,39 @@ def build_tagging_prompt(bids, include_choices=False, include_answer=False,
     return "\n".join(out), stats
 
 
+_TP_CONTEXT_WARN = 150000   # tokens: past this most chat models can't take the prompt
+_TP_REPLY_LIMIT = 30000     # tokens: one reply tops out around here
+
+
+def _tag_prompt_cost_text(prompt_len: int, n_questions: int) -> str:
+    """Rough tokens in/out + model time for the AI tag-matching prompt. The reply is short
+    (a question id + a few tags each), so reading the big candidate list is a real share
+    of the wait: ~2–6k tokens/s to read, ~40–90 tokens/s to write, ≈4 chars/token."""
+    if not n_questions:
+        return ""
+    tok_in = prompt_len // 4
+    tok_out = n_questions * 35
+
+    def _k(n):
+        return ("%.1fk" % (n / 1000.0)) if n >= 1000 else str(n)
+
+    def _dur(sec):
+        if sec < 90:
+            return "%d s" % max(5, round(sec / 5.0) * 5)
+        m = sec / 60.0
+        return ("%d min" % round(m)) if m < 90 else ("%.1f h" % (m / 60.0))
+    lo = tok_in / 6000.0 + tok_out / 90.0
+    hi = tok_in / 2000.0 + tok_out / 40.0
+    txt = ("≈ %s tokens in  ·  ≈ %s tokens out  ·  model time ≈ %s–%s"
+           % (_k(tok_in), _k(tok_out), _dur(lo), _dur(hi)))
+    if tok_in > _TP_CONTEXT_WARN:
+        txt += ("\n⚠ Too big for most chat models: untick candidate sources / card text, "
+                "or pick fewer subdecks.")
+    elif tok_out > _TP_REPLY_LIMIT:
+        txt += ("\n⚠ Reply may be cut off: tag fewer questions per prompt (pick subdecks).")
+    return txt
+
+
 def copy_tagging_prompt_dialog(on_done=None):
     """Pick bank(s), build the AI tag-matching prompt, and copy it to the
     clipboard (or save it as .txt for large prompts)."""
@@ -3109,9 +3607,17 @@ def copy_tagging_prompt_dialog(on_done=None):
     if not banks:
         tooltip("No question banks imported yet.")
         return
-    dlg = QDialog(mw)
+    # Parent to the window it was opened from (Settings), so it can't open behind it.
+    dlg = QDialog(QApplication.activeWindow() or mw)
     dlg.setWindowTitle("AI tag-matching prompt")
+    try:                                   # Janki glass, like every other Janki dialog
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        _glass = None
     v = QVBoxLayout(dlg)
+    v.setContentsMargins(16, 34 if getattr(dlg, "_jk_expanded", False) else 12, 16, 14)
     lbl = QLabel(
         "Builds a prompt that asks an AI to match each question to your Anki "
         "concept tags (AnKing #Subjects + Hutch/AJ). Paste it into "
@@ -3135,6 +3641,8 @@ def copy_tagging_prompt_dialog(on_done=None):
         wa = QWidgetAction(menu)
         wa.setDefaultWidget(inner)
         menu.addAction(wa)
+        if _glass is not None:
+            _glass.glass_menu_popup(menu)   # rounded frosted box, like the other dropdowns
         btn.setMenu(menu)
         return btn
 
@@ -3164,13 +3672,21 @@ def copy_tagging_prompt_dialog(on_done=None):
     deck_lbl.setStyleSheet("color:#9aa0aa;")
     inc_v.addWidget(deck_lbl)
     deck_scroll = QScrollArea(); deck_scroll.setWidgetResizable(True)
+    deck_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     deck_scroll.setFixedHeight(120)
     deck_host = QWidget(); deck_hv = QVBoxLayout(deck_host)
     deck_hv.setContentsMargins(22, 0, 0, 0)
-    deck_cbs = {}                                   # top-level name -> (checkbox, [dids])
-    for _name, _dids in _decks_top_level():
-        _dcb = QCheckBox(_name); _dcb.setChecked(True)
-        deck_cbs[_name] = (_dcb, _dids); deck_hv.addWidget(_dcb)
+    # Deck tree with "+" subdeck expanders (same widget as the rephrase prompt): tick
+    # whole decks or open one to pick specific subdecks. [(checkbox, [own did])].
+    try:
+        from ..features.reword import _deck_tree_widgets
+        deck_nodes = _deck_tree_widgets(_decks_top_level(), deck_hv)
+    except Exception as e:
+        log("tag prompt deck tree: %s" % e)
+        deck_nodes = []
+        for _name, _dids in _decks_top_level():
+            _dcb = QCheckBox(_name); _dcb.setChecked(True)
+            deck_nodes.append((_dcb, _dids)); deck_hv.addWidget(_dcb)
     deck_hv.addStretch()
     deck_scroll.setWidget(deck_host)
     inc_v.addWidget(deck_scroll)
@@ -3199,31 +3715,103 @@ def copy_tagging_prompt_dialog(on_done=None):
     bank_row.addStretch()
     v.addLayout(bank_row)
 
-    # Per-bank radios: only shown/needed when "All banks" is off.
-    grp = QButtonGroup(dlg)
-    bank_box = QWidget(); bank_bv = QVBoxLayout(bank_box)
-    bank_bv.setContentsMargins(16, 0, 0, 0)
-    ids = []
-    for k, (bid, meta) in enumerate(banks.items()):
-        rb = QRadioButton("%s  (%s q)" % (meta.get("name", bid),
-                                          meta.get("count", "?")))
-        grp.addButton(rb, k)
-        bank_bv.addWidget(rb)
-        ids.append(bid)
-    if ids:
-        grp.button(0).setChecked(True)
+    # Bank picker (shown when "All banks" is off): tick whole banks, or open a bank's
+    # "+" to tick specific subdecks (its lectures / subbanks).
+    from aqt.qt import QTreeWidget, QTreeWidgetItem, QHeaderView
+    ROLE = Qt.ItemDataRole.UserRole
+    ids = list(banks)
+    bank_box = QTreeWidget()
+    bank_box.setColumnCount(2)
+    bank_box.setHeaderHidden(True)
+    bank_box.setRootIsDecorated(False)
+    bank_box.setIndentation(16)
+    bank_box.setMinimumHeight(150)
+    try:
+        bank_box.header().setStretchLastSection(False)
+        bank_box.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        bank_box.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    except Exception:
+        pass
+    bank_box.setStyleSheet("QTreeWidget{background:transparent;border:1px solid "
+                           "rgba(255,255,255,0.12);border-radius:6px;}")
+    _flags = (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
+              | Qt.ItemFlag.ItemIsAutoTristate)
+
+    def _add_nodes(parent, nodes, bid, prefix):
+        for n in nodes:
+            path = (prefix + "::" + n["name"]) if prefix else n["name"]
+            it = QTreeWidgetItem(["%s  (%d)" % (n["name"], n["count"]),
+                                  "+" if n["children"] else ""])
+            it.setFlags(_flags)
+            it.setData(0, ROLE, (bid, path))
+            it.setCheckState(0, parent.checkState(0))
+            parent.addChild(it)
+            if n["children"]:
+                _add_nodes(it, n["children"], bid, path)
+
+    for k, bid in enumerate(ids):
+        meta = banks[bid]
+        top = QTreeWidgetItem(["%s  (%s q)" % (meta.get("name", bid), meta.get("count", "?")),
+                               ""])
+        top.setFlags(_flags)
+        top.setData(0, ROLE, (bid, None))
+        top.setCheckState(0, Qt.CheckState.Checked if k == 0 else Qt.CheckState.Unchecked)
+        bank_box.addTopLevelItem(top)
+        try:
+            sub = bank_subtree(bid)
+        except Exception:
+            sub = []
+        if sub:
+            top.setText(1, "+")
+            _add_nodes(top, sub, bid, "")
+
+    def _toggle_expand(item, col):
+        if col == 1 and item.childCount():
+            item.setExpanded(not item.isExpanded())
+            item.setText(1, "−" if item.isExpanded() else "+")
+    bank_box.itemClicked.connect(_toggle_expand)
     bank_box.setVisible(False)
     v.addWidget(bank_box)
 
+    def _checked_paths(item):
+        """Deepest fully-checked lecture paths under a partially checked node."""
+        out = []
+        for i in range(item.childCount()):
+            ch = item.child(i)
+            st = ch.checkState(0)
+            if st == Qt.CheckState.Checked:
+                out.append(ch.data(0, ROLE)[1])
+            elif st == Qt.CheckState.PartiallyChecked:
+                out.extend(_checked_paths(ch))
+        return out
+
     est = QLabel(""); est.setStyleSheet("color:#9aa0aa; margin-top:4px;")
     v.addWidget(est)
+    # Bottom-of-window cost line (placed just above the buttons below).
+    cost = QLabel(""); cost.setWordWrap(True)
+    cost.setStyleSheet("color:#9aa0aa; margin: 2px 0 6px 0;")
+    cost.setToolTip("Rough: ≈4 characters per token, ~35 reply tokens per question, and "
+                    "typical chat-model speeds (reading ~2–6k tokens/s, writing ~40–90/s). "
+                    "Actual time depends on the model and how busy it is.")
+
+    def _selection():
+        """(bank ids, {bid: [lecture paths]} for partly-picked banks)."""
+        if cb_all.isChecked():
+            return list(ids), None
+        bids, lects = [], {}
+        for i in range(bank_box.topLevelItemCount()):
+            top = bank_box.topLevelItem(i)
+            bid = top.data(0, ROLE)[0]
+            st = top.checkState(0)
+            if st == Qt.CheckState.Checked:
+                bids.append(bid)
+            elif st == Qt.CheckState.PartiallyChecked:
+                bids.append(bid)
+                lects[bid] = _checked_paths(top)
+        return bids, (lects or None)
 
     def _selected_bids():
-        if cb_all.isChecked():
-            return list(ids)
-        btn = grp.checkedButton()
-        idx = grp.id(btn) if btn is not None else -1
-        return [ids[idx]] if 0 <= idx < len(ids) else list(ids)
+        return _selection()[0]
 
     def _params():
         sel_branches = None
@@ -3232,10 +3820,11 @@ def copy_tagging_prompt_dialog(on_done=None):
             sel_branches = None if len(chosen) == len(branch_cbs) else set(chosen)
         deck_ids = None
         if cb_cardtext.isChecked():
-            chosen = [(cb, dids) for cb, dids in deck_cbs.values()]
-            picked = [d for cb, dids in chosen if cb.isChecked() for d in dids]
-            # All selected → None (whole collection); a subset → just those decks.
-            if picked and not all(cb.isChecked() for cb, _d in chosen):
+            full = [(cb.checkState() == Qt.CheckState.Checked, dids)
+                    for cb, dids in deck_nodes]
+            picked = [d for on, dids in full if on for d in dids]
+            # All ticked → None (whole collection); a subset → just those (sub)decks.
+            if picked and not all(on for on, _d in full):
                 deck_ids = picked
         return dict(include_choices=cb_choices.isChecked(),
                     include_answer=cb_answer.isChecked(),
@@ -3246,7 +3835,8 @@ def copy_tagging_prompt_dialog(on_done=None):
                     card_text_decks=deck_ids)
 
     def _build():
-        prompt, stats = build_tagging_prompt(_selected_bids(), **_params())
+        bids, lects = _selection()
+        prompt, stats = build_tagging_prompt(bids, lectures=lects, **_params())
         if stats["questions"] == 0:
             showWarning("No questions in the selected bank(s).")
             return None
@@ -3259,20 +3849,22 @@ def copy_tagging_prompt_dialog(on_done=None):
         cb_answer.setEnabled(not cb_choices.isChecked())  # choices supersede answer
         deck_lbl.setEnabled(cb_cardtext.isChecked())      # deck picker is a subopt
         deck_scroll.setEnabled(cb_cardtext.isChecked())
-        for _dcb, _d in deck_cbs.values():
+        for _dcb, _d in deck_nodes:
             _dcb.setEnabled(cb_cardtext.isChecked())
         try:
-            prompt, stats = build_tagging_prompt(_selected_bids(), **_params())
+            bids, lects = _selection()
+            prompt, stats = build_tagging_prompt(bids, lectures=lects, **_params())
         except Exception:
             est.setText(""); return
         extra = ("  · +choices" if cb_choices.isChecked()
                  else "  · +answer" if cb_answer.isChecked() else "")
         if cb_cardtext.isChecked():
             extra += "  · +card text"
-        est.setText("≈ %d tokens  ·  %d questions, %d candidates "
+        est.setText("%d questions, %d candidates "
                     "(%d concepts + %d Hutch + %d AJ)%s"
-                    % (len(prompt) // 4, stats["questions"], stats["candidates"],
+                    % (stats["questions"], stats["candidates"],
                        stats["concepts"], stats["hutch"], stats["aj"], extra))
+        cost.setText(_tag_prompt_cost_text(len(prompt), stats["questions"]))
 
     def _toggle_all(on):
         bank_box.setVisible(not on)   # show the radio list only when picking one
@@ -3280,10 +3872,15 @@ def copy_tagging_prompt_dialog(on_done=None):
         _refresh()
 
     cb_all.toggled.connect(_toggle_all)
-    grp.buttonToggled.connect(lambda *a: _refresh())
+    # Ticking a bank re-checks every subdeck under it (one itemChanged each); rebuild
+    # the estimate once per click, not once per child.
+    from aqt.qt import QTimer
+    _est_timer = QTimer(dlg); _est_timer.setSingleShot(True); _est_timer.setInterval(120)
+    _est_timer.timeout.connect(_refresh)
+    bank_box.itemChanged.connect(lambda *a: _est_timer.start())
     for w in (cb_concepts, cb_hutch, cb_aj, cb_answer, cb_choices, cb_cardtext,
               *branch_cbs.values(),
-              *[cb for cb, _d in deck_cbs.values()]):
+              *[cb for cb, _d in deck_nodes]):
         w.toggled.connect(_refresh)
     _refresh()
 
@@ -3317,6 +3914,7 @@ def copy_tagging_prompt_dialog(on_done=None):
         tooltip("Saved prompt (%d questions)." % stats["questions"], period=3000)
         dlg.accept()
 
+    v.addWidget(cost)
     row = QHBoxLayout()
     close = QPushButton("Close")
     save = QPushButton("Save .txt…")
@@ -3334,6 +3932,15 @@ def copy_tagging_prompt_dialog(on_done=None):
     save.clicked.connect(_save)
     copy.clicked.connect(_copy)
     dlg.resize(560, 220)
+    if _glass is not None:
+        def _front():
+            try:
+                _glass.hide_titlebar_extras(dlg)
+                _glass.bring_dialog_to_front(dlg)
+            except Exception:
+                pass
+        from aqt.qt import QTimer
+        QTimer.singleShot(0, _front)
     dlg.exec()
     if on_done:
         try:
@@ -3449,13 +4056,15 @@ def _apply_tag_results(data):
     return updated, dropped, skipped
 
 
-def apply_tag_results_dialog(on_done=None):
-    """Pick the AI's JSON reply file and apply its tag choices to the banks."""
+def apply_tag_results_dialog(on_done=None, path=None):
+    """Pick the AI's JSON reply file and apply its tag choices to the banks. Pass
+    ``path`` to skip the picker (a file dropped onto the bank list)."""
     from aqt.qt import QFileDialog
     from aqt.utils import tooltip, showWarning
-    path, _ = QFileDialog.getOpenFileName(
-        mw, "Apply AI tag results", "",
-        "AI results (*.json *.jsonl *.txt);;All files (*)")
+    if not path:
+        path, _ = QFileDialog.getOpenFileName(
+            mw, "Apply AI tag results", "",
+            "AI results (*.json *.jsonl *.txt);;All files (*)")
     if not path:
         return
     try:
@@ -5022,6 +5631,21 @@ def convert_bank_to_deck(bid):
         # Pin new-queue position to slide order (with gather=LOWEST_POSITION this
         # makes the whole bank review in exact slideshow order across lectures).
         _reposition_new(note, ordinal)
+    # Drop lecture subdecks the bank no longer uses (e.g. sections renamed by a
+    # re-import) — only when they hold NO cards at all, deepest first.
+    try:
+        stale = sorted((d for d in mw.col.decks.all_names_and_ids()
+                        if d.name.startswith(base + "::") and int(d.id) not in seen_dids),
+                       key=lambda d: -d.name.count("::"))
+        for d in stale:
+            n_cards = mw.col.db.scalar(
+                "select count() from cards where did = ? or odid = ?", int(d.id), int(d.id))
+            kids = [x for x in mw.col.decks.all_names_and_ids()
+                    if x.name.startswith(d.name + "::")]
+            if not n_cards and not kids:
+                mw.col.decks.remove([int(d.id)])
+    except Exception as e:
+        log("prune stale lecture decks: %s" % e)
     # Record the bank's deck id so a later deck rename can be synced back (see
     # reconcile_names).
     try:
@@ -5051,6 +5675,7 @@ def convert_to_deck_dialog(on_done=None):
     try:
         assign_deck_tags_from_headers()   # deterministic lecture tags first
         mine_concepts_from_banks()        # + concept mining (AI-free bridge)
+        assign_content_tags()             # + best-fitting lecture tag by card content
     except Exception as e:
         log("deck-tag pass: %s" % e)
     tot_a = tot_u = 0
@@ -5073,7 +5698,7 @@ def convert_to_deck_dialog(on_done=None):
             pass
 
 
-def docx_estimate_dialog(on_done=None, path=None):
+def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     """Pick a .docx, show how many questions it yields, then (on confirm) build a
     .qb next to it and import it. Untagged → matches by text similarity.
     Pass ``path`` to skip the file picker (e.g. a file dropped onto the list)."""
@@ -5107,7 +5732,7 @@ def docx_estimate_dialog(on_done=None, path=None):
         return
     try:
         out, man = _write_qb(path, qs)
-        import_qb(out)
+        import_qb(out, build_deck=build_deck)
     except Exception as e:
         showWarning("Could not create/import .qb:\n\n%s" % e)
         return

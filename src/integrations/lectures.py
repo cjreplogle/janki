@@ -274,7 +274,11 @@ def _load_xlsx(path):
         rows = []
         for row in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
             cells = {}
-            for attrs, body in re.findall(r'<c\b([^>]*)>(.*?)</c>', row, re.S):
+            # Empty cells are self-closing (<c r="O7" s="3"/>). The old pattern let one
+            # swallow the NEXT cell's value and file it under the wrong column, so a
+            # lecture right after a formatted-but-empty cell lost its column alignment
+            # and silently dropped out of the map.
+            for attrs, body in re.findall(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', row, re.S):
                 ref = re.search(r'r="([A-Z]+\d+)"', attrs)
                 if not ref:
                     continue
@@ -397,6 +401,29 @@ def _key_tokens(tokens):
     """Distinctive words: drop filler/stopwords + bare numerals, keep words >=4 chars."""
     return [t for t in tokens
             if t not in _MATCH_STOP and not t.isdigit() and t not in _ROMAN and len(t) >= 4]
+
+
+def _option_score(event, display):
+    """How well lecture `display` fits calendar title `event`, for ordering the row
+    dropdown. Shared distinctive WORDS dominate (prefix-tolerant: "urea" ~ "ureagenesis"),
+    both ways (how much of the event it covers, and how focused the lecture is on it);
+    a character-trigram similarity breaks ties. (Raw character ratio ranked "Nucleus"
+    above "TCA Cycle" for "Urea cycle".)"""
+    ek = set(_key_tokens(_match_tokens(event)))
+    dk = set(_key_tokens(_match_tokens(display)))
+
+    def _hit(w, pool):
+        return any(w == x or w.startswith(x) or x.startswith(w) or w[:5] == x[:5]
+                   for x in pool)
+    cover = (sum(1 for w in ek if _hit(w, dk)) / len(ek)) if ek else 0.0
+    focus = (sum(1 for w in dk if _hit(w, ek)) / len(dk)) if dk else 0.0
+
+    def _tri(s):
+        s = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+        return {s[i:i + 3] for i in range(max(0, len(s) - 2))}
+    a, b = _tri(event), _tri(display)
+    dice = (2.0 * len(a & b) / (len(a) + len(b))) if (a and b) else 0.0
+    return 3.0 * cover + 1.0 * focus + dice
 
 
 def _titles_compatible(a, b, coverage=0.6):
@@ -1436,6 +1463,40 @@ def _open_today_dialog(day_offset=0, auto=False):
     for i, nk in enumerate(opts, start=1):
         model_row[nk] = i
 
+    class _SimCombo(QComboBox):
+        """Row dropdown that, the first time it's opened, re-orders its options by
+        similarity to the row's calendar event (best match first; "— skip —" stays on
+        top) instead of alphabetically. Built lazily on open, so a day with many events
+        doesn't pay for sorting every row up front; the selection is kept."""
+
+        def __init__(self, event_title):
+            super().__init__()
+            self._event = event_title or ""
+            self._sorted = False
+
+        def showPopup(self):
+            if not self._sorted and self._event:
+                self._sorted = True
+                try:
+                    cur = self.currentData()
+
+                    def score(nk):
+                        return _option_score(self._event, m[nk]["display"])
+                    ranked = sorted(opts, key=lambda nk: (-score(nk), m[nk]["display"].lower()))
+                    mdl = QStandardItemModel(self)
+                    it = QStandardItem("— skip —"); it.setData(None, _UR); mdl.appendRow(it)
+                    for nk in ranked:
+                        it = QStandardItem(m[nk]["display"]); it.setData(nk, _UR)
+                        mdl.appendRow(it)
+                    self.blockSignals(True)
+                    self.setModel(mdl)
+                    i = self.findData(cur, _UR) if cur is not None else 0
+                    self.setCurrentIndex(i if i >= 0 else 0)
+                    self.blockSignals(False)
+                except Exception as exc:
+                    _log("lecture combo sort: %s" % exc)
+            super().showPopup()
+
     dlg = QDialog(mw)
     dlg.setWindowTitle("Lectures")
     # Same look as Janki Settings: glass, Interface font, close-only titlebar with the
@@ -1809,7 +1870,11 @@ def _open_today_dialog(day_offset=0, auto=False):
         cache[ev] = res
         return res
 
-    _COUNT_CHUNK = 24   # fragments per background query batch
+    # Tag searches per background query batch. A batch can't be interrupted, and one
+    # search costs ~0.15–1.5 s on a big collection, so a Prev/Next click waits for the
+    # batch already running before the new day is counted: keep it to ONE search
+    # (24 made day switches stall ~5 s once the map held 300+ lectures).
+    _COUNT_CHUNK = 1
 
     def _snapshot():
         """(row, nk, checked) for every row, captured on the main thread."""
@@ -2080,7 +2145,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             st["auto_keys"].append(resolved)
 
             evi = QTableWidgetItem(ev + ("   (~)" if fuzzy else ""))
-            combo = QComboBox()
+            combo = _SimCombo(ev)                           # sorts by similarity on open
             combo.setModel(combo_model)                    # shared model — cheap
             try:                                           # ~10 rows + glass popup
                 from ..user import glass as _glass
