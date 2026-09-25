@@ -1159,9 +1159,9 @@ class _SmoothControls(QObject):
         if t != QEvent.Type.Paint and t != QEvent.Type.Polish:
             return False
         try:
-            if not _glass_dialogs or not hasattr(obj, "window"):
+            if not hasattr(obj, "window"):
                 return False
-            if obj.window() not in _glass_dialogs:
+            if obj.window() not in _glass_dialogs and not _in_glass_host(obj):
                 return False
             from aqt.qt import (QPushButton, QComboBox, QLineEdit, QAbstractSpinBox,
                                 QCheckBox, QTabBar, QAbstractItemView, QStyledItemDelegate)
@@ -1178,6 +1178,32 @@ class _SmoothControls(QObject):
         except Exception:
             pass
         return False
+
+
+_glass_hosts = []        # embedded glass panels inside the main window (e.g. Statistics)
+
+
+def register_glass_host(widget) -> None:
+    """Paint the controls inside `widget` smoothly (like a glass dialog's) even though it
+    lives inside the main window rather than its own glass dialog."""
+    if widget not in _glass_hosts:
+        _glass_hosts.append(widget)
+        try:
+            widget.destroyed.connect(lambda *_a, w=widget: _glass_hosts.remove(w)
+                                     if w in _glass_hosts else None)
+        except Exception:
+            pass
+    _install_smooth_controls()
+
+
+def _in_glass_host(obj) -> bool:
+    for h in _glass_hosts:
+        try:
+            if h is obj or h.isAncestorOf(obj):
+                return h.isVisible()
+        except Exception:
+            continue
+    return False
 
 
 _smooth_controls = None

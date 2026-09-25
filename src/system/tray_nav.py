@@ -892,6 +892,30 @@ _TOGGLE_ON_NAME = {"caption": "tglOnBlue", "focus": "tglOnGreen",
                    "lockdown": "tglOnRed", "reword": "tglOnOrange"}
 
 
+def _install_mode_watch(win) -> None:
+    """Modes can change while the popup is open (Tab+` / Tab+F / Tab+R / `+⌫ keybinds work
+    over it). Poll the mode state (cheap) and re-tint the toggles when it changes. Its own
+    timer, parented to this popup (dies with it) and NOT gated on isVisible(), which is
+    unreliable for this panel on newer macOS."""
+    t = QTimer(win)
+    t.setInterval(200)
+    last = {"st": _toggle_states()}
+
+    def _tick():
+        if _nav is not win:
+            t.stop()
+            return
+        try:
+            cur = _toggle_states()
+            if cur != last["st"]:
+                last["st"] = cur
+                _refresh_toggles()
+        except Exception:
+            pass
+    t.timeout.connect(_tick)
+    t.start()
+
+
 def _refresh_toggles():
     st = _toggle_states()
     for key, btn in _toggle_btns.items():
@@ -1196,6 +1220,7 @@ def _build() -> "QWidget":
 
     _refresh_toggles()
     _install_smooth_painting(win)          # anti-aliased rounded fills
+    _install_mode_watch(win)
     return win
 
 

@@ -109,6 +109,13 @@ def open_practice_hub():
     list again."""
     global _practice_view
     _practice_view = True
+    # Stats swaps into the deck list's spot; already on the deck list this is an in-place
+    # re-render (no state change), so close Stats explicitly or it stays on top.
+    try:
+        from . import stats_embed
+        stats_embed.close()
+    except Exception:
+        pass
     # The umbrella "Practice" row is hidden in this view, so it MUST be expanded —
     # otherwise Anki doesn't render its children (the banks) at all and the view is
     # blank. NB: the deck-browser home list uses the *reviewer*-scope collapse state

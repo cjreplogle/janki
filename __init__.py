@@ -69,6 +69,13 @@ try:
 except Exception as _gl_exc:
     log("early glass hooks: %s" % _gl_exc)
 
+# Statistics opens inside the main window (glassed) instead of its own window.
+try:
+    from .src.features import stats_embed as _stats_embed
+    _stats_embed.install()
+except Exception as _se_exc:
+    log("stats embed: %s" % _se_exc)
+
 
 # ---------------------------------------------------------------------------
 # Startup
