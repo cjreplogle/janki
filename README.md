@@ -157,24 +157,37 @@ so nothing is left behind.
 
 These extra installs help tie together some theming:
 * [Anki Redesign](https://ankiweb.net/shared/info/2119814566) (Some menu animations)
-* [AMBOSS](https://www.amboss.com/us/anki) (Card underlines can explain terms, another integrated question bank)
 
 ## Support
-*If I sent this to you for testing. Just text me @ (513)-502-9361 if there are any issues/features
-you think will be helpful to other people!* 
+
+>[!NOTE]
+>*If I sent this to you for testing, just text me @ `(513)-502-9361` in the case there are 
+>any issues/features you think will be helpful to other people!* **Thank you for being an 
+>early user!** 
 
 Janki is an independent, unofficial project. It is **not affiliated with, endorsed
 by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
 "AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
 used here only nominatively — to describe compatibility with those products. No
 AnKing or AMBOSS content is bundled or redistributed; the add-on only operates on
-your own local collection.
+your local collection.
 
-As Janki has functionalities that patch the original code of Anki to improve visuals 
-and stamp cards for mobile effects. Certain functionalities, such as Lockdown Mode, 
-may also ask for system level permissions to work properly. MacOS makes this a requirement
-for programs which automatically closing apps / disabling Wi-Fi on the device. There 
-may be bugs, issues, or inaccuracies I have not yet identified.
+Claude Opus 4.8-5.5 was used in the co-programming of this application. No features are 
+intentionally taken from other add-ons. The intention is that this centralizes and 
+streamlines use of a variety of tools in existance. If any other creators have any issue 
+with features within this app, please email me at `creplogle20@gmail.com`. I am happy to 
+accommodate any inquiries and/or get rid of things if you feel this infringes on something 
+else you have made. *Janki will never have any mandatory paid features. If you paid for any 
+part of this software, you have been scammed.*
+
+Janki has functionalities that patch the original code of Anki to improve visuals 
+and stamp cards with javascript code for mobile effects. Certain functionalities, such as
+Lockdown Mode, may also ask for system level permissions to work properly. MacOS makes this
+a requirement for programs which automatically closing apps / disabling Wi-Fi on the 
+device. There may be bugs, issues, or inaccuracies I have not yet identified. In using this 
+application therefore, I cannot be liable for any unintentional damages to user Anki data 
+or glitches. Please only upload content to non-local LLMs which you have obtained
+permission.
 
 ## License
 
