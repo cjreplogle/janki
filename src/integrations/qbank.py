@@ -3198,6 +3198,9 @@ _JP_ANSWER_JS = (
 # desktop, bottom-center on mobile. State persists across cards via sessionStorage;
 # stopPropagation so tapping it never flips the card.
 _JP_SLIDE_JS = (
+    # Before anything renders: re-mark slide mode on <html> from the saved preference.
+    "try{if(sessionStorage.getItem('jp_show_slide')==='1')"
+    "document.documentElement.classList.add('jp-slide-mode');}catch(_){}"
     "if(!window.jankiApplySlide){"
     "window.jankiApplySlide=function(open){"
     # Render the slide(s) into a single BODY-LEVEL overlay (#jp-slide-ov, position:fixed
@@ -3213,6 +3216,10 @@ _JP_SLIDE_JS = (
     "var ai=a?a.querySelector('img'):null;"
     "if(q)q.style.display='none';if(a)a.style.display='none';"  # only render via overlay
     "var ov=document.getElementById('jp-slide-ov');"
+    # Slide MODE also lives on <html> (AnkiMobile rewrites <body>'s classes on every
+    # card/reveal, which let the text flash through between renders). With it, CSS hides
+    # the text from the very first paint of any card that has a slide.
+    "try{document.documentElement.classList.toggle('jp-slide-mode',!!open);}catch(_){}"
     "if(!open){if(ov)ov.style.display='none';"
     "document.body.classList.remove('jp-slide-open');}"        # reveal the card text
     "else{"
@@ -3227,7 +3234,8 @@ _JP_SLIDE_JS = (
     "if(!ov){ov=document.createElement('div');ov.id='jp-slide-ov';"
     "document.body.appendChild(ov);}"
     "else if(ov.parentNode!==document.body)document.body.appendChild(ov);"
-    "ov.className='jp-slide-ov'+(srcs.length>1?' jp-two':'');"
+    "var anim=!!window.__jpAnimNext;window.__jpAnimNext=false;"
+    "ov.className='jp-slide-ov'+(srcs.length>1?' jp-two':'')+(anim?' jp-anim':'');"
     "document.body.classList.add('jp-slide-open');"          # hide card text NOW
     "ov.style.display='flex';"
     # Rebuild only when the set changed, so re-asserting per render doesn't reload imgs.
@@ -3237,7 +3245,7 @@ _JP_SLIDE_JS = (
     "ov.appendChild(im);});}"
     # Replay the fade/slide-up in (same jpSlideUp the answer slides + photos use) each
     # time it opens — reflow between animation:none and '' restarts the CSS animation.
-    "ov.style.animation='none';void ov.offsetWidth;ov.style.animation='';"
+    "if(anim){ov.style.animation='none';void ov.offsetWidth;ov.style.animation='';}"
     # Anki re-applies document.body.className a beat AFTER this runs on a fresh card,
     # stripping jp-slide-open (so the text reappeared on subsequent cards). Reassert the
     # class + overlay on the next frames — no animation replay, just re-hide the text.
@@ -3262,7 +3270,7 @@ _JP_SLIDE_JS = (
     "window.jankiToggleSlide=function(){"
     "var cur=false;try{cur=sessionStorage.getItem('jp_show_slide')==='1';}catch(_){}"
     "var nw=!cur;try{sessionStorage.setItem('jp_show_slide',nw?'1':'0');}catch(_){}"
-    "window.jankiApplySlide(nw);};"
+    "window.__jpAnimNext=nw;window.jankiApplySlide(nw);};"
     "window.jankiSlideInit=function(){"
     # Only when this card has a stored slide (#jp-slide or #jp-ans-slide).
     "var has=!!(document.getElementById('jp-slide')||"
@@ -3754,14 +3762,31 @@ _CARD_CSS = (
     # stack (.jp-two) and each is capped to ~half height so both fit without scrolling.
     "#jp-slide-ov{position:fixed;top:0;right:0;bottom:0;left:0;z-index:25;"
     "background:#1c1d21;display:flex;flex-direction:column;align-items:center;"
-    "justify-content:center;gap:10px;padding:16px;box-sizing:border-box;"
-    "animation:jpSlideUp .35s ease-out both;}"                 # fade/slide-up like photos
+    "justify-content:center;gap:10px;padding:16px;box-sizing:border-box;}"
+    # Fade/slide-up only when the slide is OPENED by the button (.jp-anim) — replaying it
+    # on every card in slide mode made each advance blink slide → black → slide.
+    "#jp-slide-ov.jp-anim{animation:jpSlideUp .35s ease-out both;}"
+    # Phones/tablets: the card is pure OLED black, so the overlay must be too (the desktop
+    # #1c1d21 read as a grey panel there).
+    ".mobile #jp-slide-ov,.iphone #jp-slide-ov,.ipad #jp-slide-ov,.android #jp-slide-ov"
+    "{background:#000!important;}"
     "#jp-slide-ov img{display:block;max-width:100%;max-height:100%;width:auto;"
     "height:auto;object-fit:contain;border-radius:6px;}"
     "#jp-slide-ov.jp-two img{max-height:calc(50% - 8px);}"
     # While the overlay is open, hide the card text behind it (the overlay lives on
     # <body>, so hiding #qa is safe and guarantees nothing bleeds through).
     "body.jp-slide-open #qa{visibility:hidden!important;}"
+    "html.jp-slide-mode body:has(#jp-slide) #qa,"
+    "html.jp-slide-mode body:has(#jp-ans-slide) #qa{visibility:hidden!important;}"
+    # AnkiMobile doesn't necessarily put the card in #qa — so in slide mode hide EVERYTHING
+    # on the page except the slide overlay + its button (the overlay fades in, and the text
+    # showed through it until it was opaque).
+    # (mobile only — desktop keeps its body-level UI such as the card timer)
+    "body.jp-slide-open:is(.mobile,.iphone,.ipad,.android)>:not(#jp-slide-ov):not(.jp-slide-btn):not(script):not(style),"
+    "html:is(.mobile,.iphone,.ipad,.android) body.jp-slide-open>:not(#jp-slide-ov):not(.jp-slide-btn):not(script):not(style),"
+    "html.jp-slide-mode body:is(.mobile,.iphone,.ipad,.android):is(:has(#jp-slide),:has(#jp-ans-slide))>:not(#jp-slide-ov):not(.jp-slide-btn):not(script):not(style),"
+    "html.jp-slide-mode:is(.mobile,.iphone,.ipad,.android) body:is(:has(#jp-slide),:has(#jp-ans-slide))>:not(#jp-slide-ov):not(.jp-slide-btn):not(script):not(style)"
+    "{visibility:hidden!important;}"
     # Original-slide fallback button: pinned bottom-left on desktop (low, just above
     # the bottom bar), and bottom-CENTER on mobile (AnkiMobile has no such bar).
     # Minimal chrome to match the reword toggle: small, subtle grey, sans (this button lives on

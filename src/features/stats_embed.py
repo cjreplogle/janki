@@ -3,8 +3,8 @@
 Anki opens Statistics as its own opaque window. Janki instead shows the same graphs page
 (Anki's own "graphs" SvelteKit page, in a StatsWebView) in a panel that swaps into the main
 window's content area in place of the deck list / bottom bar — glassed and in the
-Interface font. Esc, clicking Stats again, or any main-window navigation (Decks, …)
-puts the normal view back.
+Interface font. Esc or any main-window navigation (Decks, Practice, …) puts the
+normal view back; clicking Stats again keeps you in Stats.
 
 The panel is Janki's OWN widget, built once and only ever hidden/shown — never Anki's
 NewDeckStats dialog reparented (that one deletes itself on close, which left dangling
@@ -196,7 +196,7 @@ def _build():
     v.addWidget(web, 1)
     esc = QShortcut(QKeySequence("Escape"), panel)
     esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-    esc.activated.connect(close)
+    esc.activated.connect(fade_close)
     idx = lay.indexOf(_main_host())
     lay.insertWidget(idx if idx >= 0 else 1, panel, 1)
     panel.hide()
@@ -481,11 +481,15 @@ def _expand(w) -> None:
 
 
 def _reglass() -> None:
+    """Keep the swapped views' page backgrounds transparent (Chromium can reset a view to
+    its opaque default when its surface is rebuilt). Only that — re-applying the whole
+    native window glass (tint/blur/corners) several times visibly flickered the window, and
+    isn't needed since the views are collapsed, never hidden."""
     try:
         from aqt.qt import QTimer
         from ..user import glass as _glass
-        for d in (0, 90, 300, 800):
-            QTimer.singleShot(d, _glass._reapply_native)
+        for d in (0, 250):
+            QTimer.singleShot(d, _glass._clear_existing_webviews)
     except Exception as exc:
         log("stats reglass: %s" % exc)
 
@@ -547,12 +551,27 @@ def _install_layout_guard(panel) -> None:
     t.start()
 
 
+_RESET_JS = ("(function(){var b=document.body;if(b){b.style.transition='';"
+             "b.style.opacity='';b.style.transform='';}})();")
+
+
 def open_stats() -> None:
     if _panel is None:
         _build()
     _collapse_others()
+    try:
+        # The deck list was faded out on the way here; now that it's hidden behind Stats,
+        # restore it — otherwise leaving Stats revealed a still-invisible list (a "dead"
+        # first click on Decks) until a redraw replaced it.
+        mw.web.eval(_RESET_JS)
+    except Exception:
+        pass
     if not _panel.isVisible():
         _panel.show()                            # first open only; afterwards it stays shown
+    try:                                         # undo a previous fade-out on this page
+        _web.eval(_RESET_JS)
+    except Exception:
+        pass
     global _mode
     _mode = "deck"
     _fill_decks()
@@ -643,7 +662,147 @@ def _preload() -> None:
         log("stats preload: %s" % exc)
 
 
-def close() -> None:
+# A short fade + drop-in for the deck list / Practice view when you switch to it (Stats has
+# its own staggered card reveal). Runs in the page itself (Qt opacity effects blank or
+# de-glass a web view); skipped under reduced motion; nothing lingers after it ends.
+_DROP_JS = ("(function(){try{var b=document.body;if(!b)return;b.style.transition='';"
+            "b.style.opacity='';b.style.transform='';"
+            "if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)')"
+            ".matches)return;if(!b.animate)return;"
+            "document.documentElement.animate([{opacity:0,transform:'translateY(-8px)'},"
+            "{opacity:1,transform:'none'}],{duration:200,easing:'cubic-bezier(.2,.8,.2,1)'});"
+            "}catch(e){}})();")
+_animate_next_deck = False
+
+# The outgoing view fades out (and dips slightly) while the switch happens.
+_FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
+                "reduce)').matches)return;var b=document.body;if(!b)return;"
+                "b.style.transition='opacity .08s ease-out,transform .08s ease-out';"
+                "b.style.opacity='0';b.style.transform='translateY(4px)';}catch(e){}})();")
+
+
+def fade_then(fn, web=None, ms: int = 0) -> None:
+    """Fade the current view out and run `fn` (the actual switch). Page switches start at
+    once (ms=0): the old page fades WHILE the new one builds, instead of waiting for the
+    fade and then for the build. Instant panel swaps (Stats) pass a short delay so their
+    fade-out is still seen."""
+    try:
+        (web or mw.web).eval(_FADE_OUT_JS)
+    except Exception:
+        pass
+    try:
+        from aqt.qt import QTimer
+        QTimer.singleShot(max(0, int(ms)), fn)
+    except Exception:
+        fn()
+
+
+_defer_close = False      # Stats is fading out; don't let navigation close it instantly
+_opening = False          # a Stats open is scheduled (ignore repeat clicks meanwhile)
+
+
+def close_soon(ms: int = 110, timeout: int = 1500) -> None:
+    """Leave Stats for another page. The stats page fades out while the deck list behind it
+    is redrawn, and Stats is only removed once that NEW page has loaded (at least `ms` for
+    the fade, at most `timeout`). Revealing the collapsed list any earlier showed its last
+    painted frame — the old deck list or Practice view — for a moment."""
+    global _defer_close
+    if not is_open():
+        return
+    _defer_close = True
+    try:
+        _web.eval("(function(){try{var b=document.body;if(!b)return;b.style.transition="
+                  "'opacity .1s ease-out,transform .1s ease-out';b.style.opacity='0';"
+                  "b.style.transform='translateY(4px)';}catch(e){}})();")
+    except Exception:
+        pass
+    import time as _time
+    from aqt.qt import QTimer
+    t0 = _time.monotonic()
+    state = {"done": False}
+
+    def _done():
+        global _defer_close
+        if state["done"]:
+            return
+        state["done"] = True
+        try:
+            mw.web.loadFinished.disconnect(_on_load)
+        except Exception:
+            pass
+        _defer_close = False
+        close(animate=False)
+        drop_in(mw.web)                          # the new list is ready → drop it in
+
+    def _on_load(_ok=True):
+        wait = int(ms - (_time.monotonic() - t0) * 1000)
+        QTimer.singleShot(max(0, wait), _done)
+
+    try:
+        mw.web.loadFinished.connect(_on_load)
+    except Exception:
+        pass
+    QTimer.singleShot(timeout, _done)            # no page load came → close anyway
+
+
+def fade_close() -> None:
+    """Stats → deck list with the fade: stats page fades out, then the list drops in."""
+    if is_open():
+        fade_then(close, _web, 80)
+
+
+def drop_in(web=None) -> None:
+    try:
+        (web or mw.web).eval(_DROP_JS)
+    except Exception:
+        pass
+
+
+def fast_deck_redraw() -> bool:
+    """Redraw the deck list re-using the deck tree Anki already has (skips the background
+    database query — the slow part of a switch). Only when the list isn't stale (reviews /
+    edits since set _refresh_needed). Returns False when a full refresh is needed."""
+    try:
+        db = mw.deckBrowser
+        if getattr(mw, "state", None) != "deckBrowser" or getattr(db, "_refresh_needed", True) \
+                or getattr(db, "_render_data", None) is None:
+            return False
+        db._renderPage(reuse=True)
+        return True
+    except Exception as exc:
+        log("fast deck redraw: %s" % exc)
+        return False
+
+
+def animate_next_deck_render() -> None:
+    """The next deck-list render (Practice ↔ Decks switch) plays the drop-in."""
+    global _animate_next_deck
+    _animate_next_deck = True
+
+
+# Baked into the deck list's own HTML when a switch is pending, so the drop-in starts on the
+# page's FIRST paint instead of waiting for the load to finish + a JS round trip (the full
+# deck list takes longer to build than the Practice view, so that wait was noticeable).
+# On <html> (not <body>): Janki's own deck-list fade (html.glass-fading body{animation})
+# would otherwise override it; on the root the two simply combine.
+_DROP_CSS = ("<style>@media (prefers-reduced-motion: no-preference){html{animation:"
+             "jkDrop .2s cubic-bezier(.2,.8,.2,1) both;}}"
+             "@keyframes jkDrop{from{opacity:0;transform:translateY(-8px);}"
+             "to{opacity:1;transform:none;}}</style>")
+
+
+def _on_will_set_content(web_content, context) -> None:
+    global _animate_next_deck
+    try:
+        from aqt.deckbrowser import DeckBrowser
+        if _animate_next_deck and isinstance(context, DeckBrowser):
+            _animate_next_deck = False
+            web_content.head += _DROP_CSS
+    except Exception:
+        pass
+
+
+def close(animate: bool = True) -> None:
     if not is_open():
         return
     _collapse(_panel)
@@ -661,12 +820,15 @@ def close() -> None:
         mw.web.setFocus()
     except Exception:
         pass
+    if animate and not _animate_next_deck:     # a pending re-render animates instead
+        drop_in(mw.web)
     _reglass()
 
 
 def _on_state_change(new_state=None, *_a) -> None:
-    # Any navigation in the main window (toolbar Decks, opening a deck, …) leaves stats.
-    if is_open():
+    # Any navigation in the main window (toolbar Decks, opening a deck, …) leaves stats —
+    # unless a fade-out close is already under way (close_soon).
+    if is_open() and not _defer_close:
         close()
     # Back on the deck list after reviews: refresh the (hidden) graphs quietly, so the next
     # Stats click shows current numbers instantly. Skipped while studying.
@@ -698,9 +860,18 @@ def _patched_on_stats(orig):
         try:
             if not mw._selectedDeck():
                 return None
-            if is_open():
-                return close()                  # Stats again toggles back
-            return open_stats()
+            # Clicking Stats while it's open (or already opening — e.g. a double-click) keeps
+            # you in Stats; leave with Esc or another toolbar button.
+            global _opening
+            if is_open() or _opening:
+                return None
+            _opening = True
+
+            def _go():
+                global _opening
+                _opening = False
+                open_stats()
+            return fade_then(_go, None, 80)     # deck list fades out, stats reveals in
         except Exception as exc:
             log("stats panel failed, using the window: %s" % exc)
             return orig(*a, **k)
@@ -730,6 +901,32 @@ def _on_main_window_init() -> None:
         log("stats shortcut: %s" % exc)
 
 
+def _wrap_toolbar_links(links, toolbar) -> None:
+    """Toolbar "Decks" while Stats is open: fade Stats out, then switch — the deck list
+    drops in from its first frame (baked CSS). Plain Anki navigation closed Stats
+    instantly, so the animation got lost in the page swap."""
+    try:
+        lh = getattr(toolbar, "link_handlers", None)
+        if not isinstance(lh, dict) or "decks" not in lh:
+            return
+        cur = lh["decks"]
+        if getattr(cur, "_janki_stats_wrapped", False):
+            return
+
+        def _decks(*a, **k):
+            if is_open():
+                animate_next_deck_render()
+                close_soon()                  # stats fades out while the list builds
+                if fast_deck_redraw():
+                    return None
+                return cur(*a, **k)
+            return cur(*a, **k)
+        _decks._janki_stats_wrapped = True
+        lh["decks"] = _decks
+    except Exception as exc:
+        log("stats decks wrap: %s" % exc)
+
+
 def install() -> None:
     global _installed
     if _installed:
@@ -738,5 +935,7 @@ def install() -> None:
     try:
         gui_hooks.main_window_did_init.append(_on_main_window_init)
         gui_hooks.state_did_change.append(_on_state_change)
+        gui_hooks.webview_will_set_content.append(_on_will_set_content)
+        gui_hooks.top_toolbar_did_init_links.append(_wrap_toolbar_links)
     except Exception as exc:
         log("stats embed: %s" % exc)

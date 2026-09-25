@@ -107,13 +107,29 @@ def open_practice_hub():
     browser, filtered to only the Practice banks (which are hidden from the normal
     list). Click a bank row to study it; click Decks (or navigate) for the normal
     list again."""
+    # The current view (deck list or Stats) fades out while the Practice view builds, then
+    # drops in. From Stats, the stats page fades and closes itself once the fade has played.
+    try:
+        from . import stats_embed
+        if stats_embed.is_open():
+            stats_embed.close_soon()
+            _open_practice_hub_now()
+        else:
+            stats_embed.fade_then(_open_practice_hub_now)
+    except Exception:
+        _open_practice_hub_now()
+
+
+def _open_practice_hub_now():
     global _practice_view
     _practice_view = True
     # Stats swaps into the deck list's spot; already on the deck list this is an in-place
     # re-render (no state change), so close Stats explicitly or it stays on top.
     try:
         from . import stats_embed
-        stats_embed.close()
+        stats_embed.animate_next_deck_render()   # the Practice view drops in when drawn
+        if not stats_embed._defer_close:
+            stats_embed.close(animate=False)
     except Exception:
         pass
     # The umbrella "Practice" row is hidden in this view, so it MUST be expanded —
@@ -123,9 +139,11 @@ def open_practice_hub():
     # writes), NOT "browserCollapsed" (which is the card-browser sidebar). We expand
     # only the parent so the banks list directly; each bank's lectures stay behind its
     # own + (collapsed).
+    tree_changed = False
     try:
         pd = mw.col.decks.by_name(_PRACTICE_PARENT)
         if pd:
+            tree_changed = bool(pd.get("collapsed"))   # expanding changes the deck tree
             try:
                 from anki.decks import DeckCollapseScope
                 mw.col.decks.set_collapsed(int(pd["id"]), collapsed=False,
@@ -140,9 +158,14 @@ def open_practice_hub():
         if getattr(mw, "state", None) != "deckBrowser":
             mw.moveToState("deckBrowser")   # renders → fires the filter hook
         else:
-            mw.deckBrowser.refresh()        # already here → re-render
+            from . import stats_embed        # already here → re-render (fast when current)
+            # The fast redraw re-uses the deck tree Anki already has — only valid if expanding
+            # "Practice" didn't just change it (then the banks weren't in that tree yet).
+            if tree_changed or not stats_embed.fast_deck_redraw():
+                mw.deckBrowser.refresh()
     except Exception as e:
         log("practice hub: %s" % e)
+    # (the redraw is async and rebuilds the page — its baked-in CSS plays the drop-in)
 
 
 def install_practice_toolbar(links, toolbar):
@@ -179,6 +202,24 @@ def install_practice_toolbar(links, toolbar):
 
                 def _decks_wrap(*a, **k):
                     global _practice_view
+                    if _practice_view:                 # Practice → Decks: fade out, drop in
+                        _practice_view = False
+                        try:
+                            from . import stats_embed
+                            if stats_embed.is_open():
+                                # Practice → Stats → Decks: Stats is on top — let its own
+                                # Decks handling close it (this path only redrew the hidden
+                                # list behind Stats, so Decks needed a second click).
+                                return _orig(*a, **k)
+                            stats_embed.animate_next_deck_render()
+
+                            def _go():
+                                if not stats_embed.fast_deck_redraw():
+                                    _orig(*a, **k)
+                            stats_embed.fade_then(_go)
+                            return None
+                        except Exception:
+                            pass
                     _practice_view = False
                     return _orig(*a, **k)
 
