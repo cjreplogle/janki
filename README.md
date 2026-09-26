@@ -12,8 +12,8 @@
 
 ## Install
 
-Runs as an Anki plugin and patcher on **normal, stock Anki** — no custom build or separate app.
-There are two builds — pick one (each link always downloads the latest release):
+Runs as a plugin on top of Anki. No separate app.
+Two builds — pick one (each link always downloads the latest release):
 
 - **[⬇ Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)**
   — the full frosted-glass experience. Adds a small, self-healing, reversible
@@ -24,10 +24,9 @@ There are two builds — pick one (each link always downloads the latest release
   Designed for if you don't care for any of the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
-2. **[Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)** (always the latest release).
-3. **Double-click it** (Anki opens and installs it), or in Anki:
-   **Tools → Add-ons → Install from file…** → pick the `.ankiaddon`.
-4. **Restart Anki.** On first launch Janki applies a small one-time patch to Anki
+2. **Double-click the downloaded `.ankiaddon`** (Anki opens and installs it), or in Anki:
+   **Tools → Add-ons → Install from file…** → pick the file.
+3. **Restart Anki.** On first launch Janki applies a small one-time patch to Anki
    so the frosted glass can work, then asks you to **quit and reopen once**. Do
    that, and the glass is on. From then on, just open Anki normally.
 
