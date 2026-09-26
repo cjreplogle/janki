@@ -163,6 +163,8 @@ These extra installs help tie together some theming:
 >any issues/features you think will be helpful to other people!* **Thank you for being an 
 >early user!** 
 
+<div id="legal"></div>
+
 Janki is an independent, unofficial project. It is **not affiliated with, endorsed
 by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
 "AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
