@@ -1,6 +1,6 @@
 # Janki
 
-<p align="center" style="font-weight: 300;">A feature-rich <a href=https://github.com/ankitects/anki>Anki</a> client for MacOS designed around you.
+<p align="center" style="font-weight: 400;">A feature-rich <a href=https://github.com/ankitects/anki>Anki</a> client for MacOS designed around you.
 </p>
 
 <p align="center">
