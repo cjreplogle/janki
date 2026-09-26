@@ -113,6 +113,30 @@ def _make_card_timer():
             self._close_t.setInterval(16)   # ~60 fps
             self._close_t.timeout.connect(self._close_tick)
             self.setWindowOpacity(_op())
+            # Bottom-right ring sits where the on-card Practice button is; fade it out
+            # while the cursor is in the Practice button's reveal zone (see _hover_tick).
+            self._pq_zone = None         # global QRect of that zone, or None
+            self._hv = 1.0               # 1 = shown, 0 = faded for Practice
+            self._hv_t = QTimer(self)
+            self._hv_t.setInterval(40)
+            self._hv_t.timeout.connect(self._hover_tick)
+            self._hv_t.start()
+
+        def _hover_tick(self):
+            """Fade the ring out while the Practice button is revealed (cursor in its
+            bottom-right zone), back in when it leaves. Only touches opacity while
+            fading, so the ring's own fade-in/close animations are left alone."""
+            try:
+                from aqt.qt import QCursor
+                near = bool(self._pq_zone is not None and self.isVisible()
+                            and self._pq_zone.contains(QCursor.pos()))
+            except Exception:
+                near = False
+            target = 0.0 if near else 1.0
+            if abs(self._hv - target) < 1e-3:
+                return
+            self._hv = max(0.0, min(1.0, self._hv + (0.25 if target > self._hv else -0.25)))
+            self.setWindowOpacity(_op() * self._hv)
 
         def _pulse_tick(self):
             import math
@@ -160,6 +184,33 @@ def _make_card_timer():
                 return
             self._close_wipe = prog * prog * (3.0 - 2.0 * prog)   # smoothstep (ease in-out)
             self.update()
+
+        def _place_on_practice_btn(self):
+            js = ("(function(){var b=document.getElementById('jk-pq-btn');if(!b)return null;"
+                  "var r=b.getBoundingClientRect();if(!r.width)return null;"
+                  "return [r.left,r.top,r.width,r.height];})()")
+
+            def _cb(res):
+                try:
+                    from aqt.qt import QRect
+                    if not res:
+                        self._pq_zone = None
+                        return
+                    base = mw.web.mapToGlobal(QPoint(0, 0))
+                    z = float(mw.web.zoomFactor() or 1.0)
+                    cx = base.x() + int(round((res[0] + res[2] / 2.0) * z))
+                    cy = base.y() + int(round((res[1] + res[3] / 2.0) * z))
+                    self.setGeometry(cx - RING_BOX // 2, cy - RING_BOX // 2,
+                                     RING_BOX, RING_BOX)
+                    w, h = mw.web.width(), mw.web.height()
+                    # the Practice button's hover-reveal zone (intersperse._PQ_HOVER_JS)
+                    self._pq_zone = QRect(base.x() + w - 290, base.y() + h - 118, 290, 118)
+                except Exception:
+                    self._pq_zone = None
+            try:
+                mw.web.evalWithCallback(js, _cb)
+            except Exception:
+                self._pq_zone = None
 
         def _mode(self):
             return str(_cfg().get("card_timer_style", "ring")).lower()
@@ -314,6 +365,9 @@ def _make_card_timer():
                     x = right_edge - RING_BOX - RING_MARGIN
                     y = bottom_y - RING_BOX - RING_MARGIN
                 self.setGeometry(x, y, RING_BOX, RING_BOX)
+                # When the card shows the on-card Practice button (bottom-right), sit in
+                # ITS spot instead (it's hover-revealed; the ring fades out while it is).
+                self._place_on_practice_btn()
                 return
 
             # "top" → true top-right corner of the window/screen (not the Sync row).

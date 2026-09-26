@@ -21,7 +21,8 @@ _panel = None            # the persistent stats panel (built on first open)
 _web = None
 _pick_btn = None
 _popup = None
-_mode = "deck"           # "deck" (current deck) | "col" (whole collection)
+_mode = "col"            # "deck" (current deck) | "col" (whole collection). Default:
+                         # Janki opens Statistics on the whole collection.
 _installed = False
 
 
@@ -573,7 +574,7 @@ def open_stats() -> None:
     except Exception:
         pass
     global _mode
-    _mode = "deck"
+    _mode = "col"            # always open on the whole collection (user can pick a deck)
     _fill_decks()
     if not _ensure_loaded():
         # Page already current (preloaded, or nothing changed since) → instant; just replay
@@ -656,7 +657,7 @@ def _preload() -> None:
         if _panel is None:
             _build()
         global _mode
-        _mode = "deck"
+        _mode = "col"
         _ensure_loaded()
     except Exception as exc:
         log("stats preload: %s" % exc)
@@ -840,7 +841,7 @@ def _on_state_change(new_state=None, *_a) -> None:
                 if is_open() or getattr(mw, "state", None) != "deckBrowser":
                     return
                 global _mode
-                _mode = "deck"
+                _mode = "col"
                 if _load_key() != _loaded_key:
                     _refresh_data()
             QTimer.singleShot(1500, _bg)

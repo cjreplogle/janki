@@ -934,7 +934,16 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    function timing(total){ var MS=Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED;\n"
         "      return Math.max(1, Math.ceil(total/Math.max(1,(MS/12)))); }\n"
         "    function typeOutStatic(clozeOnly, done){ var nodes=collect(clozeOnly), spans=[], holders=[];\n"
+        "      var liSeen=[];\n"
+        # The bullet/number of a list item is the <li> ::marker — not a text node, so the
+        # reveal never touched it and it popped in instantly. Hide each animated item's
+        # marker (visibility keeps the indent, no reflow) and flag its FIRST char span to
+        # bring the marker back in step with the text.
+        "      function jkLi(tn){ var p=tn.parentElement; while(p && p!==qa){\n"
+        "        if((p.tagName||'')==='LI') return p; p=p.parentNode; } return null; }\n"
         "      nodes.forEach(function(e){ var tn=e[0], text=e[1], nu=isUnderlined(tn);\n"
+        "        var li=jkLi(tn), liFirst=null;\n"
+        "        if(li && liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden'; liFirst=li; }\n"
         # Wrap each char in a tagged span inside ONE holder, so the reveal can be
         # per-char but every span is removable afterward (see finish()). EXCEPTION:
         # text inside an underline (<u>) is revealed as ONE span, not fragmented.
@@ -943,11 +952,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # spike per underline on software-composited (--disable-gpu) glass. Revealing
         # the underlined run whole (the phrase pops in) avoids it; other text still
         # types char-by-char.
-        "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1');\n"
+        "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1'); var s0=spans.length;\n"
         "        if(nu){ var sp=document.createElement('span'); sp.className='__jtwc'; sp.textContent=text; sp.style.visibility='hidden'; holder.appendChild(sp); spans.push(sp); }\n"
         "        else { for(var i=0;i<text.length;i++){ var sp=document.createElement('span');\n"
         "          sp.className='__jtwc'; sp.textContent=text[i]; sp.style.visibility='hidden';\n"
         "          holder.appendChild(sp); spans.push(sp); } }\n"
+        "        if(liFirst && spans.length>s0) spans[s0].__jkli=liFirst;\n"
         "        if(tn.parentNode){ tn.parentNode.replaceChild(holder, tn); holders.push(holder); } });\n"
         "      reveal();\n"   # full layout is present (all chars sized) → nothing moves
         # On finish, strip EVERY Janki char-span (even ones AMBOSS wrapped inside a
@@ -961,11 +971,14 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "               var par=hd.parentNode;\n"
         "               if(par){ while(hd.firstChild){ par.insertBefore(hd.firstChild, hd); }\n"
         "                 par.removeChild(hd); par.normalize(); } }catch(e){} }\n"
+        "        for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
         "        done(); }\n"
         "      var total=spans.length; if(!total){ finish(); return; }\n"
         "      var perTick=timing(total), i=0;\n"
         "      function step(){ var b=perTick;\n"
-        "        while(b>0 && i<total){ spans[i].style.visibility='visible'; i++; b--; }\n"
+        "        while(b>0 && i<total){ spans[i].style.visibility='visible';\n"
+        "          if(spans[i].__jkli){ spans[i].__jkli.style.visibility=''; }\n"
+        "          i++; b--; }\n"
         "        if(i<total) requestAnimationFrame(step); else finish(); }\n"
         "      requestAnimationFrame(step); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"

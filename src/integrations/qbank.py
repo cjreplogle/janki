@@ -642,6 +642,7 @@ def questions_for_bank(bid):
 
 
 def _rewrite_bank(dir_name, qs):
+    _QTOK.clear()
     p = os.path.join(_qbanks_dir(), dir_name, "questions.jsonl")
     with open(p, "w", encoding="utf-8") as f:
         f.write("\n".join(json.dumps(q, ensure_ascii=False) for q in qs))
@@ -858,7 +859,13 @@ def _tokens_list(text):
     """Ordered, stemmed word tokens. Uses the lecture engine's camelCase-aware
     tokeniser + synonym folding when available, so question text, card text and
     concept-leaf names all normalise the same way (order kept for phrase matching)."""
-    text = re.sub(r"<[^>]+>", " ", text or "")
+    # Rendered card HTML carries the note type's <style>/<script> (mobile theme JS, the
+    # reword toggle) — code identifiers swamped the real words (a one-line card came out
+    # as ~280 tokens), so card↔question text matching almost never fired. Drop them.
+    text = re.sub(r"(?is)<(script|style|template)\b.*?</\1>", " ", text or "")
+    text = re.sub(r"(?is)<!--.*?-->", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&\w+;", " ", text)
     lec = _lectures()
     if lec is not None:
         raw = lec._match_tokens(text)
@@ -888,6 +895,7 @@ def reset_caches():
     _IDF["n"] = 0
     _CONCEPT_IDX["idx"] = None
     _CONCEPT_IDX["mod"] = None
+    _QTOK.clear()
 
 
 _IDF_SAMPLE = 8000       # DF is a coarse weight; a sample keeps the build sub-second
@@ -1043,8 +1051,30 @@ def _q_match_text(q):
     return " ".join(parts)
 
 
+_QTOK = {}      # (bank dir, ordinal, stem length) → question token set (text relevance)
+
+
+def _q_tokens(dir_name, ordinal, q):
+    k = (dir_name, ordinal, len(q.get("stem") or ""))
+    t = _QTOK.get(k)
+    if t is None:
+        t = _tokens(_q_match_text(q))
+        _QTOK[k] = t
+    return t
+
+
+def _card_cover(tokens, qtok):
+    """Share of the CARD's distinctive (IDF-weighted) words that the question contains.
+    Too weak to decide IF a question matches (a card is one short fact, a question a
+    vignette), but good for ORDERING questions that already match by tag/deck."""
+    if not tokens or not qtok:
+        return 0.0
+    den = sum(_idf(t) for t in tokens)
+    return (sum(_idf(t) for t in (tokens & qtok)) / den) if den > 0 else 0.0
+
+
 def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
-                    leaf_weights=None):
+                    leaf_weights=None, relaxed=False):
     """Rank complete questions across ENABLED banks by relevance to concept-leaf
     `leaves` (tag match wins decisively), then fuzzy leaf match, then IDF-weighted
     text overlap of `tokens`. Returns question dicts best-first, each annotated with
@@ -1085,16 +1115,23 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
             qleaves = (_leaf_keys(q.get("tags")) | _leaf_keys(q.get("mined_tags"))
                        | _leaf_keys(q.get("content_tags")))
             inter = leaves & qleaves
+            # Among questions that match by tag/deck, rank the ones about THIS card's
+            # content first: every card in a deck shares the same deck match, so on a
+            # tie the bank's first question won for every card.
+            rel = _card_cover(tokens, _q_tokens(meta.get("dir", ""), ordinal, q)) \
+                if (inter or tokens) else 0.0
             if inter:
-                score = 10.0 + _w(inter)             # exact tag/concept match wins
+                score = 10.0 + _w(inter) + 4.0 * rel  # exact tag/concept match wins
             else:
                 fuzz = _fuzzy_leaf_score(card_word_sets, qleaves)
                 if fuzz > 0:
-                    score = 6.0 + fuzz               # near-miss tag variant
+                    score = 6.0 + fuzz + 2.0 * rel   # near-miss tag variant
                 elif use_text_fallback and tokens:
-                    ov = _weighted_overlap(tokens, _tokens(_q_match_text(q)))
+                    ov = _weighted_overlap(tokens, _q_tokens(meta.get("dir", ""), ordinal, q))
                     if ov >= 0.30:
                         score = ov                   # IDF-weighted text (0..1)
+                    elif relaxed and rel > 0:
+                        score = 0.01 * rel           # last resort: most shared card words
             if score > 0:
                 qa = dict(q)
                 qa["_bid"] = bid
@@ -1105,10 +1142,90 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
     return [q for _s, q in scored]
 
 
+# --- Borrowed tags for UNTAGGED cards --------------------------------------------
+# An untagged card (e.g. a deck-organised "cobo" card) borrows the concept/lecture tags
+# its most similar TAGGED cards agree on. Card↔card text comparison works (both are
+# short facts in the same style) where card↔question doesn't; the borrowed tags then
+# match questions through the normal tag matching. Benchmarked on hidden-tag Hutch
+# cards: 32% top-1 right lecture vs 8% for text fallback. Index built once per session
+# in the background (~2 s); ~1 ms per card after, cached. Local only.
+_BORROW = {"inv": None, "idf": None, "norm": None, "tags": None, "cache": {}}
+_BORROW_K = 5           # nearest tagged cards to consult
+_BORROW_VOTE = 0.25     # keep a tag once its similarity-weighted votes reach this × best
+_BORROW_DF_CAP = 800    # skip words common to more notes than this (no signal, slow)
+
+
+def _borrow_pool_families():
+    fams = list(_ct_families())
+    return tuple(fams) + ("#AK_Step1",)
+
+
+def build_borrow_index(col=None):
+    """Build the tagged-card similarity index (call from a background QueryOp)."""
+    import math
+    col = col or mw.col
+    fams = _borrow_pool_families()
+    pool, df = {}, collections.Counter()
+    for nid, tags, flds in col.db.execute("select id, tags, flds from notes where tags != ''"):
+        ts = tags.split()
+        if not any(t.startswith(f) for t in ts for f in fams):
+            continue
+        tk = set(_ct_tokens(flds.replace("\x1f", " ")))
+        if tk:
+            pool[nid] = (tk, ts)
+            df.update(tk)
+    n = len(pool)
+    idf = {w: math.log((n + 1) / (d + 0.5)) for w, d in df.items()}
+    inv = collections.defaultdict(list)
+    for nid, (tk, _ts) in pool.items():
+        for w in tk:
+            if df[w] < _BORROW_DF_CAP:
+                inv[w].append(nid)
+    norm = {nid: math.sqrt(sum(idf[w] ** 2 for w in tk)) or 1.0 for nid, (tk, _ts) in pool.items()}
+    _BORROW.update(inv=dict(inv), idf=idf, norm=norm,
+                   tags={nid: ts for nid, (_tk, ts) in pool.items()}, cache={})
+    return n
+
+
+def borrowed_keys(note):
+    """Leaf keys an untagged note borrows from its nearest tagged cards (cached), or an
+    empty set until the index is ready."""
+    if _BORROW["inv"] is None:
+        return set()
+    hit = _BORROW["cache"].get(note.id)
+    if hit is not None:
+        return hit
+    import math
+    inv, idf, norm, tags = _BORROW["inv"], _BORROW["idf"], _BORROW["norm"], _BORROW["tags"]
+    text = " ".join(content_text(f) for f in note.fields)
+    tk = set(_ct_tokens(text))
+    acc = collections.Counter()
+    for w in tk:
+        for other in inv.get(w, ()):
+            acc[other] += idf[w] ** 2
+    qn = math.sqrt(sum(idf.get(w, 0.0) ** 2 for w in tk)) or 1.0
+    top = sorted(((sc / (qn * norm[o]), o) for o, sc in acc.items()), reverse=True)[:_BORROW_K]
+    vote = collections.Counter()
+    for sim, o in top:
+        for leaf in _leaf_keys([t for t in tags.get(o, ()) if not t.lower().startswith("leech")]):
+            if leaf not in _GENERIC_LEAVES:
+                vote[leaf] += sim
+    keep = {l for l, v in vote.items() if top and v >= _BORROW_VOTE * top[0][0]}
+    _BORROW["cache"][note.id] = keep
+    return keep
+
+
 def card_leaf_keys(card):
     """Match keys for a review card: its tags' concept leaves plus its (home) deck, so
-    cards organised by deck rather than tags can match questions tagged "deck:<name>"."""
-    keys = _leaf_keys(list(card.note().tags))
+    cards organised by deck rather than tags can match questions tagged "deck:<name>".
+    An UNTAGGED card also carries the tags it borrows from similar tagged cards."""
+    note = card.note()
+    keys = _leaf_keys(list(note.tags))
+    if not note.tags:
+        try:
+            keys |= borrowed_keys(note)
+        except Exception as e:
+            log("borrowed tags: %s" % e)
     try:
         did = getattr(card, "odid", 0) or card.did
         keys.add(("deck:" + mw.col.decks.name(did)).lower())
@@ -1128,14 +1245,14 @@ def find_for_card(card, limit=5):
 
 
 def intersperse_card_ids(leaves, tokens, limit, use_text_fallback=True,
-                         exclude_cids=None, leaf_weights=None):
+                         exclude_cids=None, leaf_weights=None, relaxed=False):
     """Resolve the top-ranked matching questions to REAL Practice **card ids** (best
     first), for interspersing into a live review session. Skips suspended cards
     (already retired) and any in `exclude_cids`. Returns up to `limit` card ids."""
     exclude_cids = set(exclude_cids or ())
     out = []
     for q in _rank_questions(leaves, tokens, use_text_fallback=use_text_fallback,
-                             leaf_weights=leaf_weights):
+                             leaf_weights=leaf_weights, relaxed=relaxed):
         if len(out) >= limit:
             break
         qid = q.get("_qid")
@@ -3180,10 +3297,16 @@ _CT_MARGIN = 1.15       # best must beat the runner-up by this factor
 _CT_HEADER_BOOST = 1.6  # lecture tags under a topic the section header names
 _CT_NEIGHBOUR_MIN = 0.06
 _CT_CLOSE = 0.87        # a runner-up this close to the best is kept too (overlapping lectures)
+# Untagged, deck-organised cards: best guesses are worth more than a miss (sibling decks
+# like "Innate Immunity" vs "Innate Immunity and Inflammation" overlap heavily).
+_CT_DECK_KEEP = 3       # up to this many decks per question
+_CT_DECK_REL = 0.70     # …each scoring at least this share of the best deck
+_CT_DECK_MIN = 0.055    # lower floor than tag families (0.12): pooled deck profiles score low…
+_CT_DECK_LEAD = 1.4     # …so the best deck must also clearly lead the field (≥ this × 4th)
 # Bump when the content-tag logic changes: banks tagged by an older version re-tag on
 # the next launch (the pass used to run only for banks that had never been tagged, so
 # a logic change never reached already-tagged banks).
-_CT_VERSION = 4
+_CT_VERSION = 5
 
 
 def _ct_families():
@@ -3266,7 +3389,8 @@ def _ct_profiles(families=_CT_FAMILIES):
         nm = math.sqrt(sum(x * x for x in v.values())) or 1.0
         return {w: x / nm for w, x in v.items()}
     vecs = {t: vec(c) for t, c in prof.items()}
-    return {"vecs": vecs, "idf": idf, "vec": vec}
+    return {"vecs": vecs, "idf": idf, "vec": vec,
+            "loose": tuple(families) == (_CT_DECKS,)}
 
 
 def _ct_header_hits(header, tags):
@@ -3302,6 +3426,15 @@ def _ct_assign_family(qs, P):
                       * (_CT_HEADER_BOOST if t in hh else 1.0), t)
                      for t, pv in vecs.items()), reverse=True)
         (s1, t1), (s2, t2) = sc[0], sc[1]
+        if P.get("loose"):
+            # Deck-organised cards: keep the top few plausible decks as best guesses.
+            s4 = sc[3][0] if len(sc) > 3 else 0.0
+            lead = s1 >= _CT_DECK_LEAD * s4
+            picks = [t for sx, t in sc[:_CT_DECK_KEEP]
+                     if sx >= _CT_DECK_MIN and sx >= _CT_DECK_REL * s1] \
+                if (s1 >= _CT_DECK_MIN and lead) else []
+            rows.append([i, q.get("lecture"), picks or None, t1, s1])
+            continue
         ok = s1 >= _CT_MIN_SCORE and s1 >= _CT_MARGIN * s2
         # Close call between two lectures (sibling decks that cover the same material):
         # keep both rather than neither.
@@ -4236,7 +4369,11 @@ _JP_SLIDE_JS = (
     # stripping jp-slide-open (so the text reappeared on subsequent cards). Reassert the
     # class + overlay on the next frames — no animation replay, just re-hide the text.
     "var reOpen=function(){try{if(sessionStorage.getItem('jp_show_slide')!=='1')return;}"
-    "catch(_){}document.body.classList.add('jp-slide-open');if(ov)ov.style.display='flex';};"
+    "catch(_){}"
+    # the reviewer may have moved on to a non-practice card (Ctrl+Z out of an inline
+    # question) before this fires — never re-hide a card that has no slide
+    "if(!document.getElementById('jp-slide')&&!document.getElementById('jp-ans-slide'))return;"
+    "document.body.classList.add('jp-slide-open');if(ov)ov.style.display='flex';};"
     "try{requestAnimationFrame(reOpen);}catch(_){}"
     "setTimeout(reOpen,50);setTimeout(reOpen,150);setTimeout(reOpen,400);"
     # If the image wasn't ready yet, re-run shortly so the overlay gets its picture.
@@ -4305,14 +4442,14 @@ _JP_SLIDE_JS = (
     "if(!isMob){"
     # Force the minimal reword-toggle look INLINE (beats the inherited serif card font without
     # depending on the note-type CSS deploy or a stylesheet override winning specificity).
-    "btn.style.fontSize='11px';"
+    "btn.style.fontSize='14.5px';"
     "btn.style.fontFamily=\"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif\";"
     "if(!btn._jphover){btn._jphover=true;btn.style.opacity='0';btn.style.pointerEvents='none';}"
     "if(!window.__jpSlideHoverBound){window.__jpSlideHoverBound=true;"
     "document.addEventListener('mousemove',function(e){"
     "var b=document.getElementById('jp-slide-btn');if(!b)return;"
     "if(window.__jpSlideOpen){b.style.opacity='0.55';b.style.pointerEvents='auto';return;}"
-    "var near=(e.clientX<220&&e.clientY>window.innerHeight-90);"
+    "var near=(e.clientX<290&&e.clientY>window.innerHeight-118);"
     "b.style.opacity=near?'0.55':'0';b.style.pointerEvents=near?'auto':'none';});}}"
     "var rem=false;try{rem=sessionStorage.getItem('jp_show_slide')==='1';}catch(_){}"
     "window.jankiApplySlide(rem);};}"
@@ -4810,9 +4947,9 @@ _CARD_CSS = (
     # Minimal chrome to match the reword toggle: small, subtle grey, sans (this button lives on
     # <body>, so without an explicit family it'd inherit the serif card font).
     ".jp-slide-btn{position:fixed;left:10px;bottom:0;z-index:30;cursor:pointer;"
-    "font-size:11px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "font-size:14.5px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "color:#9fb4d8;opacity:0.55;background:rgba(28,29,33,0.7);"
-    "border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 9px;"
+    "border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:4px 12px;"
     "transition:opacity .15s;}"
     ".jp-slide-btn:hover{opacity:1;color:#fff;}"
     ".mobile .jp-slide-btn,.iphone .jp-slide-btn,.ipad .jp-slide-btn,"
@@ -4957,13 +5094,13 @@ def enforce_slide_btn_style():
         fj = _json.dumps(_font)                     # safe JS string literal (escapes the quotes)
         mw.web.eval(
             "(function(){function f(){var b=document.getElementById('jp-slide-btn');if(!b)return;"
-            "b.style.setProperty('font-size','11px','important');"
+            "b.style.setProperty('font-size','14.5px','important');"
             "b.style.setProperty('font-family'," + fj + ",'important');"
             # match the reword toggle's box exactly (rounding/border/padding), overriding whatever
             # the note-type CSS deployed
-            "b.style.setProperty('border-radius','6px','important');"
+            "b.style.setProperty('border-radius','8px','important');"
             "b.style.setProperty('border','1px solid rgba(255,255,255,0.2)','important');"
-            "b.style.setProperty('padding','3px 9px','important');"
+            "b.style.setProperty('padding','4px 12px','important');"
             "b.style.setProperty('background','rgba(28,29,33,0.7)','important');"
             # strip native <button> metrics so its height matches the reword <div> exactly
             "b.style.setProperty('-webkit-appearance','none','important');"
@@ -5214,8 +5351,22 @@ def cleanup_slide_button_if_not_practice():
         is_practice = (card is not None
                        and (card.note_type() or {}).get("name") == _MODEL_NAME)
         if not is_practice:
-            web.eval("(function(){var b=document.getElementById('jp-slide-btn');"
-                     "if(b&&b.parentNode)b.parentNode.removeChild(b);})();")
+            # The slide button AND the slide view (overlay + the classes that hide the
+            # card text) live on <body>/<html>, so leaving a practice card — e.g. Ctrl+Z
+            # out of an inline question while its original slide was showing — left the
+            # photo over the real card. Clear all of it (again shortly after, in case a
+            # late re-open timer from the practice card fires).
+            js = ("(function(){if(document.getElementById('jp-slide')||"
+                  "document.getElementById('jp-ans-slide'))return;"
+                  "var b=document.getElementById('jp-slide-btn');"
+                  "if(b&&b.parentNode)b.parentNode.removeChild(b);"
+                  "var o=document.getElementById('jp-slide-ov');"
+                  "if(o&&o.parentNode)o.parentNode.removeChild(o);"
+                  "document.body.classList.remove('jp-slide-open');"
+                  "document.documentElement.classList.remove('jp-slide-mode');})();")
+            web.eval(js)
+            from aqt.qt import QTimer
+            QTimer.singleShot(500, lambda: web.eval(js))
     except Exception:
         pass
 

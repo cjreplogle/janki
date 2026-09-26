@@ -235,6 +235,21 @@ def _key(note_id, ord_, side: str) -> str:
 # decision made for the current exposure (so the answer side matches its question side).
 _shown_q = set()
 _orig_exposure = {}
+_shown_day = None      # study day _shown_q belongs to (a new day = a new session)
+
+
+def _roll_session() -> None:
+    """Forget which cards were seen when Anki's study day rolls over, so a card's first
+    view each day shows the original again even if Anki stayed open overnight."""
+    global _shown_day
+    try:
+        today = mw.col.sched.today
+    except Exception:
+        return
+    if _shown_day != today:
+        _shown_day = today
+        _shown_q.clear()
+        _orig_exposure.clear()
 
 
 def _pick(variants, card) -> "str | None":
@@ -282,19 +297,19 @@ def apply(text: str, card, kind) -> str:
             if idx > 0:
                 variant = variants[(idx - 1) % len(variants)]
         else:
-            # A genuinely new card (never shown this session AND reps 0) shows the original
-            # first — learn it as written. A card brought back by undo has already been shown
-            # this session, so it shows reworded (undo restores reps to 0, which is why we
-            # track the session, not just reps). Peek forces reworded. The answer side reuses
-            # the question side's decision.
+            # A card's FIRST view this session (study day) shows the original — new or review
+            # — so you see it as written; every later view that session (learning-step
+            # repeats minutes later, a card brought back by undo) shows a rephrasing. Peek
+            # forces reworded. The answer side reuses the question side's decision.
+            _roll_session()
             if _peek:
                 show_original = False
             elif side == "q":
-                show_original = (cid not in _shown_q) and reps <= 0
+                show_original = cid not in _shown_q
                 _shown_q.add(cid)
                 _orig_exposure[cid] = show_original
             else:
-                show_original = _orig_exposure.get(cid, reps <= 0 and cid not in _shown_q)
+                show_original = _orig_exposure.get(cid, cid not in _shown_q)
             if not show_original:
                 variant = variants[0] if _peek else _pick(variants, card)
 
@@ -2865,9 +2880,14 @@ _HOVER_JS = (
     "else if(immediate){b.style.opacity='0';b.style.pointerEvents='none';}};"
     "if(!window.__jkRwHoverBound){window.__jkRwHoverBound=true;"
     "document.addEventListener('mousemove',function(e){"
+    "var near=(e.clientX<290&&e.clientY>window.innerHeight-118);"
+    # The next-rephrasing arrow stays invisible until the cursor comes near the corner,
+    # in BOTH views (it used to show whenever the reworded side was up).
+    "var nx=document.getElementById('jk-rw-next');"
+    "if(nx){nx.style.opacity=near?(nx.matches(':hover')?'1':'0.55'):'0';"
+    "nx.style.pointerEvents=near?'auto':'none';}"
     "if(!window.__jkRwHide)return;"
     "var b=document.getElementById('jk-rw-bar');if(!b)return;"
-    "var near=(e.clientX<220&&e.clientY>window.innerHeight-90);"
     "b.style.opacity=near?'1':'0';b.style.pointerEvents=near?'auto':'none';});}"
 )
 
@@ -2880,9 +2900,9 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
         '<div id="jk-rw-toggle" onclick="jankiRewordSwap()" '
         'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
         'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
-        'style="cursor:pointer;font-size:11px;color:#9fb4d8;opacity:0.55;'
+        'style="cursor:pointer;font-size:14.5px;color:#9fb4d8;opacity:0.55;'
         'background:rgba(28,29,33,0.7);border:1px solid rgba(255,255,255,0.2);'
-        'border-radius:6px;padding:3px 9px;user-select:none;">' + label + '</div>')
+        'border-radius:8px;padding:4px 12px;user-select:none;">' + label + '</div>')
     nxt = ""
     if multi:
         disp = "block" if showing_reworded else "none"
@@ -2890,9 +2910,11 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
             '<div id="jk-rw-next" onclick="jankiRewordNext()" title="Next rephrasing" '
             'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
             'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
-            'style="display:%s;cursor:pointer;font:700 13px/1 -apple-system,sans-serif;'
-            'color:#9fb4d8;opacity:0.55;background:rgba(28,29,33,0.7);'
-            'border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 10px;'
+            # starts invisible; the corner mousemove fades it in (see _HOVER_JS)
+            'style="display:%s;cursor:pointer;font:700 17px/1 -apple-system,sans-serif;'
+            'color:#9fb4d8;opacity:0;pointer-events:none;transition:opacity .18s;'
+            'background:rgba(28,29,33,0.7);'
+            'border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:4px 13px;'
             'user-select:none;">&#8250;</div>' % disp)
     # In the original view the bar starts hidden (opacity 0) and is hover-revealed; in the
     # reworded view it's visible. transition gives a soft fade-in on hover.
@@ -2900,7 +2922,7 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
     pe = "auto" if showing_reworded else "none"
     return (
         '<div id="jk-rw-bar" style="position:fixed;left:10px;bottom:0;z-index:2147483000;'
-        'display:flex;gap:6px;align-items:center;transition:opacity .15s;'
+        'display:flex;gap:8px;align-items:center;transition:opacity .15s;'
         'opacity:%s;pointer-events:%s;">' % (op, pe) + toggle + nxt + '</div>')
 
 

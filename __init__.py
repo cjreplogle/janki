@@ -319,6 +319,14 @@ def _startup():
                     qbank.assign_content_tags()
             except Exception as _cn_exc:
                 log("content tags: %s" % _cn_exc)
+            # Similar-card index so untagged cards can borrow tags (background, ~2 s).
+            try:
+                from aqt.operations import QueryOp
+                QueryOp(parent=mw, op=lambda col: qbank.build_borrow_index(col),
+                        success=lambda n: log("borrow index: %d tagged notes" % n)
+                        ).run_in_background()
+            except Exception as _bi_exc:
+                log("borrow index: %s" % _bi_exc)
             try:
                 mobilecards.refresh_if_stale()   # push card-script fixes to mobile themes
             except Exception as _mc_exc:
@@ -347,6 +355,10 @@ def _startup():
             log("reword undo hook: %s" % _rw_undo_exc)
 
         # Bottom-left "Original/Reworded" toggle button posts a pycmd we handle here.
+        try:
+            gui_hooks.webview_did_receive_js_message.append(intersperse.on_js_message)
+        except Exception as _pq_js_exc:
+            log("practice button js hook: %s" % _pq_js_exc)
         try:
             gui_hooks.webview_did_receive_js_message.append(reword.on_js_message)
         except Exception as _rw_js_exc:
@@ -566,9 +578,25 @@ def _startup():
             # injecting here reaches every card render regardless). Harmless when no such button.
             _SLIDE_BTN_STYLE = (
                 "<style>body .jp-slide-btn,button.jp-slide-btn{"
-                "font-size:11px !important;"
+                "font-size:14.5px !important;"
                 "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;}"
                 "</style>")
+
+            # The reword control bar (#jk-rw-bar) arrives inside #qa, but Focus Mode moves
+            # #qa with a CSS transform — and a position:fixed element inside a transformed
+            # parent is pinned to THAT parent, so the bar rode up with the card and then
+            # dropped to the bottom. Hoist it onto <body> (keeping #qa's zoom so its size is
+            # unchanged) and drop any bar left over from the previous card — this runs for
+            # every reviewer card, so cards without rephrasings clean up too.
+            _RW_BAR_HOIST = (
+                "<script>(function(){try{var qa=document.getElementById('qa');"
+                "['jk-rw-bar','jk-pq-bar'].forEach(function(id){"
+                "var bars=document.querySelectorAll('#'+id),fresh=null;"
+                "for(var i=0;i<bars.length;i++){var b=bars[i];"
+                "if(qa&&qa.contains(b))fresh=b;else b.remove();}"
+                "if(fresh){var z=qa?(parseFloat(getComputedStyle(qa).zoom)||1):1;"
+                "fresh.style.zoom=z;document.body.appendChild(fresh);}});"
+                "}catch(e){}})();</script>")
 
             def _card_will_show(text, card, kind):
                 try:
@@ -576,7 +604,12 @@ def _startup():
                         # Reword is a DISPLAY-ONLY swap (same card data-space, no
                         # scheduler impact); no-op unless enabled + a variant exists.
                         text = reword.apply(text, card, kind)
-                        return text + focus.FOCUS_TRIM_SCRIPT + _SLIDE_BTN_STYLE
+                        try:
+                            pq = intersperse.practice_button_html(card)
+                        except Exception:
+                            pq = ""
+                        return (text + focus.FOCUS_TRIM_SCRIPT + _SLIDE_BTN_STYLE
+                                + pq + _RW_BAR_HOIST)
                 except Exception:
                     pass
                 return text

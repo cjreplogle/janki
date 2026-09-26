@@ -136,8 +136,14 @@ _FOCUS_CSS = (
     "html{height:100%!important;}"
     "body{min-height:100%!important;box-sizing:border-box!important;"
     "display:flex!important;flex-direction:column!important;"
-    "padding:12px 0!important;overflow-y:auto!important;}"
+    # top/bottom only: "padding:12px 0" also zeroed the SIDES, and practice cards take
+    # their side padding from body.card — at narrow widths their text hit the edges.
+    "padding-top:12px!important;padding-bottom:12px!important;"
+    "overflow-y:auto!important;}"
     "#qa{margin-top:auto!important;margin-bottom:auto!important;}"
+    # The answer bar is hidden here, so lift the bottom-left controls (reword toggle,
+    # practice slide button) off the very edge of the screen.
+    "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:14px!important;}"
 )
 
 

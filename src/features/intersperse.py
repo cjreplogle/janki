@@ -307,7 +307,8 @@ def practice_now():
     # The current card's concepts dominate (weight 5); the recently reviewed cards'
     # concepts are also fair game (weight 1 per card they appeared on), so their
     # questions fill in after the current card's own matches.
-    weights = collections.Counter({l: 5.0 for l in leaves})
+    # deck guesses (deck:…) count half: borrowed/real tags proved far more precise
+    weights = collections.Counter({l: (2.5 if l.startswith("deck:") else 5.0) for l in leaves})
     if _cfg().get("practice_q_recent", True):
         for s in _tabq_recent:
             for l in s:
@@ -318,6 +319,10 @@ def practice_now():
     cids = qbank.intersperse_card_ids(
         leaves, tokens, hi, use_text_fallback=True, exclude_cids=_seen,
         leaf_weights=weights)
+    if not cids and tokens:
+        # nothing matched at all: the questions sharing the most of this card's words
+        cids = qbank.intersperse_card_ids(
+            set(), tokens, hi, use_text_fallback=True, exclude_cids=_seen, relaxed=True)
     if not cids:
         tooltip("No related practice questions found for this card.\n"
                 "Build the Practice deck first: Settings ▸ Practice ▸ Question Bank ▸ "
@@ -675,3 +680,61 @@ def install():
         _hooks_installed = True
     except Exception as e:
         log("intersperse hook register: %s" % e)
+
+
+# ---------------------------------------------------------------------------
+# On-card "Practice" button (bottom-right) — same action as Tab+Q
+# ---------------------------------------------------------------------------
+# Styled exactly like the bottom-left Original/Reworded toggle and hover-revealed the
+# same way (mirrored to the bottom-right corner). __init__ appends it to reviewer cards
+# and hoists it onto <body> with the reword bar, so Focus Mode's transform can't move it.
+_PQ_HOVER_JS = (
+    "(function(){var b=document.getElementById('jk-pq-bar');if(!b)return;"
+    "b.style.opacity='0';b.style.pointerEvents='none';"
+    "if(window.__jkPqHoverBound)return;window.__jkPqHoverBound=true;"
+    "document.addEventListener('mousemove',function(e){"
+    "var b=document.getElementById('jk-pq-bar');if(!b)return;"
+    "var near=(e.clientX>window.innerWidth-290&&e.clientY>window.innerHeight-118);"
+    "b.style.opacity=near?'1':'0';b.style.pointerEvents=near?'auto':'none';});})();"
+)
+
+
+def practice_button_html(card) -> str:
+    """The bottom-right Practice button for a reviewer card, or "" when it doesn't apply
+    (no Practice deck yet, or a Practice-deck card being studied directly)."""
+    try:
+        cid = getattr(card, "id", None)
+        inline = is_inline_active(cid)
+        if not inline and (_is_practice_note(card) or not qbank._practice_deck_exists()):
+            return ""
+        label = "Back to card" if inline else "Practice"
+    except Exception:
+        return ""
+    btn = (
+        '<div id="jk-pq-btn" onclick="pycmd(\'jankipractice:toggle\')" '
+        'title="Related practice questions (Tab+Q)" '
+        'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
+        'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
+        'style="cursor:pointer;font-size:14.5px;color:#9fb4d8;opacity:0.55;'
+        'background:rgba(28,29,33,0.7);border:1px solid rgba(255,255,255,0.2);'
+        # no font-family: inherit the page font exactly like the reword toggle does
+        'border-radius:8px;padding:4px 12px;user-select:none;">'
+        + label + '</div>')
+    # (in bottom-right mode the card-timer ring moves into this spot and fades while
+    # the button is revealed — see card_timer._place_on_practice_btn)
+    return ('<div id="jk-pq-bar" style="position:fixed;right:10px;bottom:0;'
+            'z-index:2147483000;display:flex;transition:opacity .15s;opacity:0;'
+            'pointer-events:none;">' + btn + '</div>'
+            '<script>' + _PQ_HOVER_JS + '</script>')
+
+
+def on_js_message(handled, message, context):
+    """webview_did_receive_js_message: the on-card Practice button (same as Tab+Q)."""
+    if message == "jankipractice:toggle":
+        try:
+            practice_now()
+        except Exception as e:
+            log("practice button: %s" % e)
+        return (True, None)
+    return handled
+
