@@ -164,5 +164,7 @@
   "reword_variants": 1,
   "reword_prefetch": false,
   "reword_prefetch_count": 3,
-  "main_settings_button": false
+  "main_settings_button": false,
+  "stats_rolling_avg": false,
+  "stats_rolling_window": 7
 }

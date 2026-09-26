@@ -50,6 +50,16 @@ def _page_css() -> str:
         # (No mask on the page: masking the scroller forced a full repaint every scroll
         # frame. The top-edge fade is per-card opacity from _ANIM_JS instead.)
         "div.container{will-change:opacity;}"
+        # Graph colours. The Reviews graph (g.bars0..4 = Mature/Young/Relearn/Learn/Filtered)
+        # becomes a single blue gradient instead of green/red/orange/purple; the 'learning'
+        # orange used by other graphs (card counts, future due, buttons) is recoloured blue.
+        # d3 sets these as fill PRESENTATION attributes, so a CSS `fill` rule overrides them.
+        "g.bars0 rect{fill:#0d47a1!important;}"
+        "g.bars1 rect{fill:#1769cc!important;}"
+        "g.bars2 rect{fill:#2f8ae0!important;}"
+        "g.bars3 rect{fill:#5aa8ee!important;}"
+        "g.bars4 rect{fill:#8fc7f5!important;}"
+        "svg rect[fill='#fd8d3c' i]{fill:#5aa8ee!important;}"
     ) % {"ink": ink}
     if _glass_on():
         rules += "html body,html body *{font-family:%s!important;}" % font
@@ -150,7 +160,147 @@ def _style_web(web) -> None:
         pass
 
 
+def _stat_titles():
+    """(today, reviews) graph titles in the collection's language, for matching the
+    cards to reorder. Falls back to English if tr isn't available."""
+    try:
+        tr = mw.col.tr
+        return tr.statistics_today_title(), tr.statistics_reviews_title()
+    except Exception:
+        return "Today", "Reviews"
+
+
+def _reorder_js(today_title, reviews_title):
+    """Move the 'Reviews' graph card to sit right after 'Today' (i.e. where 'Future Due'
+    is), and keep it there across the page's re-renders. Cards are Anki's div.container
+    with the title in an <h1>; matched by that text so it works in any language."""
+    import json as _json
+    t = _json.dumps(today_title)
+    r = _json.dumps(reviews_title)
+    return (
+        "(function(){var TODAY=" + t + ",REV=" + r + ";"
+        "function h1(el){var h=el.querySelector(':scope > .position-relative > h1')||"
+        "el.querySelector('h1');return h?(h.textContent||'').trim():'';}"
+        "var moving=false;"
+        "function reorder(){if(moving)return;"
+        "var cs=document.querySelectorAll('div.container'),today=null,rev=null;"
+        "for(var i=0;i<cs.length;i++){var t=h1(cs[i]);"
+        "if(!today&&t===TODAY)today=cs[i];else if(!rev&&t===REV)rev=cs[i];}"
+        "if(!today||!rev)return;"
+        "if(today.nextElementSibling===rev)return;"          # already in place
+        "moving=true;try{today.parentNode.insertBefore(rev,today.nextSibling);}"
+        "catch(e){}moving=false;}"
+        "if(window.__jkReorder){window.__jkReorder();return;}"   # observer already set
+        "window.__jkReorder=reorder;reorder();"
+        "var pend=false;new MutationObserver(function(){if(pend)return;pend=true;"
+        "requestAnimationFrame(function(){pend=false;reorder();});})"
+        ".observe(document.body||document.documentElement,{childList:true,subtree:true});"
+        "})();")
+
+
+def _reorder(web) -> None:
+    if web is None:
+        return
+    try:
+        web.eval(_reorder_js(*_stat_titles()))
+    except Exception as exc:
+        log("stats reorder: %s" % exc)
+
+
+def _rolling_js(on: bool, window: int) -> str:
+    """Inject a 'Rolling avg' checkbox into the Reviews graph's range-radio row and draw a
+    rolling-average line over the bars when it's on. Daily total = top of the stacked bars;
+    the y-scale is linear, so averaging the bar-top pixel positions gives the averaged
+    total's position. State lives on window.__jkRoll (read live by the single observer, so
+    re-injection never leaves a stale copy erasing the line). Persists via pycmd."""
+    return (
+        "(function(){"
+        "window.__jkRoll=window.__jkRoll||{};"
+        "window.__jkRoll.on=" + ("true" if on else "false") + ";"
+        "window.__jkRoll.w=" + str(int(window)) + ";"
+        "function grp(){var b=document.querySelector('g.bars0');return b?b.parentNode:null;}"
+        "function draw(){var g=grp();if(!g)return;var old=g.querySelector('path.jk-rollavg');"
+        "if(!window.__jkRoll.on){if(old)old.remove();return;}"
+        "var rs=g.querySelectorAll('g.bars0 rect,g.bars1 rect,g.bars2 rect,g.bars3 rect,g.bars4 rect');"
+        "if(!rs.length){if(old)old.remove();return;}"
+        # Only bars with real height define a day. Changing the range leaves d3 EXIT rects
+        # (height 0 at the baseline) briefly in the DOM; counting those added phantom low
+        # points that dragged the averaged line down (and it stayed low on the way back).
+        "var by={};"
+        "for(var i=0;i<rs.length;i++){var r=rs[i];"
+        "var h=parseFloat(r.getAttribute('height'))||0;if(h<=0.5)continue;"
+        "var x=parseFloat(r.getAttribute('x'))||0,y=parseFloat(r.getAttribute('y'))||0;"
+        "var w=parseFloat(r.getAttribute('width'))||0;"
+        "var k=Math.round(x);if(!by[k])by[k]={x:x,w:w,top:y};"
+        "if(y<by[k].top)by[k].top=y;if(w>by[k].w)by[k].w=w;}"
+        "var days=[];for(var k in by)days.push(by[k]);days.sort(function(a,b){return a.x-b.x;});"
+        "if(days.length<2){if(old)old.remove();return;}"
+        "var W=window.__jkRoll.w||7,pts=[];"
+        "for(var i=0;i<days.length;i++){var sm=0,c=0;"
+        "for(var j=Math.max(0,i-W+1);j<=i;j++){sm+=days[j].top;c++;}"
+        "pts.push([days[i].x+days[i].w/2,sm/c]);}"
+        "var d='M'+pts.map(function(p){return p[0].toFixed(1)+' '+p[1].toFixed(1);}).join(' L');"
+        "var NS='http://www.w3.org/2000/svg';"
+        "var path=old||document.createElementNS(NS,'path');path.setAttribute('class','jk-rollavg');"
+        "path.setAttribute('d',d);path.setAttribute('fill','none');"
+        "path.setAttribute('stroke','rgba(90,168,238,0.6)');path.setAttribute('stroke-width','2');"
+        "path.setAttribute('stroke-dasharray','3 4');"
+        "path.setAttribute('stroke-linejoin','round');path.setAttribute('stroke-linecap','round');"
+        "path.setAttribute('pointer-events','none');if(!old)g.appendChild(path);}"
+        "function inject(){var g=grp();if(!g)return;var card=g.closest('div.container');if(!card)return;"
+        "if(card.querySelector('.jk-roll-cb'))return;"                 # already there
+        "var radio=card.querySelector('input[type=radio]');if(!radio)return;"
+        "var lbl=radio.closest('label');var box=lbl?lbl.parentNode:null;if(!box)return;"
+        "var wrap=document.createElement('label');wrap.style.marginLeft='14px';"
+        "var cb=document.createElement('input');cb.type='checkbox';cb.className='jk-roll-cb';"
+        "cb.checked=!!window.__jkRoll.on;"
+        "cb.addEventListener('change',function(){window.__jkRoll.on=cb.checked;draw();"
+        "try{pycmd('jankiRoll:'+(cb.checked?'1':'0'));}catch(e){}});"
+        "wrap.appendChild(cb);wrap.appendChild(document.createTextNode(' Rolling avg'));"
+        "box.appendChild(wrap);}"
+        "window.__jkRollDraw=draw;"
+        "if(window.__jkRollObs){inject();draw();return;}window.__jkRollObs=1;"
+        # Observe the whole document, not just the Reviews card: changing the range rebuilds
+        # that card (a new node), which detached a card-scoped observer so the line/checkbox
+        # never refreshed when you switched back. Debounced to one redraw per frame; a
+        # settle timer redraws once more after the bar transition finishes.
+        "var pend=false,settle=null;function tick(){inject();draw();"
+        "if(settle)clearTimeout(settle);settle=setTimeout(function(){inject();draw();},350);}"
+        # Watch bar geometry only (NOT our own path's 'd', which would retrigger us).
+        "new MutationObserver(function(){if(pend)return;pend=true;"
+        "requestAnimationFrame(function(){pend=false;tick();});})"
+        ".observe(document.body||document.documentElement,{childList:true,subtree:true,"
+        "attributes:true,attributeFilter:['x','y','height','width']});"
+        # Self-heal: changing the range rebuilds the Reviews card in ways an observer can
+        # miss; a light interval re-injects the checkbox and redraws the line from the
+        # current bars (reads a few rects — negligible). Runs once.
+        "if(!window.__jkRollTimer)window.__jkRollTimer=setInterval(function(){"
+        "if(document.querySelector('g.bars0'))tick();},500);"
+        "tick();"
+        "})();")
+
+
+def _apply_rolling(web) -> None:
+    if web is None:
+        return
+    try:
+        c = _cfg()
+        web.eval(_rolling_js(bool(c.get("stats_rolling_avg", False)),
+                             int(c.get("stats_rolling_window", 7) or 7)))
+    except Exception as exc:
+        log("stats rolling avg: %s" % exc)
+
+
 def _on_bridge_cmd(cmd: str) -> bool:
+    # Rolling-average checkbox (in the Reviews graph): persist its state.
+    if isinstance(cmd, str) and cmd.startswith("jankiRoll:"):
+        try:
+            cur = mw.addonManager.getConfig(__name__) or {}
+            cur["stats_rolling_avg"] = cmd.endswith(":1")
+            mw.addonManager.writeConfig(__name__, cur)
+        except Exception as exc:
+            log("stats rolling toggle: %s" % exc)
+        return False
     # Same as NewDeckStats: clicking a graph element searches the Browser.
     if isinstance(cmd, str) and cmd.startswith("browserSearch"):
         try:
@@ -179,7 +329,7 @@ def _build():
     v.setSpacing(0)
     web = StatsWebView(parent=panel)
     web.set_bridge_command(_on_bridge_cmd, panel)
-    web.loadFinished.connect(lambda _ok: (_style_web(_web), _animate(_web), _apply_mode()))
+    web.loadFinished.connect(lambda _ok: (_style_web(_web), _reorder(_web), _apply_rolling(_web), _animate(_web), _apply_mode()))
     # Deck picker (replaces the page's own hidden deck/collection bar): a button that opens
     # a glass popup of top-level decks; subdecks stay folded until you press their "+".
     from aqt.qt import QHBoxLayout, QPushButton
