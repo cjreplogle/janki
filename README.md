@@ -1,7 +1,6 @@
 # Janki
 
-<p align="center"><strong><i>A feature-rich <a href=https://github.com/ankitects/anki>Anki</a> client for MacOS, designed to expand
-Anki's core functionalities and simplify student workflows.</i></strong>
+<p align="center"><strong><i>A feature-rich <a href=https://github.com/ankitects/anki>Anki</a> client for MacOS designed around you.</i></strong>
 </p>
 
 <p align="center">
