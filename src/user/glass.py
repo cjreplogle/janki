@@ -434,6 +434,72 @@ def hold_dialog_above(dialog) -> None:
             pass
 
 
+class _KeepInFront(QObject):
+    """Event filter behind keep_dialog_in_front: attach on Show, detach on Hide."""
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t == QEvent.Type.Show:
+            QTimer.singleShot(0, lambda o=obj: _attach_to_main(o))
+        elif t == QEvent.Type.Hide:
+            _detach_from_main(obj)
+        return False
+
+
+_keep_front_filter = None
+
+
+def _attach_to_main(dialog) -> None:
+    try:
+        if not dialog.isVisible() or not mw.isVisible() or mw.isMinimized():
+            return
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if not ns or not main or ns == main:
+            return
+        if msg(c_void_p, ns, b"parentWindow"):
+            return
+        msg(None, main, b"addChildWindow:ordered:", (c_void_p, c_long), (ns, 1))  # Above
+    except Exception as exc:
+        log("keep in front attach: %s" % exc)
+
+
+def _detach_from_main(dialog) -> None:
+    try:
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(dialog.winId())), b"window")
+        if not ns:
+            return
+        parent = msg(c_void_p, ns, b"parentWindow")
+        if parent:
+            msg(None, parent, b"removeChildWindow:", (c_void_p,), (ns,))
+    except Exception:
+        pass
+
+
+def keep_dialog_in_front(dialog) -> None:
+    """Keep `dialog` above the main Janki window for as long as it's open: clicking the
+    main window (or restoring it from the Dock) can no longer cover it. Done by making
+    the dialog a CHILD window of the main NSWindow while shown — AppKit always stacks a
+    child above its parent, without floating it over other apps or over the dialog's
+    own message boxes / file pickers (unlike a raised window level). The side effect is
+    that the dialog moves with the main window while both are open. Idempotent; no-op
+    off macOS or when the main window is hidden (tray: see float_dialog_above)."""
+    global _keep_front_filter
+    if sys.platform != "darwin" or dialog is mw or getattr(dialog, "_jk_keep_front", False):
+        return
+    try:
+        if _keep_front_filter is None:
+            _keep_front_filter = _KeepInFront()
+        dialog.installEventFilter(_keep_front_filter)
+        dialog._jk_keep_front = True
+        if dialog.isVisible():
+            QTimer.singleShot(0, lambda: _attach_to_main(dialog))
+    except Exception as exc:
+        log("keep_dialog_in_front: %s" % exc)
+
+
 def float_dialog_above(dialog) -> None:
     """Raise `dialog`'s own NSWindow to the floating level so it stays above the main
     window regardless of always-on-top state or a later restore of the main window.
@@ -1265,6 +1331,7 @@ def glass_dialog(dialog) -> None:
         log(f"glass dialog qt: {exc}")
         return
     _glass_dialogs.append(dialog)
+    keep_dialog_in_front(dialog)
     _install_smooth_controls()
 
     def _forget(*_a):
@@ -1772,6 +1839,7 @@ def bring_dialog_to_front(dialog) -> None:
         pass
     if sys.platform != "darwin":
         return
+    keep_dialog_in_front(dialog)
     if dialog in _glass_dialogs:
         _style_glass_window(dialog)
     try:

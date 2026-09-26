@@ -204,6 +204,7 @@ def _rich(html: str) -> str:
     h = re.sub(r"(?is)<li\b[^>]*>", "\n• ", h)                       # bullet each item
     h = re.sub(r"(?is)<br\s*/?>", "\n", h)
     h = re.sub(r"(?is)</(p|div|h[1-6]|tr|li|ul|ol|section|header|blockquote)\s*>", "\n", h)
+    h = re.sub(r"(?is)<(p|div|h[1-6]|tr|ul|ol|section|header|blockquote)\b[^>]*>", "\n", h)
     h = re.sub(r"(?is)<[^>]+>", " ", h)                                   # drop remaining tags
     h = h.replace("&nbsp;", " ")
     try:
@@ -330,7 +331,7 @@ def apply(text: str, card, kind) -> str:
             if is_html:
                 return styles + varhtml
             # rich variants keep line structure; bold/lists come back from the original
-            v = _format_text_variant(varhtml, text, side, note, card.ord, is_cz)
+            v = _format_text_variant(varhtml, text, side, note, card.ord, is_cz, card=card)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)
@@ -751,6 +752,8 @@ def _line_shells(html: str) -> list:
             super().__init__(convert_charrefs=True)
             self.buf, self.stack = [], []          # buf: "\n" | ("LI", depth, ordered) | chunk
             self.lists = []                        # open <ul>/<ol> (for nesting + numbering)
+            self.cstack, self.eid = [], 0          # parallel to stack: (element id, class) —
+                                                   # template CSS (e.g. .lbl) styles by class
 
         def _bold(self):
             return any(b for _t, b, _s in self.stack)
@@ -775,6 +778,8 @@ def _line_shells(html: str) -> list:
                                     bool(self.lists) and self.lists[-1] == "ol")]
             elif tag == "br":
                 self.buf.append("BR")               # a newline that can make a blank line
+            elif tag in _BLOCK_END_TAGS:
+                self.buf.append("\n")              # a block starting also starts a line (as _rich)
             if tag in _VOID_TAGS:
                 return
             a = dict(attrs)
@@ -782,6 +787,8 @@ def _line_shells(html: str) -> list:
             b = tag in ("b", "strong", "h1", "h2", "h3", "h4", "h5", "h6") \
                 or bool(_BOLD_WEIGHT_RE.search(style))
             self.stack.append((tag, b, _size_of(tag, a)))
+            self.eid += 1
+            self.cstack.append((self.eid, re.sub(r"[^A-Za-z0-9_\- ]", "", a.get("class") or "").strip()))
 
         def handle_endtag(self, tag):
             if tag in _BLOCK_END_TAGS:
@@ -791,6 +798,7 @@ def _line_shells(html: str) -> list:
             for i in range(len(self.stack) - 1, -1, -1):
                 if self.stack[i][0] == tag:
                     del self.stack[i:]
+                    del self.cstack[i:]
                     break
 
         def handle_data(self, data):
@@ -800,7 +808,8 @@ def _line_shells(html: str) -> list:
                 if k:
                     self.buf.append("\n")
                 if part:
-                    self.buf.append((part, self._bold(), self._size(), self._heading()))
+                    self.buf.append((part, self._bold(), self._size(), self._heading(),
+                                     tuple(e for e in self.cstack if e[1])))
 
     try:
         p = P()
@@ -823,7 +832,7 @@ def _line_shells(html: str) -> list:
     def _runs(chunks, key):
         """Merge consecutive chunks sharing a (truthy) attribute into phrases."""
         runs, buf, val = [], [], None
-        for text, b, sz, _h in chunks + [("", None, None, None)]:
+        for text, b, sz, *_ in chunks + [("", None, None, None, ())]:
             v = b if key == "b" else sz
             if text.strip() == "" and buf and text:
                 buf.append(text)                   # whitespace joins a run
@@ -836,8 +845,27 @@ def _line_shells(html: str) -> list:
                 buf, val = ([text], v) if v else ([], None)
         return [(t, v) for t, v in runs if t]
 
+    # Which lines each classed element spans. A line takes the class of its innermost classed
+    # element that contains ONLY this line — a wrapper around the whole card isn't copied per line.
+    spans = {}
+    for i, ln in enumerate(lines):
+        for c in ln["chunks"]:
+            if c[0].strip():
+                for eid, _cls in c[4]:
+                    spans.setdefault(eid, set()).add(i)
+
+    def _own_class(i, ln):
+        vis = [c for c in ln["chunks"] if c[0].strip()]
+        if not vis:
+            return None
+        common = [e for e in vis[0][4] if all(e in c[4] for c in vis[1:])]
+        for eid, cls in reversed(common):
+            if spans.get(eid) == {i}:
+                return cls
+        return None
+
     br_blank = False                             # a <br> made an empty line since the last one
-    for ln in lines:
+    for li_idx, ln in enumerate(lines):
         plain = re.sub(r"\s+", " ", "".join(c[0] for c in ln["chunks"])).strip()
         if not plain:
             br_blank = br_blank or ln["br"]
@@ -852,6 +880,7 @@ def _line_shells(html: str) -> list:
         heads = {c[3] for c in vis}
         heading = heads.pop() if len(heads) == 1 else None
         out.append({"li": ln["li"], "depth": ln["depth"], "ol": ln["ol"], "gap": gap,
+                    "cls": _own_class(li_idx, ln), "plain": plain,
                     "bold": bold, "full_bold": _norm(" ".join(bold)) == _norm(plain),
                     "size": full_size, "sized": sized, "heading": heading})
     return out
@@ -883,7 +912,7 @@ def _bold_phrases(body: str, phrases) -> str:
 
 
 def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
-                         is_cz: bool) -> str:
+                         is_cz: bool, card=None) -> str:
     """Plain reword → HTML carrying the original's list structure and bold (see _line_shells),
     plus Anki's cloze styling."""
     shells = _line_shells(original_html)
@@ -901,6 +930,52 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     lines = [ln.strip() for ln in (v or "").split("\n") if ln.strip()]
     li_sh = [sh for sh in shells if sh["li"]]
     tx_sh = [sh for sh in shells if not sh["li"]]
+    # Rephrasers often fold a label line into its content ("Presentation: …" where the card has
+    # "Presentation" as its own styled line above the text). If splitting those back apart makes
+    # the text lines line up with the original's, do it so each part gets its own styling.
+    n_tx = sum(1 for ln in lines if not ln.startswith("\u2022"))
+    label_re = re.compile(r"^([^:\u2022]{1,40}):\s+(\S.*)$")
+    n_lab = sum(1 for ln in lines if not ln.startswith("\u2022") and label_re.match(ln))
+    if n_lab and n_tx < len(tx_sh) and n_tx + n_lab == len(tx_sh):
+        split = []
+        for ln in lines:
+            m = None if ln.startswith("\u2022") else label_re.match(ln)
+            split += [m.group(1).strip(), m.group(2).strip()] if m else [ln]
+        lines = split
+    # Fallback styling by CONTENT when the reword doesn't line up with the card line-for-line
+    # (e.g. a pack that turns the card around: "Which disease fits?" + presentation on the front).
+    # Pool = this side's lines plus the answer side's (where section labels like .lbl live).
+    fb = [None] * len(lines)
+    if len([ln for ln in lines if not ln.startswith("\u2022")]) != len(tx_sh):
+        pool = list(shells)
+        if side == "q" and card is not None:
+            try:
+                pool += _line_shells(card.answer())
+            except Exception:
+                pass
+        by_text = {_norm(sh["plain"]): sh["cls"] for sh in pool if sh.get("cls")}
+        by_cls = {}
+        for sh in pool:
+            if sh.get("cls") and sh["plain"] not in by_cls.get(sh["cls"], []):
+                by_cls.setdefault(sh["cls"], []).append(sh["plain"])
+        # a label class: used 2+ times, always on short lines that aren't sentences/questions
+        labels = [c for c, ps in by_cls.items() if len(ps) >= 2
+                  and all(len(p) <= 40 and not p.rstrip().endswith((".", "?", ";")) for p in ps)]
+        lab = max(labels, key=lambda c: len(by_cls[c])) if labels else None
+        q_cls = next((sh["cls"] for sh in shells if sh.get("cls") and sh["plain"].rstrip().endswith("?")), None)
+        new_lines, fb = [], []
+        for ln in lines:
+            m = None if (ln.startswith("\u2022") or not lab) else label_re.match(ln)
+            if _norm(ln) in by_text:
+                new_lines.append(ln); fb.append(by_text[_norm(ln)])
+            elif m:
+                rest = m.group(2).strip()
+                new_lines += [m.group(1).strip(), rest]; fb += [lab, by_text.get(_norm(rest))]
+            elif q_cls and ln.rstrip().endswith("?"):
+                new_lines.append(ln); fb.append(q_cls)
+            else:
+                new_lines.append(ln); fb.append(None)
+        lines = new_lines
     is_li = [ln.startswith("\u2022") for ln in lines]
     n_li = sum(is_li)
     li_map = len(li_sh) == n_li
@@ -923,7 +998,7 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
                 out.append("</li>")
             open_li.pop()
             out.append("</%s>" % stack.pop())
-    for ln, li in zip(lines, is_li):
+    for idx, (ln, li) in enumerate(zip(lines, is_li)):
         sh = None
         if li:
             sh = li_sh[li_i] if li_map else None
@@ -971,7 +1046,9 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
             _close_to(0)
             if sh is not None and sh.get("gap"):
                 out.append("<br>")                  # the original's blank line
+            cls = sh.get("cls") if sh is not None else (fb[idx] if idx < len(fb) else None)
             out.append("<%s>%s</%s>" % (heading, ln, heading) if heading
+                       else '<div class="%s">%s</div>' % (cls, ln) if cls
                        else "<div>%s</div>" % ln)
     _close_to(0)
     html_out = "".join(out)
@@ -1468,7 +1545,7 @@ def view_all_rewords_dialog(on_done=None, parent=None):
     screen render their card — for the header text and the stale check (a card edited since
     its reword was stored is labelled; review already ignores such rewords)."""
     from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                        QScrollArea, QWidget, QFrame, Qt, QTimer)
+                        QScrollArea, QWidget, QFrame, Qt, QTimer, QComboBox)
     store = _load()
     entries = []                               # (key, variants, search_text_lower)
     for key in sorted(store.keys()):
@@ -1476,6 +1553,35 @@ def view_all_rewords_dialog(on_done=None, parent=None):
         if variants:
             entries.append((key, variants, " ".join(variants).lower()))
     page_size = 50
+
+    # Home deck of every stored card-side (one SQL pass; filtered-deck cards count
+    # toward their home deck), for the deck dropdown.
+    key_deck = {}
+    try:
+        home = {"%d:%d" % (int(n), int(o)): int(od or d) for n, o, d, od in
+                mw.col.db.all("select nid, ord, did, odid from cards")}
+        for key, _v, _s in entries:
+            did = home.get(key.rsplit(":", 1)[0])
+            if did is not None:
+                key_deck[key] = did
+    except Exception as exc:
+        log(f"reword view decks: {exc}")
+    deck_names = {}
+    for did in set(key_deck.values()):
+        try:
+            deck_names[did] = mw.col.decks.name(did)
+        except Exception:
+            pass
+    # Every deck on the path to one holding rewords, with its subtree card-side count.
+    tree_counts = {}
+    for key, did in key_deck.items():
+        name = deck_names.get(did)
+        if not name:
+            continue
+        parts = name.split("::")
+        for i in range(1, len(parts) + 1):
+            p = "::".join(parts[:i])
+            tree_counts[p] = tree_counts.get(p, 0) + 1
 
     dlg = QDialog(parent or mw)
     dlg.setWindowTitle("All stored rewords")
@@ -1486,12 +1592,25 @@ def view_all_rewords_dialog(on_done=None, parent=None):
     except Exception:
         pass
     v = QVBoxLayout(dlg)
+    if getattr(dlg, "_jk_expanded", False):         # content sits in the titlebar row
+        _m = v.contentsMargins()
+        v.setContentsMargins(_m.left(), 30, _m.right(), _m.bottom())
     count = QLabel("")
     count.setStyleSheet("color:#9aa0aa;")
     v.addWidget(count)
+    frow = QHBoxLayout()
+    deck_box = QComboBox()
+    deck_box.addItem("All decks (%d)" % len(entries), "")
+    for p in sorted(tree_counts, key=lambda n: [x.lower() for x in n.split("::")]):
+        depth = p.count("::")
+        deck_box.addItem("%s%s (%d)" % ("    " * depth, p.split("::")[-1], tree_counts[p]), p)
+    deck_box.setToolTip("Only show rephrasings from this deck (and its subdecks)")
+    deck_box.setMaxVisibleItems(20)
+    frow.addWidget(deck_box)
     filt = QLineEdit()
     filt.setPlaceholderText("Filter…")
-    v.addWidget(filt)
+    frow.addWidget(filt, 1)
+    v.addLayout(frow)
     scroll = QScrollArea(); scroll.setWidgetResizable(True)
     host = QWidget(); hostv = QVBoxLayout(host)
     hostv.addStretch()
@@ -1501,8 +1620,9 @@ def view_all_rewords_dialog(on_done=None, parent=None):
     state = {"match": entries, "shown": 0, "total_v": sum(len(e[1]) for e in entries)}
 
     def _refresh_count():
+        narrowed = filt.text().strip() or deck_box.currentData()
         count.setText("%d card-sides%s · %d rewords total"
-                      % (len(state["match"]), " match" if filt.text().strip() else "",
+                      % (len(state["match"]), " match" if narrowed else "",
                          state["total_v"]))
 
     def _make_group(key, variants):
@@ -1599,9 +1719,18 @@ def view_all_rewords_dialog(on_done=None, parent=None):
 
     def _apply_filter():
         q = filt.text().strip().lower()
-        state["match"] = [e for e in entries if not q or q in e[2]] if q else entries
+        deck = deck_box.currentData() or ""
+
+        def _in_deck(key):
+            if not deck:
+                return True
+            n = deck_names.get(key_deck.get(key), "")
+            return n == deck or n.startswith(deck + "::")
+        state["match"] = [e for e in entries
+                          if (not q or q in e[2]) and _in_deck(e[0])]
         _reset()
     deb.timeout.connect(_apply_filter)
+    deck_box.currentIndexChanged.connect(lambda *_a: _apply_filter())
     filt.textChanged.connect(lambda *_a: deb.start())
 
     row = QHBoxLayout()
@@ -1688,7 +1817,7 @@ def clear_for_decks(deck_ids) -> int:
 def clear_rephrasings_dialog(parent=None) -> None:
     """Pick which decks to clear stored rephrasings from (per-deck counts shown)."""
     from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                        QCheckBox, QScrollArea, QWidget, QMessageBox)
+                        QCheckBox, QScrollArea, QWidget, QMessageBox, Qt)
     from aqt.utils import tooltip
     try:
         from ..integrations.qbank import _decks_top_level
@@ -1705,6 +1834,20 @@ def clear_rephrasings_dialog(parent=None) -> None:
     if not counts:
         tooltip("No stored rephrasings to clear.")
         return
+    # Per-deck (own cards only) counts, so the tree can show only decks that hold
+    # rephrasings and label each with its subtree total.
+    own = {}
+    for _n, dids, _c in counts:
+        for d in dids:
+            k = count_for_decks([d])
+            if k:
+                own[int(d)] = k
+    names = {}
+    for d in own:
+        try:
+            names[d] = mw.col.decks.name(d)
+        except Exception:
+            pass
 
     dlg = QDialog(parent or mw)
     dlg.setWindowTitle("Clear rephrasings")
@@ -1726,12 +1869,27 @@ def clear_rephrasings_dialog(parent=None) -> None:
     cb_all = QCheckBox("All decks")
     v.addWidget(cb_all)
     scroll = QScrollArea(); scroll.setWidgetResizable(True)
-    scroll.setFixedHeight(min(260, 30 * len(counts) + 12))
-    host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(16, 0, 0, 0)
-    boxes = []
-    for name, dids, n in counts:
-        cb = QCheckBox("%s  (%d card%s)" % (name, n, "" if n == 1 else "s"))
-        boxes.append((cb, dids)); hv.addWidget(cb)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setFixedHeight(min(300, 30 * len(counts) + 60))
+    host = QWidget(); hv = QVBoxLayout(host); hv.setContentsMargins(4, 0, 0, 0)
+    hv.setSpacing(2)
+    # Deck tree with "+" to open subdecks (only decks that hold rephrasings; parents are
+    # created along the way). [(checkbox, [own did])] for every node.
+    tree_decks = [(n, [d for d in dids if int(d) in own]) for n, dids, _c in counts]
+    boxes = _deck_tree_widgets(tree_decks, hv)
+    for cb, _d in boxes:                         # a delete dialog starts with nothing ticked
+        cb.blockSignals(True); cb.setTristate(False)
+        cb.setCheckState(Qt.CheckState.Unchecked); cb.blockSignals(False)
+    for cb, dids in boxes:                       # label with the subtree's card count
+        try:
+            path = names.get(dids[0]) if dids else None
+            if path is None:
+                continue
+            n = sum(k for d, k in own.items()
+                    if names.get(d) == path or (names.get(d) or "").startswith(path + "::"))
+            cb.setText("%s  (%d)" % (cb.text(), n))
+        except Exception:
+            pass
     hv.addStretch()
     scroll.setWidget(host)
     v.addWidget(scroll)
@@ -1745,7 +1903,8 @@ def clear_rephrasings_dialog(parent=None) -> None:
         on = cb_all.isChecked()
         for cb, _d in boxes:
             cb.setEnabled(not on)
-        clear.setEnabled(on or any(cb.isChecked() for cb, _d in boxes))
+        clear.setEnabled(on or any(cb.checkState() != Qt.CheckState.Unchecked
+                                   for cb, _d in boxes))
     cb_all.toggled.connect(_sync)
     for cb, _d in boxes:
         cb.toggled.connect(_sync)
@@ -1755,8 +1914,10 @@ def clear_rephrasings_dialog(parent=None) -> None:
         if cb_all.isChecked():
             picked = [(cb.text(), d) for cb, d in boxes]
         else:
-            picked = [(cb.text(), d) for cb, d in boxes if cb.isChecked()]
-        dids = [x for _t, d in picked for x in d]
+            # fully ticked nodes only (a partly-ticked parent's own cards stay)
+            picked = [(cb.text(), d) for cb, d in boxes
+                      if cb.checkState() == Qt.CheckState.Checked and d]
+        dids = list(dict.fromkeys(x for _t, d in picked for x in d))
         n = count_for_decks(dids)
         if QMessageBox.question(
                 dlg, "Clear rephrasings",
@@ -2974,7 +3135,7 @@ def _inject_live_current() -> None:
         def _disp(varhtml):
             if is_html:
                 return styles + varhtml
-            v = _format_text_variant(varhtml, text, side, note, cur.ord, is_cz)
+            v = _format_text_variant(varhtml, text, side, note, cur.ord, is_cz, card=cur)
             if imgs:
                 v = v + "<br>" + imgs
             pre, suf = _preserve_style(text)

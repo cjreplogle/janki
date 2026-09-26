@@ -1396,6 +1396,11 @@ def _prompt_and_load_tag_map(day_offset=0):
 
         # "2" == generate-from-LOs; "1"/accept == file picker; "0"/reject == cancel.
         gen_btn.clicked.connect(lambda: d.done(2))
+        try:
+            from ..user import glass as _glass
+            _glass.keep_dialog_in_front(d)
+        except Exception:
+            pass
         result = d.exec()
         if result == 2:
             _generate_map_from_los(day_offset)
