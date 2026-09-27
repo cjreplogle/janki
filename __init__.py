@@ -820,5 +820,12 @@ try:
     from .src.integrations import lectures
 except Exception as _lec_exc:
     log("lectures submodule failed to load: %s" % _lec_exc)
+
+# Overlays sliding over Anki (e.g. WorkMode hot corners) must not reveal the hidden bars.
+try:
+    from .src.integrations import overlay_leave
+    overlay_leave.install()
+except Exception as _ol_exc:
+    log("overlay_leave failed to install: %s" % _ol_exc)
 _bt.mark("imported lectures → janki import done")
 _bt.arm_first_render()

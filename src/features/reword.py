@@ -331,6 +331,8 @@ def apply(text: str, card, kind) -> str:
             if is_html:
                 return styles + varhtml
             # rich variants keep line structure; bold/lists come back from the original
+            if side == "a" and not is_cz:
+                varhtml = _with_answer_marker(varhtml, text, note, card.ord)
             v = _format_text_variant(varhtml, text, side, note, card.ord, is_cz, card=card)
             if imgs:
                 v = v + "<br>" + imgs
@@ -911,6 +913,29 @@ def _bold_phrases(body: str, phrases) -> str:
     return body
 
 
+# Line in a text variant marking where the card's front ends on the ANSWER side. Rendered as
+# Anki's <hr id=answer>, which the text reveal uses to type only the back, not the whole card.
+_ANS_MARK = "\x06"
+
+
+def _with_answer_marker(v: str, text: str, note, ord_) -> str:
+    """Answer-side text variant → the same text with _ANS_MARK after the lines that repeat one of
+    the card's stored FRONT variants (a reworded back normally opens with its reworded front).
+    Only when the original back has the marker; otherwise unchanged."""
+    if not re.search(r"""id=["']?answer\b""", text or ""):
+        return v
+    vl = [ln.strip() for ln in (v or "").split("\n") if ln.strip()]
+    vn = [_norm(x) for x in vl]
+    head = 0
+    for qv in (_load().get(_key(note.id, ord_, "q")) or {}).get("variants") or []:
+        qn = [_norm(x) for x in qv.split("\n") if x.strip()]
+        if qn and len(qn) < len(vn) and vn[:len(qn)] == qn:
+            head = max(head, len(qn))
+    if not head:
+        return v
+    return "\n".join(vl[:head] + [_ANS_MARK] + vl[head:])
+
+
 def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
                          is_cz: bool, card=None) -> str:
     """Plain reword → HTML carrying the original's list structure and bold (see _line_shells),
@@ -933,7 +958,7 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     # Rephrasers often fold a label line into its content ("Presentation: …" where the card has
     # "Presentation" as its own styled line above the text). If splitting those back apart makes
     # the text lines line up with the original's, do it so each part gets its own styling.
-    n_tx = sum(1 for ln in lines if not ln.startswith("\u2022"))
+    n_tx = sum(1 for ln in lines if not ln.startswith("\u2022") and ln != _ANS_MARK)
     label_re = re.compile(r"^([^:\u2022]{1,40}):\s+(\S.*)$")
     n_lab = sum(1 for ln in lines if not ln.startswith("\u2022") and label_re.match(ln))
     if n_lab and n_tx < len(tx_sh) and n_tx + n_lab == len(tx_sh):
@@ -945,8 +970,15 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     # Fallback styling by CONTENT when the reword doesn't line up with the card line-for-line
     # (e.g. a pack that turns the card around: "Which disease fits?" + presentation on the front).
     # Pool = this side's lines plus the answer side's (where section labels like .lbl live).
+    # A reword that turns the card around (a line of the original now sits at another position,
+    # e.g. the answer moved to the top) can't be styled line-for-line even when the counts match.
+    vtx = [ln for ln in lines if not ln.startswith("\u2022") and ln != _ANS_MARK]
+    opos = {}
+    for i, sh in enumerate(tx_sh):
+        opos.setdefault(_norm(sh["plain"]), i)
+    reordered = any(opos.get(_norm(ln), j) != j for j, ln in enumerate(vtx))
     fb = [None] * len(lines)
-    if len([ln for ln in lines if not ln.startswith("\u2022")]) != len(tx_sh):
+    if reordered or len(vtx) != len(tx_sh):
         pool = list(shells)
         if side == "q" and card is not None:
             try:
@@ -979,7 +1011,7 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
     is_li = [ln.startswith("\u2022") for ln in lines]
     n_li = sum(is_li)
     li_map = len(li_sh) == n_li
-    tx_map = len(tx_sh) == len(lines) - n_li
+    tx_map = len(tx_sh) == len(lines) - n_li - lines.count(_ANS_MARK) and not reordered
     phrases = sorted({b for sh in shells for b in sh["bold"] if len(_norm(b)) >= 3},
                      key=len, reverse=True)
     # Enlarged key phrases / lines. A size shared by EVERY line is card-wide — _preserve_style
@@ -999,6 +1031,10 @@ def _format_text_variant(v: str, original_html: str, side: str, note, ord_,
             open_li.pop()
             out.append("</%s>" % stack.pop())
     for idx, (ln, li) in enumerate(zip(lines, is_li)):
+        if ln == _ANS_MARK:
+            _close_to(0)
+            out.append("<hr id=answer>")
+            continue
         sh = None
         if li:
             sh = li_sh[li_i] if li_map else None
@@ -1147,9 +1183,13 @@ _COUNT_RE = re.compile(
 # of it BEFORE looking for a list, or its lines get mistaken for list items and shuffled into
 # garbage. Also reject any candidate item that looks like leftover CSS/JS as a second line of
 # defense.
+# JS / CSS need their real syntax ("function(", "var x =", a lowercase property with a CSS-like
+# value): card prose like "renal function" or "Presentation: fever, rash; …" must not be dropped.
 _CODEISH_RE = re.compile(
-    r"[{}]|;\s*$|::|=>|\bfunction\b|\bvar\b|\bwindow\.|\bdocument\.|@font-face|!important"
-    r"|-webkit-|[a-z-]+\s*:\s*[^;]+;", re.I)
+    r"[{}]|;\s*$|::|=>|\bfunction\s*\w*\s*\(|\bvar\s+\w+\s*=|\bwindow\.|\bdocument\.|@font-face|!important"
+    r"|-webkit-|(?-i:(?<![\w-])[a-z][a-z-]*\s*:\s*"
+    r"(?:#[0-9a-fA-F]{3,8}|-?[\d.]+(?:px|em|rem|%|pt|vh|vw|s|ms)?|[a-z-]+(?:\([^)]*\))?)\s*;)",
+    re.I)
 
 
 def _strip_noncontent(html: str) -> str:
@@ -3135,6 +3175,8 @@ def _inject_live_current() -> None:
         def _disp(varhtml):
             if is_html:
                 return styles + varhtml
+            if side == "a" and not is_cz:
+                varhtml = _with_answer_marker(varhtml, text, note, cur.ord)
             v = _format_text_variant(varhtml, text, side, note, cur.ord, is_cz, card=cur)
             if imgs:
                 v = v + "<br>" + imgs
