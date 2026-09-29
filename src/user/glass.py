@@ -1431,8 +1431,8 @@ class _DragByBackground(QObject):
 def _win_glass_dialog(dialog) -> None:
     """Windows twin of the Mac glass dialog: with the pre-launch hook active the
     dialog goes frameless + translucent (Windows only draws translucent frameless
-    windows), content extends to the top like the Mac's, a red close dot sits at the
-    top-left and the empty background drags the window. Without the hook it keeps its
+    windows), content extends to the top like the Mac's, a Windows-style close button
+    sits at the top-right and the empty background drags the window. Without the hook it keeps its
     frame and gets the same colours solid."""
     try:
         from ..platform.win import preboot
@@ -1444,36 +1444,21 @@ def _win_glass_dialog(dialog) -> None:
             dialog._jk_drag = _DragByBackground(dialog)
             dialog.installEventFilter(dialog._jk_drag)
 
-            class _Dot(_QW):
-                def __init__(self, parent):
-                    super().__init__(parent)
-                    self.setFixedSize(14, 14)
-                    self.move(13, 12)
-                    self._hover = False
+            from ..platform.win.chrome import _CapButton
 
-                def enterEvent(self, _e):
-                    self._hover = True; self.update()
+            def _close(d=dialog):
+                d.reject() if hasattr(d, "reject") else d.close()
+            dialog._jk_close_dot = _CapButton("close", _close, dialog)
 
-                def leaveEvent(self, _e):
-                    self._hover = False; self.update()
-
-                def paintEvent(self, _e):
-                    p = QPainter(self)
-                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    c = QColor("#ff5f57")
-                    p.setPen(QPen(c.darker(130), 0.6)); p.setBrush(c)
-                    p.drawEllipse(QRectF(1, 1, 12, 12))
-                    if self._hover:
-                        p.setPen(QPen(QColor(0, 0, 0, 150), 1.2))
-                        p.drawLine(4, 4, 10, 10); p.drawLine(4, 10, 10, 4)
-                    p.end()
-
-                def mouseReleaseEvent(self, e):
-                    if e.button() == Qt.MouseButton.LeftButton:
-                        self.window().reject() if hasattr(self.window(), "reject") \
-                            else self.window().close()
-            dialog._jk_close_dot = _Dot(dialog)
-            dialog._jk_close_dot.raise_()
+            class _Pin(QObject):          # keep it in the top-right corner
+                def eventFilter(self, obj, ev):
+                    if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+                        b = obj._jk_close_dot
+                        b.move(obj.width() - b.width(), 0)
+                        b.raise_()
+                    return False
+            dialog._jk_close_pin = _Pin(dialog)
+            dialog.installEventFilter(dialog._jk_close_pin)
         dialog._jk_base_qss = dialog.styleSheet() or ""
         dialog._jk_light = _tint_is_light()
         dialog.setStyleSheet(_glass_dialog_qss(dialog._jk_light) + dialog._jk_base_qss)

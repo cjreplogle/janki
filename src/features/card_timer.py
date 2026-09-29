@@ -797,13 +797,16 @@ def _make_card_timer():
             self._cycles = cycles          # None = loop forever; N = flash N times
             self._cycles_done = 0
             self._pulse_t = QTimer(self)
-            self._pulse_t.setInterval(33)   # ~30 fps
+            # ~30 fps; Windows re-copies this full-window translucent overlay on every
+            # opacity step, so 20 fps there (the slow pulse looks the same).
+            self._tick_ms = 50 if sys.platform.startswith("win") else 33
+            self._pulse_t.setInterval(self._tick_ms)
             self._pulse_t.timeout.connect(self._tick)
             _prep_overlay_native(self, ignore_mouse=True)
 
         def _tick(self):
             import math
-            self._prog += 33.0 / max(1, self._pulse_ms)
+            self._prog += float(self._tick_ms) / max(1, self._pulse_ms)
             if self._prog >= 1.0:
                 self._prog = 0.0            # completed one in/out cycle
                 if self._cycles is not None:

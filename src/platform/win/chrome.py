@@ -2,7 +2,7 @@
 
 Windows only lets Qt draw a translucent top-level window when it's frameless, so for
 glass the main window drops the native frame and Janki draws the Mac-style chrome
-itself: traffic-light buttons (close / minimise / maximise) at the top-left, drag to
+itself: Windows-style caption buttons (minimise / maximise / close) at the top-right, drag to
 move from the toolbar's empty space (with Aero Snap, via startSystemMove), double-click
 to maximise, and resizing from any edge (startSystemResize).
 """
@@ -15,62 +15,98 @@ _lights = None
 _resizer = None
 
 
-class _Light(QWidget):
-    def __init__(self, color, glyph, action, parent):
+class _CapButton(QWidget):
+    """One Windows caption button (minimise / maximise / close): flat on the glass,
+    soft highlight on hover, red for close — drawn with Windows' own icon font."""
+    GLYPHS = {"min": "\uE921", "max": "\uE922", "restore": "\uE923", "close": "\uE8BB"}
+
+    def __init__(self, kind, action, parent):
         super().__init__(parent)
-        self._color, self._glyph, self._action = QColor(color), glyph, action
-        self._hover = False
-        self.setFixedSize(14, 14)
+        self._kind, self._action = kind, action
+        self._hover = self._down = False
+        self.setFixedSize(46, 32)
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def paintEvent(self, _ev):
+        from aqt.qt import QFont, QFontDatabase
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(self._color.darker(130), 0.6))
-        p.setBrush(self._color)
-        p.drawEllipse(QRectF(1, 1, 12, 12))
-        if self.parent()._hover:
-            p.setPen(QPen(QColor(0, 0, 0, 150), 1.2))
-            c = QPointF(7, 7)
-            if self._glyph == "x":
-                p.drawLine(c + QPointF(-2.5, -2.5), c + QPointF(2.5, 2.5))
-                p.drawLine(c + QPointF(-2.5, 2.5), c + QPointF(2.5, -2.5))
-            elif self._glyph == "-":
-                p.drawLine(c + QPointF(-3, 0), c + QPointF(3, 0))
+        close = self._kind == "close"
+        if self._hover or self._down:
+            if close:
+                p.fillRect(self.rect(), QColor(196, 43, 28, 230 if self._down else 255))
             else:
-                p.drawLine(c + QPointF(-3, 0), c + QPointF(3, 0))
-                p.drawLine(c + QPointF(0, -3), c + QPointF(0, 3))
+                p.fillRect(self.rect(), QColor(255, 255, 255, 18 if self._down else 28))
+        kind = self._kind
+        if kind == "max" and mw.isMaximized():
+            kind = "restore"
+        fam = next((f for f in ("Segoe Fluent Icons", "Segoe MDL2 Assets")
+                    if f in QFontDatabase.families()), None)
+        p.setPen(QColor(255, 255, 255) if (close and self._hover) else QColor(235, 235, 235, 220))
+        if fam:
+            f = QFont(fam)
+            f.setPixelSize(10)
+            p.setFont(f)
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.GLYPHS[kind])
+        else:                                  # fallback: draw the glyph with lines
+            c = QPointF(23, 16)
+            if kind == "min":
+                p.drawLine(c + QPointF(-5, 0), c + QPointF(5, 0))
+            elif kind == "close":
+                p.drawLine(c + QPointF(-5, -5), c + QPointF(5, 5))
+                p.drawLine(c + QPointF(-5, 5), c + QPointF(5, -5))
+            else:
+                p.drawRect(QRectF(c.x() - 5, c.y() - 5, 10, 10))
         p.end()
-
-    def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.MouseButton.LeftButton and self.rect().contains(ev.position().toPoint()):
-            self._action()
-
-
-class TrafficLights(QWidget):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self._hover = False
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-        for color, glyph, act in (("#ff5f57", "x", mw.close),
-                                  ("#febc2e", "-", mw.showMinimized),
-                                  ("#28c840", "+", toggle_maximize)):
-            lay.addWidget(_Light(color, glyph, act, self))
-        self.adjustSize()
-        self.move(13, 12)
 
     def enterEvent(self, _ev):
         self._hover = True
         self.update()
-        for c in self.findChildren(_Light):
-            c.update()
 
     def leaveEvent(self, _ev):
-        self._hover = False
-        for c in self.findChildren(_Light):
-            c.update()
+        self._hover = self._down = False
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._down = True
+            self.update()
+
+    def mouseReleaseEvent(self, ev):
+        was = self._down
+        self._down = False
+        self.update()
+        if was and ev.button() == Qt.MouseButton.LeftButton and \
+                self.rect().contains(ev.position().toPoint()):
+            self._action()
+
+
+class CaptionButtons(QWidget):
+    """Windows-style caption buttons pinned to the top-right corner."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        for kind, act in (("min", mw.showMinimized), ("max", toggle_maximize),
+                          ("close", mw.close)):
+            lay.addWidget(_CapButton(kind, act, self))
+        self.adjustSize()
+        self.place()
+
+    def place(self):
+        self.move(self.parent().width() - self.width(), 0)
+        self.raise_()
+
+
+class _PlaceOnResize(QObject):
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QEvent.Type.Resize, QEvent.Type.WindowStateChange) and _lights:
+            _lights.place()
+            for b in _lights.findChildren(_CapButton):
+                b.update()
+        return False
 
 
 def toggle_maximize():
@@ -159,9 +195,11 @@ def install():
     if was_visible:                       # setWindowFlags hides the window; bring it back
         mw.setGeometry(geo)
         mw.show()
-    _lights = TrafficLights(mw)
+    _lights = CaptionButtons(mw)
     _lights.show()
     _lights.raise_()
+    mw._jk_cap_place = _PlaceOnResize(mw)
+    mw.installEventFilter(mw._jk_cap_place)
     _resizer = _EdgeResizer(mw)
     QApplication.instance().installEventFilter(_resizer)
     # Anki's in-window menu bar (File/Edit/Tools…) would sit above the toolbar and
@@ -211,4 +249,4 @@ class _AltMenu(QObject):
 
 def raise_lights():
     if _lights is not None:
-        _lights.raise_()
+        _lights.place()

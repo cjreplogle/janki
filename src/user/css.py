@@ -523,6 +523,12 @@ _DECK_STICKY_JS = r"""(function(){
  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
 })();"""
 
+# Readability halo for text on glass. Two blurred layers look best but are expensive
+# when the webviews draw in software — which the Windows glass needs (every typewriter
+# frame repaints them) — so Windows gets one tight layer.
+_TEXT_SHADOW = ("0 0 2px rgba(0,0,0,.95)" if sys.platform.startswith("win")
+                else "0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85)")
+
 _REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
 
 
@@ -634,9 +640,9 @@ def _build_css(cfg, context):
         "html body { background: transparent !important; background-color: transparent !important; }\n"
         "/* readable text over the desktop without an opaque backing */\n"
         "body, body * {\n"
-        "  text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85) !important; }\n"
+        "  text-shadow: %s !important; }\n"
         "</style>\n"
-    )
+    ) % _TEXT_SHADOW
     parts = [base]
 
     # System-wide UI font, applied for every context (appended before the
@@ -1155,6 +1161,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # still animates once per real render.
         "  if(window.__jkTwLoaded) return; window.__jkTwLoaded=1;\n"
         f"  var WPM={wpm}, MIN_MS={min_ms}, MAX_MS={max_ms}, STATIC={static}, SPEED={speed};\n"
+        # Windows glass draws the webviews in software and re-copies the translucent
+        # window every frame, so step every other frame there with twice the
+        # characters per step: same typing speed, half the repaints.
+        f"  var JK_FR={2 if sys.platform.startswith('win') else 1};\n"
+        "  function jkNext(f){ if(JK_FR>1){ requestAnimationFrame(function(){ requestAnimationFrame(f); }); }"
+        " else { requestAnimationFrame(f); } }\n"
         f'  var PREV_HASH="{prev_hash}";\n'
         "  function ready(fn){ if(document.readyState!='loading') fn();\n"
         "    else document.addEventListener('DOMContentLoaded', fn); }\n"
@@ -1254,13 +1266,13 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
         "        done(); }\n"
         "      var total=spans.length; if(!total){ finish(); return; }\n"
-        "      var perTick=timing(total), i=0;\n"
+        "      var perTick=timing(total)*JK_FR, i=0;\n"
         "      function step(){ var b=perTick;\n"
         "        while(b>0 && i<total){ spans[i].style.visibility='visible';\n"
         "          if(spans[i].__jkli){ spans[i].__jkli.style.visibility=''; }\n"
         "          i++; b--; }\n"
-        "        if(i<total) requestAnimationFrame(step); else finish(); }\n"
-        "      requestAnimationFrame(step); }\n"
+        "        if(i<total) jkNext(step); else finish(); }\n"
+        "      jkNext(step); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"
         "      var nodes=collect(clozeOnly);\n"
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
@@ -1269,14 +1281,14 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      var MS=Math.max(MIN_MS, Math.min(MAX_MS, (total/5)/WPM*60000))/SPEED;\n"
         "      nodes.forEach(function(x){ x[0].nodeValue=''; });\n"
         "      reveal();   // reveal the now-emptied card (no flash of full text)\n"
-        "      var perTick=Math.max(1, Math.ceil(total/Math.max(1,(MS/12))));\n"
+        "      var perTick=Math.max(1, Math.ceil(total/Math.max(1,(MS/12))))*JK_FR;\n"
         "      var ni=0,ci=0;\n"
         "      function step(){ var b=perTick;\n"
         "        while(b>0 && ni<nodes.length){ var c=nodes[ni], rem=c[1].length-ci, take=Math.min(b,rem);\n"
         "          c[0].nodeValue=c[1].slice(0,ci+take); ci+=take; b-=take;\n"
         "          if(ci>=c[1].length){ ni++; ci=0; } }\n"
-        "        if(ni<nodes.length) requestAnimationFrame(step); else done(); }\n"
-        "      requestAnimationFrame(step); }\n"
+        "        if(ni<nodes.length) jkNext(step); else done(); }\n"
+        "      jkNext(step); }\n"
         "    var lastSig=null;\n"
         # Persist the last-animated card signature across webview RELOADS/re-renders.
         # A plain reload (cold-launch glass reload, mw.reset() after a lecture apply,
@@ -1588,15 +1600,19 @@ def _stats_head() -> str:
         # size the shared area to the larger of the two, then wire the selector
         "  chartc.style.width=Math.max(hc.offsetWidth,lc.offsetWidth)+'px';\n"
         "  chartc.style.height=Math.max(hc.offsetHeight,lc.offsetHeight)+'px';\n"
-        "  var CKEY='janki_gs_chart';\n"
-        "  function setChart(w){var cal=(w!=='trend');\n"
-        "    hc.style.display=cal?'':'none';lc.style.display=cal?'none':'';\n"
-        "    bCal.classList.toggle('on',cal);bTrend.classList.toggle('on',!cal);\n"
-        "    if(!cal)drawLine(lc,true);\n"          # replay the line-draw when showing Trend
-        "    try{localStorage.setItem(CKEY,cal?'cal':'trend');}catch(e){}}\n"
-        "  bCal.onclick=function(){setChart('cal');};\n"
-        "  bTrend.onclick=function(){setChart('trend');};\n"
-        "  var _cs='cal';try{_cs=localStorage.getItem(CKEY)||'cal';}catch(e){}\n"
+        "  var CKEY='janki_gs_chart2';\n"
+        # Three states: hidden (the default — just the two icons), calendar, or trend.
+        # Clicking the chart that's showing hides it again.
+        "  var FULLW=chartc.style.width,FULLH=chartc.style.height,CUR='none';\n"
+        "  function setChart(w){CUR=w;var cal=(w==='cal'),tr=(w==='trend');\n"
+        "    hc.style.display=cal?'':'none';lc.style.display=tr?'':'none';\n"
+        "    chartc.style.height=(cal||tr)?FULLH:'18px';\n"
+        "    bCal.classList.toggle('on',cal);bTrend.classList.toggle('on',tr);\n"
+        "    if(tr)drawLine(lc,true);\n"          # replay the line-draw when showing Trend
+        "    try{localStorage.setItem(CKEY,w);}catch(e){}}\n"
+        "  bCal.onclick=function(){setChart(CUR==='cal'?'none':'cal');};\n"
+        "  bTrend.onclick=function(){setChart(CUR==='trend'?'none':'trend');};\n"
+        "  var _cs='none';try{_cs=localStorage.getItem(CKEY)||'none';}catch(e){}\n"
         "  setChart(_cs);\n"
         # hover tooltip on heatmap
         "  hc.addEventListener('mousemove',function(e){\n"
@@ -2032,7 +2048,7 @@ _CONGRATS_GLASS_CSS = (
     "{background:transparent!important;background-color:transparent!important;"
     "background-image:none!important;}"
     "html,body{background:transparent!important;background-color:transparent!important;}"
-    "body,body *{text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.85)!important;}"
+    "body,body *{text-shadow:" + _TEXT_SHADOW + "!important;}"
 )
 _CONGRATS_GLASS_JS = (
     "(function(){if(document.getElementById('__janki_congrats_glass'))return;"

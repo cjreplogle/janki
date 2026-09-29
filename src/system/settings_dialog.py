@@ -58,7 +58,7 @@ class GlassSettings(QDialog):
                 "border: 1px solid rgba(80,140,255,0.4); border-radius: 6px; "
                 "padding: 8px 10px; }"
             )
-            lay.addWidget(_warn)
+            self._win_note = _warn          # placed under the tabs (below)
         elif sys.platform != "darwin":
             _warn = QLabel(
                 "ℹ️  On this platform Janki runs its cross-platform features — "
@@ -174,6 +174,8 @@ class GlassSettings(QDialog):
         tabs.setCurrentWidget(app_page)
 
         lay.addWidget(tabs)
+        if getattr(self, "_win_note", None) is not None:
+            lay.addWidget(self._win_note)   # Windows notice sits at the bottom
 
         # === Appearance ======================================================
         # --- Background color picker (a color well like Terminal) ------------
