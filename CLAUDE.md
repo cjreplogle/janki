@@ -38,9 +38,14 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 ## Windows specifics (beta, 2.1.x)
 - On Windows `ACTIVE=True` always; `GLASS` has a crash guard (`user_files/win_glass_pending`
   → `win_glass_failed`; cleared 4s after start and on clean quit).
-- **See-through glass needs the pre-launch hook**: `janki_win_glass.pth` in Anki's
-  site-packages sets `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu --disable-gpu-compositing`
-  and `JANKI_WIN_PREBOOT=1`. Installed on first run → restart prompt (auto-relaunch).
+- **See-through glass needs the pre-launch hook** (`preboot.py`): `janki_win_glass.pth`
+  (`import janki_preboot`) + `janki_preboot.py` in a site dir. The module sets the Chromium
+  flags (software compositing, no occlusion) and wraps `aqt.AnkiApp` to call
+  `QSurfaceFormat.setAlphaBufferSize(8)` before the app exists — without alpha the window
+  is solid grey. It exports `JANKI_WIN_PREBOOT=2` (= hook ran). Bundled-Python builds
+  (`python3XX._pth`, e.g. the ARM64 installer) ignore .pth unless `import site` is enabled
+  there — install enables it (backup `.janki-orig`, restored on uninstall). Installed on
+  first run → restart prompt; Settings → General has a glass on/off button.
   Windows only draws translucent windows when **frameless**, hence `chrome.py`.
 - Everything is software-drawn there, so perf matters: Windows gets a single-layer text
   halo, typewriter steps every other frame (`JK_FR`), flare overlay at 20 fps. Settings /

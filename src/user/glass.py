@@ -2500,7 +2500,7 @@ def _patched_theme_did_change(self, *a, **k):
         pass
 
 
-if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "1":
+if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "2":
     # Translucency has to be set before the native window exists. Add-ons load before
     # Anki first shows the main window, so set it now (chrome.install() rebuilds the
     # window frameless if it was already created).

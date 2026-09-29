@@ -1085,7 +1085,7 @@ def _build_css(cfg, context):
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
-        if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "1":
+        if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "2":
             # Frameless window: the toolbar's empty space is the title bar.
             parts.append(
                 "<script>(function(){function bare(e){return !e.target.closest("
