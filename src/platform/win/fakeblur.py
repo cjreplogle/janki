@@ -96,14 +96,29 @@ class _Layer(QWidget):
                              self.width() * kx, self.height() * ky)
                 p.drawImage(QRectF(self.rect()), img, src)
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            fade = min(1.0, (time.monotonic() - _live.get("t_swap", 0)) / 0.18)
+            now = time.monotonic()
+            moving = now < _live.get("moving_until", 0)
+            # While dragging, Windows shows the previous frame at the new position for a
+            # moment, so sharp edges behind wobble; the soft version hides that. Blend
+            # between the two over ~120 ms so the switch isn't a pop.
+            target = 1.0 if moving else 0.0
+            cur = _live.get("soft_mix", 0.0)
+            step = (now - _live.get("soft_t", now)) / 0.12
+            _live["soft_t"] = now
+            cur = min(target, cur + step) if target > cur else max(target, cur - step)
+            _live["soft_mix"] = cur
+            fade = min(1.0, (now - _live.get("t_swap", 0)) / 0.18)
             prev = _live.get("prev")
-            if prev is not None and fade < 1.0:
+            if prev is not None and fade < 1.0 and not moving:
                 _draw(prev, _live["prev_rect"])
                 p.setOpacity(fade)
-                QTimer.singleShot(16, self.update)        # keep the cross-fade going
             _draw(_live["img"], _live["rect"])
+            if cur > 0 and _live.get("soft") is not None:
+                p.setOpacity(cur)
+                _draw(_live["soft"], _live["rect"])
             p.setOpacity(1.0)
+            if (fade < 1.0) or (cur != target) or moving:
+                QTimer.singleShot(16, self.update)        # keep blends going
             p.fillRect(self.rect(), self.tint)
             p.end()
             return
@@ -217,6 +232,7 @@ def _grab():
                                     Qt.AspectRatioMode.IgnoreAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation)
         img = _blur(small, strength=1)
+        soft = _blur(small, strength=3)        # heavier version shown while dragging
         from aqt.qt import QRect
         rect = QRect(x0, y0, w, h)
         old = _live.get("img")
@@ -224,7 +240,7 @@ def _grab():
             return                             # nothing behind changed: no repaint
         # Cross-fade from the previous capture so changes blend in instead of snapping.
         _live["prev"], _live["prev_rect"] = old, _live.get("rect")
-        _live["img"], _live["rect"] = img, rect
+        _live["img"], _live["rect"], _live["soft"] = img, rect, soft
         import time
         _live["t_swap"] = time.monotonic()
         _layer.update()
