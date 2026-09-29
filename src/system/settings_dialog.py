@@ -1983,7 +1983,8 @@ class GlassSettings(QDialog):
                                "Windows' blur (solid grey where Windows can't draw it). "
                                "Off: fully see-through.")
             self._bd_box = _QCB()
-            _modes = (("Auto", "auto"), ("Live (frosts windows behind)", "live"),
+            _modes = (("Auto", "auto"), ("Wallpaper blur (fastest)", "wallpaper"),
+                      ("Live (frosts windows behind)", "live"),
                       ("Windows blur", "on"), ("Off", "off"))
             for _t, _v in _modes:
                 self._bd_box.addItem(_t, _v)

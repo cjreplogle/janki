@@ -142,7 +142,7 @@ def backdrop_mode() -> str:
         m = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
     except Exception:
         m = "auto"
-    return m if m in ("auto", "on", "off", "live") else "auto"
+    return m if m in ("auto", "on", "off", "live", "wallpaper") else "auto"
 
 
 def dwm_blur_works() -> bool:
@@ -151,7 +151,8 @@ def dwm_blur_works() -> bool:
 
 def janki_blur_wanted() -> bool:
     """Auto mode on a machine where DWM can't blur: Janki draws its wallpaper blur."""
-    return backdrop_mode() == "auto" and not dwm_blur_works()
+    m = backdrop_mode()
+    return m == "wallpaper" or (m == "auto" and not dwm_blur_works())
 
 
 def backdrop_wanted() -> bool:
@@ -164,7 +165,7 @@ def backdrop_wanted() -> bool:
         mode = "auto"
     if mode == "on":
         return True
-    if mode in ("off", "live"):
+    if mode in ("off", "live", "wallpaper"):
         return False
     return transparency_effects_on() and not is_virtual_machine()
 

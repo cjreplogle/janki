@@ -85,7 +85,14 @@ class _Layer(QWidget):
     def paintEvent(self, _ev):
         p = QPainter(self)
         if _live["on"] and _live["img"] is not None:
-            p.drawImage(self.rect(), _live["img"])
+            from aqt.qt import QRectF
+            cap, img = _live["rect"], _live["img"]
+            tl = self.mapToGlobal(self.rect().topLeft())
+            k = img.width() / max(1, cap.width())
+            src = QRectF((tl.x() - cap.x()) * k, (tl.y() - cap.y()) * k,
+                         self.width() * k, self.height() * k)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            p.drawImage(QRectF(self.rect()), img, src)
             p.fillRect(self.rect(), self.tint)
             p.end()
             return
@@ -107,8 +114,8 @@ class _Follow(QObject):
             if _live["on"]:
                 import time
                 now = time.monotonic()
-                if now - _live.get("last", 0) > 0.033:   # ~30 fps while dragging
-                    _live["last"] = now
+                if now - _live.get("last", 0) > 0.06:    # re-capture while dragging;
+                    _live["last"] = now                  # paint re-maps instantly anyway
                     _grab()
             _layer.update()
         return False
@@ -159,24 +166,28 @@ def _affinity(hwnd, on):
         return False
 
 
+_MARGIN = 120        # px captured around the window, so small moves show instantly
+_SCALE = 8           # blur works on a 1/8-size copy; smooth up-scaling spreads it out
+
+
 def _grab():
-    """Capture + blur the screen behind the main window (skipped while minimised)."""
+    """Capture the screen area around + behind the main window at 1/8 size, lightly
+    blurred. Paint maps the window's CURRENT position into it, so the frosted
+    background stays put while the window moves (no waiting for a new capture)."""
     if not _live["on"] or _layer is None or mw.isMinimized() or not mw.isVisible():
         return
     try:
         scr = mw.screen()
-        g = mw.frameGeometry()
         sg = scr.geometry()
+        g = mw.frameGeometry().adjusted(-_MARGIN, -_MARGIN, _MARGIN, _MARGIN) & sg
         pm = scr.grabWindow(0, g.x() - sg.x(), g.y() - sg.y(), g.width(), g.height())
-        img = pm.toImage()
-        if img.isNull():
+        if pm.isNull():
             return
-        # Blur at reduced size (fast), then let drawImage scale it back up.
-        small = img.scaled(max(1, img.width() // 3), max(1, img.height() // 3),
-                           Qt.AspectRatioMode.IgnoreAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
-        _live["img"] = _blur(small, strength=3)
-        _live["rect"] = g
+        small = pm.toImage().scaled(max(1, g.width() // _SCALE), max(1, g.height() // _SCALE),
+                                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation)
+        _live["img"] = _blur(small, strength=1)
+        _live["rect"] = g                      # global rect the capture covers
         _layer.update()
     except Exception:
         pass
@@ -191,7 +202,7 @@ def enable_live(tint_rgba) -> bool:
     _live["on"] = True
     if _live["timer"] is None:
         t = QTimer(mw)
-        t.setInterval(350)                     # refresh what's behind a few times a second
+        t.setInterval(100)                     # ~10 refreshes/s of what's behind
         t.timeout.connect(_grab)
         _live["timer"] = t
     _live["timer"].start()
