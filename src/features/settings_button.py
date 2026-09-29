@@ -8,7 +8,7 @@ from ..util.config import _cfg, log
 
 _btn = None
 _filter = None
-_last = None          # last measured (top, size) of the toolbar pill, in widget px
+_last = None          # last measured (top, size, right) of the toolbar pill, in widget px
 _pending = None       # a differing measurement awaiting confirmation
 
 
@@ -112,15 +112,15 @@ def _host():
 
 
 _PILL_JS = ("(function(){var t=document.querySelector('div.toolbar');if(!t)return null;"
-            "var r=t.getBoundingClientRect();return [r.top,r.height];})()")
+            "var r=t.getBoundingClientRect();return [r.top,r.height,r.right];})()")
 
 
-def _set_geom(top, size):
+def _set_geom(top, size, pill_right=None):
     host = _host()
     if _btn is None or host is None:
         return
     global _last
-    _last = (top, size)
+    _last = (top, size, pill_right)
     size = int(max(22, min(size, 48)))
     # Widget = circle + 2px each side for the painted shadow, centred on the bar's
     # centre. Never let it poke above the toolbar strip (that clipped the circle's top
@@ -131,6 +131,12 @@ def _set_geom(top, size):
     x = host.width() - side - 14
     if getattr(mw, "_jk_frameless", False):
         x -= 46 * 3 + 4        # clear the Windows caption buttons in the top-right
+    if pill_right is not None:
+        # The nav pill is centred independently of this button, so on a narrow
+        # window it can reach further right than the caption-button clearance
+        # above accounts for — clamp the gear clear of the pill's OWN measured
+        # right edge too, however wide it happens to be.
+        x = max(x, int(pill_right) + 10)
     y = int(round(max(0.0, centre - side / 2.0)))
     if _btn.size().width() != side or _btn.size().height() != side:
         _btn.setFixedSize(side, side)
@@ -155,19 +161,22 @@ def _place():
     def _got(res):
         global _pending
         try:
-            if not (res and len(res) == 2 and res[1] > 0):
+            if not (res and len(res) == 3 and res[1] > 0):
                 return
             z = float(host.zoomFactor() or 1.0)
             new = (round(res[0] * z, 1), round(res[1] * z, 1))
+            pill_right = round(res[2] * z, 1)
             if _last is None or new != (round(_last[0], 1), round(_last[1], 1)):
                 # The page reports interim positions while it settles after launch;
                 # only move once two readings ~200 ms apart agree.
                 if _pending == new:
                     _pending = None
-                    _set_geom(*new)
+                    _set_geom(new[0], new[1], pill_right)
                 else:
                     _pending = new
                     QTimer.singleShot(200, _place)
+            else:
+                _set_geom(new[0], new[1], pill_right)   # same spot, pill width may differ
         except Exception:
             pass
     try:
