@@ -89,36 +89,35 @@ class _Layer(QWidget):
             import time
             tl = self.mapToGlobal(self.rect().topLeft())
 
-            def _draw(img, cap):
-                kx = img.width() / max(1, cap.width())      # exact, per axis
-                ky = img.height() / max(1, cap.height())
-                src = QRectF((tl.x() - cap.x()) * kx, (tl.y() - cap.y()) * ky,
-                             self.width() * kx, self.height() * ky)
-                p.drawImage(QRectF(self.rect()), img, src)
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             now = time.monotonic()
             moving = now < _live.get("moving_until", 0)
-            # While dragging, Windows shows the previous frame at the new position for a
-            # moment, so sharp edges behind wobble; the soft version hides that. Blend
-            # between the two over ~120 ms so the switch isn't a pop.
-            target = 1.0 if moving else 0.0
-            cur = _live.get("soft_mix", 0.0)
-            step = (now - _live.get("soft_t", now)) / 0.12
-            _live["soft_t"] = now
-            cur = min(target, cur + step) if target > cur else max(target, cur - step)
-            _live["soft_mix"] = cur
+            # While dragging, don't re-map the frost to the window's live position
+            # (Windows shows the old frame at the new spot for a moment, so re-mapping
+            # wobbles). Freeze it at the drag-start mapping — it rides along with the
+            # window — and cross-fade to a fresh capture once the window settles.
+            if moving or "anchor" in _live:          # stay frozen until the fresh capture
+                if "anchor" not in _live:
+                    _live["anchor"] = _live.get("last_tl", tl)
+                use_tl = _live["anchor"]
+            else:
+                use_tl = tl
+            _live["last_tl"] = use_tl
+
+            def _draw_at(img, cap, at):
+                kx = img.width() / max(1, cap.width())
+                ky = img.height() / max(1, cap.height())
+                src = QRectF((at.x() - cap.x()) * kx, (at.y() - cap.y()) * ky,
+                             self.width() * kx, self.height() * ky)
+                p.drawImage(QRectF(self.rect()), img, src)
             fade = min(1.0, (now - _live.get("t_swap", 0)) / 0.18)
             prev = _live.get("prev")
             if prev is not None and fade < 1.0 and not moving:
-                _draw(prev, _live["prev_rect"])
+                _draw_at(prev, _live["prev_rect"], _live.get("prev_tl") or use_tl)
                 p.setOpacity(fade)
-            _draw(_live["img"], _live["rect"])
-            if cur > 0 and _live.get("soft") is not None:
-                p.setOpacity(cur)
-                _draw(_live["soft"], _live["rect"])
+                QTimer.singleShot(16, self.update)        # keep the cross-fade going
+            _draw_at(_live["img"], _live["rect"], use_tl)
             p.setOpacity(1.0)
-            if (fade < 1.0) or (cur != target) or moving:
-                QTimer.singleShot(16, self.update)        # keep blends going
             p.fillRect(self.rect(), self.tint)
             p.end()
             return
@@ -232,15 +231,19 @@ def _grab():
                                     Qt.AspectRatioMode.IgnoreAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation)
         img = _blur(small, strength=1)
-        soft = _blur(small, strength=3)        # heavier version shown while dragging
         from aqt.qt import QRect
         rect = QRect(x0, y0, w, h)
         old = _live.get("img")
         if old is not None and _live.get("rect") == rect and old == img:
+            if _live.pop("anchor", None) is not None:   # released a frozen drag view
+                _layer.update()
             return                             # nothing behind changed: no repaint
         # Cross-fade from the previous capture so changes blend in instead of snapping.
         _live["prev"], _live["prev_rect"] = old, _live.get("rect")
-        _live["img"], _live["rect"], _live["soft"] = img, rect, soft
+        _live["img"], _live["rect"] = img, rect
+        # The previous image was last shown at the drag-start position (frozen); keep
+        # drawing it there during the cross-fade so the hand-over doesn't jump.
+        _live["prev_tl"] = _live.pop("anchor", None)
         import time
         _live["t_swap"] = time.monotonic()
         _layer.update()
