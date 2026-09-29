@@ -787,10 +787,22 @@ def _startup():
             # on. If a launch dies before this, the next start rolls glass back.
             if sys.platform.startswith("win"):
                 from .src.util.config import confirm_win_glass
-                if mw.windowHandle() is not None and not getattr(mw, "_janki_win_recreated", False):
-                    mw._janki_win_recreated = True
-                    QTimer.singleShot(0, glass._apply_native_glass)
+                from .src.platform.win import preboot as _pb
+                QTimer.singleShot(0, glass._apply_native_glass)
                 QTimer.singleShot(4000, confirm_win_glass)
+                mw.app.aboutToQuit.connect(confirm_win_glass)   # a clean quit isn't a crash
+                # First run: install the pre-launch hook, then one restart turns the
+                # see-through glass on (like the Mac self-heal's restart prompt).
+                if not _pb.active() and _pb.install():
+                    def _ask_restart():
+                        from aqt.utils import askUser
+                        if askUser("Janki installed its Windows glass support.\n\n"
+                                   "Restart Anki now to turn on the see-through glass?",
+                                   title="Janki"):
+                            from .src.platform.win import shell as _wsh
+                            _wsh.relaunch_after_exit()
+                            mw.unloadProfileAndExit()
+                    QTimer.singleShot(5000, _ask_restart)
             else:
                 QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
 

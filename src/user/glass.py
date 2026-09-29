@@ -60,11 +60,16 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
         from ..platform.win import dwm
         cfg = _cfg()
         r, g, b = _tint_rgb(cfg)
-        w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        blur = int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
+        from ..platform.win import preboot
+        # Windows only draws a translucent window when it's frameless AND the webviews
+        # render in software (the pre-launch hook). Otherwise: same colours, solid.
+        see_through = preboot.active() and (w is mw or bool(w.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        if see_through:
+            w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        blur = see_through and int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
         dwm.apply(int(w.winId()), material=int(cfg.get("material", 21)), blur=blur,
                   tint=(r, g, b), dark=not _tint_is_light(cfg), small_corners=small)
-        if _oled_active and w is mw:
+        if (_oled_active and w is mw) or not see_through:
             a = 255
         else:
             a = 255 * min(1.0, max(0.06, float(cfg.get("body_opacity", 0.25)) + extra_alpha))
@@ -74,6 +79,13 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
 
 
 def _win_apply_main():
+    try:
+        from ..platform.win import preboot, chrome
+        if preboot.active():
+            chrome.install()                 # frameless + Mac-style traffic lights
+            chrome.raise_lights()
+    except Exception as exc:
+        log(f"win chrome: {exc}")
     try:
         mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -1416,10 +1428,80 @@ class _DragByBackground(QObject):
         return False
 
 
+def _win_glass_dialog(dialog) -> None:
+    """Windows twin of the Mac glass dialog: with the pre-launch hook active the
+    dialog goes frameless + translucent (Windows only draws translucent frameless
+    windows), content extends to the top like the Mac's, a red close dot sits at the
+    top-left and the empty background drags the window. Without the hook it keeps its
+    frame and gets the same colours solid."""
+    try:
+        from ..platform.win import preboot
+        if preboot.active():
+            from aqt.qt import QPainter, QColor, QPen, QRectF, QWidget as _QW
+            dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            dialog._jk_expanded = True             # callers add top room for the dot
+            dialog._jk_drag = _DragByBackground(dialog)
+            dialog.installEventFilter(dialog._jk_drag)
+
+            class _Dot(_QW):
+                def __init__(self, parent):
+                    super().__init__(parent)
+                    self.setFixedSize(14, 14)
+                    self.move(13, 12)
+                    self._hover = False
+
+                def enterEvent(self, _e):
+                    self._hover = True; self.update()
+
+                def leaveEvent(self, _e):
+                    self._hover = False; self.update()
+
+                def paintEvent(self, _e):
+                    p = QPainter(self)
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    c = QColor("#ff5f57")
+                    p.setPen(QPen(c.darker(130), 0.6)); p.setBrush(c)
+                    p.drawEllipse(QRectF(1, 1, 12, 12))
+                    if self._hover:
+                        p.setPen(QPen(QColor(0, 0, 0, 150), 1.2))
+                        p.drawLine(4, 4, 10, 10); p.drawLine(4, 10, 10, 4)
+                    p.end()
+
+                def mouseReleaseEvent(self, e):
+                    if e.button() == Qt.MouseButton.LeftButton:
+                        self.window().reject() if hasattr(self.window(), "reject") \
+                            else self.window().close()
+            dialog._jk_close_dot = _Dot(dialog)
+            dialog._jk_close_dot.raise_()
+        dialog._jk_base_qss = dialog.styleSheet() or ""
+        dialog._jk_light = _tint_is_light()
+        dialog.setStyleSheet(_glass_dialog_qss(dialog._jk_light) + dialog._jk_base_qss)
+    except Exception as exc:
+        log(f"win glass dialog: {exc}")
+        return
+    _glass_dialogs.append(dialog)
+    _install_smooth_controls()
+
+    class _OnShow(QObject):
+        def eventFilter(self, obj, ev):
+            if ev.type() == QEvent.Type.Show:
+                QTimer.singleShot(0, lambda: _style_glass_window(obj))
+                d = getattr(obj, "_jk_close_dot", None)
+                if d is not None:
+                    d.raise_()
+            return False
+    dialog._jk_win_show = _OnShow(dialog)
+    dialog.installEventFilter(dialog._jk_win_show)
+
+
 def glass_dialog(dialog) -> None:
     """Frost `dialog` like the main window. Call BEFORE the dialog is first shown (the
     translucent-background attribute has to be set before its native window exists);
     the native half is applied on show and re-applied whenever tint/blur change."""
+    if GLASS and _WIN:
+        _win_glass_dialog(dialog)
+        return
     if not GLASS or sys.platform != "darwin":
         return
     try:
@@ -2449,10 +2531,10 @@ def _patched_theme_did_change(self, *a, **k):
         pass
 
 
-if GLASS and _WIN:
+if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "1":
     # Translucency has to be set before the native window exists. Add-ons load before
-    # Anki first shows the main window, so set it now; if the window was already
-    # created, _startup rebuilds it once (_force_recreate_translucent).
+    # Anki first shows the main window, so set it now (chrome.install() rebuilds the
+    # window frameless if it was already created).
     try:
         mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)

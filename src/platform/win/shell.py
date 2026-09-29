@@ -169,3 +169,14 @@ def set_owner(hwnd: int, owner: int, click_through: bool = False) -> None:
     if click_through:
         ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED
     user32.SetWindowLongPtrW(h, GWL_EXSTYLE, ex)
+
+
+def relaunch_after_exit(delay_s: int = 3) -> None:
+    """Start Anki again a few seconds from now (after this instance has quit)."""
+    try:
+        import subprocess
+        subprocess.Popen('cmd /c "timeout /t %d /nobreak >nul & start "" %s"'
+                         % (int(delay_s), _anki_command()),
+                         creationflags=0x08000000, close_fds=True)   # CREATE_NO_WINDOW
+    except Exception:
+        pass

@@ -50,6 +50,13 @@ def _win_glass_gate() -> bool:
         if os.path.exists(pending):
             os.replace(pending, failed)
         if os.path.exists(failed):
+            # A glass launch crashed: drop the pre-launch hook so the next start is
+            # plain; Settings can turn glass back on (reset_win_glass_failure).
+            try:
+                from ..platform.win import preboot
+                preboot.uninstall()
+            except Exception:
+                pass
             return False
         cfg = mw.addonManager.getConfig(__name__) or {}
         if not cfg.get("win_glass", True):

@@ -1,5 +1,6 @@
 """Webview CSS builder (glass tint, typewriter caption, stats) + content hook."""
 
+import os
 import sys
 from typing import Any, Optional
 from aqt import mw, gui_hooks
@@ -182,6 +183,19 @@ def apply_native_ui_font(cfg=None):
     # webview chrome/cards still get Lora via CSS.
     import sys
     if sys.platform.startswith("win"):
+        # Stylesheets only reach a few native controls on Windows; setFont reaches all
+        # of them (menus, dialogs, Settings), so the whole UI matches the Lora chrome.
+        try:
+            from aqt.qt import QApplication, QFont, QFontDatabase
+            _register_bundled_fonts()
+            have = set(QFontDatabase.families())
+            fam = next((f for f in qt_font_families(cfg) if f in have), None)
+            if fam:
+                f = QFont(QApplication.font())
+                f.setFamily(fam)
+                QApplication.setFont(f)
+        except Exception as e:
+            log("win ui font: %s" % e)
         return
     try:
         import re
@@ -1062,6 +1076,15 @@ def _build_css(cfg, context):
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
+        if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "1":
+            # Frameless window: the toolbar's empty space is the title bar.
+            parts.append(
+                "<script>(function(){function bare(e){return !e.target.closest("
+                "'a,button,input,select,.hitem');}"
+                "document.addEventListener('mousedown',function(e){"
+                "if(e.button===0&&e.detail===1&&bare(e))pycmd('jkwin:move');},true);"
+                "document.addEventListener('dblclick',function(e){"
+                "if(bare(e))pycmd('jkwin:max');},true);})();</script>\n")
         # The nav items (a.hitem) live inside one island (div.toolbar). Give the
         # ISLAND the dark fill (matching the bottom buttons), keep items clear, and
         # only highlight the item you're hovering.
@@ -1900,6 +1923,15 @@ def _on_js_message(handled, message, context):
     AMBOSS re-mark re-render) is injected with it as PREV_HASH and reveals
     instantly instead of replaying the reveal."""
     try:
+        # Windows frameless glass window: drag / maximise from the toolbar's empty space.
+        if message == "jkwin:move":
+            from ..platform.win import chrome
+            chrome.start_move()
+            return (True, None)
+        if message == "jkwin:max":
+            from ..platform.win import chrome
+            chrome.toggle_maximize()
+            return (True, None)
         if isinstance(message, str) and message.startswith("jktwanim:"):
             parts = message.split(":", 1)
             if len(parts) == 2:
