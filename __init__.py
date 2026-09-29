@@ -819,7 +819,8 @@ def _startup():
                             from .src.platform.win import shell as _wsh
                             # The relaunched Anki inherits OUR environment, which predates
                             # the new user variables — hand them over explicitly.
-                            os.environ.update(_pb._ENV)
+                            import os as _os   # _startup has a later local `import os`
+                            _os.environ.update(_pb._ENV)
                             _wsh.relaunch_after_exit()
                             mw.unloadProfileAndExit()
                     QTimer.singleShot(5000, _ask_restart)
