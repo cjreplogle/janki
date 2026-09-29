@@ -77,7 +77,10 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             w._jk_dwm_key = key
             dwm.apply(key[0], material=key[1], blur=blur, tint=(r, g, b),
                       dark=not key[4], small_corners=small)
-        if (_oled_active and w is mw) or not see_through:
+        if _oled_active and w is mw:
+            r = g = b = 0                      # OLED: true black, not the tint
+            a = 255
+        elif not see_through:
             a = 255
         else:
             a = 255 * min(1.0, max(0.06, float(cfg.get("body_opacity", 0.25)) + extra_alpha))
@@ -441,6 +444,9 @@ def _set_oled(on: bool):
     """Toggle OLED (solid-black in full-screen). ON: instant black window + black
     webviews, no blur. OFF: fully restore the glass (transparency/tint/blur/corners)."""
     global _oled_active
+    if _WIN and GLASS:
+        _win_fade_oled(on)
+        return
     _oled_active = on
     if on:
         _set_window_black(True)   # native + instant → no grey flash during transition
@@ -468,6 +474,88 @@ def _set_oled(on: bool):
     if not on:
         _reapply_native()   # restore the full glass exactly as it was
 
+
+
+# --- Windows: smooth OLED fade ------------------------------------------------------
+# Flipping the window and every web view to black at once flickered (each surface
+# switched on its own frame). Instead a black layer behind the (still transparent) web
+# views fades in; once fully black the settled OLED state is applied underneath, where
+# nothing visible changes. Leaving: glass is restored under the black, then it fades out.
+_win_dim = {"layer": None, "anim": None}
+
+
+def _win_dim_layer():
+    if _win_dim["layer"] is None:
+        from aqt.qt import QWidget, QPainter
+
+        class _Dim(QWidget):
+            def __init__(self):
+                super().__init__(mw)
+                self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                self.alpha = 0
+
+            def paintEvent(self, _e):
+                if self.alpha <= 0:
+                    return
+                p = QPainter(self)
+                p.fillRect(self.rect(), QColor(0, 0, 0, int(self.alpha)))
+                p.end()
+
+        d = _Dim()
+
+        class _Fit(QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() in (QEvent.Type.Resize, QEvent.Type.WindowStateChange):
+                    d.setGeometry(0, 0, mw.width(), mw.height())
+                return False
+        d._fit = _Fit(mw)
+        mw.installEventFilter(d._fit)
+        _win_dim["layer"] = d
+    d = _win_dim["layer"]
+    d.setGeometry(0, 0, mw.width(), mw.height())
+    central = mw.centralWidget()
+    if central is not None:
+        d.stackUnder(central)                  # behind the web views, above the blur
+    d.show()
+    return d
+
+
+def _win_fade_oled(on: bool, ms: int = 320):
+    global _oled_active
+    from aqt.qt import QVariantAnimation, QEasingCurve
+    d = _win_dim_layer()
+    old = _win_dim["anim"]
+    if old is not None:
+        old.stop()
+    start = d.alpha
+    if not on and _oled_active:
+        _oled_active = False
+        d.alpha = 255
+        d.update()
+        _win_apply_main()                      # restore glass UNDER the black first
+        start = 255
+    anim = QVariantAnimation(mw)
+    anim.setDuration(ms)
+    anim.setStartValue(float(start))
+    anim.setEndValue(255.0 if on else 0.0)
+    anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+    def _step(v):
+        d.alpha = v
+        d.update()
+    anim.valueChanged.connect(_step)
+
+    def _done():
+        global _oled_active
+        if on:
+            _oled_active = True
+            _win_apply_main()                  # settled OLED (solid black, no blur)
+        else:
+            d.alpha = 0
+            d.hide()
+    anim.finished.connect(_done)
+    _win_dim["anim"] = anim
+    anim.start()
 
 def _sync_oled():
     """Apply OLED state based on config + current full-screen status."""

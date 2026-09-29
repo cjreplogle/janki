@@ -106,7 +106,22 @@ class _PlaceOnResize(QObject):
             _lights.place()
             for b in _lights.findChildren(_CapButton):
                 b.update()
+        if ev.type() == QEvent.Type.WindowStateChange:
+            sync_fullscreen()
         return False
+
+
+def sync_fullscreen():
+    """Square corners + no border in fullscreen (and hide the caption buttons, like a
+    fullscreen app); restore them when leaving."""
+    try:
+        from . import dwm
+        fs = mw.isFullScreen()
+        dwm.set_fullscreen(int(mw.winId()), fs)
+        if _lights is not None:
+            _lights.setVisible(not fs)
+    except Exception:
+        pass
 
 
 def toggle_maximize():
@@ -200,6 +215,7 @@ def install():
     _lights.raise_()
     mw._jk_cap_place = _PlaceOnResize(mw)
     mw.installEventFilter(mw._jk_cap_place)
+    sync_fullscreen()
     _resizer = _EdgeResizer(mw)
     QApplication.instance().installEventFilter(_resizer)
     # Anki's in-window menu bar (File/Edit/Tools…) would sit above the toolbar and

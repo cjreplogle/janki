@@ -65,6 +65,21 @@ def set_dark(hwnd, on=True):
     _set_int(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, 1 if on else 0)
 
 
+DWMWA_COLOR_DEFAULT = 0xFFFFFFFF
+CORNER_DONOTROUND = 1
+
+
+def set_fullscreen(hwnd, on: bool):
+    """Fullscreen: no Windows 11 window border and square corners — otherwise a 1px
+    unfilled ring (border + rounded corners) outlines the screen, very visible in OLED."""
+    v = ctypes.c_uint(DWMWA_COLOR_NONE if on else DWMWA_COLOR_DEFAULT)
+    dwmapi.DwmSetWindowAttribute(_hwnd(hwnd), DWMWA_BORDER_COLOR, ctypes.byref(v),
+                                 ctypes.sizeof(v))
+    if IS_WIN11:
+        _set_int(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                 CORNER_DONOTROUND if on else CORNER_ROUND)
+
+
 def set_corners(hwnd, small=False):
     if IS_WIN11:
         _set_int(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, CORNER_ROUND_SMALL if small else CORNER_ROUND)
