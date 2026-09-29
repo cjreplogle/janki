@@ -805,12 +805,32 @@ def _startup():
             if sys.platform.startswith("win"):
                 from .src.util.config import confirm_win_glass
                 from .src.platform.win import preboot as _pb
+                def _diag():
+                    try:
+                        import os as _o, time as _t
+                        from aqt.qt import QSurfaceFormat as _Q
+                        d = _o.path.join(_o.environ.get("LOCALAPPDATA", ""), "Janki", "Logs")
+                        _o.makedirs(d, exist_ok=True)
+                        with open(_o.path.join(d, "janki-preboot.log"), "a", encoding="utf-8") as f:
+                            f.write("%s add-on: hook_active=%s site=%s no_site=%s exe=%s "
+                                    "alpha=%s translucent=%s frameless=%s flags=%r\n" % (
+                                _t.strftime("%Y-%m-%d %H:%M:%S"), _pb.active(),
+                                "site" in sys.modules, sys.flags.no_site, sys.executable,
+                                _Q.defaultFormat().alphaBufferSize(),
+                                mw.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground),
+                                bool(mw.windowFlags() & Qt.WindowType.FramelessWindowHint),
+                                _o.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")))
+                    except Exception as _e:
+                        log("preboot diag: %s" % _e)
+                QTimer.singleShot(1500, _diag)
                 QTimer.singleShot(0, glass._apply_native_glass)
                 QTimer.singleShot(4000, confirm_win_glass)
                 mw.app.aboutToQuit.connect(confirm_win_glass)   # a clean quit isn't a crash
                 # First run: install the pre-launch hook, then one restart turns the
                 # see-through glass on (like the Mac self-heal's restart prompt).
-                if not _pb.active() and _pb.install():
+                # (Re)install every launch: a new Janki may ship an updated hook, which
+                # needs one restart to take effect.
+                if _pb.install() and (not _pb.active() or _pb.changed):
                     def _ask_restart():
                         from aqt.utils import askUser
                         if askUser("Janki installed its Windows glass support.\n\n"

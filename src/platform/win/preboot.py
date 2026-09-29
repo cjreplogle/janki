@@ -31,7 +31,20 @@ _FLAGS = ("--disable-gpu --disable-gpu-compositing "
 _PTH_LINE = "import janki_preboot\n"
 
 _MODULE = '''"""Janki glass pre-launch hook (written by the Janki add-on; safe to delete)."""
-import os, sys
+import os, sys, time
+
+
+def _jlog(msg):
+    try:
+        d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Janki", "Logs")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "janki-preboot.log"), "a", encoding="utf-8") as f:
+            f.write("%%s %%s\\n" %% (time.strftime("%%Y-%%m-%%d %%H:%%M:%%S"), msg))
+    except Exception:
+        pass
+
+
+_jlog("hook ran (python %%s)" %% sys.version.split()[0])
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", %r)
 os.environ["JANKI_WIN_PREBOOT"] = "2"   # "2" = this hook ran
 
@@ -50,10 +63,21 @@ def _patch(aqt):
                 f = QSurfaceFormat.defaultFormat()
                 f.setAlphaBufferSize(8)          # transparent web views need alpha
                 QSurfaceFormat.setDefaultFormat(f)
-            except Exception:
-                pass
+                _jlog("surface alpha set before AnkiApp")
+            except Exception as e:
+                _jlog("surface alpha failed: %%r" %% (e,))
+            try:
+                # Anki picks Direct3D 11 for Qt Quick (which draws the web views); a D3D
+                # surface comes out opaque in a translucent window. The software renderer
+                # keeps alpha — same as Anki's own "Software" video driver.
+                from PyQt6.QtQuick import QQuickWindow, QSGRendererInterface
+                QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.Software)
+                _jlog("Qt Quick -> software renderer")
+            except Exception as e:
+                _jlog("software renderer failed: %%r" %% (e,))
             super().__init__(*a, **k)
     aqt.AnkiApp = JankiApp
+    _jlog("aqt.AnkiApp wrapped")
 
 
 class _AfterAqt:
@@ -169,17 +193,29 @@ def _clear_old_user_env():
 _ENV = {"QTWEBENGINE_CHROMIUM_FLAGS": _FLAGS}
 
 
+changed = False     # set by install(): the hook on disk was missing or out of date
+
+
 def install() -> bool:
-    """Put the hook in place. Returns True if it's in place (new or already there)."""
+    """Put the hook in place (rewriting it if this Janki's version differs). Returns True
+    if it's in place; `changed` tells whether a restart is needed to pick it up."""
+    global changed
+    changed = False
     _clear_old_user_env()
     if not _enable_site_in_pth(True):
         return False
     for d in _site_dirs():
+        mp, pp = os.path.join(d, MOD_NAME), os.path.join(d, PTH_NAME)
         try:
-            with open(os.path.join(d, MOD_NAME), "w", encoding="utf-8") as f:
-                f.write(_MODULE)
-            with open(os.path.join(d, PTH_NAME), "w", encoding="utf-8") as f:
-                f.write(_PTH_LINE)
+            cur = open(mp, encoding="utf-8").read() if os.path.isfile(mp) else None
+            if cur != _MODULE:
+                with open(mp, "w", encoding="utf-8") as f:
+                    f.write(_MODULE)
+                changed = True
+            if not os.path.isfile(pp):
+                with open(pp, "w", encoding="utf-8") as f:
+                    f.write(_PTH_LINE)
+                changed = True
             return True
         except Exception:
             continue
