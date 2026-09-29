@@ -123,7 +123,7 @@
   "hid_discover": false,
   "always_on_top": false,
   "deck_stats": true,
-  "tray_minimize": true,
+  "tray_minimize": false,
   "open_to_tray_on_login": false,
   "card_font": "Lora",
   "cloze_color": "#6db3ff",
