@@ -44,7 +44,22 @@ class GlassSettings(QDialog):
         # On non-macOS the native visual features cleanly no-op (guarded). The
         # cross-platform features still run. Warn up front so the mac-only controls
         # below don't confuse Windows/Linux users.
-        if sys.platform != "darwin":
+        if sys.platform.startswith("win"):
+            _warn = QLabel(
+                "ℹ️  Janki on Windows: glass uses Windows' own Acrylic/Mica backdrop, "
+                "hotkeys use Ctrl/Alt (show/hide Anki is Ctrl+Alt+A, lockdown Ctrl+Alt+L). "
+                "Not available here: building banks from .pptx slides and generating "
+                "rephrasings (both need macOS) — .qb and .rp files made on a Mac import "
+                "fine. Lockdown can't block Ctrl+Alt+Del."
+            )
+            _warn.setWordWrap(True)
+            _warn.setStyleSheet(
+                "QLabel { background: rgba(80,140,255,0.12); color: #9cbcf3; "
+                "border: 1px solid rgba(80,140,255,0.4); border-radius: 6px; "
+                "padding: 8px 10px; }"
+            )
+            lay.addWidget(_warn)
+        elif sys.platform != "darwin":
             _warn = QLabel(
                 "ℹ️  On this platform Janki runs its cross-platform features — "
                 "today's-lectures import, card zoom (Ctrl +/−), the text-reveal "
@@ -249,7 +264,7 @@ class GlassSettings(QDialog):
         _left.addStretch()
         _cols.addLayout(_left, 1)
 
-        if sys.platform == "darwin":
+        if sys.platform == "darwin" or sys.platform.startswith("win"):
             _cols.addSpacing(24)
 
             # RIGHT — background photo
@@ -2381,7 +2396,10 @@ class GlassSettings(QDialog):
             def _key(self, ev):
                 if ev.key() in _MODKEYS or ev.isAutoRepeat():
                     return
-                kc = int(ev.nativeVirtualKey())
+                kc = hk.native_to_kc(int(ev.nativeVirtualKey()))
+                if kc is None:                       # a key Janki can't bind
+                    self._stop("Unsupported key")
+                    return
                 m = ev.modifiers()
                 # Qt on macOS: Control = ⌘, Meta = ⌃, Alt = ⌥.
                 mods = [n for n, f in (("cmd", QtMod.ControlModifier),
@@ -2404,7 +2422,8 @@ class GlassSettings(QDialog):
                 else:
                     # A plain key here would be swallowed everywhere — require a modifier.
                     if not any(x in mods for x in ("cmd", "ctrl", "opt")):
-                        self._stop("Add \u2318, \u2303 or \u2325")
+                        self._stop("Add Ctrl or Alt" if sys.platform.startswith("win")
+                                   else "Add \u2318, \u2303 or \u2325")
                         return
                     if kind == "combo":
                         _save(self._aid, {"kc": kc, "mods": mods})

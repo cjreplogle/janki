@@ -90,6 +90,15 @@ def _make_card_timer():
         Space, and a panel that can activate takes key from the fullscreen reviewer.
         Either way the fullscreen window loses focus. Idempotent (value-checked, so no
         style-mask churn)."""
+        if sys.platform.startswith("win"):
+            # Windows: an owned, never-activating window stays above Anki without
+            # taking focus (the counterpart of the Mac child-window attach).
+            try:
+                from ..platform.win import shell as _wsh
+                _wsh.set_owner(int(w.winId()), int(mw.winId()), click_through=ignore_mouse)
+            except Exception:
+                pass
+            return
         try:
             msg, cls = _bridge()
             ns = msg(c_void_p, c_void_p(int(w.winId())), b"window")
@@ -1427,8 +1436,8 @@ def _make_card_timer():
 
 
 def _apply_card_timer(on: bool) -> None:
-    # Native edge-glow overlays (Cocoa/CGS) — macOS only.
-    if sys.platform != "darwin":
+    # Edge-glow overlays: native touches on macOS, owned windows on Windows.
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     global _card_timer_instance
     if on:

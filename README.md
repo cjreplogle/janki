@@ -58,6 +58,21 @@ so nothing is left behind.
 > To change or disable any feature: **Tools → Janki: Settings…**
 
 
+### Windows (beta)
+
+Janki now runs on Windows too. Download
+**[`janki-windows.ankiaddon`](https://github.com/cjreplogle/janki/releases)** from the newest
+Windows release and double-click it (or Tools → Add-ons → Install from file…). After that it
+updates itself from the Windows releases only.
+
+What's different on Windows:
+- Glass uses Windows' own Acrylic / Mica backdrop (Windows 11 looks best).
+- Shortcuts use Ctrl/Alt: show/hide Anki is **`Ctrl+Alt+A`**, lockdown **`Ctrl+Alt+L`**,
+  and the lockdown chord is backtick + Backspace. The Tab chords are the same.
+- Not available: building question banks from `.pptx` slides and generating rephrasings
+  (both need macOS). `.qb` and `.rp` files made on a Mac import fine.
+- Lockdown can't block Ctrl+Alt+Del (Windows reserves it).
+
 ## Features
 
 - **Frosted-glass reviewer** — revamps the Anki user interface from the ground up. Minimal, yet designed to seamlessly take advantage of modern hardware features. Includes a rework of card animations, application-wide frosted glass transparency, and much, much more...

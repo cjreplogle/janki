@@ -36,8 +36,83 @@ _bg_blur_installed = False  # whether the named CIGaussianBlur filter is on the 
 _bg_blur_cur = 0.0          # current effective blur radius (animate-from value)
 
 
+
+# ---------------------------------------------------------------------------
+# Windows glass (DWM backdrop + Qt-painted tint). Each native function below has
+# an early `if _WIN:` path that lands here; the macOS code after it is unchanged.
+# ---------------------------------------------------------------------------
+_WIN = sys.platform.startswith("win")
+_WIN_TINT_TAG = "/*janki-win-tint*/"
+
+
+def _win_set_bg(widget, rgba, sel):
+    """Qt-painted translucent fill for a translucent top-level (the tint layer)."""
+    import re
+    cur = re.sub(re.escape(_WIN_TINT_TAG) + r"[^\n]*\n?", "", widget.styleSheet() or "")
+    r, g, b, a = rgba
+    widget.setStyleSheet(cur.rstrip() + "\n%s %s{background-color:rgba(%d,%d,%d,%d);}\n"
+                         % (_WIN_TINT_TAG, sel, r, g, b, int(a)))
+
+
+def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
+    """DWM backdrop + tint on any top-level Qt window (main window, dialogs, popups)."""
+    try:
+        from ..platform.win import dwm
+        cfg = _cfg()
+        r, g, b = _tint_rgb(cfg)
+        w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        blur = int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
+        dwm.apply(int(w.winId()), material=int(cfg.get("material", 21)), blur=blur,
+                  tint=(r, g, b), dark=not _tint_is_light(cfg), small_corners=small)
+        if _oled_active and w is mw:
+            a = 255
+        else:
+            a = 255 * min(1.0, max(0.06, float(cfg.get("body_opacity", 0.25)) + extra_alpha))
+        _win_set_bg(w, (r, g, b, a), sel or w.metaObject().className())
+    except Exception as exc:
+        log(f"win glass: {exc}")
+
+
+def _win_apply_main():
+    try:
+        mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        central = mw.centralWidget()
+        if central:
+            central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            central.setAutoFillBackground(False)
+    except Exception:
+        pass
+    if has_background_image():
+        _win_bg_apply_safe()
+    else:
+        import re
+        mw.setStyleSheet(re.sub(r"/\*janki-win-bgimg\*/[^\n]*\n?", "", mw.styleSheet() or ""))
+        _win_glass_window(mw, sel="QMainWindow")
+    _clear_existing_webviews()
+
+
+_win_bg_busy = False
+
+
+def _win_bg_apply_safe():
+    """Photo background, but also keep the DWM backdrop under it."""
+    global _win_bg_busy
+    if _win_bg_busy:
+        return
+    _win_bg_busy = True
+    try:
+        _win_glass_window(mw, sel="QMainWindow")
+        _win_bg_apply()
+    finally:
+        _win_bg_busy = False
+
+
 def _apply_native_glass():
     global _vibrancy_installed
+    if GLASS and _WIN:
+        _win_apply_main()
+        return
     if not GLASS or sys.platform != "darwin":
         return
     try:
@@ -248,6 +323,12 @@ def _set_blur(radius: float):
 
 def _apply_window_blur(radius: float):
     """Set the window's background blur radius via the CGS window server."""
+    if _WIN:
+        # DWM has no radius: 0 = tint only, anything else = the backdrop.
+        if GLASS:
+            _win_apply_main()
+            _restyle_glass_dialogs()
+        return
     if sys.platform != "darwin":
         return
     try:
@@ -281,6 +362,9 @@ def _set_material(m: int):
     cfg = _cfg()
     cfg["material"] = int(m)
     mw.addonManager.writeConfig(__name__, cfg)
+    if _WIN:
+        _win_apply_main()           # material → nearest DWM backdrop
+        return
     if sys.platform == "darwin" and _vibrancy_view:
         try:
             msg, _cls = _bridge()
@@ -299,6 +383,9 @@ _oled_active = False
 def _set_window_black(on: bool):
     """Native: make the window opaque black (OLED) instantly. The off-state is
     handled by _reapply_native, which restores the translucent tint."""
+    if _WIN and on:
+        _win_apply_main()           # _oled_active → no backdrop, opaque black fill
+        return
     if sys.platform != "darwin" or not on:
         return
     try:
@@ -372,6 +459,17 @@ def _apply_always_on_top(on: bool) -> None:
                 return
         except Exception as exc:
             log("always-on-top (native): %s" % exc)
+    if _WIN:
+        # SetWindowPos topmost: same job, no window recreate (which would drop the
+        # DWM backdrop and translucency).
+        try:
+            import ctypes
+            ctypes.windll.user32.SetWindowPos(ctypes.c_void_p(int(mw.winId())),
+                                              ctypes.c_void_p(-1 if on else -2),
+                                              0, 0, 0, 0, 0x1 | 0x2 | 0x10)
+            return
+        except Exception as exc:
+            log("always-on-top (win): %s" % exc)
     try:
         from PyQt6.QtCore import Qt
         mw.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
@@ -743,6 +841,9 @@ def _reapply_native():
     """Re-assert the full native glass stack (transparency + tint + corners +
     blur). Idempotent and cheap; called with retries at startup and whenever the
     window is activated, so a cold Launch-Services start can't leave it opaque."""
+    if GLASS and _WIN:
+        _win_apply_main()
+        return
     if not GLASS or sys.platform != "darwin":
         return
     try:
@@ -867,6 +968,13 @@ def _unify_titlebar():
     """Merge the macOS title bar into the window: transparent titlebar, hidden
     title text, and full-size content view so the glass extends to the very top.
     Traffic-light buttons remain (they float over the content)."""
+    if GLASS and _WIN:
+        try:
+            from ..platform.win import dwm
+            dwm.set_dark(int(mw.winId()), not _tint_is_light())   # native caption, dark
+        except Exception:
+            pass
+        return
     if not GLASS or sys.platform != "darwin":
         return
     try:
@@ -993,6 +1101,11 @@ def _apply_window_tint():
     uniform tint, sitting behind every (transparent) webview, so the colour
     applies equally across the whole window. A minimum alpha is kept so the
     window still has a rounded structural shape for the CGS blur to clip to."""
+    if _WIN:
+        if GLASS:
+            _win_apply_main()
+            _restyle_glass_dialogs()
+        return
     if sys.platform != "darwin":
         return
     try:
@@ -1366,6 +1479,9 @@ def hide_titlebar_extras(dialog) -> None:
 
 
 def _style_glass_window(dialog) -> None:
+    if _WIN:
+        _win_glass_window(dialog, extra_alpha=0.1, sel="QDialog")
+        return
     try:
         cfg = _cfg()
         r, g, b = _tint_rgb(cfg)
@@ -1569,6 +1685,12 @@ def frost_popup_window(widget, corner: int = 8) -> None:
     treatment as the tray menu)."""
     def _go():
         try:
+            if _WIN:
+                if widget.isVisible():
+                    from ..platform.win import dwm
+                    dwm.apply(int(widget.winId()), material=int(_cfg().get("material", 21)),
+                              dark=not _tint_is_light(), small_corners=corner <= 8)
+                return
             from ..system import tray_nav
             if widget.isVisible():
                 tray_nav._apply_glass_panel(widget, corner=corner)
@@ -1814,7 +1936,7 @@ _tip_filter = None
 
 def install_glass_tooltips() -> None:
     global _tip_filter
-    if not GLASS or sys.platform != "darwin" or _tip_filter is not None:
+    if not GLASS or (sys.platform != "darwin" and not sys.platform.startswith("win")) or _tip_filter is not None:
         return
     try:
         from aqt.qt import QApplication
@@ -2046,9 +2168,94 @@ def _bg_animate_blur(msg, cls, layer, nsstr, num, frm, to):
 def refresh_bg_blur(animate=True):
     """Re-evaluate the text-only blur gate (call on state / card changes). Animated
     by default so the blur fades in/out as text appears/leaves."""
+    if _WIN:
+        if GLASS and has_background_image():
+            _win_bg_apply()                  # re-render with the new blur
+        return
     if _bg_image_view:
         _bg_set_blur(animate=animate)
 
+
+
+# --- Windows photo background: pre-rendered with Qt, set as the window background ---
+_win_bg_timer = None
+_win_bg_filter = None
+
+
+def _win_bg_render(path, w, h):
+    """Photo scaled to cover w×h, blurred (bg_blur) and faded (bg_opacity), with the
+    glass tint on top — the same stack as the Mac's photo view + tint view."""
+    from aqt.qt import (QImage, QPainter, QColor, QGraphicsScene, QGraphicsPixmapItem,
+                        QGraphicsBlurEffect, QPixmap, QRectF)
+    cfg = _cfg()
+    src = QPixmap(path)
+    if src.isNull():
+        return None
+    src = src.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                     Qt.TransformationMode.SmoothTransformation)
+    _maxr, blur = _bg_blur_target()
+    if blur > 0:
+        scene = QGraphicsScene()
+        item = QGraphicsPixmapItem(src)
+        eff = QGraphicsBlurEffect()
+        eff.setBlurRadius(float(blur))
+        eff.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
+        item.setGraphicsEffect(eff)
+        scene.addItem(item)
+        img = QImage(src.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        img.fill(0)
+        p = QPainter(img)
+        scene.render(p, QRectF(img.rect()), QRectF(src.rect()))
+        p.end()
+        src = QPixmap.fromImage(img)
+    out = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+    out.fill(0)
+    p = QPainter(out)
+    p.setOpacity(max(0.0, min(1.0, float(cfg.get("bg_opacity", 1.0)))))
+    p.drawPixmap((w - src.width()) // 2, (h - src.height()) // 2, src)
+    p.setOpacity(1.0)
+    r, g, b = _tint_rgb(cfg)
+    p.fillRect(out.rect(), QColor(r, g, b, int(255 * float(cfg.get("body_opacity", 0.25)))))
+    p.end()
+    return out
+
+
+def _win_bg_apply():
+    global _win_bg_filter
+    path = _current_bg_path()
+    if not (path and os.path.isfile(path)):
+        _win_apply_main()                    # back to the plain tint
+        return
+    try:
+        dpr = mw.devicePixelRatioF()
+        w, h = max(1, int(mw.width() * dpr)), max(1, int(mw.height() * dpr))
+        img = _win_bg_render(path, w, h)
+        if img is None:
+            return
+        out = os.path.join(_bg_dir(), ".win_bg_render.png")
+        img.save(out, "PNG")
+        _win_set_bg(mw, (0, 0, 0, 0), "QMainWindow")
+        import re
+        cur = re.sub(r"/\*janki-win-bgimg\*/[^\n]*\n?", "", mw.styleSheet() or "")
+        mw.setStyleSheet(cur.rstrip() + "\n/*janki-win-bgimg*/ QMainWindow{border-image:"
+                         "url('%s') 0 0 0 0 stretch stretch;}\n" % out.replace("\\", "/"))
+    except Exception as exc:
+        log(f"win bg: {exc}")
+        return
+    if _win_bg_filter is None:               # re-render (debounced) on resize
+        class _F(QObject):
+            def eventFilter(self, o, ev):
+                if ev.type() == QEvent.Type.Resize:
+                    global _win_bg_timer
+                    if _win_bg_timer is None:
+                        _win_bg_timer = QTimer(mw)
+                        _win_bg_timer.setSingleShot(True)
+                        _win_bg_timer.setInterval(250)
+                        _win_bg_timer.timeout.connect(_win_bg_apply)
+                    _win_bg_timer.start()
+                return False
+        _win_bg_filter = _F(mw)
+        mw.installEventFilter(_win_bg_filter)
 
 def _apply_bg_image():
     """Show/update (or hide) the custom background photo. An image view + a tint
@@ -2056,6 +2263,9 @@ def _apply_bg_image():
     through the transparent webviews and cover the whole window (incl. the titlebar
     strip). The tint overlay uses the glass tint + Opacity; the photo has its own
     opacity (bg_opacity) and optional blur (bg_blur), so both layers are tunable."""
+    if GLASS and _WIN:
+        _win_bg_apply()
+        return
     if not GLASS or sys.platform != "darwin":
         return
     global _bg_image_view, _bg_tint_view, _bg_loaded_path
@@ -2238,6 +2448,16 @@ def _patched_theme_did_change(self, *a, **k):
     except Exception:
         pass
 
+
+if GLASS and _WIN:
+    # Translucency has to be set before the native window exists. Add-ons load before
+    # Anki first shows the main window, so set it now; if the window was already
+    # created, _startup rebuilds it once (_force_recreate_translucent).
+    try:
+        mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+    except Exception:
+        pass
 
 if GLASS:
     AnkiWebView.__init__ = _patched_webview_init

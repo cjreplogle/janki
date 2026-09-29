@@ -22,7 +22,7 @@ from aqt.qt import (
     QPropertyAnimation, QEasingCurve,
 )
 
-from ..util.config import log
+from ..util.config import log, _cfg
 from ..util.bridge import _bridge, _cgs, NSPoint, NSRect
 
 _nav: "QWidget | None" = None
@@ -436,6 +436,16 @@ def _apply_glass_panel(widget, radius: int = 30, corner: int = 16) -> None:
     blur), non-opaque with a clear background, rounded corners clipped at the layer,
     a soft shadow, and float it above normal windows. Mirrors the main window's look
     without the NSVisualEffectView sibling dance (this is a small transient panel)."""
+    if sys.platform.startswith("win"):
+        try:
+            from ..platform.win import shell as _wsh, dwm as _dwm
+            hwnd = int(widget.winId())
+            _wsh.make_overlay(hwnd)                  # topmost, never takes focus
+            _dwm.apply(hwnd, material=int(_cfg().get("material", 21)))
+            _install_win_dismiss(widget)
+        except Exception as e:
+            log(f"win nav glass: {e}")
+        return
     if sys.platform != "darwin":
         return
     try:
@@ -1271,6 +1281,11 @@ def _anchor_point(w) -> "QPoint":
         scr = None
     x = c.x() - w.width() + 12          # right edge near the cursor
     y = (scr.y() if scr else 24) + 6    # just below the menu bar
+    if sys.platform.startswith("win") and scr is not None:
+        # Windows: the tray lives in the taskbar (usually at the bottom). Open just
+        # above/below it depending on which half of the screen was clicked.
+        if c.y() > scr.y() + scr.height() / 2:
+            y = scr.y() + scr.height() - w.height() - 6
     if scr is not None:
         x = max(scr.x() + 6, min(x, scr.x() + scr.width() - w.width() - 6))
     return QPoint(x, y)
@@ -1421,10 +1436,39 @@ def _hide() -> None:
             pass
 
 
+_win_dismiss_timer = None
+
+
+def _install_win_dismiss(widget) -> None:
+    """Windows: close the navigator on a click outside it. It never takes focus (so
+    there's no focus-out to watch), so poll the mouse button while it's open."""
+    global _win_dismiss_timer
+    import ctypes
+    u32 = ctypes.windll.user32
+    if _win_dismiss_timer is None:
+        _win_dismiss_timer = QTimer(mw)
+        _win_dismiss_timer.setInterval(50)
+        state = {"was": False}
+
+        def _tick():
+            w = _nav
+            if w is None or not w.isVisible():
+                _win_dismiss_timer.stop()
+                return
+            down = bool(u32.GetAsyncKeyState(0x01) & 0x8000 or u32.GetAsyncKeyState(0x02) & 0x8000)
+            if down and not state["was"] and not w.frameGeometry().contains(QCursor.pos()):
+                _hide()
+            state["was"] = down
+        _win_dismiss_timer.timeout.connect(_tick)
+    QTimer.singleShot(250, _win_dismiss_timer.start)   # ignore the click that opened it
+
+
 def _natively_on_screen(w) -> bool:
     """Qt's isVisible() can go stale: macOS may order the panel out natively (e.g. on
     app deactivation / a Space switch) without telling Qt. Then the icon click took the
     'visible → hide' branch and nothing opened. Ask the NSWindow itself."""
+    if sys.platform.startswith("win"):
+        return w.isVisible()
     try:
         msg, _cls = _bridge()
         win = msg(c_void_p, c_void_p(int(w.winId())), b"window")
@@ -1442,7 +1486,7 @@ def _natively_on_screen(w) -> bool:
 def show_navigator() -> None:
     """Rebuild fresh (decks/counts change) and pop the glass navigator."""
     global _nav
-    if sys.platform != "darwin":
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     # Deterministic toggle: visible → hide, hidden → show. The global dismiss monitor
     # ignores menu-bar-strip clicks (see _install_global_dismiss), so it no longer races

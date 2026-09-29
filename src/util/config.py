@@ -37,8 +37,53 @@ def _is_active() -> bool:
 #   GLASS  — window transparency + OLED + the stock-Anki self-heal patch
 # SAFE is kept as a False constant for any legacy reference.
 SAFE = False
-ACTIVE = _is_active()
-GLASS = _is_active()
+def _win_glass_gate() -> bool:
+    """Windows glass (DWM backdrop) with a crash guard like the Mac self-heal: a
+    'pending' marker is written as glass starts and cleared once the launch has run
+    stably (confirm_win_glass). If a launch dies first, the next start finds the
+    marker, records the failure and boots without glass until it's re-enabled."""
+    d = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                     "user_files")
+    pending, failed = os.path.join(d, "win_glass_pending"), os.path.join(d, "win_glass_failed")
+    try:
+        os.makedirs(d, exist_ok=True)
+        if os.path.exists(pending):
+            os.replace(pending, failed)
+        if os.path.exists(failed):
+            return False
+        cfg = mw.addonManager.getConfig(__name__) or {}
+        if not cfg.get("win_glass", True):
+            return False
+        open(pending, "w").close()
+        return True
+    except Exception:
+        return False
+
+
+def confirm_win_glass() -> None:
+    try:
+        os.remove(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                               "user_files", "win_glass_pending"))
+    except Exception:
+        pass
+
+
+def reset_win_glass_failure() -> None:
+    try:
+        os.remove(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                               "user_files", "win_glass_failed"))
+    except Exception:
+        pass
+
+
+if sys.platform.startswith("win"):
+    # Windows has no launcher flag: features always run; glass is on unless turned off
+    # (config win_glass) or the crash guard tripped.
+    ACTIVE = True
+    GLASS = _win_glass_gate()
+else:
+    ACTIVE = _is_active()
+    GLASS = _is_active()
 
 
 # ---------------------------------------------------------------------------

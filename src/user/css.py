@@ -43,6 +43,9 @@ UI_FONTS = {
 # font — nothing is bundled or redistributed — so it's offered as an option on
 # macOS only. -apple-system/system-ui resolve to it in the webview; the named
 # families are a belt-and-suspenders fallback.
+if sys.platform.startswith("win"):
+    # Windows' own UI font (Windows 11), falling back to classic Segoe UI.
+    UI_FONTS["Segoe UI"] = '"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif'
 if sys.platform == "darwin":
     UI_FONTS["SF Pro"] = (
         '"SF Pro Text","SF Pro Display","SF Pro",'
@@ -645,6 +648,15 @@ def _build_css(cfg, context):
         _mc = _motion_css(context)
         if _mc:
             parts.append(_mc)
+
+    if sys.platform.startswith("win"):
+        # Chromium on Windows draws chunky classic scrollbars — the most visible
+        # "not a Mac" tell. Thin, rounded overlay-style bars instead.
+        parts.append(
+            "<style>::-webkit-scrollbar{width:8px;height:8px;background:transparent;}"
+            "::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.22);border-radius:4px;}"
+            "::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.35);}"
+            "::-webkit-scrollbar-button,::-webkit-scrollbar-corner{display:none;}</style>\n")
 
     screens = cfg.get("screens", {})
     r = int(cfg.get("win_corner_radius", 11))

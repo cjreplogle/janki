@@ -117,6 +117,15 @@ def _make_pomodoro():
                 pass
 
         def _apply_native(self):
+            if sys.platform.startswith("win"):
+                # Owned by the main window: stays above it, never takes focus.
+                try:
+                    from ..platform.win import shell as _wsh
+                    _wsh.set_owner(int(self.winId()), int(mw.winId()))
+                    self._native_done = True
+                except Exception:
+                    pass
+                return
             try:
                 msg, cls = _bridge()
                 ns = msg(c_void_p, c_void_p(int(self.winId())), b"window")
@@ -388,6 +397,15 @@ def _make_pomodoro():
                 pass
 
         def _apply_native(self):
+            if sys.platform.startswith("win"):
+                # Owned by the main window: stays above it, never takes focus.
+                try:
+                    from ..platform.win import shell as _wsh
+                    _wsh.set_owner(int(self.winId()), int(mw.winId()))
+                    self._native_done = True
+                except Exception:
+                    pass
+                return
             try:
                 msg, cls = _bridge()
                 ns = msg(c_void_p, c_void_p(int(self.winId())), b"window")
@@ -660,8 +678,8 @@ _pomo_instance = None
 
 
 def _apply_pomodoro(on: bool) -> None:
-    # Break screen + tint use native Cocoa overlays — macOS only.
-    if sys.platform != "darwin":
+    # Break screen + tint overlays (Cocoa on macOS, owned windows on Windows).
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     global _pomo_instance
     if on:

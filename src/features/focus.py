@@ -29,6 +29,15 @@ def _cursor_hide() -> None:
     global _cursor_hidden
     if _cursor_hidden:
         return
+    if sys.platform.startswith("win"):
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import Qt as _Qt
+            QApplication.setOverrideCursor(_Qt.CursorShape.BlankCursor)
+            _cursor_hidden = True
+        except Exception:
+            pass
+        return
     try:
         msg, cls = _bridge()
         msg(None, cls(b"NSCursor"), b"hide")
@@ -41,6 +50,14 @@ def _cursor_show() -> None:
     """Undo _cursor_hide() (balanced unhide)."""
     global _cursor_hidden
     if not _cursor_hidden:
+        return
+    if sys.platform.startswith("win"):
+        try:
+            from PyQt6.QtWidgets import QApplication
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        _cursor_hidden = False
         return
     try:
         msg, cls = _bridge()
@@ -92,7 +109,7 @@ def _cursor_tick():
 
 def _start_cursor_hide():
     global _cursor_timer
-    if sys.platform != 'darwin' or _cursor_timer is not None:
+    if (sys.platform != "darwin" and not sys.platform.startswith("win")) or _cursor_timer is not None:
         return
     _cursor_timer = QTimer(mw)  # parented so Qt manages its lifetime
     _cursor_timer.setInterval(_CURSOR_TICK_MS)

@@ -1,6 +1,7 @@
 """Glass state diagnostics helpers."""
 
 import os
+from .. import platform as _plat
 from ctypes import c_void_p, c_bool
 from aqt import mw
 from aqt.webview import AnkiWebView
@@ -16,7 +17,7 @@ from . import keytap
 # Focus / window breadcrumb — TEMP: capture what drops app/window focus or flips
 # Focus Mode, since the general log() is stderr-only. Writes to janki-focus.log.
 # ---------------------------------------------------------------------------
-_FOCUS_LOG = os.path.expanduser("~/Library/Logs/janki-focus.log")
+_FOCUS_LOG = _plat.log_path("janki-focus.log")
 
 
 def flog(msg: str) -> None:

@@ -195,6 +195,12 @@ _HID_USAGE_PAGE_BUTTON = 0x09
 
 
 def is_controller_connected():
+    if sys.platform.startswith('win'):
+        try:
+            from ..platform.win import gamepad as _wgp
+            return _wgp.is_controller_connected()
+        except Exception:
+            return False
     """True if a matched gamepad/remote is currently connected. Prefers an
     authoritative live query of the IOHIDManager (IOHIDManagerCopyDevices), falling
     back to the device match/removal callback counter. False when the HID monitor
@@ -238,6 +244,13 @@ def _start_hid_monitor():
     presses to the reviewer from a background CFRunLoop thread. No-op unless the
     `hid_controller` config flag is on."""
     global _hid_manager, _hid_cb_ref, _hid_thread, _hid_shutting_down, _hid_cf, _hid_iokit
+    if sys.platform.startswith('win'):
+        try:
+            from ..platform.win import gamepad as _wgp
+            _wgp.start()                      # winmm poller, same map/gates/signals
+        except Exception:
+            pass
+        return
     if sys.platform != 'darwin' or _hid_thread is not None:
         return
     if not _cfg().get("hid_controller", False):

@@ -14,6 +14,8 @@ Every Janki hotkey is listed in ACTIONS with its default. Overrides live in conf
 key codes internally: apply() builds a user-key → default-key table that the tap
 translates through, so the handlers themselves never change.
 """
+import sys
+
 from aqt import mw
 
 from .config import log, _cfg
@@ -41,7 +43,9 @@ ACTIONS = [
     ("cap_right",     "Caption",       "Move caption right",                   "tab",    {"kc": 124}),
     ("cap_bigger",    "Caption",       "Caption text bigger (+ Shift)",        "shift",  {"kc": 24}),
     ("cap_smaller",   "Caption",       "Caption text smaller (+ Shift)",       "shift",  {"kc": 27}),
-    ("lockdown",      "Lockdown",      "Toggle lockdown",                      "qt",     {"seq": "Ctrl+Meta+L"}),
+    # Windows: Meta is the Win key and Win+L locks the PC, so Ctrl+Alt+L there.
+    ("lockdown",      "Lockdown",      "Toggle lockdown",                      "qt",
+     {"seq": "Ctrl+Alt+L" if sys.platform.startswith("win") else "Ctrl+Meta+L"}),
     ("lock_chord",    "Lockdown",      "Lockdown chord (engage / hold to exit)", "chord", {"kc": 50, "kc2": 51}),
 ]
 GROUPS = ["Review", "Window & focus", "Caption", "Lockdown", "Chord key"]
@@ -93,8 +97,27 @@ def binding(aid, cfg=None):
     return dict(b) if ok else d
 
 
+_WIN = sys.platform.startswith("win")
+if _WIN:
+    KC_NAMES = dict(KC_NAMES, **{51: "Backspace", 117: "Delete"})
+# How the stored modifier names read on each OS. The recorder stores Qt's modifiers
+# with Mac names: Control→"cmd", Meta→"ctrl", Alt→"opt". On Windows Qt's Control is
+# the Ctrl key and Meta is the Win key.
+_MOD_TEXT = ({"ctrl": "Win+", "opt": "Alt+", "shift": "Shift+", "cmd": "Ctrl+"} if _WIN
+             else MOD_GLYPH)
+_MOD_ORDER = ("cmd", "opt", "shift", "ctrl") if _WIN else ("ctrl", "opt", "shift", "cmd")
+
+
 def key_name(kc):
     return KC_NAMES.get(kc, "Key %d" % kc)
+
+
+def native_to_kc(native: int):
+    """A QKeyEvent's nativeVirtualKey() as a Mac keycode (Windows sends VK codes)."""
+    if _WIN:
+        from ..platform.win.keymap import vk_to_kc
+        return vk_to_kc(native)
+    return int(native)
 
 
 def describe(aid, b=None):
@@ -109,15 +132,14 @@ def describe(aid, b=None):
         except Exception:
             return b.get("seq", "")
     if kind == "combo":
-        mods = "".join(MOD_GLYPH[m] for m in ("ctrl", "opt", "shift", "cmd")
-                       if m in (b.get("mods") or []))
+        mods = "".join(_MOD_TEXT[m] for m in _MOD_ORDER if m in (b.get("mods") or []))
         return mods + key_name(b["kc"])
     if kind == "chord":
         return "%s + %s" % (key_name(b["kc"]), key_name(b["kc2"]))
     if kind == "leader":
         return key_name(b["kc"])
     lead = key_name(binding("leader")["kc"])
-    pre = ("⇧" + lead) if kind == "shift" else lead
+    pre = (("Shift+" if _WIN else "⇧") + lead) if kind == "shift" else lead
     return "%s + %s" % (pre, key_name(b["kc"]))
 
 

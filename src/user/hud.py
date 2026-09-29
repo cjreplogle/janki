@@ -67,6 +67,14 @@ def _frontmost_fullscreen() -> bool:
     now = _time.monotonic()
     if now - _fs_cache["t"] < 0.4:
         return _fs_cache["v"]
+    if sys.platform.startswith("win"):
+        try:
+            from ..platform.win import shell as _wsh
+            val = _wsh.foreground_is_fullscreen()
+        except Exception:
+            val = False
+        _fs_cache.update(t=now, v=val)
+        return val
     val = False
     try:
         if mw.isFullScreen():
@@ -689,6 +697,18 @@ hr, #answer {{ display: none !important; }}
 </div></body></html>""", _base)
 
         def _apply_glass(self):
+            if sys.platform.startswith("win"):
+                # Topmost, never-activating tool window + acrylic backdrop: floats over
+                # other apps (incl. borderless fullscreen) without taking focus.
+                try:
+                    from ..platform.win import shell as _wsh, dwm as _dwm
+                    hwnd = int(self.winId())
+                    _wsh.make_overlay(hwnd)
+                    _dwm.apply(hwnd, material=int(_cfg().get("material", 21)),
+                               small_corners=False)
+                except Exception:
+                    pass
+                return
             try:
                 msg, cls = _bridge()
                 ns_win = msg(c_void_p, c_void_p(int(self.winId())), b"window")
@@ -882,8 +902,8 @@ def _prewarm_coherence_hud():
     panel and doesn't, hence the "first time only" steal). Realizing + styling the
     panel here, hidden, moves that churn to launch (nothing to steal from), so the
     first real open just shows an already-non-activating panel."""
-    # Caption HUD is a native non-activating NSPanel — macOS only.
-    if sys.platform != "darwin":
+    # Caption HUD: non-activating NSPanel on macOS, topmost no-activate window on Windows.
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     global _coherence_hud
     if _coherence_hud is not None:
@@ -899,8 +919,8 @@ def _prewarm_coherence_hud():
 
 
 def _toggle_coherence():
-    # Native NSPanel caption HUD — macOS only.
-    if sys.platform != "darwin":
+    # Caption HUD (macOS NSPanel / Windows no-activate topmost window).
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     global _coherence_hud
     keytap._gtap_log("_toggle_coherence called")
@@ -945,7 +965,7 @@ def caption_practice_gate():
     (only if WE hid it) once a non-practice card / no card shows. The user's manual
     Tab+\\ state is preserved — we auto-hide, never auto-enable."""
     global _caption_practice_hidden
-    if sys.platform != "darwin" or _coherence_hud is None:
+    if (sys.platform != "darwin" and not sys.platform.startswith("win")) or _coherence_hud is None:
         return
     try:
         r = getattr(mw, "reviewer", None)

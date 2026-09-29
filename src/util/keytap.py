@@ -1,6 +1,7 @@
 """CGEventTap keyboard capture, key forwarding, and global-key shortcuts."""
 
 import os
+from .. import platform as _plat
 import sys
 from ctypes import c_void_p, c_char_p, c_bool
 from aqt import mw
@@ -51,7 +52,7 @@ _KC_TAB = 48
 # reviewing. kc 18-21 remain in the maps above only so the poller can drive
 # ratings via _send_key_to_anki.
 
-_GTAP_LOG = os.path.expanduser("~/Library/Logs/anki-glass-keytap.log")
+_GTAP_LOG = _plat.log_path("anki-glass-keytap.log")
 
 # Thread-safe bridge: CGEventTap callback runs in a CFRunLoop thread, not the Qt
 # main thread. QTimer.singleShot from that thread silently drops. Emitting a
@@ -158,6 +159,13 @@ def _toggle_main_window() -> None:
         msg, cls = _bridge()
         nsapp = msg(ctypes.c_void_p, cls("NSApplication"), b"sharedApplication")
         active = bool(msg(ctypes.c_bool, nsapp, b"isActive")) if nsapp else False
+        if sys.platform.startswith('win'):
+            active = bool(state._anki_focused and mw.isVisible() and not mw.isMinimized())
+            if active:
+                # Minimising hands focus back to the previous window, like macOS hide.
+                _fade_window(mw, mw.windowOpacity(), 0.0, 130,
+                             lambda: (mw.showMinimized(), mw.setWindowOpacity(1.0)))
+                return
 
         if active:
             # Frontmost → fade out, then hide the app (AppKit reactivates the prior app).
@@ -195,6 +203,12 @@ def _toggle_main_window() -> None:
             pass
         if nsapp:
             msg(None, nsapp, b"activateIgnoringOtherApps:", (ctypes.c_bool,), (True,))
+        if sys.platform.startswith('win'):
+            try:
+                from ..platform.win import shell
+                shell.force_foreground(int(mw.winId()))
+            except Exception:
+                pass
         _fade_window(mw, 0.0, 1.0, 180)
     except Exception as e:
         log(f"toggle main window: {e}")
@@ -470,6 +484,8 @@ def _adjust_caption_font(delta: int) -> None:
 def ax_trusted() -> bool:
     """True if Anki has Accessibility permission (needed for the CGEventTap that
     powers the lockdown hold-to-exit)."""
+    if sys.platform.startswith('win'):
+        return True        # the Windows low-level hook needs no permission
     if sys.platform != 'darwin':
         return False
     try:
@@ -485,6 +501,14 @@ def stop_key_tap() -> None:
     """Disable the CGEventTap and stop its CFRunLoop so the daemon thread exits
     cleanly at app quit, avoiding a callback firing during interpreter teardown."""
     global _key_tap_running
+    if sys.platform.startswith('win'):
+        try:
+            from ..platform.win import hooks
+            hooks.stop()
+        except Exception:
+            pass
+        _key_tap_running = False
+        return
     try:
         if _key_tap_port is not None and _cg is not None:
             _cg.CGEventTapEnable(_key_tap_port, False)
@@ -500,7 +524,18 @@ def stop_key_tap() -> None:
 
 def _start_key_tap() -> None:
     global _key_tap_running
-    if _key_tap_running or sys.platform != 'darwin':
+    if _key_tap_running:
+        return
+    if sys.platform.startswith('win'):
+        # Windows: WH_KEYBOARD_LL hook running the same state machine.
+        try:
+            from ..platform.win import hooks
+            hooks.start()
+            _key_tap_running = True
+        except Exception as exc:
+            log(f"win key hook: {exc}")
+        return
+    if sys.platform != 'darwin':
         return
     import ctypes, threading
 

@@ -90,8 +90,8 @@ except Exception as _se_exc:
 
 def _patch_tooltip():
     # The glass tooltip strips its shadow/background via the native Cocoa bridge;
-    # on other platforms keep Anki's stock tooltip.
-    if sys.platform != "darwin":
+    # on Windows the pill gets a DWM backdrop; elsewhere keep Anki's stock tooltip.
+    if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     import aqt.utils as _aqtu
 
@@ -420,7 +420,7 @@ def _startup():
         # create the manager now so its CGEventTap signal handlers are live —
         # the backtick+Delete chord can then engage lockdown before any manual
         # toggle (requires global keys / the key tap to be running).
-        if sys.platform == "darwin":
+        if sys.platform == "darwin" or sys.platform.startswith("win"):
             lockdown._get()
             _lock_sc = QShortcut(QKeySequence("Ctrl+Meta+L"), mw)
             _lock_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
@@ -513,6 +513,16 @@ def _startup():
         # key tap is macOS-only and needs Accessibility permission.
         keytap._apply_global_keys(True)
         _bt.mark("global keys")
+        # Windows: register .jank / .qb / .rp with Anki once (per-user, no admin), so
+        # double-clicking one in Explorer imports it — like Open With on the Mac.
+        if sys.platform.startswith("win") and not _cfg().get("win_assoc_done", False):
+            try:
+                from .src.platform.win import shell as _wsh
+                if _wsh.register_file_types():
+                    _c = _cfg(); _c["win_assoc_done"] = True
+                    mw.addonManager.writeConfig(__name__, _c)
+            except Exception as _fa_exc:
+                log("file associations: %s" % _fa_exc)
 
         # Gamepad poller DISABLED (GameController is focus-gated — can't read the
         # pad while Anki is backgrounded, so it only double-fires with Contanki).
@@ -775,7 +785,14 @@ def _startup():
             # (where the injected glass setup runs) survived. Give the first paint
             # a moment, then clear the "pending" sentinel so the guard leaves glass
             # on. If a launch dies before this, the next start rolls glass back.
-            QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
+            if sys.platform.startswith("win"):
+                from .src.util.config import confirm_win_glass
+                if mw.windowHandle() is not None and not getattr(mw, "_janki_win_recreated", False):
+                    mw._janki_win_recreated = True
+                    QTimer.singleShot(0, glass._apply_native_glass)
+                QTimer.singleShot(4000, confirm_win_glass)
+            else:
+                QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
 
         _bt.mark("glass setup")
         # ACTIVE = features (run in BOTH editions — safe edition has these without

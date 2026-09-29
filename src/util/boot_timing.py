@@ -9,10 +9,11 @@ Each line shows:  +<ms since the Anki process started>  (+<ms since previous mar
 """
 
 import os
+from .. import platform as _plat
 import sys
 import time
 
-LOG_PATH = os.path.expanduser("~/Library/Logs/janki-startup-timing.log")
+LOG_PATH = _plat.log_path("janki-startup-timing.log")
 _KEEP_LAUNCHES = 20
 
 _T0 = time.perf_counter()

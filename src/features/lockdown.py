@@ -65,8 +65,18 @@ _APP_QUIT_GRACE = 15
 _mgr = None                  # singleton Lockdown manager
 
 
+_WIN = sys.platform.startswith("win")
+_win_wifi_profile = None       # Windows: the Wi-Fi profile to reconnect on unlock
+
+
 def _set_presentation_options(mask: int) -> bool:
-    """Apply an NSApplicationPresentationOptions mask. Returns True on success."""
+    """Apply an NSApplicationPresentationOptions mask. Returns True on success.
+    Windows: the same masks select the kiosk level (hook key-blocking + topmost)."""
+    if _WIN:
+        from ..platform.win import kiosk
+        level = (kiosk.LEVEL_OFF if not mask else
+                 kiosk.LEVEL_STRICT if mask == _MASK_STRICT else kiosk.LEVEL_STANDARD)
+        return kiosk.set_kiosk(level, int(mw.winId()))
     try:
         msg, cls = _bridge()
         ns = msg(c_void_p, cls(b"NSApplication"), b"sharedApplication")
@@ -107,6 +117,13 @@ _NETWORKSETUP = "/usr/sbin/networksetup"
 
 def _wifi_device() -> "str | None":
     """The Wi-Fi interface name (e.g. en0), parsed from networksetup."""
+    if _WIN:
+        global _win_wifi_profile
+        from ..platform.win import kiosk
+        prof = kiosk.wifi_profile()
+        if prof:
+            _win_wifi_profile = prof
+        return "wlan" if (prof or _win_wifi_profile) else None
     try:
         out = subprocess.run([_NETWORKSETUP, "-listallhardwareports"],
                              capture_output=True, text=True, timeout=5).stdout
@@ -123,6 +140,9 @@ def _wifi_device() -> "str | None":
 
 
 def _wifi_is_on(dev: str) -> bool:
+    if _WIN:
+        from ..platform.win import kiosk
+        return kiosk.wifi_profile() is not None
     try:
         out = subprocess.run([_NETWORKSETUP, "-getairportpower", dev],
                              capture_output=True, text=True, timeout=5).stdout
@@ -132,6 +152,10 @@ def _wifi_is_on(dev: str) -> bool:
 
 
 def _set_wifi(dev: str, on: bool) -> None:
+    if _WIN:
+        from ..platform.win import kiosk
+        kiosk.wifi_on(_win_wifi_profile) if on else kiosk.wifi_off()
+        return
     try:
         subprocess.run([_NETWORKSETUP, "-setairportpower", dev, "on" if on else "off"],
                        capture_output=True, timeout=5)
@@ -144,6 +168,9 @@ def _close_other_apps() -> "list[int]":
     Uses -[NSRunningApplication terminate] (not force-kill), so apps with unsaved
     work show their own save prompt. Skips Anki itself and Finder. Not reopened on
     exit. Returns the pids we asked to quit (terminate is async — poll these)."""
+    if _WIN:
+        from ..platform.win import kiosk
+        return kiosk.close_other_apps()
     pids: "list[int]" = []
     try:
         msg, cls = _bridge()
@@ -182,6 +209,9 @@ def _apps_still_running(pids: "list[int]") -> bool:
     """True if any of the given pids is still a running regular app."""
     if not pids:
         return False
+    if _WIN:
+        from ..platform.win import kiosk
+        return kiosk.apps_still_running(pids)
     try:
         msg, cls = _bridge()
         ws = msg(c_void_p, cls(b"NSWorkspace"), b"sharedWorkspace")
@@ -204,6 +234,13 @@ def _keep_in_front(widget) -> None:
     is not the active app. A Qt Tool window is an NSPanel, which hides on
     deactivate by default — the fix is setHidesOnDeactivate:NO plus a high window
     level + all-spaces collection behavior (same as the coherence caption)."""
+    if _WIN:
+        try:
+            from ..platform.win import shell
+            shell.make_overlay(int(widget.winId()))
+        except Exception:
+            pass
+        return
     try:
         msg, cls = _bridge()
         ns = msg(c_void_p, c_void_p(int(widget.winId())), b"window")
@@ -227,6 +264,12 @@ def _keep_in_front(widget) -> None:
 
 def _activate_and_raise() -> None:
     """Bring Anki frontmost and raise the main window (so nothing peeks out)."""
+    if _WIN:
+        try:
+            from ..platform.win import shell
+            shell.force_foreground(int(mw.winId()))
+        except Exception:
+            pass
     try:
         msg, cls = _bridge()
         ns = msg(c_void_p, cls(b"NSApplication"), b"sharedApplication")
@@ -899,9 +942,9 @@ def _qapp():
 
 
 def _get() -> "Lockdown | None":
-    """Lazily create the singleton (macOS only)."""
+    """Lazily create the singleton (macOS and Windows)."""
     global _mgr
-    if sys.platform != "darwin":
+    if sys.platform != "darwin" and not _WIN:
         return None
     if _mgr is None:
         _mgr = Lockdown()

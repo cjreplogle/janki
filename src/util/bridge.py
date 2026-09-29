@@ -22,7 +22,28 @@ class NSRect(Structure):
     _fields_ = [("origin", NSPoint), ("size", NSSize)]
 
 
+def _null_bridge():
+    """Off macOS there's no ObjC runtime. Every message returns a zero of its return
+    type (null window, 0 level, False), so the many native touches scattered through
+    the add-on quietly no-op instead of raising."""
+    def msg(restype, receiver, selector, argtypes=(), args=()):
+        if restype is None:
+            return None
+        try:
+            return restype().value if hasattr(restype(), "value") else restype()
+        except Exception:
+            return 0
+
+    def cls(name):
+        return None
+
+    return msg, cls
+
+
 def _bridge():
+    import sys
+    if sys.platform != "darwin":
+        return _null_bridge()
     libobjc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.dylib")
     libobjc.objc_getClass.restype = c_void_p
     libobjc.objc_getClass.argtypes = [c_char_p]

@@ -28,8 +28,16 @@ _API = "https://api.github.com/repos/%s/releases/latest" % _REPO
 _STATE = Path.home() / ".janki_update_check"
 
 
+_WIN = __import__("sys").platform.startswith("win")
+# Windows has its own update channel: releases that carry janki-windows.ankiaddon,
+# which can be GitHub pre-releases so macOS (which only reads /releases/latest) never
+# sees them. macOS keeps the plain janki.ankiaddon from the latest full release.
+_WIN_ASSET = "janki-windows.ankiaddon"
+_API_ALL = "https://api.github.com/repos/%s/releases?per_page=30" % _REPO
+
+
 def _asset_name() -> str:
-    return "janki.ankiaddon"
+    return _WIN_ASSET if _WIN else "janki.ankiaddon"
 
 
 def _current_version() -> str:
@@ -49,6 +57,8 @@ def _ver_tuple(s: str):
 
 def _fetch_latest():
     """Return (tag, asset_download_url) for the latest release, or raise."""
+    if _WIN:
+        return _fetch_latest_windows()
     req = urllib.request.Request(_API, headers={"User-Agent": "janki-updater",
                                                 "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -63,6 +73,26 @@ def _fetch_latest():
     if not url:
         raise ValueError("no %s asset in release %s" % (want, tag or "?"))
     return tag, url
+
+
+def _fetch_latest_windows():
+    """Newest release (pre-releases included) that ships the Windows asset."""
+    req = urllib.request.Request(_API_ALL, headers={"User-Agent": "janki-updater",
+                                                    "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        releases = json.loads(r.read().decode("utf-8"))
+    best = None
+    for rel in releases:
+        if rel.get("draft"):
+            continue
+        for a in rel.get("assets", []):
+            if a.get("name") == _WIN_ASSET:
+                tag = rel.get("tag_name") or ""
+                if best is None or _ver_tuple(tag) > _ver_tuple(best[0]):
+                    best = (tag, a.get("browser_download_url"))
+    if not best:
+        raise ValueError("no Windows release yet")
+    return best
 
 
 def _download(url: str) -> str:

@@ -21,6 +21,18 @@ def _silhouette_icon():
             ic = QIcon(png)
             ic.setIsMask(True)     # NSImage template → adaptive silhouette
             return ic
+        if sys.platform.startswith("win") and os.path.isfile(png):
+            # Windows has no template images: paint the star's alpha in white for a
+            # dark taskbar, or near-black when the taskbar uses the light theme.
+            from aqt.qt import QPixmap, QPainter, QColor
+            from ..platform.win import shell as _wsh
+            pm = QPixmap(png)
+            p = QPainter(pm)
+            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            p.fillRect(pm.rect(), QColor(30, 30, 30) if _wsh.system_uses_light_theme()
+                       else QColor(255, 255, 255))
+            p.end()
+            return QIcon(pm)
     except Exception as e:
         log(f"tray silhouette: {e}")
     return mw.windowIcon()
@@ -135,7 +147,7 @@ def _apply_tray(on: bool) -> None:
             # open/quit) instead of a native menu — richer, and themed like the main
             # window. No context menu is set, so the click reaches us as a Trigger.
             # Other platforms keep the plain cross-platform QMenu.
-            if sys.platform == "darwin":
+            if sys.platform == "darwin" or sys.platform.startswith("win"):
                 _tray_icon.activated.connect(_on_tray_activated)
             else:
                 menu = QMenu()
@@ -194,8 +206,8 @@ def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
         # otherwise trigger the activate→reopen hook and yank the window back. Set it
         # before anything else so it lands no matter the event order.
         suppress_reopen()
-        # macOS: open the glass navigator (decks + toggles + open/quit).
-        if sys.platform == "darwin":
+        # macOS / Windows: open the glass navigator (decks + toggles + open/quit).
+        if sys.platform == "darwin" or sys.platform.startswith("win"):
             try:
                 from . import tray_nav
                 tray_nav.show_navigator()
@@ -264,7 +276,14 @@ def set_login_item(enable: bool) -> None:
     at login. Implemented as a per-user LaunchAgent rather than a System Events login
     item so the launch can be TAGGED with an env var (JANKI_LOGIN_LAUNCH=1): that's
     what lets start_to_tray_if_wanted() hide only on a real login launch and never on
-    a manual open. No-op off macOS."""
+    a manual open. Windows: the per-user Run key (no admin)."""
+    if sys.platform.startswith("win"):
+        try:
+            from ..platform.win import shell as _wsh
+            _wsh.set_open_on_login(bool(enable))
+        except Exception as e:
+            log(f"login item: {e}")
+        return
     if sys.platform != "darwin":
         return
     try:
@@ -313,12 +332,20 @@ def start_to_tray_if_wanted() -> None:
     (tagged JANKI_LOGIN_LAUNCH=1 by the LaunchAgent), bring Janki up minimized to the
     tray: ensure the icon exists, then hide the window a beat after init. A manual
     double-click of Janki.app carries no such tag, so the window shows normally."""
-    if sys.platform != "darwin":
-        return
     import os
     if not _cfg().get("open_to_tray_on_login", False):
         return
-    if os.environ.get(_LOGIN_ENV) != "1":
+    if sys.platform.startswith("win"):
+        # A Run-key launch can't carry an env var; treat a launch in the first two
+        # minutes after boot as the login launch.
+        try:
+            import ctypes
+            ctypes.windll.kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+            if ctypes.windll.kernel32.GetTickCount64() > 120000:
+                return
+        except Exception:
+            return
+    elif sys.platform != "darwin" or os.environ.get(_LOGIN_ENV) != "1":
         return
     try:
         _ensure_tray_target()
