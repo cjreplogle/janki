@@ -1086,6 +1086,9 @@ def _build_css(cfg, context):
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
         if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "2":
+            # Frameless window: no title bar above the toolbar, so give the pill some
+            # air from the window's top edge (the Mac has its titlebar strip there).
+            parts.append("<style>html body{padding-top:10px!important;}</style>\n")
             # Frameless window: the toolbar's empty space is the title bar.
             parts.append(
                 "<script>(function(){function bare(e){return !e.target.closest("
