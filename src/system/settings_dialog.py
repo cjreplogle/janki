@@ -2110,7 +2110,9 @@ class GlassSettings(QDialog):
             try:
                 self.layout().activate()
                 target = _eff_h(tabs)
-                if _fit_state["first"]:            # initial open: size instantly
+                if _fit_state["first"] or sys.platform.startswith("win"):
+                    # initial open (and always on Windows, where animating the window
+                    # size each frame stutters): size instantly
                     _fit_state["first"] = False
                     tabs.setFixedHeight(target)
                     self.layout().activate()
@@ -2160,6 +2162,8 @@ class GlassSettings(QDialog):
             page = tw.currentWidget()
             if page is None:
                 return
+            if sys.platform.startswith("win"):
+                return          # opacity effects re-render the page in software: laggy
             try:
                 old = getattr(page, "_jk_fade", None)
                 if old is not None:

@@ -1409,12 +1409,16 @@ def _animate_open(win, final_pos) -> None:
         # Unroll: grow the window from a short strip to full height (like Settings'
         # tab resize). The content frame is pinned at full height and anchored top, so
         # the growing window reveals it instead of squashing the layout.
-        grow = _make_unroll(win)
-        if grow is not None:
-            grp.addAnimation(grow)
-        sharpen = _make_focus_in(win)
-        if sharpen is not None:
-            grp.addAnimation(sharpen)
+        # Windows draws this translucent popup in software: resizing it every frame
+        # (unroll) and the blur "focus-in" made opening stutter. There it just fades
+        # and drops in.
+        if not sys.platform.startswith("win"):
+            grow = _make_unroll(win)
+            if grow is not None:
+                grp.addAnimation(grow)
+            sharpen = _make_focus_in(win)
+            if sharpen is not None:
+                grp.addAnimation(sharpen)
         _open_anim = grp                     # keep a ref so it isn't GC'd mid-flight
         grp.start()
     except Exception as exc:

@@ -48,10 +48,14 @@ _WIN_TINT_TAG = "/*janki-win-tint*/"
 def _win_set_bg(widget, rgba, sel):
     """Qt-painted translucent fill for a translucent top-level (the tint layer)."""
     import re
-    cur = re.sub(re.escape(_WIN_TINT_TAG) + r"[^\n]*\n?", "", widget.styleSheet() or "")
     r, g, b, a = rgba
-    widget.setStyleSheet(cur.rstrip() + "\n%s %s{background-color:rgba(%d,%d,%d,%d);}\n"
-                         % (_WIN_TINT_TAG, sel, r, g, b, int(a)))
+    rule = "%s %s{background-color:rgba(%d,%d,%d,%d);}" % (_WIN_TINT_TAG, sel, r, g, b, int(a))
+    old = widget.styleSheet() or ""
+    if rule in old:
+        return                     # unchanged: re-setting a stylesheet re-polishes the
+                                   # whole window tree, which is slow (was per frame)
+    cur = re.sub(re.escape(_WIN_TINT_TAG) + r"[^\n]*\n?", "", old)
+    widget.setStyleSheet(cur.rstrip() + "\n" + rule + "\n")
 
 
 def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
@@ -67,8 +71,12 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
         if see_through:
             w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         blur = see_through and int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
-        dwm.apply(int(w.winId()), material=int(cfg.get("material", 21)), blur=blur,
-                  tint=(r, g, b), dark=not _tint_is_light(cfg), small_corners=small)
+        key = (int(w.winId()), int(cfg.get("material", 21)), blur, (r, g, b),
+               _tint_is_light(cfg), small)
+        if getattr(w, "_jk_dwm_key", None) != key:        # only when something changed
+            w._jk_dwm_key = key
+            dwm.apply(key[0], material=key[1], blur=blur, tint=(r, g, b),
+                      dark=not key[4], small_corners=small)
         if (_oled_active and w is mw) or not see_through:
             a = 255
         else:
@@ -1429,36 +1437,12 @@ class _DragByBackground(QObject):
 
 
 def _win_glass_dialog(dialog) -> None:
-    """Windows twin of the Mac glass dialog: with the pre-launch hook active the
-    dialog goes frameless + translucent (Windows only draws translucent frameless
-    windows), content extends to the top like the Mac's, a Windows-style close button
-    sits at the top-right and the empty background drags the window. Without the hook it keeps its
-    frame and gets the same colours solid."""
+    """Windows version of the Mac glass dialog: the same glass styling (colours, controls,
+    font) on a normal Windows window with a dark title bar."""
     try:
-        from ..platform.win import preboot
-        if preboot.active():
-            from aqt.qt import QPainter, QColor, QPen, QRectF, QWidget as _QW
-            dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-            dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            dialog._jk_expanded = True             # callers add top room for the dot
-            dialog._jk_drag = _DragByBackground(dialog)
-            dialog.installEventFilter(dialog._jk_drag)
-
-            from ..platform.win.chrome import _CapButton
-
-            def _close(d=dialog):
-                d.reject() if hasattr(d, "reject") else d.close()
-            dialog._jk_close_dot = _CapButton("close", _close, dialog)
-
-            class _Pin(QObject):          # keep it in the top-right corner
-                def eventFilter(self, obj, ev):
-                    if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
-                        b = obj._jk_close_dot
-                        b.move(obj.width() - b.width(), 0)
-                        b.raise_()
-                    return False
-            dialog._jk_close_pin = _Pin(dialog)
-            dialog.installEventFilter(dialog._jk_close_pin)
+        # A normal Windows window (native frame, dark title bar via DWM) with the glass
+        # colours solid: frameless translucent dialogs are drawn in software on Windows
+        # and made Settings and friends laggy.
         dialog._jk_base_qss = dialog.styleSheet() or ""
         dialog._jk_light = _tint_is_light()
         dialog.setStyleSheet(_glass_dialog_qss(dialog._jk_light) + dialog._jk_base_qss)
