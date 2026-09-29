@@ -186,8 +186,7 @@ Lockdown Mode, may also ask for system level permissions to work properly. MacOS
 a requirement for programs which automatically closing apps / disabling Wi-Fi on the 
 device. There may be bugs, issues, or inaccuracies I have not yet identified. In using this 
 application therefore, I cannot be liable for any unintentional damages to user Anki data 
-or glitches. Please only upload content to non-local LLMs which you have obtained
-permission.
+or glitches. Please only upload content to non-local LLMs with permission.
 
 ## License
 
