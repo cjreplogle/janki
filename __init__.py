@@ -817,6 +817,9 @@ def _startup():
                                    "Restart Anki now to turn on the see-through glass?",
                                    title="Janki"):
                             from .src.platform.win import shell as _wsh
+                            # The relaunched Anki inherits OUR environment, which predates
+                            # the new user variables — hand them over explicitly.
+                            os.environ.update(_pb._ENV)
                             _wsh.relaunch_after_exit()
                             mw.unloadProfileAndExit()
                     QTimer.singleShot(5000, _ask_restart)

@@ -58,9 +58,8 @@ def _win_glass_gate() -> bool:
             except Exception:
                 pass
             return False
-        cfg = mw.addonManager.getConfig(__name__) or {}
-        if not cfg.get("win_glass", True):
-            return False
+        # win_glass only switches the see-through part (the pre-launch hook); Janki's
+        # glass styling (tint, fonts, controls) stays on either way.
         open(pending, "w").close()
         return True
     except Exception:

@@ -47,8 +47,55 @@ def installed() -> bool:
     return any(os.path.isfile(os.path.join(d, PTH_NAME)) for d in _site_dirs())
 
 
+def _site_enabled() -> bool:
+    """Bundled-Python Anki builds (python313._pth without `import site`) never read
+    .pth files, so the hook file would be ignored there."""
+    import sys
+    return "site" in sys.modules and not sys.flags.no_site
+
+
+# Fallback for those builds: the same two variables as per-user environment variables
+# (HKCU\Environment, no admin), read by every new Anki launch. Other apps built on Qt's
+# web engine would see the software-rendering flag too — rare, and removed on uninstall.
+_ENV = {"QTWEBENGINE_CHROMIUM_FLAGS": _FLAGS, "JANKI_WIN_PREBOOT": "1"}
+
+
+def _set_user_env(on: bool) -> bool:
+    try:
+        import winreg
+        import ctypes
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                            winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+            for name, val in _ENV.items():
+                if on:
+                    try:
+                        cur = winreg.QueryValueEx(k, name)[0]
+                    except FileNotFoundError:
+                        cur = None
+                    if name == "QTWEBENGINE_CHROMIUM_FLAGS" and cur and cur != val:
+                        val = cur if _FLAGS in cur else (cur + " " + _FLAGS)  # keep theirs
+                    winreg.SetValueEx(k, name, 0, winreg.REG_SZ, val)
+                else:
+                    try:
+                        cur = winreg.QueryValueEx(k, name)[0]
+                        if name != "QTWEBENGINE_CHROMIUM_FLAGS" or cur == _FLAGS:
+                            winreg.DeleteValue(k, name)
+                        else:
+                            winreg.SetValueEx(k, name, 0, winreg.REG_SZ,
+                                              cur.replace(_FLAGS, "").strip())
+                    except FileNotFoundError:
+                        pass
+        # Tell Explorer so apps started from it pick up the change.
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 2, 2000, None)
+        return True
+    except Exception:
+        return False
+
+
 def install() -> bool:
-    """Write the hook. Returns True if it's in place (new or already there)."""
+    """Put the hook in place. Returns True if it's in place (new or already there)."""
+    if not _site_enabled():
+        return _set_user_env(True)
     for d in _site_dirs():
         p = os.path.join(d, PTH_NAME)
         try:
@@ -63,6 +110,7 @@ def install() -> bool:
 
 
 def uninstall() -> None:
+    _set_user_env(False)
     for d in _site_dirs():
         try:
             os.remove(os.path.join(d, PTH_NAME))

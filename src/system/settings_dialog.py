@@ -1903,6 +1903,75 @@ class GlassSettings(QDialog):
             self._patch_btn.clicked.connect(_on_patch_btn)
             gen_lay.addWidget(self._patch_btn)
 
+        # --- Windows glass on/off ---------------------------------------------
+        # Windows counterpart of the Mac "Apply glass patch" button: installs (or removes)
+        # the pre-launch hook, clears a crash-guard lock, and restarts Anki.
+        if sys.platform.startswith("win"):
+            from ..platform.win import preboot as _pb
+            from ..util import config as _jc
+            _wg_note = QLabel("")
+            _wg_note.setWordWrap(True)
+            _wg_note.setStyleSheet("color: gray; margin-top: 8px;")
+            gen_lay.addWidget(_wg_note)
+            self._wglass_btn = QPushButton()
+            self._wglass_btn.setStyleSheet(
+                "QPushButton{background-color:#4f5b75;color:white;border:none;"
+                "padding:5px 12px;border-radius:5px;}"
+                "QPushButton:hover{background-color:#5b6886;}")
+
+            def _wg_on():
+                return _pb.active() and bool(self.cfg.get("win_glass", True))
+
+            def _refresh_wglass():
+                if _wg_on():
+                    _wg_note.setText("See-through glass is on. Turning it off makes the "
+                                     "window solid (a little faster on slow machines).")
+                    self._wglass_btn.setText("Turn off see-through glass")
+                else:
+                    _wg_note.setText("See-through glass is off. Turning it on sets up a "
+                                     "small start-up hook for Anki (no admin, nothing of "
+                                     "Anki's changed) and restarts Anki.")
+                    self._wglass_btn.setText("Turn on see-through glass (restarts Anki)")
+
+            def _restart_anki(env_on):
+                from ..platform.win import shell as _wsh
+                import os as _os
+                if env_on:
+                    _os.environ.update(_pb._ENV)
+                else:
+                    for k in _pb._ENV:
+                        _os.environ.pop(k, None)
+                _jc.confirm_win_glass()
+                _wsh.relaunch_after_exit()
+                mw.unloadProfileAndExit()
+
+            def _on_wglass():
+                from aqt.utils import askUser, showWarning
+                if _wg_on():
+                    if not askUser("Turn off the see-through glass and restart Anki?",
+                                   parent=self, title="Janki"):
+                        return
+                    self.cfg["win_glass"] = False
+                    mw.addonManager.writeConfig(__name__, self.cfg)
+                    _pb.uninstall()
+                    _restart_anki(False)
+                else:
+                    self.cfg["win_glass"] = True
+                    mw.addonManager.writeConfig(__name__, self.cfg)
+                    _jc.reset_win_glass_failure()
+                    if not _pb.install():
+                        showWarning("Couldn't set up the glass start-up hook on this "
+                                    "Anki install.", parent=self)
+                        return
+                    if askUser("Glass is set up. Restart Anki now to turn it on?",
+                               parent=self, title="Janki"):
+                        _restart_anki(True)
+                _refresh_wglass()
+
+            _refresh_wglass()
+            self._wglass_btn.clicked.connect(_on_wglass)
+            gen_lay.addWidget(self._wglass_btn)
+
         # --- Updates --------------------------------------------------------
         # Janki auto-checks on launch; this is the manual trigger (moved here from
         # the Tools menu).
