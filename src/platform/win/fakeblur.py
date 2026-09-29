@@ -85,14 +85,25 @@ class _Layer(QWidget):
     def paintEvent(self, _ev):
         p = QPainter(self)
         if _live["on"] and _live["img"] is not None:
-            from aqt.qt import QRectF
-            cap, img = _live["rect"], _live["img"]
+            from aqt.qt import QRectF, QTimer
+            import time
             tl = self.mapToGlobal(self.rect().topLeft())
-            k = img.width() / max(1, cap.width())
-            src = QRectF((tl.x() - cap.x()) * k, (tl.y() - cap.y()) * k,
-                         self.width() * k, self.height() * k)
+
+            def _draw(img, cap):
+                kx = img.width() / max(1, cap.width())      # exact, per axis
+                ky = img.height() / max(1, cap.height())
+                src = QRectF((tl.x() - cap.x()) * kx, (tl.y() - cap.y()) * ky,
+                             self.width() * kx, self.height() * ky)
+                p.drawImage(QRectF(self.rect()), img, src)
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            p.drawImage(QRectF(self.rect()), img, src)
+            fade = min(1.0, (time.monotonic() - _live.get("t_swap", 0)) / 0.18)
+            prev = _live.get("prev")
+            if prev is not None and fade < 1.0:
+                _draw(prev, _live["prev_rect"])
+                p.setOpacity(fade)
+                QTimer.singleShot(16, self.update)        # keep the cross-fade going
+            _draw(_live["img"], _live["rect"])
+            p.setOpacity(1.0)
             p.fillRect(self.rect(), self.tint)
             p.end()
             return
@@ -180,14 +191,31 @@ def _grab():
         scr = mw.screen()
         sg = scr.geometry()
         g = mw.frameGeometry().adjusted(-_MARGIN, -_MARGIN, _MARGIN, _MARGIN) & sg
-        pm = scr.grabWindow(0, g.x() - sg.x(), g.y() - sg.y(), g.width(), g.height())
+        # Snap the capture to an 8-px screen grid so every capture down-samples the same
+        # pixels into the same small pixels — otherwise the blur "swims" between frames.
+        x0 = g.x() - ((g.x() - sg.x()) % _SCALE)
+        y0 = g.y() - ((g.y() - sg.y()) % _SCALE)
+        w = ((g.right() + 1 - x0) // _SCALE) * _SCALE
+        h = ((g.bottom() + 1 - y0) // _SCALE) * _SCALE
+        if w <= 0 or h <= 0:
+            return
+        pm = scr.grabWindow(0, x0 - sg.x(), y0 - sg.y(), w, h)
         if pm.isNull():
             return
-        small = pm.toImage().scaled(max(1, g.width() // _SCALE), max(1, g.height() // _SCALE),
+        small = pm.toImage().scaled(w // _SCALE, h // _SCALE,
                                     Qt.AspectRatioMode.IgnoreAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation)
-        _live["img"] = _blur(small, strength=1)
-        _live["rect"] = g                      # global rect the capture covers
+        img = _blur(small, strength=1)
+        from aqt.qt import QRect
+        rect = QRect(x0, y0, w, h)
+        old = _live.get("img")
+        if old is not None and _live.get("rect") == rect and old == img:
+            return                             # nothing behind changed: no repaint
+        # Cross-fade from the previous capture so changes blend in instead of snapping.
+        _live["prev"], _live["prev_rect"] = old, _live.get("rect")
+        _live["img"], _live["rect"] = img, rect
+        import time
+        _live["t_swap"] = time.monotonic()
         _layer.update()
     except Exception:
         pass
