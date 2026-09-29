@@ -81,6 +81,19 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             a = 255
         else:
             a = 255 * min(1.0, max(0.06, float(cfg.get("body_opacity", 0.25)) + extra_alpha))
+        if w is mw:
+            # Where Windows can't draw its blur (VMs, transparency effects off), Janki
+            # paints a blurred wallpaper behind the window instead — Mica-style — and the
+            # tint on top of it (so the window background itself stays clear).
+            from ..platform.win import fakeblur
+            want_blur = (see_through and int(cfg.get("blur_radius", 20)) > 0
+                         and not _oled_active and dwm.janki_blur_wanted()
+                         and not has_background_image())
+            if want_blur:
+                fakeblur.enable((r, g, b, a))
+                a = 0
+            else:
+                fakeblur.disable()
         _win_set_bg(w, (r, g, b, a), sel or w.metaObject().className())
     except Exception as exc:
         log(f"win glass: {exc}")

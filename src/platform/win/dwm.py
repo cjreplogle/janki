@@ -136,6 +136,24 @@ def _safe_q(k, name):
         return False
 
 
+def backdrop_mode() -> str:
+    try:
+        from aqt import mw
+        m = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
+    except Exception:
+        m = "auto"
+    return m if m in ("auto", "on", "off") else "auto"
+
+
+def dwm_blur_works() -> bool:
+    return transparency_effects_on() and not is_virtual_machine()
+
+
+def janki_blur_wanted() -> bool:
+    """Auto mode on a machine where DWM can't blur: Janki draws its wallpaper blur."""
+    return backdrop_mode() == "auto" and not dwm_blur_works()
+
+
 def backdrop_wanted() -> bool:
     """Config win_backdrop: "on" / "off" / "auto" (default: on unless transparency effects
     are off or this is a virtual machine)."""

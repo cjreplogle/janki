@@ -1978,8 +1978,10 @@ class GlassSettings(QDialog):
             from ..platform.win import dwm as _dwm
             _bd_row = QHBoxLayout()
             _bd_lbl = QLabel("Windows frosted blur")
-            _bd_lbl.setToolTip("The blurred-desktop backdrop behind the glass. If the window "
-                               "looks solid grey, set this to Off.")
+            _bd_lbl.setToolTip("Auto: Windows' own blur where it works, otherwise Janki blurs "
+                               "your wallpaper behind the window (like Mica). On: always "
+                               "Windows' blur (solid grey where Windows can't draw it). "
+                               "Off: fully see-through.")
             self._bd_box = _QCB()
             for _t, _v in (("Auto", "auto"), ("On", "on"), ("Off", "off")):
                 self._bd_box.addItem(_t, _v)
@@ -1989,9 +1991,13 @@ class GlassSettings(QDialog):
             _bd_hint.setStyleSheet("color: gray;")
 
             def _bd_hint_text():
-                on = _dwm.backdrop_wanted()
-                _bd_hint.setText(("(currently on)" if on else "(currently off%s)" % (
-                    " — virtual machine" if _dwm.is_virtual_machine() else "")))
+                if _dwm.backdrop_wanted():
+                    _bd_hint.setText("(Windows blur)")
+                elif _dwm.janki_blur_wanted():
+                    _bd_hint.setText("(Janki's wallpaper blur%s)" % (
+                        " — virtual machine" if _dwm.is_virtual_machine() else ""))
+                else:
+                    _bd_hint.setText("(off)")
 
             def _on_bd(_i):
                 self.cfg["win_backdrop"] = self._bd_box.currentData()
