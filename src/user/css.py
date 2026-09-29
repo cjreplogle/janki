@@ -529,6 +529,14 @@ _DECK_STICKY_JS = r"""(function(){
 # Readability halo for text on glass. Two blurred layers look best but are expensive
 # when the webviews draw in software — which the Windows glass needs (every typewriter
 # frame repaints them) — so Windows gets one tight layer.
+def _win_frameless() -> bool:
+    try:
+        from ..platform.win import preboot
+        return preboot.frameless()
+    except Exception:
+        return False
+
+
 _WIN_SOFT = (sys.platform.startswith("win")
              and os.environ.get("JANKI_WIN_RENDER") == "software")
 _TEXT_SHADOW = ("0 0 2px rgba(0,0,0,.95)" if _WIN_SOFT
@@ -1087,7 +1095,7 @@ def _build_css(cfg, context):
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
-        if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "2":
+        if sys.platform.startswith("win") and _win_frameless():
             # Frameless window: no title bar above the toolbar, so give the pill some
             # air from the window's top edge (the Mac has its titlebar strip there).
             parts.append("<style>html body{padding-top:10px!important;}</style>\n")

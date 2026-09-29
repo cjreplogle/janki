@@ -836,12 +836,21 @@ def _startup():
                 # see-through glass on (like the Mac self-heal's restart prompt).
                 # (Re)install every launch: a new Janki may ship an updated hook, which
                 # needs one restart to take effect.
-                if _pb.install() and (not _pb.active() or _pb.changed):
+                # Fast (GPU) mode needs no start-up hook — no extra restart after
+                # installing. Only See-through needs it (installed here, one restart).
+                _need_restart = False
+                if _pb.render_mode() == "software":
+                    _need_restart = _pb.install() and (
+                        not _pb.active() or _pb.changed or _pb.running_mode() != "software")
+                else:
+                    if _pb.installed():
+                        _pb.uninstall()            # leftover See-through hook
+                    _need_restart = _pb.running_mode() == "software"   # leave software mode
+                if _need_restart:
                     def _ask_restart():
                         from aqt.utils import askUser
-                        if askUser("Janki installed its Windows glass support.\n\n"
-                                   "Restart Anki now to turn on the see-through glass?",
-                                   title="Janki"):
+                        if askUser("Restart Anki now to switch Janki's Windows rendering "
+                                   "mode (see-through glass ↔ fast)?", title="Janki"):
                             from .src.platform.win import shell as _wsh
                             # The relaunched Anki inherits OUR environment, which predates
                             # the new user variables — hand them over explicitly.

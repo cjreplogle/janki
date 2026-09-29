@@ -1971,6 +1971,9 @@ class GlassSettings(QDialog):
             _refresh_wglass()
             self._wglass_btn.clicked.connect(_on_wglass)
             gen_lay.addWidget(self._wglass_btn)
+            # Superseded by the Rendering switch below (Fast ↔ See-through).
+            _wg_note.setVisible(False)
+            self._wglass_btn.setVisible(False)
 
             # Rendering: Fast keeps Anki's GPU rendering (solid window + Janki-painted
             # blur); See-through renders in software so Windows can show a clear window
@@ -1988,11 +1991,16 @@ class GlassSettings(QDialog):
 
             def _on_rm(_i):
                 from aqt.utils import askUser
-                self.cfg["win_render"] = self._rm_box.currentData()
+                mode = self._rm_box.currentData()
+                self.cfg["win_render"] = mode
                 mw.addonManager.writeConfig(__name__, self.cfg)
-                if _pb.install() and _pb.changed and askUser(
-                        "Restart Anki now to switch rendering?", parent=self, title="Janki"):
-                    _restart_anki(True)
+                if mode == "software":
+                    _pb.install()
+                else:
+                    _pb.uninstall()                # Fast mode runs without the hook
+                if askUser("Restart Anki now to switch rendering?", parent=self,
+                           title="Janki"):
+                    _restart_anki(mode == "software")
             self._rm_box.currentIndexChanged.connect(_on_rm)
             _rm_row.addWidget(_rm_lbl)
             _rm_row.addWidget(self._rm_box)

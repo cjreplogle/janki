@@ -43,6 +43,15 @@ def render_mode() -> str:
     return "software" if m == "software" else "gpu"
 
 
+def frameless() -> bool:
+    """Use the frameless glass window now? Fast (GPU) mode needs no start-up hook, so
+    it's on right away; See-through needs its hook to have run in this launch."""
+    run = running_mode()
+    if run == "software":
+        return active()
+    return render_mode() == "gpu"
+
+
 def running_mode() -> str:
     """The rendering mode THIS launch actually started with."""
     return os.environ.get("JANKI_WIN_RENDER", "")

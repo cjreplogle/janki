@@ -71,7 +71,7 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
         see_through = soft and (w is mw or bool(w.windowFlags() & Qt.WindowType.FramelessWindowHint))
         # Fast (GPU) mode: the main window is solid, but Janki paints its blur behind
         # the (transparent) pages, so it looks like glass without software rendering.
-        gpu_glass = (w is mw and preboot.active() and not soft)
+        gpu_glass = (w is mw and preboot.frameless() and not soft)
         if see_through:
             w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         blur = see_through and int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
@@ -116,7 +116,7 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
 def _win_apply_main():
     try:
         from ..platform.win import preboot, chrome
-        if preboot.active():
+        if preboot.frameless():
             chrome.install()                 # frameless + Mac-style traffic lights
             chrome.raise_lights()
     except Exception as exc:
