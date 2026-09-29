@@ -170,9 +170,10 @@ by, or sponsored by** AnKing, AMBOSS, Anki / Ankitects, or any medical school.
 "AnKing," "AMBOSS," and "Anki" are trademarks of their respective owners and are
 used here only nominatively — to describe compatibility with those products. No
 AnKing or AMBOSS content is bundled or redistributed; the add-on only operates on
-your local collection.
+your local collection. Claude Opus 4.8-5.5 was used in the co-programming of this
+application.
 
-Claude Opus 4.8-5.5 was used in the co-programming of this application. No features are 
+No features are 
 intentionally taken from other add-ons. The intention is that this centralizes and 
 streamlines use of a variety of tools in existance. If any other creators have any issue 
 with features within this app, please email me at `creplogle20@gmail.com`. I am happy to 
