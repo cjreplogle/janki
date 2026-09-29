@@ -63,9 +63,9 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.0.0**.
-  Next Mac release must be **≥ 2.1.x** (code version is already 2.1.x).
-- **Windows channel**: `--prerelease`, tag `vX.Y.Z-win`, asset `janki-windows.ankiaddon`.
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.1.6**.
+- **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
+  `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.
   Installs older than 2.1.1 can't see this channel (manual install once).
 - Local dev checkout: set `"auto_update_check": false` so the updater doesn't overwrite it.
@@ -83,3 +83,7 @@ expected error is a QAction/MagicMock mismatch from the stand-in window. Qt's Py
   fullscreen, controller, lockdown.
 - If the tray menu is still slow on Windows: make it a solid panel too.
 - AMBOSS frost on Windows; Canki is shelved (dev only).
+
+## Branching
+One branch: `master`. Mac and Windows ship from the same commit. Dev in the Windows VM:
+rsync this folder into the VM's `addons21/janki` (via `/Volumes/[C] Windows 11.hidden/...`).
