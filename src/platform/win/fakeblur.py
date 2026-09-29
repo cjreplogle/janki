@@ -96,13 +96,11 @@ class _Layer(QWidget):
             # (Windows shows the old frame at the new spot for a moment, so re-mapping
             # wobbles). Freeze it at the drag-start mapping — it rides along with the
             # window — and cross-fade to a fresh capture once the window settles.
-            if moving or "anchor" in _live:          # stay frozen until the fresh capture
-                if "anchor" not in _live:
-                    _live["anchor"] = _live.get("last_tl", tl)
-                use_tl = _live["anchor"]
-            else:
-                use_tl = tl
-            _live["last_tl"] = use_tl
+            # Windows presents each new window position one frame before our repaint for
+            # it lands, so painting for the CURRENT position alternates right/off-by-one
+            # (the wobble). Painting for the PREVIOUS move's position keeps it a steady
+            # one step behind instead — a slight trail, no back-and-forth.
+            use_tl = (_live.get("lag_tl") or tl) if moving else tl
 
             def _draw_at(img, cap, at):
                 kx = img.width() / max(1, cap.width())
@@ -137,6 +135,8 @@ class _Follow(QObject):
             _layer.setGeometry(0, 0, mw.width(), mw.height())
             _layer.lower()
             if _live["on"] and ev.type() == QEvent.Type.Move:
+                _live["lag_tl"] = _live.get("cur_tl")
+                _live["cur_tl"] = mw.mapToGlobal(mw.rect().topLeft())
                 # While the window moves, DON'T capture: mid-move captures can be a frame
                 # stale vs where we paint, so edges behind jitter back and forth. Keep the
                 # current capture (re-mapped each paint, like the wallpaper blur) and take
@@ -235,15 +235,11 @@ def _grab():
         rect = QRect(x0, y0, w, h)
         old = _live.get("img")
         if old is not None and _live.get("rect") == rect and old == img:
-            if _live.pop("anchor", None) is not None:   # released a frozen drag view
-                _layer.update()
             return                             # nothing behind changed: no repaint
         # Cross-fade from the previous capture so changes blend in instead of snapping.
         _live["prev"], _live["prev_rect"] = old, _live.get("rect")
         _live["img"], _live["rect"] = img, rect
-        # The previous image was last shown at the drag-start position (frozen); keep
-        # drawing it there during the cross-fade so the hand-over doesn't jump.
-        _live["prev_tl"] = _live.pop("anchor", None)
+        _live["prev_tl"] = None
         import time
         _live["t_swap"] = time.monotonic()
         _layer.update()
