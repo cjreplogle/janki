@@ -442,8 +442,12 @@ _DECK_WIDTH_JS = r"""(function(){
    var target=Math.max(nat, prev), start=prev||nat;
    t.style.width=target+'px'; var fin=centres();
    t.style.width=start+'px'; var now=centres();
+   // Only animate right after a +/− click. Anki also redraws the list 2–3× on launch
+   // (and on returning from review) while the webfont swaps in; sliding on those made
+   // the columns jitter against each other.
+   var toggled=get('jkColAnim')==='1'; put('jkColAnim','');
    var old=null; try{ old=JSON.parse(get(key+':x')||'null'); }catch(e){}
-   if(!still && old && old.length===now.length){
+   if(toggled && !still && old && old.length===now.length){
      Array.prototype.forEach.call(t.rows, function(tr){
        if(tr.children.length<2) return;
        Array.prototype.slice.call(tr.children,1).forEach(function(c,i){
@@ -453,14 +457,22 @@ _DECK_WIDTH_JS = r"""(function(){
    }
    put(key+':x', JSON.stringify(fin));
    t.style.width=target+'px';
-   if(start<target-1 && !still){
+   if(toggled && start<target-1 && !still){
      try{ t.animate([{width:start+'px'},{width:target+'px'}],{duration:DUR,easing:EASE}); }catch(e){}
    }
    put(key, String(Math.max(target, stored())));
-   window.addEventListener('resize', function(){
-     t.style.width=Math.max(natural(), Math.min(stored(), cap()))+'px';
-     put(key+':x', JSON.stringify(centres())); });
+   // Re-measure once the webfont has loaded (it changes the text widths), so the next
+   // toggle slides from where the columns really are.
+   function refit(){ t.style.width=Math.max(natural(), Math.min(stored(), cap()))+'px';
+     put(key, String(Math.max(parseFloat(t.style.width)||0, stored())));
+     put(key+':x', JSON.stringify(centres())); }
+   try{ document.fonts.ready.then(function(){ setTimeout(refit, 0); }); }catch(e){}
+   window.addEventListener('resize', refit);
  }
+ // Mark a +/− click so the redraw it causes (and only that one) animates. Registered
+ // before the dropdown script's listener, which stops the event on "−".
+ document.addEventListener('click', function(e){
+   if(e.target.closest && e.target.closest('a.collapse')) put('jkColAnim','1'); }, true);
  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
 })();"""
 
@@ -1954,11 +1966,32 @@ _CONGRATS_GLASS_JS = (
 )
 
 
+def _congrats_font_js(cfg) -> str:
+    """The congrats page's text in the chosen Janki UI font (Lora by default), like the
+    rest of the chrome. Rebuilt on every load so a font change applies; replaces its
+    own <style> rather than stacking."""
+    import json
+    css = (lora_face_css() +
+           "html body, html body h1, html body h2, html body h3, html body p,"
+           " html body a, html body button {font-family:%s!important;}"
+           "html body h1{font-weight:600!important;letter-spacing:0!important;}"
+           % ui_font_stack(cfg))
+    # loadFinished fires for every main-window page (reviewer included), so only touch
+    # the congrats page — never a card's own fonts.
+    return ("(function(){if(!/congrats/.test(location.pathname))return;"
+            "var s=document.getElementById('__janki_congrats_font');"
+            "if(!s){s=document.createElement('style');s.id='__janki_congrats_font';"
+            "if(document.head)document.head.appendChild(s);}"
+            "s.textContent=%s;})();" % json.dumps(css))
+
+
 def _ensure_congrats_glass(*_):
-    if not GLASS or not _cfg().get("enabled", True):
+    cfg = _cfg()
+    if not GLASS or not cfg.get("enabled", True):
         return
     try:
         mw.web.eval(_CONGRATS_GLASS_JS)
+        mw.web.eval(_congrats_font_js(cfg))
     except Exception:
         pass
 
