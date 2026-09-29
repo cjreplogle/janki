@@ -2465,6 +2465,17 @@ class GlassSettings(QDialog):
         warn.setVisible(False)
         lay.addWidget(warn)
 
+        zx = QCheckBox("Z / X / C / V also rate cards (Again / Hard / Good / Easy, like 1–4)")
+        zx.setToolTip("Plain keys, only while Anki is focused and the answer is showing. "
+                      "Takes effect the next time you start reviewing.")
+        zx.setChecked(bool(self.cfg.get("zxcv_rating", True)))
+
+        def _on_zx(_s):
+            self.cfg["zxcv_rating"] = zx.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+        zx.stateChanged.connect(_on_zx)
+        lay.addWidget(zx)
+
         buttons = {}                          # action id → capture button
         QtMod = Qt.KeyboardModifier
         _MODKEYS = {Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Meta, Qt.Key.Key_Alt,

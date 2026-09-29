@@ -523,6 +523,12 @@ def _startup():
         # key tap is macOS-only and needs Accessibility permission.
         keytap._apply_global_keys(True)
         _bt.mark("global keys")
+        # Z/X/C/V as extra Again/Hard/Good/Easy keys in the reviewer (beside 1–4).
+        try:
+            from .src.features import zxcv
+            zxcv.install()
+        except Exception as _zx_exc:
+            log("zxcv: %s" % _zx_exc)
         # Windows: register .jank / .qb / .rp with Anki once (per-user, no admin), so
         # double-clicking one in Explorer imports it — like Open With on the Mac.
         if sys.platform.startswith("win") and not _cfg().get("win_assoc_done", False):
