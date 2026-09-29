@@ -122,12 +122,20 @@ class _Follow(QObject):
                                                 QEvent.Type.WindowStateChange):
             _layer.setGeometry(0, 0, mw.width(), mw.height())
             _layer.lower()
-            if _live["on"]:
+            if _live["on"] and ev.type() == QEvent.Type.Move:
+                # While the window moves, DON'T capture: mid-move captures can be a frame
+                # stale vs where we paint, so edges behind jitter back and forth. Keep the
+                # current capture (re-mapped each paint, like the wallpaper blur) and take
+                # a fresh one once the window has been still for a moment.
                 import time
-                now = time.monotonic()
-                if now - _live.get("last", 0) > 0.06:    # re-capture while dragging;
-                    _live["last"] = now                  # paint re-maps instantly anyway
-                    _grab()
+                _live["moving_until"] = time.monotonic() + 0.15
+                if _live.get("settle") is None:
+                    from aqt.qt import QTimer
+                    st = QTimer(mw)
+                    st.setSingleShot(True)
+                    st.timeout.connect(_grab)
+                    _live["settle"] = st
+                _live["settle"].start(160)
             _layer.update()
         return False
 
@@ -177,7 +185,7 @@ def _affinity(hwnd, on):
         return False
 
 
-_MARGIN = 120        # px captured around the window, so small moves show instantly
+_MARGIN = 300        # px captured around the window, so drags stay covered
 _SCALE = 8           # blur works on a 1/8-size copy; smooth up-scaling spreads it out
 
 
@@ -187,6 +195,9 @@ def _grab():
     background stays put while the window moves (no waiting for a new capture)."""
     if not _live["on"] or _layer is None or mw.isMinimized() or not mw.isVisible():
         return
+    import time as _t
+    if _t.monotonic() < _live.get("moving_until", 0):
+        return                                 # mid-drag: wait for the window to settle
     try:
         scr = mw.screen()
         sg = scr.geometry()
