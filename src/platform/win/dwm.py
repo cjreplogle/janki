@@ -90,9 +90,71 @@ def _win10_accent(hwnd, rgba):
         pass
 
 
+def transparency_effects_on() -> bool:
+    """Windows' Settings → Personalization → Colors → Transparency effects. When it's off
+    (often forced on non-activated Windows or in VMs) the Acrylic/Mica backdrop draws as
+    an opaque grey fallback, hiding the see-through window — so skip the backdrop."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return bool(winreg.QueryValueEx(k, "EnableTransparency")[0])
+    except Exception:
+        return True
+
+
+_VM_CACHE = None
+
+
+def is_virtual_machine() -> bool:
+    """Parallels / VMware / VirtualBox / QEMU / Hyper-V guests: Windows often claims
+    transparency effects work there but draws the backdrop as solid grey."""
+    global _VM_CACHE
+    if _VM_CACHE is None:
+        _VM_CACHE = False
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DESCRIPTION\System\BIOS") as k:
+                info = " ".join(str(winreg.QueryValueEx(k, n)[0]) for n in
+                                ("SystemManufacturer", "SystemProductName")
+                                if _safe_q(k, n))
+            _VM_CACHE = any(v in info.lower() for v in
+                            ("parallels", "vmware", "virtualbox", "qemu", "kvm",
+                             "virtual machine", "hyper-v"))
+        except Exception:
+            pass
+    return _VM_CACHE
+
+
+def _safe_q(k, name):
+    try:
+        import winreg
+        winreg.QueryValueEx(k, name)
+        return True
+    except Exception:
+        return False
+
+
+def backdrop_wanted() -> bool:
+    """Config win_backdrop: "on" / "off" / "auto" (default: on unless transparency effects
+    are off or this is a virtual machine)."""
+    try:
+        from aqt import mw
+        mode = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
+    except Exception:
+        mode = "auto"
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return transparency_effects_on() and not is_virtual_machine()
+
+
 def apply(hwnd, material=21, blur=True, tint=(18, 20, 30), dark=True, small_corners=False):
     """Give a top-level window the glass backdrop. blur=False = no backdrop (the
     Janki tint alone, e.g. blur slider at 0 or OLED)."""
+    blur = blur and backdrop_wanted()
     set_dark(hwnd, dark)
     set_corners(hwnd, small_corners)
     extend_frame(hwnd)

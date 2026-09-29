@@ -72,7 +72,7 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         blur = see_through and int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
         key = (int(w.winId()), int(cfg.get("material", 21)), blur, (r, g, b),
-               _tint_is_light(cfg), small)
+               _tint_is_light(cfg), small, str(cfg.get("win_backdrop", "auto")))
         if getattr(w, "_jk_dwm_key", None) != key:        # only when something changed
             w._jk_dwm_key = key
             dwm.apply(key[0], material=key[1], blur=blur, tint=(r, g, b),

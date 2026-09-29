@@ -1972,6 +1972,44 @@ class GlassSettings(QDialog):
             self._wglass_btn.clicked.connect(_on_wglass)
             gen_lay.addWidget(self._wglass_btn)
 
+            # Windows' frosted blur behind the glass. Where Windows can't draw it (VMs,
+            # transparency effects off) it shows as solid grey — "Auto" skips it there.
+            from aqt.qt import QComboBox as _QCB
+            from ..platform.win import dwm as _dwm
+            _bd_row = QHBoxLayout()
+            _bd_lbl = QLabel("Windows frosted blur")
+            _bd_lbl.setToolTip("The blurred-desktop backdrop behind the glass. If the window "
+                               "looks solid grey, set this to Off.")
+            self._bd_box = _QCB()
+            for _t, _v in (("Auto", "auto"), ("On", "on"), ("Off", "off")):
+                self._bd_box.addItem(_t, _v)
+            _cur = str(self.cfg.get("win_backdrop", "auto")).lower()
+            self._bd_box.setCurrentIndex(max(0, [self._bd_box.itemData(i) for i in range(3)].index(_cur) if _cur in ("auto", "on", "off") else 0))
+            _bd_hint = QLabel("")
+            _bd_hint.setStyleSheet("color: gray;")
+
+            def _bd_hint_text():
+                on = _dwm.backdrop_wanted()
+                _bd_hint.setText(("(currently on)" if on else "(currently off%s)" % (
+                    " — virtual machine" if _dwm.is_virtual_machine() else "")))
+
+            def _on_bd(_i):
+                self.cfg["win_backdrop"] = self._bd_box.currentData()
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                _bd_hint_text()
+                try:
+                    glass._reapply_native()
+                    glass._restyle_glass_dialogs()
+                except Exception:
+                    pass
+            self._bd_box.currentIndexChanged.connect(_on_bd)
+            _bd_hint_text()
+            _bd_row.addWidget(_bd_lbl)
+            _bd_row.addWidget(self._bd_box)
+            _bd_row.addWidget(_bd_hint)
+            _bd_row.addStretch()
+            gen_lay.addLayout(_bd_row)
+
         # --- Updates --------------------------------------------------------
         # Janki auto-checks on launch; this is the manual trigger (moved here from
         # the Tools menu).
