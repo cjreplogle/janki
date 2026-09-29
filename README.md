@@ -178,7 +178,7 @@ intentionally taken from other add-ons. The intention is that this centralizes a
 streamlines use of a variety of tools in existance. If any other creators have any issue 
 with features within this app, please email me at `creplogle20@gmail.com`. I am happy to 
 accommodate any inquiries and/or get rid of things if you feel this infringes on something 
-else you have made. *Janki will never have any mandatory paid features. If you paid for any 
+else you have made. *Janki will **never** have any mandatory paid features. If you paid for any 
 part of this software, you have been scammed.*
 
 Janki has functionalities that patch the original code of Anki to improve visuals 
