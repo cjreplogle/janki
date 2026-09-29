@@ -161,6 +161,13 @@ class GlassSettings(QDialog):
 
         tabs.addTab(prac_page, "Practice")
         tabs.addTab(rw_page, "Rephrase")
+        # Canki (experimental): review this collection from a browser / phone.
+        try:
+            from ..integrations import canki_server as _canki
+            if _canki.AVAILABLE:                  # shelved unless JANKI_CANKI=1
+                tabs.addTab(_canki.build_settings_page(), "Canki")
+        except Exception as _e:
+            log("canki settings tab failed: %s" % _e)
         hk_page = QWidget(); hk_lay = QVBoxLayout(hk_page)
         tabs.addTab(hk_page, "Hotkeys")
         tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance

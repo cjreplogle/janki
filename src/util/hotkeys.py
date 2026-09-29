@@ -99,7 +99,7 @@ def binding(aid, cfg=None):
 
 _WIN = sys.platform.startswith("win")
 if _WIN:
-    KC_NAMES = dict(KC_NAMES, **{51: "Backspace", 117: "Delete"})
+    KC_NAMES = {**KC_NAMES, 51: "Backspace", 117: "Delete"}
 # How the stored modifier names read on each OS. The recorder stores Qt's modifiers
 # with Mac names: Control→"cmd", Meta→"ctrl", Alt→"opt". On Windows Qt's Control is
 # the Ctrl key and Meta is the Win key.

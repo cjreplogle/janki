@@ -756,6 +756,13 @@ def _startup():
         # re-render of that same screen.
 
         _bt.mark("state hooks")
+        # Canki: serve this collection to the web reviewer (cjre.pl/ogle/canki).
+        # Local-only HTTP API; never uploads anything. Tools → Canki to pair a phone.
+        try:
+            from .src.integrations import canki_server
+            canki_server.install()
+        except Exception as _ck_exc:
+            log("canki: %s" % _ck_exc)
         # GLASS = window transparency (glass edition only). In the safe edition
         # GLASS is False, so none of this runs and Anki is never touched.
         if GLASS:
