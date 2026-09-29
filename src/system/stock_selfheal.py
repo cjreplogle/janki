@@ -222,6 +222,13 @@ def _relaunch_in_place() -> bool:
         from aqt import mw
         if mw is not None and (mw.isVisible() or getattr(mw, "col", None) is not None):
             return False
+        # Loop guard: never re-run more than once. The marker survives execv (the
+        # environment carries over), so if the patch somehow didn't take effect, the
+        # next pass sees it and falls back to the restart prompt instead of looping.
+        if os.environ.get("JANKI_SELFHEAL_RELAUNCHED"):
+            log("self-heal: already re-ran once; not relaunching again")
+            return False
+        os.environ["JANKI_SELFHEAL_RELAUNCHED"] = "1"
         args = list(getattr(sys, "orig_argv", None) or ([sys.executable] + sys.argv))
         log("self-heal: re-running Anki in place to start the glass")
         sys.stdout.flush()
@@ -308,6 +315,16 @@ def _failed_here(h: str) -> bool:
 
 # --- state / uninstall ---------------------------------------------------------
 
+def _files_patched(ad) -> bool:
+    """True if Anki's aqt/__init__.pyc on disk carries Janki's injected code. Checks for
+    our marker string (not "differs from the backup": after an Anki update the backup is
+    from the old version, which would wrongly read as patched)."""
+    try:
+        return b"janki_glass_pending" in (ad / "__init__.pyc").read_bytes()
+    except Exception:
+        return False
+
+
 def patch_state() -> str:
     """'patched' | 'unpatched' | 'unsupported' — for the settings UI."""
     if sys.platform != "darwin":
@@ -378,8 +395,18 @@ def maybe_self_heal(early: bool = False) -> None:
         pass
     if sys.version_info[:2] != (3, 13):
         return                         # can't produce matching bytecode
+    if early and os.environ.get("JANKI_SELFHEAL_RELAUNCHED"):
+        # We already patched + re-ran once and the glass still isn't active: don't
+        # patch again here; the normal (non-early) pass will prompt instead.
+        return
     h = _buildhash()
     if not h:
+        return
+    if _files_patched(ad):
+        # Already patched on disk, yet this launch isn't running it: the patch isn't
+        # taking effect here. Re-patching + restarting would only repeat — say so once.
+        _notify_once(h, "glass is installed but didn't start on this Anki setup, so "
+                        "it's off. Re-apply it in Janki: Settings to try again.")
         return
     if _failed_here(h):
         # The glass patch crashed on THIS build before — stay plain, don't loop.
