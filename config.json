@@ -122,7 +122,7 @@
   "open_win_width": 600,
   "hid_discover": false,
   "always_on_top": false,
-  "deck_stats": true,
+  "deck_stats": false,
   "tray_minimize": true,
   "open_to_tray_on_login": false,
   "card_font": "Lora",

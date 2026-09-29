@@ -11,6 +11,8 @@ from aqt.qt import (QWidget, QHBoxLayout, QPainter, QColor, QEvent, QObject, Qt,
                     QApplication, QRectF, QPointF, QPen, QCursor)
 
 EDGE = 6          # px band along the window edge that resizes
+TOP_GAP = 6       # px breathing room above the caption buttons/toolbar pill (matches
+                  # the #header padding-top in css.py so both sit at the same offset)
 _lights = None
 _resizer = None
 
@@ -81,6 +83,23 @@ class _CapButton(QWidget):
             self._action()
 
 
+def _on_close_clicked():
+    """Red-X: minimize to the tray when that's on, exactly like the mac/other-
+    platform close paths — called directly rather than routed through mw.close()
+    so the frameless caption button's behaviour doesn't depend on Qt's close-event
+    dispatch order (event filter vs. the closeEvent override in tray.py) ever
+    landing before Qt tears the window down."""
+    try:
+        from ..util.config import _cfg
+        if _cfg().get("tray_minimize", False):
+            from ..system import tray
+            tray._minimize_to_tray()
+            return
+    except Exception:
+        pass
+    mw.close()
+
+
 class CaptionButtons(QWidget):
     """Windows-style caption buttons pinned to the top-right corner."""
 
@@ -90,13 +109,13 @@ class CaptionButtons(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         for kind, act in (("min", mw.showMinimized), ("max", toggle_maximize),
-                          ("close", mw.close)):
+                          ("close", _on_close_clicked)):
             lay.addWidget(_CapButton(kind, act, self))
         self.adjustSize()
         self.place()
 
     def place(self):
-        self.move(self.parent().width() - self.width(), 0)
+        self.move(self.parent().width() - self.width(), TOP_GAP)
         self.raise_()
 
 

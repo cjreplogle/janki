@@ -428,7 +428,40 @@ def black_text_css(scopes=("",)) -> str:
 # (sessionStorage) and unfolds its subdeck rows after the redraw, while closing folds
 # them first and then sends Anki's own collapse command. Rows are found by indent (the
 # leading &nbsp; count), so it also works on the Practice page's banks.
-_DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=260, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
+_DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=260, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n" \
+    r""" // Was TWO separate WAAPI animations per cell (height/opacity on a wrapper,
+ // padding on the td itself) — 8 animated elements per row (4 columns x 2). A
+ // deck with many subdecks meant dozens to hundreds of simultaneous animations,
+ // each driving a per-frame reflow (height/padding both affect layout), which
+ // is what made this scale so badly with deck size. Folding padding into the
+ // SAME wrapper/keyframe (box-sizing:border-box so the animated height already
+ // accounts for it) halves that to one animation per cell — same visual result,
+ // half the concurrent layout-affecting animations.
+ function wrap(tr){return Array.prototype.map.call(tr.children,function(td){
+   var cs=getComputedStyle(td);
+   var w=document.createElement('div');
+   w.style.overflow='hidden'; w.style.boxSizing='border-box';
+   w.style.paddingTop=cs.paddingTop; w.style.paddingBottom=cs.paddingBottom;
+   td.style.paddingTop='0'; td.style.paddingBottom='0';
+   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}
+ function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;
+   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();
+   td.style.paddingTop=''; td.style.paddingBottom='';});}
+ function run(rows,open,done){
+   var ws=[], fill=open?'none':'forwards';
+   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});
+   ws.forEach(function(w){
+     var h=w.scrollHeight+'px', pt=w.style.paddingTop, pb=w.style.paddingBottom;
+     var closed={height:'0px',opacity:0,paddingTop:'0px',paddingBottom:'0px'};
+     var opened={height:h,opacity:1,paddingTop:pt,paddingBottom:pb};
+     w.animate(open?[closed,opened]:[opened,closed],{duration:DUR,easing:EASE,fill:fill});
+   });
+   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded
+   // view), which would leave a fold stuck without ever sending the collapse.
+   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);
+ }
+""" \
+    "\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
 
 # Deck list width + columns: Anki sizes the table to its widest VISIBLE deck name, so
 # opening or closing subdecks made the whole list jump wider/narrower and the count
@@ -458,20 +491,16 @@ _DECK_WIDTH_JS = r"""(function(){
    var nat=natural(), prev=Math.min(stored(), cap());
    var target=Math.max(nat, prev), start=prev||nat;
    t.style.width=target+'px'; var fin=centres();
-   t.style.width=start+'px'; var now=centres();
+   t.style.width=start+'px';
    // Only animate right after a +/− click. Anki also redraws the list 2–3× on launch
    // (and on returning from review) while the webfont swaps in; sliding on those made
    // the columns jitter against each other.
    var toggled=get('jkColAnim')==='1'; put('jkColAnim','');
-   var old=null; try{ old=JSON.parse(get(key+':x')||'null'); }catch(e){}
-   if(toggled && !still && old && old.length===now.length){
-     Array.prototype.forEach.call(t.rows, function(tr){
-       if(tr.children.length<2) return;
-       Array.prototype.slice.call(tr.children,1).forEach(function(c,i){
-         var dx=old[i]-now[i];
-         if(Math.abs(dx)>0.5){ try{ c.animate([{transform:'translateX('+dx+'px)'},
-           {transform:'none'}],{duration:DUR,easing:EASE}); }catch(e){} } }); });
-   }
+   // The New/Learn/Due columns used to get a compensating translateX FLIP here
+   // (snapshotting their old x, then animating back from it) whenever a subdeck
+   // reveal shifted the table width. Visibly sliding those columns read as a bug,
+   // not a nicety — dropped. The table-width slide below still smooths the width
+   // change itself; the columns just reflow with it, no separate motion of their own.
    put(key+':x', JSON.stringify(fin));
    t.style.width=target+'px';
    if(toggled && start<target-1 && !still){
@@ -503,23 +532,48 @@ _DECK_STICKY_CSS = (
     "html body center > table:first-of-type th{position:sticky!important;top:0;z-index:3;}"
 )
 _DECK_STICKY_JS = r"""(function(){
- var t, pend=false;
+ // Was one getBoundingClientRect() PER CELL (4x a row's real cost, since every cell
+ // in a row shares the same top/bottom) plus an unconditional style write on every
+ // row every scroll frame, even rows whose clip state hadn't changed — pure layout
+ // thrashing on a software-rasterized (Windows glass) scroll, the biggest visible
+ // source of choppy scrolling in the deck list. Now: one rect read per ROW, all
+ // reads done before any writes (no read/write interleaving forcing extra layout),
+ // and a write only for rows whose clip state actually changed since last frame —
+ // in practice that's the 0-2 rows crossing the header's bottom edge.
+ var t, pend=false, bodyRows=[];
+ function collectRows(){
+   bodyRows=[]; if(!t) return;
+   var th=t.querySelector('th'); if(!th) return;
+   Array.prototype.forEach.call(t.rows,function(tr){
+     if(tr!==th.parentNode) bodyRows.push({tr:tr, state:null}); }); }
  function clip(){ pend=false; if(!t) return;
    var th=t.querySelector('th'); if(!th) return;
    var H=0; Array.prototype.forEach.call(th.parentNode.children,function(c){
      H=Math.max(H,c.getBoundingClientRect().bottom); });
-   Array.prototype.forEach.call(t.rows,function(tr){
-     if(tr===th.parentNode) return;
-     Array.prototype.forEach.call(tr.children,function(c){
-       var r=c.getBoundingClientRect();
-       if(r.bottom<=H){ c.style.visibility='hidden'; c.style.clipPath=''; }
-       else if(r.top<H){ c.style.visibility=''; c.style.clipPath='inset('+(H-r.top)+'px -40px 0 -40px)'; }
-       else if(c.style.clipPath||c.style.visibility){ c.style.visibility=''; c.style.clipPath=''; }
-     }); }); }
+   // Read phase: one rect per row.
+   var rects=bodyRows.map(function(e){ return e.tr.getBoundingClientRect(); });
+   // Write phase: only rows whose discretized state changed.
+   for(var i=0;i<bodyRows.length;i++){
+     var e=bodyRows[i], r=rects[i], next;
+     if(r.bottom<=H) next='h';
+     else if(r.top<H) next='c'+(H-r.top);
+     else next='v';
+     if(next===e.state) continue;
+     e.state=next;
+     var hidden=(next==='h'), clipTop=(next.charAt(0)==='c')?parseFloat(next.slice(1)):null;
+     Array.prototype.forEach.call(e.tr.children,function(c){
+       if(hidden){ c.style.visibility='hidden'; c.style.clipPath=''; }
+       else if(clipTop!==null){ c.style.visibility=''; c.style.clipPath='inset('+clipTop+'px -40px 0 -40px)'; }
+       else { c.style.visibility=''; c.style.clipPath=''; }
+     });
+   }
+ }
  function sched(){ if(!pend){ pend=true; requestAnimationFrame(clip); } }
+ function onResize(){ collectRows(); sched(); }
  function go(){ t=document.querySelector('body center > table'); if(!t) return;
+   collectRows();
    window.addEventListener('scroll',sched,{passive:true});
-   window.addEventListener('resize',sched); sched(); }
+   window.addEventListener('resize',onResize); sched(); }
  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
 })();"""
 
@@ -534,9 +588,17 @@ _REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
 
 def _redesign_on() -> bool:
     """True when the Anki Redesign add-on is enabled. It brings its own hover
-    transitions, so Janki's motion CSS stands down instead of stacking on top."""
+    transitions, so Janki's motion CSS stands down instead of stacking on top.
+
+    addonManager.isEnabled() only checks the "disabled" flag in that add-on's
+    stored meta — an add-on that was never INSTALLED has no meta at all, so
+    "disabled" is absent and isEnabled() returns True vacuously. That silently
+    disabled every bit of Janki's own hover/dropdown motion on any profile that
+    never had Redesign installed (i.e. everywhere but the profile this was first
+    written against). Must confirm it's actually installed first."""
     try:
-        return bool(mw.addonManager.isEnabled(_REDESIGN_ID))
+        return _REDESIGN_ID in mw.addonManager.allAddons() and \
+               bool(mw.addonManager.isEnabled(_REDESIGN_ID))
     except Exception:
         return False
 
@@ -643,6 +705,18 @@ def _build_css(cfg, context):
         "  text-shadow: %s !important; }\n"
         "</style>\n"
     ) % _TEXT_SHADOW
+    if sys.platform.startswith("win"):
+        # The typewriter reveal (css.py: _typewriter_head) toggles this class for
+        # its brief animation window. Windows glass software-rasterizes every
+        # repaint, and re-blurring a text-shadow on every newly-visible char span
+        # (there can be hundreds by the end of a long card) is real per-tick cost;
+        # dropping the halo just while the type-out is running removes that cost
+        # with nothing to see — the halo reappears the instant a card settles.
+        base += (
+            "<style>\n"
+            "body.jk-tw-active, body.jk-tw-active * { text-shadow: none !important; }\n"
+            "</style>\n"
+        )
     parts = [base]
 
     # System-wide UI font, applied for every context (appended before the
@@ -1082,6 +1156,20 @@ def _build_css(cfg, context):
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
+        if sys.platform.startswith("win") and getattr(mw, "_jk_frameless", False):
+            # The frameless chrome's caption buttons (min/max/close, ~142px) float
+            # natively on top of the toolbar's top-right corner. The toolbar's own
+            # `.toolbar` pill is centered in a 3-column grid across the FULL window
+            # width, so at anything but a wide window its right edge runs under the
+            # caption buttons. Reserve that width on the right so the grid's centre
+            # column — and the pill — shift left, clear of the buttons.
+            parts.append(
+                "<style>\nhtml body #header { padding-right:150px !important;"
+                # A few px of breathing room above the pill so it (and the caption
+                # buttons, offset by the same TOP_GAP in chrome.py) don't sit flush
+                # against the window's very top edge.
+                " padding-top:6px !important;"
+                " box-sizing:border-box !important; }\n</style>\n")
         if sys.platform.startswith("win") and os.environ.get("JANKI_WIN_PREBOOT") == "1":
             # Frameless window: the toolbar's empty space is the title bar.
             parts.append(
@@ -1200,13 +1288,6 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "            p.classList.contains('MathJax_Preview')||p.classList.contains('mjx-chtml')||\n"
         "            p.classList.contains('amboss-marker'))) return true;\n"
         "        p=p.parentNode; } return false; }\n"
-        # True if the text node sits inside an underline (<u>/<ins> or an inline
-        # text-decoration:underline). Underlined runs are revealed whole (below) to
-        # avoid a costly per-frame underline recompute on software-composited glass.
-        "    function isUnderlined(node){ var p=node.parentNode; while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
-        "        if(t==='U'||t==='INS') return true;\n"
-        "        if(p.style && (p.style.textDecoration||'').indexOf('underline')>=0) return true;\n"
-        "        p=p.parentNode; } return false; }\n"
         "    function collect(clozeOnly){\n"
         "      if(clozeOnly){ var out=[], cs=qa.querySelectorAll('.cloze');\n"
         "        for(var k=0;k<cs.length;k++){ var w2=document.createTreeWalker(cs[k],NodeFilter.SHOW_TEXT,null),m;\n"
@@ -1223,56 +1304,82 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    function outerSig(){ var c=qa.cloneNode(true), cs=c.querySelectorAll('.cloze');\n"
         "      for(var i=0;i<cs.length;i++){ cs[i].textContent=''; }\n"
         "      return (c.textContent||'').replace(/\\s+/g,' ').trim(); }\n"
-        "    function timing(total){ var MS=Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED;\n"
-        "      return Math.max(1, Math.ceil(total/Math.max(1,(MS/12)))); }\n"
-        "    function typeOutStatic(clozeOnly, done){ var nodes=collect(clozeOnly), spans=[], holders=[];\n"
-        "      var liSeen=[];\n"
-        # The bullet/number of a list item is the <li> ::marker — not a text node, so the
-        # reveal never touched it and it popped in instantly. Hide each animated item's
-        # marker (visibility keeps the indent, no reflow) and flag its FIRST char span to
-        # bring the marker back in step with the text.
+        "    function totalMs(total){ return Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED; }\n"
+        # WIPE reveal: one holder per text node (no per-char DOM at all), clip-path
+        # animated left→right via the Web Animations API — the browser interpolates
+        # ONE property per holder declaratively instead of Janki's JS toggling
+        # visibility on hundreds of char-spans every other frame. That per-char
+        # version was the real source of the choppy/uneven reveal on Windows glass:
+        # every tick forced a style + paint pass across a growing number of live
+        # elements, and a slow tick (a big repaint elsewhere landing the same frame)
+        # made a WHOLE BATCH of characters pop in at once — visible "skipping."
+        # A clip-path wipe has no such batching: however many frames the browser
+        # actually manages, the wipe is at the right position for THAT frame, so a
+        # dropped frame just means one slightly bigger, still-smooth step forward,
+        # not a chunk of characters jumping in. clip-path only clips within an
+        # element's OWN box per line fragment, so this only looks right on a run
+        # confined to a single visual line; a run that wraps across several lines
+        # (a long stretch of plain text with no inline markup breaking it up) falls
+        # back to the old per-char step, scoped to just that one run.
+        "    function typeOutStatic(clozeOnly, done){\n"
+        "      var nodes=collect(clozeOnly);\n"
+        "      var totalChars=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
+        "      if(!totalChars){ reveal(); done(); return; }\n"
+        "      var MS=totalMs(totalChars);\n"
         "      function jkLi(tn){ var p=tn.parentElement; while(p && p!==qa){\n"
         "        if((p.tagName||'')==='LI') return p; p=p.parentNode; } return null; }\n"
-        "      nodes.forEach(function(e){ var tn=e[0], text=e[1], nu=isUnderlined(tn);\n"
-        "        var li=jkLi(tn), liFirst=null;\n"
-        "        if(li && liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden'; liFirst=li; }\n"
-        # Wrap each char in a tagged span inside ONE holder, so the reveal can be
-        # per-char but every span is removable afterward (see finish()). EXCEPTION:
-        # text inside an underline (<u>) is revealed as ONE span, not fragmented.
-        # Splitting underlined text into many inline boxes makes the browser recompute
-        # the underline across all fragments the first time that run paints — a ~150ms
-        # spike per underline on software-composited (--disable-gpu) glass. Revealing
-        # the underlined run whole (the phrase pops in) avoids it; other text still
-        # types char-by-char.
-        "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1'); var s0=spans.length;\n"
-        "        if(nu){ var sp=document.createElement('span'); sp.className='__jtwc'; sp.textContent=text; sp.style.visibility='hidden'; holder.appendChild(sp); spans.push(sp); }\n"
-        "        else { for(var i=0;i<text.length;i++){ var sp=document.createElement('span');\n"
-        "          sp.className='__jtwc'; sp.textContent=text[i]; sp.style.visibility='hidden';\n"
-        "          holder.appendChild(sp); spans.push(sp); } }\n"
-        "        if(liFirst && spans.length>s0) spans[s0].__jkli=liFirst;\n"
-        "        if(tn.parentNode){ tn.parentNode.replaceChild(holder, tn); holders.push(holder); } });\n"
-        "      reveal();\n"   # full layout is present (all chars sized) → nothing moves
-        # On finish, strip EVERY Janki char-span (even ones AMBOSS wrapped inside a
-        # marker), then unwrap the holder + normalize — leaving clean text with
-        # AMBOSS's own marker as a single element. That fixes: per-letter dropdowns,
-        # wrong tooltip position, the fullscreen-hide (span.amboss-marker matches
-        # again), and preserves the underline.
-        "      function finish(){ for(var h=0;h<holders.length;h++){ var hd=holders[h];\n"
-        "          try{ var cs=hd.querySelectorAll('span.__jtwc');\n"
-        "               for(var c=0;c<cs.length;c++){ cs[c].replaceWith(document.createTextNode(cs[c].textContent)); }\n"
-        "               var par=hd.parentNode;\n"
-        "               if(par){ while(hd.firstChild){ par.insertBefore(hd.firstChild, hd); }\n"
-        "                 par.removeChild(hd); par.normalize(); } }catch(e){} }\n"
-        "        for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
+        # Build every holder up front (stable full-size layout, nothing reflows once
+        # revealing starts) and hide each with a full clip — clip-path doesn't affect
+        # layout, so this is safe to set before reveal() and before measuring lines.
+        "      var HIDE='inset(0 100% 0 0)', SHOW='inset(0 0 0 0)';\n"
+        "      var holders=nodes.map(function(e){ var tn=e[0], text=e[1];\n"
+        "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1');\n"
+        "        holder.textContent=text; holder.style.clipPath=HIDE;\n"
+        "        if(tn.parentNode) tn.parentNode.replaceChild(holder, tn);\n"
+        "        return {el:holder, text:text, li:jkLi(tn)}; });\n"
+        # The <li> ::marker isn't a text node, so it's untouched by any of this and
+        # would pop in instantly ahead of its item's text — hide it (once per item;
+        # a bullet's text can be split across several holders) until its FIRST
+        # holder starts revealing.
+        "      var liSeen=[];\n"
+        "      holders.forEach(function(h){ if(h.li && liSeen.indexOf(h.li)<0){\n"
+        "        liSeen.push(h.li); h.li.style.visibility='hidden'; h.liFirst=true; } });\n"
+        "      reveal();\n"
+        "      function finishHolder(h){ try{ var par=h.el.parentNode;\n"
+        "        if(par){ par.replaceChild(document.createTextNode(h.text), h.el); par.normalize(); } }catch(e){} }\n"
+        "      function finishAll(){ for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
         "        done(); }\n"
-        "      var total=spans.length; if(!total){ finish(); return; }\n"
-        "      var perTick=timing(total)*JK_FR, i=0;\n"
-        "      function step(){ var b=perTick;\n"
-        "        while(b>0 && i<total){ spans[i].style.visibility='visible';\n"
-        "          if(spans[i].__jkli){ spans[i].__jkli.style.visibility=''; }\n"
-        "          i++; b--; }\n"
-        "        if(i<total) jkNext(step); else finish(); }\n"
-        "      jkNext(step); }\n"
+        "      var idx=0;\n"
+        "      function next(){\n"
+        "        if(idx>=holders.length){ finishAll(); return; }\n"
+        "        var h=holders[idx++];\n"
+        "        if(h.liFirst){ try{ h.li.style.visibility=''; }catch(e){} }\n"
+        "        var dur=Math.max(16, MS*(h.text.length/totalChars));\n"
+        "        var oneLine=h.el.getClientRects().length<=1;\n"
+        "        if(oneLine && typeof h.el.animate==='function'){\n"
+        "          var rtl=getComputedStyle(h.el).direction==='rtl';\n"
+        "          try{\n"
+        "            var anim=h.el.animate([{clipPath:rtl?'inset(0 0 0 100%)':HIDE},{clipPath:SHOW}],\n"
+        "              {duration:dur, easing:'linear', fill:'forwards'});\n"
+        "            anim.onfinish=function(){ finishHolder(h); next(); };\n"
+        "            anim.oncancel=function(){ finishHolder(h); next(); };\n"
+        "          }catch(e){ finishHolder(h); next(); }\n"
+        "          return;\n"
+        "        }\n"
+        # Multi-line fallback: the same per-char span-visibility step as before, but
+        # scoped to just THIS holder's text (rare — a long run of plain text with no
+        # inline markup to break it into single-line pieces), not the whole card.
+        "        h.el.style.clipPath=''; h.el.textContent='';\n"
+        "        var spans=[]; for(var i=0;i<h.text.length;i++){ var sp=document.createElement('span');\n"
+        "          sp.className='__jtwc'; sp.textContent=h.text[i]; sp.style.visibility='hidden';\n"
+        "          h.el.appendChild(sp); spans.push(sp); }\n"
+        "        var perTick=Math.max(1, Math.ceil(spans.length/Math.max(1,dur/(1000/60))))*JK_FR, ci=0;\n"
+        "        function step(){ var b=perTick;\n"
+        "          while(b>0 && ci<spans.length){ spans[ci].style.visibility='visible'; ci++; b--; }\n"
+        "          if(ci<spans.length) jkNext(step); else { finishHolder(h); next(); } }\n"
+        "        jkNext(step);\n"
+        "      }\n"
+        "      next(); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"
         "      var nodes=collect(clozeOnly);\n"
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
@@ -1339,8 +1446,13 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # PREV_HASH and reveal instantly instead of replaying.
         "      try{ if(window.pycmd) pycmd('jktwanim:'+s); }catch(e){}\n"
         "      animating=true;\n"
+        # Drop the readability halo for the animation's duration only (Windows glass
+        # only — see the matching body.jk-tw-active rule in css.py's _build_css).
+        # Removes a growing per-tick shadow-blur cost with nothing visibly lost.
+        "      if(JK_FR>1) document.body.classList.add('jk-tw-active');\n"
         "      if(observer) observer.disconnect();\n"
         "      typeOut(false, function(){ animating=false;\n"
+        "        if(JK_FR>1) document.body.classList.remove('jk-tw-active');\n"
         "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }); }\n"
         "    // childList-only + SYNCHRONOUS run: the observer microtask fires before\n"
         "    // the browser paints, so emptying the text here means the full text is\n"
@@ -1764,7 +1876,7 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             web_content.head += "\n" + _typewriter_head(_cfg(), prev_hash=prev)
         # Review history charts (calendar heatmap + reviews plot) on the deck
         # browser home screen. Optional — hidden via Settings → General.
-        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", True):
+        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", False):
             web_content.head += "\n" + _stats_head()
         # In the Practice view, relabel the deck browser's bottom "Import File" button
         # to "Import Bank" (its click is redirected to the bank importer — see
