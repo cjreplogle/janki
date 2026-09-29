@@ -476,6 +476,36 @@ _DECK_WIDTH_JS = r"""(function(){
  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
 })();"""
 
+# Deck list header (Deck / New / Learn / Due, or Bank / To-Do / Review / Completion)
+# stays pinned at the top while the decks scroll. The glass table has no background to
+# hide rows passing under the header, so each row's cells are clipped at the header's
+# bottom line instead (clip-path), and hidden once fully above it. overflow:clip (not
+# hidden) keeps the rounded table from becoming the sticky element's scroll container.
+_DECK_STICKY_CSS = (
+    "html body center > table:first-of-type{overflow:clip!important;}"
+    "html body center > table:first-of-type th{position:sticky!important;top:0;z-index:3;}"
+)
+_DECK_STICKY_JS = r"""(function(){
+ var t, pend=false;
+ function clip(){ pend=false; if(!t) return;
+   var th=t.querySelector('th'); if(!th) return;
+   var H=0; Array.prototype.forEach.call(th.parentNode.children,function(c){
+     H=Math.max(H,c.getBoundingClientRect().bottom); });
+   Array.prototype.forEach.call(t.rows,function(tr){
+     if(tr===th.parentNode) return;
+     Array.prototype.forEach.call(tr.children,function(c){
+       var r=c.getBoundingClientRect();
+       if(r.bottom<=H){ c.style.visibility='hidden'; c.style.clipPath=''; }
+       else if(r.top<H){ c.style.visibility=''; c.style.clipPath='inset('+(H-r.top)+'px -40px 0 -40px)'; }
+       else if(c.style.clipPath||c.style.visibility){ c.style.visibility=''; c.style.clipPath=''; }
+     }); }); }
+ function sched(){ if(!pend){ pend=true; requestAnimationFrame(clip); } }
+ function go(){ t=document.querySelector('body center > table'); if(!t) return;
+   window.addEventListener('scroll',sched,{passive:true});
+   window.addEventListener('resize',sched); sched(); }
+ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
+})();"""
+
 _REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
 
 
@@ -664,6 +694,8 @@ def _build_css(cfg, context):
         parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
+        parts.append("<style>" + _DECK_STICKY_CSS + "</style>\n"
+                     "<script>" + _DECK_STICKY_JS + "</script>\n")
         # New / Learn / Due headings centred over their numbers (Anki right-aligns both).
         parts.append("<style>html body th.count, html body tr.deck > td[align=end]"
                      "{text-align:center!important;}</style>\n")
