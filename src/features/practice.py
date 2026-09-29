@@ -247,21 +247,17 @@ def install_practice_toolbar(links, toolbar):
         log("practice toolbar: %s" % e)
 
 
+_INCOMPLETE_TAG = "Practice::Incomplete"   # same tag as qbank
+
+
 def _acc_pct(did, names):
-    """Score for a bank/subbank (this deck + its descendants): the share of the cards
-    you've ATTEMPTED that you've RETIRED (suspended). Binary practice suspends a card on
-    a correct answer, so this reads as 'of what I've attempted, how much I've gotten
-    right / cleared'. = suspended cards / attempted cards.
-
-    Both counts come from the card's CURRENT queue (not the review log), so a card that
-    is Forgotten/reset — returning to the new queue — drops back out of the denominator.
-    (The old revlog-based count kept every card that was EVER answered forever, since a
-    reset doesn't delete revlog history, which made the score read far too low.)
-
-    Attempted = queue in (-1 suspended, 1 learning, 2 review, 3 day-relearn): everything
-    that's been answered at least once and not reset. Excludes new (0, incl. reset cards)
-    and buried (-2/-3, i.e. skips). Returns an int 0..100, or None when nothing's been
-    attempted yet."""
+    """Completion for a bank/subbank (this deck + its descendants): the share of its
+    answerable cards you've RETIRED. Binary practice suspends a card when you pick the
+    right answer (a wrong pick only buries it until next session), so this reads as
+    'how much of this bank have I cleared'. = suspended cards / all cards, leaving out
+    the ⚠ incomplete-question cards (tagged Practice::Incomplete), which can't be
+    answered properly. From each card's CURRENT queue, so resetting a card drops it
+    back out of the numerator. Returns an int 0..100, or None for an empty bank."""
     try:
         this = names.get(did)
         if this is None:
@@ -273,15 +269,16 @@ def _acc_pct(did, names):
         ph = ",".join("?" * len(sub))
         row = mw.col.db.first(
             "select "
-            "sum(case when queue=-1 then 1 else 0 end),"
-            "sum(case when queue in (-1,1,2,3) then 1 else 0 end) "
-            "from cards where did in (%s)" % ph, *sub)
-        suspended, attempted = (row or [0, 0])
+            "sum(case when c.queue=-1 then 1 else 0 end), count(*) "
+            "from cards c join notes n on n.id = c.nid "
+            "where c.did in (%s) and n.tags not like ?" % ph,
+            *sub, "%% %s %%" % _INCOMPLETE_TAG)
+        suspended, total = (row or [0, 0])
         suspended = suspended or 0
-        attempted = attempted or 0
-        if not attempted:
+        total = total or 0
+        if not total:
             return None
-        return max(0, min(100, int(round(100.0 * suspended / attempted))))
+        return max(0, min(100, int(round(100.0 * suspended / total))))
     except Exception as e:
         log("acc pct: %s" % e)
         return None
@@ -319,15 +316,18 @@ def hide_practice_rows(deck_browser, content):
             names = {int(n.id): n.name for n in mw.col.decks.all_names_and_ids()}
 
             def _filter(keep, deindent):
-                hdr = iter(["To-Do", "Review", "Score"])   # New / Learn / Due columns
+                hdr = iter(["To-Do", "Review", "Completion"])   # New / Learn / Due columns
 
                 def _row(m):
                     row = m.group(0)
                     if "<th" in row:                    # column header row
                         row = re.sub(r"(<th colspan=5[^>]*>).*?(</th>)", r"\1Bank\2",
                                      row, count=1, flags=re.DOTALL)
-                        row = re.sub(r"(<th class=count>).*?(</th>)",
-                                     lambda mm: mm.group(1) + next(hdr, "") + mm.group(2),
+                        # Headings centred over their numbers (the cells below are
+                        # centred too), so To-Do / Review / Completion line up.
+                        row = re.sub(r"(<th class=count)>.*?(</th>)",
+                                     lambda mm: (mm.group(1) + " style='text-align:center'>"
+                                                 + next(hdr, "") + mm.group(2)),
                                      row, flags=re.DOTALL)
                         return row
                     if "top-level-drag-row" in row:     # spacer → same top gap as normal
@@ -343,16 +343,19 @@ def hide_practice_rows(deck_browser, content):
                     if did in deindent:
                         row = re.sub(r"(<td class=decktd colspan=5>)(?:&nbsp;){6}", r"\1",
                                      row, count=1)
+                    # Centre every count cell under its (centred) heading.
+                    row = row.replace("<td align=end>", "<td align=center>")
                     if did in amb:                  # AMBOSS deck: keep its real counts
                         return row
                     # Replace the Due count with % accuracy for this bank/subbank subtree.
                     pct = _acc_pct(did, names)
                     label = ("%d%%" % pct) if pct is not None else "—"
-                    cells = list(re.finditer(r"<td align=end>.*?</td>", row, re.DOTALL))
+                    cells = list(re.finditer(r"<td align=center>.*?</td>", row, re.DOTALL))
                     if len(cells) >= 3:
                         c = cells[2]
                         row = (row[:c.start()]
-                               + '<td align=end><span class="review-count">%s</span></td>' % label
+                               + '<td align=center><span class="review-count">%s</span></td>'
+                               % label
                                + row[c.end():])
                     return row
                 return re.sub(r"<tr[^>]*>.*?</tr>", _row, content.tree, flags=re.DOTALL)

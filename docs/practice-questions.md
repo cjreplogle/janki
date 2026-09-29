@@ -130,7 +130,7 @@ no account, nothing uploaded.**
 file. Janki extracts each slide image, recognizes the text, assembles the
 multiple-choice questions, and reports how many it read cleanly before building
 and importing the `.qb`. From there it behaves like any other bank (same binary
-grading, Score, Practice deck).
+grading, Completion, Practice deck).
 
 For this to work the slides should read roughly like:
 
@@ -208,8 +208,8 @@ matcher used by `Tab + Q`.
   your next "card" in the same deck flow, then your real cards resume — no leaving
   the deck. It's a real Practice card, so it looks and grades exactly like the
   Practice deck: pick an answer, see it tint green/red with the explanation, and
-  **Continue**. Get it right and it retires (and counts toward the bank's Score);
-  get it wrong or skip and it comes back later in the session.
+  **Continue**. Get it right and it retires (and counts toward the bank's Completion);
+  get it wrong or skip and it's set aside until a later session.
 - **Before each pomodoro break → mini practice set.** Right before the break
   screen, Janki gathers a short set of matched questions and lets you run through
   them as a quick benchmark, then the break begins. (Requires Pomodoro enabled
@@ -245,28 +245,28 @@ for integrating these questions seamlessly with your cards.
 
 ---
 
-## How grading & Score work
+## How grading & Completion work
 
 Practice cards are graded **only by your answer choice**, not by the usual
 Again/Hard/Good/Easy:
 
 - **Correct** → graded Easy and **suspended** (retired from the queue), with a
   soft green flare.
-- **Incorrect** → graded Hard (comes back for another try).
+- **Incorrect** → **buried** until your next session (no review recorded, scheduling
+  untouched), so it comes back for another try later.
 - **Skip** (advance without picking) → **buried** for the session, no judgement.
 
 Practice questions work fundamentally different from traditional card reviews
 because we are not trying to just associate definitions. It is testing your
 understanding. You either make the connection or you don't. When you get a card
 right, we get it out of your way, since the exercise is complete. If it's wrong,
-it acts equivalent in spacing to a 'Hard' card review. You will see it again
-another time, but not as quickly as simply not knowing a card to avoid just
-remembering the answer.
+it's set aside for the rest of the session, so you see it again another day
+rather than minutes later (when you'd just be remembering the answer).
 
-The **Score** shown for each bank is the share of the cards you've *attempted*
-that you've *cleared*: **suspended ÷ attempted**, from each card's current state.
-Resetting a card returns it to "new" and drops it back out — and skipped/buried
-cards don't count either way.
+The **Completion** shown for each bank is the share of its questions you've
+*cleared*: **suspended ÷ all cards**, from each card's current state. The ⚠
+incomplete-question cards aren't counted, and resetting a card returns it to
+"new" and drops it back out.
 
 > On **AnkiMobile**, practice cards still show the right/wrong color and the
 > explanation, but the app doesn't allow grading from card JavaScript — so grade

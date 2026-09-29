@@ -82,6 +82,63 @@ def _make_card_timer():
             pass
         return False
 
+    def _prep_overlay_native(w, ignore_mouse=False):
+        """Make an overlay's NSWindow focus-safe BEFORE it is first ordered on screen.
+        Qt's show() orders the window front on its own for a beat before
+        _apply_native attaches it as a child of the main window. Without
+        FullScreenAuxiliary, that first order-front happens outside a native-fullscreen
+        Space, and a panel that can activate takes key from the fullscreen reviewer.
+        Either way the fullscreen window loses focus. Idempotent (value-checked, so no
+        style-mask churn)."""
+        try:
+            msg, cls = _bridge()
+            ns = msg(c_void_p, c_void_p(int(w.winId())), b"window")
+            if not ns:
+                return
+            beh = int(msg(c_ulong, ns, b"collectionBehavior"))
+            if (beh & (1 | 256)) != (1 | 256):
+                # CanJoinAllSpaces (1) excludes MoveToActiveSpace (2), and
+                # FullScreenAuxiliary (256) excludes FullScreenPrimary (128) /
+                # FullScreenNone (512). Qt sets one of those by default, and AppKit
+                # raises an uncatchable ObjC exception (app abort) on a conflicting
+                # combo, so clear them first.
+                beh = (beh & ~(2 | 128 | 512)) | 1 | 256
+                msg(None, ns, b"setCollectionBehavior:", (c_ulong,), (c_ulong(beh),))
+            if msg(c_bool, ns, b"isKindOfClass:", (c_void_p,), (cls(b"NSPanel"),)):
+                cur = int(msg(c_ulong, ns, b"styleMask"))
+                if not (cur & 128):          # NSWindowStyleMaskNonactivatingPanel
+                    msg(None, ns, b"setStyleMask:", (c_ulong,), (c_ulong(cur | 128),))
+                msg(None, ns, b"setBecomesKeyOnlyIfNeeded:", (c_bool,), (True,))
+            if ignore_mouse:
+                msg(None, ns, b"setIgnoresMouseEvents:", (c_bool,), (True,))
+        except Exception:
+            pass
+
+    def _restore_main_focus(prev):
+        """Undo any focus the overlay knocked off the reviewer: the main NSWindow
+        becomes key again and the widget that had keyboard focus gets it back. Only
+        while Anki is frontmost, so this never steals focus from another app."""
+        if not state._anki_focused:
+            return
+        try:
+            msg, _cls = _bridge()
+            main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+            if main and not msg(c_bool, main, b"isKeyWindow"):
+                msg(None, main, b"makeKeyWindow")
+        except Exception:
+            pass
+        try:
+            from aqt.qt import QApplication
+            cur = QApplication.focusWidget()
+            if prev is not None and cur is not prev and prev.window() is mw \
+                    and prev.isVisible():
+                prev.setFocus()
+            elif cur is None and getattr(mw, "web", None) is not None \
+                    and mw.state == "review":
+                mw.web.setFocus()
+        except Exception:
+            pass
+
     class TimerBar(QWidget):
         def __init__(self):
             # NOTE: no WindowStaysOnTopHint — addChildWindow(ordered:Above) keeps it
@@ -90,7 +147,8 @@ def _make_card_timer():
             # (stealing focus, esp. in fullscreen). Same lesson as PulseOverlay.
             super().__init__(None,
                 Qt.WindowType.FramelessWindowHint |
-                Qt.WindowType.Tool)
+                Qt.WindowType.Tool |
+                Qt.WindowType.WindowDoesNotAcceptFocus)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
             self._p = 0.0
@@ -121,6 +179,7 @@ def _make_card_timer():
             self._hv_t.setInterval(40)
             self._hv_t.timeout.connect(self._hover_tick)
             self._hv_t.start()
+            _prep_overlay_native(self)
 
         def _hover_tick(self):
             """Fade the ring out while the Practice button is revealed (cursor in its
@@ -433,6 +492,12 @@ def _make_card_timer():
         def showEvent(self, ev):
             super().showEvent(ev)
             if not self._native_done:
+                try:
+                    from aqt.qt import QApplication
+                    self._prev_focus = QApplication.focusWidget()
+                except Exception:
+                    self._prev_focus = None
+                _prep_overlay_native(self)
                 QTimer.singleShot(0, self._apply_native)
 
         def hideEvent(self, ev):
@@ -519,7 +584,8 @@ def _make_card_timer():
                     msg(None, ns, b"orderFront:", (c_void_p,), (None,))
                 else:
                     msg(None, ns, b"setLevel:", (c_long,), (c_long(0),))       # NSNormalWindowLevel
-                    msg(None, ns, b"setCollectionBehavior:", (c_ulong,), (c_ulong(0),))
+                    # FullScreenAuxiliary stays on (see _prep_overlay_native)
+                    msg(None, ns, b"setCollectionBehavior:", (c_ulong,), (c_ulong(1 | 256),))
                     if not msg(c_void_p, ns, b"parentWindow"):
                         main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
                         if main:
@@ -561,6 +627,7 @@ def _make_card_timer():
             except Exception:
                 pass
             self._set_float(self._should_float())
+            _restore_main_focus(getattr(self, "_prev_focus", None))
 
         def _paint_bar(self):
             # Original thin progress bar (horizontal).
@@ -706,7 +773,8 @@ def _make_card_timer():
             # firing window.blur in the AMBOSS webview (dismissed its preview/tooltip).
             super().__init__(None,
                 Qt.WindowType.FramelessWindowHint |
-                Qt.WindowType.Tool)
+                Qt.WindowType.Tool |
+                Qt.WindowType.WindowDoesNotAcceptFocus)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -722,6 +790,7 @@ def _make_card_timer():
             self._pulse_t = QTimer(self)
             self._pulse_t.setInterval(33)   # ~30 fps
             self._pulse_t.timeout.connect(self._tick)
+            _prep_overlay_native(self, ignore_mouse=True)
 
         def _tick(self):
             import math
@@ -816,6 +885,12 @@ def _make_card_timer():
                 # before the first tick.
                 self.setWindowOpacity(0.12)
                 if not self.isVisible():
+                    try:
+                        from aqt.qt import QApplication
+                        self._prev_focus = QApplication.focusWidget()
+                    except Exception:
+                        self._prev_focus = None
+                    _prep_overlay_native(self, ignore_mouse=True)
                     self.show()
                 if not self._pulse_t.isActive():
                     self._pulse_t.start()
@@ -881,12 +956,12 @@ def _make_card_timer():
                     if host:
                         msg(c_void_p, host, b"addChildWindow:ordered:",
                             (c_void_p, c_long), (ns, 1))
-                # Reassert the main window as key so any transient resign-key from
-                # showing this overlay is undone — keeps DOM focus in the AMBOSS /
-                # reviewer webview (no window.blur). Only when Anki is frontmost, so
-                # we never steal focus from another app.
-                if main and state._anki_focused:
-                    msg(None, main, b"makeKeyWindow")
+                # Undo any transient resign-key from showing this overlay — keeps the
+                # fullscreen window key and DOM focus in the AMBOSS / reviewer webview
+                # (no window.blur). Only when Anki is frontmost (see helper).
+                prev = getattr(self, "_prev_focus", None)
+                _restore_main_focus(prev)
+                QTimer.singleShot(80, lambda p=prev: _restore_main_focus(p))
                 self._native_done = True
             except Exception:
                 pass

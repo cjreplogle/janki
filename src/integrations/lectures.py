@@ -2224,13 +2224,55 @@ def _open_today_dialog(day_offset=0, auto=False):
     for _cb in src_cbs.values():                   # toggling a source recounts live
         _cb.toggled.connect(lambda _c=False: _recount())
 
+    # Loading a big day (AnKing can put ~2000 cards on one day) used to freeze Anki: two
+    # find_cards per lecture, the unsuspend, and a full mw.reset() all ran on the main thread.
+    # Now: ONE combined search in a background QueryOp, then the (un)suspend as a background
+    # CollectionOp (undoable; Anki refreshes its own views from the op's changes, so no reset).
+    def _busy(on, text=""):
+        btn_unsusp.setEnabled(not on)
+        btn_resusp.setEnabled(not on and _has_day_state(st["target"]))
+        if on:
+            state_lbl.setVisible(True)
+            state_lbl.setText("<i>%s</i>" % text)
+
+    def _finish_change(msg):
+        frag_ids.clear()   # suspended state changed → cached id-sets are stale
+        st["cgen"] = st.get("cgen", 0) + 1   # invalidate any in-flight count batch
+        st["queue"] = []                     # rebuilt fresh by the next _recount
+        tooltip("Janki Lectures — " + msg, period=4000)
+        _populate(st["offset"])   # refresh counts/checks in place (dialog stays up)
+        _busy(False)
+        state_lbl.setVisible(True)
+        state_lbl.setText("<b style='color:#3a3'>✓ %s.</b>" % msg)
+
+    def _run_change(unsusp, susp, on_done):
+        """(Un)suspend in one background CollectionOp, then on_done() on the main thread."""
+        if not unsusp and not susp:
+            on_done()
+            return
+        from aqt.operations import CollectionOp
+
+        def op(col):
+            ch = None
+            if unsusp:
+                ch = col.sched.unsuspend_cards(list(unsusp))
+            if susp:
+                ch = col.sched.suspend_cards(list(susp))
+            return ch
+
+        def failed(exc):
+            _busy(False)
+            _log("unsuspend op failed: %s" % exc)
+            state_lbl.setText("<b style='color:#c33'>Couldn't change cards: %s</b>" % exc)
+
+        CollectionOp(parent=dlg, op=op).success(lambda _c: on_done()).failure(failed).run_in_background()
+
     def _do_unsuspend():
         target = st["target"]
         events, combos, auto_keys = st["events"], st["combos"], st["auto_keys"]
         raw = _load_aliases_raw()
         changed = False
-        to_unsusp = set()        # suspended cards in checked lectures → unsuspend
-        checked_cards = set()    # ALL cards in checked lectures (for re-suspend calc)
+        searches_all = []        # every enabled fragment of every checked lecture
         active_lectures = []
         for r, ev in enumerate(events):
             if table.item(r, 0).checkState() != _Qt.CheckState.Checked:
@@ -2241,50 +2283,59 @@ def _open_today_dialog(day_offset=0, auto=False):
             searches = _enabled_frags(nk)   # honors source / exact-only / +tag toggles
             if not searches:
                 continue
-            to_unsusp |= _suspended_ids(searches)
-            checked_cards |= _match_ids(searches)
+            searches_all.extend(s for s in searches if s not in searches_all)
             active_lectures.append(m[nk]["display"])
             if nk != auto_keys[r]:
                 raw[ev] = m[nk]["display"]
                 changed = True
 
-        prev_ids, _prev_lecs = _load_day_active(target)
-        resuspend = prev_ids - checked_cards - _owned_except(target)
-        if resuspend:
-            if QMessageBox.question(
-                    dlg, "Janki Lectures",
-                    "Re-suspend %d card(s) from lecture(s) you removed?"
-                    % len(resuspend)) != QMessageBox.StandardButton.Yes:
-                return
-        if len(to_unsusp) > 200:
-            if QMessageBox.question(
-                    dlg, "Janki Lectures",
-                    "This will unsuspend %d cards — that's a lot for one day.\n\n"
-                    "Continue?" % len(to_unsusp)) != QMessageBox.StandardButton.Yes:
-                return
+        from aqt.operations import QueryOp
+        joined = " OR ".join("(%s)" % s for s in searches_all)
 
-        if changed:
-            _save_aliases(raw)
-        _unsuspend_ids(to_unsusp)
-        _suspend_ids(resuspend)
-        new_owned = (prev_ids - resuspend) | to_unsusp
-        _save_day_active(new_owned, active_lectures, target)
-        if to_unsusp or resuspend:
-            mw.reset()
-        frag_ids.clear()   # suspended state changed → cached id-sets are stale
-        st["cgen"] = st.get("cgen", 0) + 1   # invalidate any in-flight count batch
-        st["queue"] = []                     # rebuilt fresh by the next _recount
+        def find(col):
+            if not joined:
+                return set(), set()
+            try:
+                return (set(col.find_cards("(%s) is:suspended" % joined)),   # → unsuspend
+                        set(col.find_cards("(%s)" % joined)))                # all (re-suspend calc)
+            except Exception as e:
+                _log("find_cards failed: %s" % e)
+                return set(), set()
 
-        # Feedback: a persistent tooltip AND an in-dialog banner (the window stays
-        # open, so the user sees confirmation without it vanishing).
-        msg = ("Loaded %s: +%d card(s) unsuspended"
-               % (_day_label(st["offset"]), len(to_unsusp)))
-        if resuspend:
-            msg += ", −%d re-suspended" % len(resuspend)
-        tooltip("Janki Lectures — " + msg, period=4000)
-        _populate(st["offset"])   # refresh counts/checks in place (dialog stays up)
-        state_lbl.setVisible(True)
-        state_lbl.setText("<b style='color:#3a3'>✓ %s.</b>" % msg)
+        def found(res):
+            to_unsusp, checked_cards = res
+            prev_ids, _prev_lecs = _load_day_active(target)
+            resuspend = prev_ids - checked_cards - _owned_except(target)
+            if resuspend:
+                if QMessageBox.question(
+                        dlg, "Janki Lectures",
+                        "Re-suspend %d card(s) from lecture(s) you removed?"
+                        % len(resuspend)) != QMessageBox.StandardButton.Yes:
+                    _busy(False); state_lbl.setVisible(False)
+                    return
+            if len(to_unsusp) > 200:
+                if QMessageBox.question(
+                        dlg, "Janki Lectures",
+                        "This will unsuspend %d cards — that's a lot for one day.\n\n"
+                        "Continue?" % len(to_unsusp)) != QMessageBox.StandardButton.Yes:
+                    _busy(False); state_lbl.setVisible(False)
+                    return
+            if changed:
+                _save_aliases(raw)
+            _busy(True, "Unsuspending %d card(s)…" % len(to_unsusp))
+
+            def applied():
+                _save_day_active((prev_ids - resuspend) | to_unsusp, active_lectures, target)
+                msg = ("Loaded %s: +%d card(s) unsuspended"
+                       % (_day_label(st["offset"]), len(to_unsusp)))
+                if resuspend:
+                    msg += ", −%d re-suspended" % len(resuspend)
+                _finish_change(msg)
+
+            _run_change(to_unsusp, resuspend, applied)
+
+        _busy(True, "Finding cards…")
+        QueryOp(parent=dlg, op=find, success=found).run_in_background()
 
     def _do_resuspend():
         """Undo this day: re-suspend every card Janki unsuspended for the viewed
@@ -2302,18 +2353,13 @@ def _open_today_dialog(day_offset=0, auto=False):
                    if len(prev_ids) != len(resuspend) else "")
                 ) != QMessageBox.StandardButton.Yes:
             return
-        _suspend_ids(resuspend)
-        _save_day_active(set(), [], target)   # day now owns nothing (entry dropped)
-        if resuspend:
-            mw.reset()
-        frag_ids.clear()
-        st["cgen"] = st.get("cgen", 0) + 1   # invalidate any in-flight count batch
-        st["queue"] = []                     # rebuilt fresh by the next _recount
-        msg = "Re-suspended %s: −%d card(s)" % (_day_label(st["offset"]), len(resuspend))
-        tooltip("Janki Lectures — " + msg, period=4000)
-        _populate(st["offset"])
-        state_lbl.setVisible(True)
-        state_lbl.setText("<b style='color:#3a3'>✓ %s.</b>" % msg)
+        _busy(True, "Re-suspending %d card(s)…" % len(resuspend))
+
+        def applied():
+            _save_day_active(set(), [], target)   # day now owns nothing (entry dropped)
+            _finish_change("Re-suspended %s: −%d card(s)" % (_day_label(st["offset"]), len(resuspend)))
+
+        _run_change(set(), resuspend, applied)
 
     btn_unsusp.clicked.connect(_do_unsuspend)
     btn_resusp.clicked.connect(_do_resuspend)
@@ -2664,18 +2710,24 @@ def run_today(interactive=True, auto=False):
         if not (_cfg().get("ics_path") or "").strip():
             return
         # Silently unsuspend auto-matches.
+        # Search + unsuspend off the main thread (big days froze Anki; see _do_unsuspend).
         matched, _unmatched = match_today(_enabled_families())
-        ids = set()
-        for _cal, _res, searches, _fz in matched:
-            ids |= _suspended_ids(searches)
-        ids = list(ids)
-        if ids:
-            try:
-                mw.col.sched.unsuspend_cards(ids)
-            except Exception:
-                mw.col.unsuspend_cards(ids)
-            mw.reset()
-        tooltip("Janki Lectures: unsuspended %d cards for today." % len(ids))
+        searches = [q for _cal, _res, ss, _fz in matched for q in ss]
+        if not searches:
+            tooltip("Janki Lectures: unsuspended 0 cards for today.")
+            return
+        from aqt.operations import CollectionOp
+        joined = " OR ".join("(%s)" % q for q in searches)
+        box = {}
+
+        def op(col):
+            ids = list(col.find_cards("(%s) is:suspended" % joined))
+            box["n"] = len(ids)
+            return col.sched.unsuspend_cards(ids)
+
+        CollectionOp(parent=mw, op=op).success(
+            lambda _c: tooltip("Janki Lectures: unsuspended %d cards for today." % box.get("n", 0))
+        ).run_in_background()
     except Exception as e:
         _log("run_today error: %s\n%s" % (e, traceback.format_exc()))
         if interactive:

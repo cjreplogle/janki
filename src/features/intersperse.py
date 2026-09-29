@@ -358,19 +358,18 @@ def exit_inline():
 def resolve_inline(cid, correct, answered):
     """Resolve an inline practice card WITHOUT the SRS backend (it wasn't scheduler-
     served, so answer_card would desync the real queue). Correct → suspend/retire
-    (counts toward the bank Score, same as practice mode); wrong → resurface later
-    this session; skip → drop. Then advance the reviewer to the next card."""
+    (counts toward the bank's Completion, same as practice mode); wrong or skip →
+    set aside for the rest of the session, like practice mode's bury. Then advance
+    the reviewer to the next card."""
     _inline_active.discard(cid)
     try:
         if answered and correct:
             mw.col.sched.suspend_cards([cid])
             _inline_resolved[cid] = "suspend"
-        elif answered and not correct:
-            if cid not in _requeue:
-                _requeue.append(cid)   # comes back later, like practice-mode "Hard"
-            _inline_resolved[cid] = "requeue"
         else:
-            _inline_resolved[cid] = "skip"   # dropped for the session (in _seen)
+            # Wrong or skipped: dropped for the session (it's in _seen), matching the
+            # practice deck, where a wrong pick buries the card until next session.
+            _inline_resolved[cid] = "skip"
     except Exception as e:
         log("intersperse resolve: %s" % e)
     r = getattr(mw, "reviewer", None)

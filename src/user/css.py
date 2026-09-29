@@ -405,6 +405,143 @@ def black_text_css(scopes=("",)) -> str:
     return full + "{color:inherit !important;}"
 
 
+
+# Deck list: subdecks drop down when a "+" is clicked and fold up on "−". Anki rebuilds
+# the whole page on every collapse toggle, so opening remembers the clicked deck
+# (sessionStorage) and unfolds its subdeck rows after the redraw, while closing folds
+# them first and then sends Anki's own collapse command. Rows are found by indent (the
+# leading &nbsp; count), so it also works on the Practice page's banks.
+_DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=260, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
+
+# Deck list width + columns: Anki sizes the table to its widest VISIBLE deck name, so
+# opening or closing subdecks made the whole list jump wider/narrower and the count
+# columns (New / Learn / Due) jump sideways. Remember the widest the list has been this
+# session (per view: decks vs Practice banks) and never narrow below it; if a wider name
+# appears, slide out to the new width. Each column also slides from its x on the
+# previous render to its new x. Capped to the window, and re-fit on resize.
+_DECK_WIDTH_JS = r"""(function(){
+ var t, key, EASE='cubic-bezier(.2,.8,.2,1)', DUR=300;
+ var still=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+ function cap(){ return document.documentElement.clientWidth - 24; }
+ function natural(){ var w=t.style.width; t.style.width=''; var n=t.getBoundingClientRect().width;
+   t.style.width=w; return n; }
+ function get(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+ function put(k,v){ try{ sessionStorage.setItem(k,v); }catch(e){} }
+ function stored(){ return parseFloat(get(key))||0; }
+ // Centre x of each column after the name cell (New / Learn / Due / options), from the
+ // header row (or the first deck row if there's none).
+ function refRow(){ var th=t.querySelector('th'); return th ? th.parentNode : t.querySelector('tr.deck'); }
+ function centres(){ var r=refRow(); if(!r) return [];
+   return Array.prototype.slice.call(r.children,1).map(function(c){
+     var b=c.getBoundingClientRect(); return b.left+b.width/2; }); }
+ function go(){
+   t=document.querySelector('body center > table'); if(!t) return;
+   var th=t.querySelector('th');
+   key='jkDeckW:'+(th&&/^\s*Bank\s*$/.test(th.textContent)?'p':'d');
+   var nat=natural(), prev=Math.min(stored(), cap());
+   var target=Math.max(nat, prev), start=prev||nat;
+   t.style.width=target+'px'; var fin=centres();
+   t.style.width=start+'px'; var now=centres();
+   var old=null; try{ old=JSON.parse(get(key+':x')||'null'); }catch(e){}
+   if(!still && old && old.length===now.length){
+     Array.prototype.forEach.call(t.rows, function(tr){
+       if(tr.children.length<2) return;
+       Array.prototype.slice.call(tr.children,1).forEach(function(c,i){
+         var dx=old[i]-now[i];
+         if(Math.abs(dx)>0.5){ try{ c.animate([{transform:'translateX('+dx+'px)'},
+           {transform:'none'}],{duration:DUR,easing:EASE}); }catch(e){} } }); });
+   }
+   put(key+':x', JSON.stringify(fin));
+   t.style.width=target+'px';
+   if(start<target-1 && !still){
+     try{ t.animate([{width:start+'px'},{width:target+'px'}],{duration:DUR,easing:EASE}); }catch(e){}
+   }
+   put(key, String(Math.max(target, stored())));
+   window.addEventListener('resize', function(){
+     t.style.width=Math.max(natural(), Math.min(stored(), cap()))+'px';
+     put(key+':x', JSON.stringify(centres())); });
+ }
+ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
+})();"""
+
+_REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
+
+
+def _redesign_on() -> bool:
+    """True when the Anki Redesign add-on is enabled. It brings its own hover
+    transitions, so Janki's motion CSS stands down instead of stacking on top."""
+    try:
+        return bool(mw.addonManager.isEnabled(_REDESIGN_ID))
+    except Exception:
+        return False
+
+
+# One easing for all chrome motion: quick start, soft settle.
+_EASE = "cubic-bezier(.2,.8,.2,1)"
+
+
+def _motion_css(context) -> str:
+    """Hover and press transitions for the deck list, toolbar and bottom-bar buttons.
+    Only motion lives here (transition / padding / transform); colours stay with the
+    glass rules. Honours the OS "reduce motion" setting."""
+    from aqt.deckbrowser import DeckBrowser, DeckBrowserBottomBar
+    from aqt.overview import Overview, OverviewBottomBar
+    from aqt.reviewer import ReviewerBottomBar
+    from aqt.toolbar import TopToolbar
+    rules = ""
+    if isinstance(context, DeckBrowser):
+        # Deck names slide right on hover while a soft pill grows out behind them. Both
+        # are transforms (the name) and a pseudo-element (the pill), so the name, its
+        # row and the count columns never change width — animating padding shifted the
+        # other columns sideways. The pill counter-shifts so its left edge stays put.
+        rules += (
+            "html body a.deck {\n"
+            "  position:relative; isolation:isolate; text-decoration:none !important;\n"
+            "  transition: transform .35s %(e)s, color .3s ease; }\n"
+            "html body a.deck:hover { transform: translateX(6px); }\n"
+            "html body a.deck::before {\n"
+            "  content:''; position:absolute; z-index:-1; inset:-3px -8px -3px -7px;\n"
+            "  border-radius:8px; background: rgba(255,255,255,0.10);\n"
+            # The pill takes pointer events: it still covers the spot the name slid
+            # away from, so the hover can't flicker off at the name's left edge.
+            "  opacity:0; transform-origin:left center; transform:scaleX(.7);\n"
+            "  transition: opacity .3s ease, transform .35s %(e)s, left .35s %(e)s; }\n"
+            "html body a.deck:hover::before {\n"
+            "  opacity:1; transform:scaleX(1); left:-13px; }\n"
+            "html body a.collapse, html body td.opts a, html body td.opts img {\n"
+            "  transition: opacity .25s ease, color .25s ease, transform .25s %(e)s; }\n"
+            "html body td.opts a:hover img { transform: rotate(35deg); }\n"
+            "html body a.collapse:hover { opacity:.75; }\n"
+        )
+    if isinstance(context, TopToolbar):
+        rules += (
+            "html body .header .hitem, html body a.hitem {\n"
+            "  transition: background-color .28s ease, color .28s ease,\n"
+            "    transform .28s %(e)s !important; }\n"
+            "html body .header .hitem:hover, html body a.hitem:hover {\n"
+            "  transform: translateY(-1px); }\n"
+            "html body .header .hitem:active, html body a.hitem:active {\n"
+            "  transform: translateY(0) scale(.96); transition-duration:.08s !important; }\n"
+        )
+    if isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar,
+                            Overview)):
+        rules += (
+            "html body button {\n"
+            "  transition: background-color .2s linear, color .3s ease-out,\n"
+            "    filter .2s ease, box-shadow .25s ease, transform .2s %(e)s !important; }\n"
+            "html body button:hover { transform: translateY(-1px); }\n"
+            "html body button:active {\n"
+            "  transform: translateY(0) scale(.97); transition-duration:.08s !important; }\n"
+        )
+    if not rules:
+        return ""
+    return ("<style>\n" + rules % {"e": _EASE} +
+            "@media (prefers-reduced-motion: reduce) {\n"
+            "  html body a.deck, html body a.hitem, html body .hitem, html body button {\n"
+            "    transition: none !important; transform: none !important; } }\n"
+            "</style>\n")
+
+
 def _build_css(cfg, context):
     if not GLASS or not cfg.get("enabled", True):
         return ""
@@ -461,6 +598,12 @@ def _build_css(cfg, context):
         "</style>\n" % _stack
     )
 
+    # Hover / press motion for Anki's chrome (deck names, toolbar, buttons).
+    if cfg.get("ui_animations", True) and not _redesign_on():
+        _mc = _motion_css(context)
+        if _mc:
+            parts.append(_mc)
+
     screens = cfg.get("screens", {})
     r = int(cfg.get("win_corner_radius", 11))
 
@@ -502,6 +645,32 @@ def _build_css(cfg, context):
         parts.append("<style>\nbody center > table:first-of-type {\n" + props
                      + "  overflow:hidden;\n}\n</style>\n")
         parts.append("<style>#studiedToday,#sts-table{display:none!important;}</style>\n")
+        # A little more air between WHOLE decks (subdeck spacing unchanged). Anki
+        # doesn't mark top-level rows, but they're the only ones whose name cell has no
+        # leading &nbsp; indent — tag those, then pad every top-level row after the
+        # first. Runs after all Python-side rewrites (e.g. the Practice view's banks).
+        parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
+        if cfg.get("ui_animations", True) and not _redesign_on():
+            parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
+        # New / Learn / Due headings centred over their numbers (Anki right-aligns both).
+        parts.append("<style>html body th.count, html body tr.deck > td[align=end]"
+                     "{text-align:center!important;}</style>\n")
+        _gap = int(cfg.get("deck_gap_px", 6))
+        if _gap > 0:
+            parts.append(
+                "<style>html body tr.jk-top ~ tr.jk-top > td{padding-top:%dpx!important;}"
+                # Extra room where an expanded deck's subdeck list ends and the next
+                # whole deck begins, so groups read as groups.
+                "html body tr.deck:not(.jk-top) + tr.jk-top > td{padding-top:%dpx!important;}"
+                "</style>\n"
+                "<script>(function(){function mark(){\n"
+                "  document.querySelectorAll('tr.deck').forEach(function(tr){\n"
+                "    var td=tr.querySelector('td.decktd');\n"
+                "    if(td&&td.textContent.charAt(0)!=='\\u00a0') tr.classList.add('jk-top');});}\n"
+                "  if(document.readyState==='loading')"
+                " document.addEventListener('DOMContentLoaded',mark); else mark();\n"
+                "})();</script>\n"
+                % (1 + _gap, 1 + _gap + int(cfg.get("deck_group_gap_px", 6))))
         # Pull the AMBOSS QBank box up toward the deck list: Anki inserts a <br>
         # between the deck table and the stats section, which leaves a big gap. Also
         # zero the box's bottom margin and the stats block's top margin so the
@@ -663,6 +832,18 @@ def _build_css(cfg, context):
             "html body center > table > tbody > tr > td {\n"
             "  width:50% !important; text-align:center !important;\n"
             "  vertical-align:middle !important; word-wrap:break-word !important; }\n"
+            # Study Now: larger, evenly padded (centred in its half, level with the
+            # counts) and a pale blue matching the New count, with dark text.
+            "html body button#study {\n"
+            "  font-size:1.12em !important; font-weight:600 !important;\n"
+            "  padding:12px 34px !important; margin:0 !important; min-width:150px !important;\n"
+            "  border:none !important; border-radius:14px !important;\n"
+            "  background:#9cbcf3 !important; color:#10213f !important;\n"
+            "  text-shadow:none !important;\n"
+            "  box-shadow:0 2px 10px rgba(0,0,0,0.35) !important; }\n"
+            "html body button#study:hover { background:#b0cbf6 !important; }\n"
+            "html body button#study:focus-visible {\n"
+            "  outline:2px solid rgba(176,203,246,0.7) !important; outline-offset:2px; }\n"
             "</style>\n"
         )
         # "Study Time Stats" addon injects #sts-table (the deck's Total / Past
@@ -688,6 +869,26 @@ def _build_css(cfg, context):
         )
         parts.append(fade_in)
     elif isinstance(context, Reviewer) and screens.get("reviewer", True):
+        # Fade the FIRST card in when a study session starts. The reviewer page is
+        # rebuilt on every entry to review, and Anki reveals each card by setting
+        # #qa's opacity to 1 in one jump; catch that first reveal and animate it in.
+        # Later cards keep Anki's (and the typewriter's) normal behaviour.
+        if cfg.get("first_card_fade", True):
+            _fd = int(cfg.get("first_card_fade_ms", 450))
+            parts.append(
+                "<script>(function(){\n"
+                "  if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)"
+                " return;\n"
+                "  function arm(){ var qa=document.getElementById('qa'); if(!qa) return;\n"
+                "    var mo=new MutationObserver(function(){\n"
+                "      if(qa.style.opacity==='1'&&qa.childNodes.length){ mo.disconnect();\n"
+                "        try{ qa.animate([{opacity:0},{opacity:1}],"
+                "{duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'}); }catch(e){} } });\n"
+                "    mo.observe(qa,{attributes:true,attributeFilter:['style']});\n"
+                "    setTimeout(function(){ mo.disconnect(); }, 8000); }\n"
+                "  if(document.readyState==='loading')"
+                " document.addEventListener('DOMContentLoaded',arm); else arm();\n"
+                "})();</script>\n" % _fd)
         # Keep the card fully transparent (its note background is opaque otherwise).
         # The AnKing note types set `.card{background:#D1CFCE}` and, worse,
         # `.night_mode .card{background:#272828!important}` — the night-mode rule
@@ -1556,7 +1757,7 @@ if hasattr(gui_hooks, "reviewer_did_answer_card"):
 
 def _jp_bury():
     """Set the current practice card aside for this session with no judgement — used
-    when advancing without a pick. Bury records no review and doesn't touch
+    for a wrong pick and when advancing without one. Bury records no review and doesn't touch
     scheduling; the card returns next session."""
     r = getattr(mw, "reviewer", None)
     card = getattr(r, "card", None) if r else None
@@ -1569,8 +1770,8 @@ def _jp_bury():
 
 def _jp_resolve():
     """The SINGLE authority for advancing a binary-grade practice card. Applies the
-    outcome the FRONT pick decided (correct → Easy + suspend, wrong → Hard) or buries
-    if no answer was picked. Latched per card id so a stray/duplicate trigger — e.g.
+    outcome the FRONT pick decided: correct → Easy + suspend; wrong, or no answer
+    picked → bury until next session. Latched per card id so a stray/duplicate trigger — e.g.
     Anki's native answer shortcut firing alongside our own Continue — can't act twice
     (the second call sees the card already resolved and no-ops). The latch is cleared
     on each question render (see apply_practice_prefs) so a card that legitimately
@@ -1597,9 +1798,11 @@ def _jp_resolve():
             return
     except Exception as e:
         log("intersperse resolve delegate: %s" % e)
-    if pend and len(pend) >= 3 and pend[2]:
-        _jp_apply_grade(pend[0], pend[1])
+    if pend and len(pend) >= 3 and pend[2] and pend[1]:
+        _jp_apply_grade(pend[0], True)
     else:
+        # Wrong pick or no pick: bury — set aside until next session with no review
+        # recorded and no scheduling change (a wrong answer used to grade Hard).
         _jp_bury()
 
 

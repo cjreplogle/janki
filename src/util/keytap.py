@@ -9,6 +9,7 @@ from aqt.qt import QObject, QTimer
 from .bridge import _bridge
 from .config import log, _cfg
 from . import state
+from . import hotkeys as _hk
 from ..features import focus
 from ..user import hud
 
@@ -575,9 +576,9 @@ def _start_key_tap() -> None:
             # anywhere, or hide it (back to the previous app) if Anki is frontmost. Handled
             # before the global-keys gate so it works whenever the tap is running; consumed
             # so it doesn't type an 'a' in the other app.
-            if etype == 10 and kc == 0:
+            if etype == 10 and kc == _hk.toggle_kc:
                 fl = CG.CGEventGetFlags(event)
-                if (fl & 0x100000) and (fl & 0x80000):   # Command + Option
+                if (fl & _hk.MOD_MASK) == _hk.toggle_flags:   # e.g. Command + Option
                     _key_bridge.toggle_window.emit()
                     return None
             # Lockdown hold-to-exit: watch Space regardless of the global-keys
@@ -598,13 +599,13 @@ def _start_key_tap() -> None:
             # unlocked, or (while locked) contribute to the hold-to-exit. Backtick
             # passes through so it still types; Delete is swallowed only while it's
             # part of the chord so it never deletes a card/note.
-            if kc == 50:
+            if kc == _hk.chord_kc1:
                 _lk_bt_held = (etype == 10)
                 _lk_eval_chord()
                 # A lone backtick still types; swallow it only while Delete is
                 # co-held (chord active) so a held chord doesn't spew backticks.
                 return None if _lk_del_held else event
-            if kc == 51:
+            if kc == _hk.chord_kc2:
                 if etype == 10:      # keydown
                     if _lk_bt_held:
                         _lk_del_held = True
@@ -638,28 +639,32 @@ def _start_key_tap() -> None:
                     _key_bridge.pomo_space.emit(etype == 10)
                     return None  # consumed (focused)
                 return event     # unfocused plain Space → let the focused app have it
+            # The chord key (Tab by default) and the keys pressed with it are
+            # user-adjustable (Settings → Hotkeys): translate the pressed key to the
+            # DEFAULT key code its action uses, so the handlers stay unchanged.
             if etype == 10:  # keydown
-                if kc == _KC_TAB:
+                if kc == _hk.leader_kc:
                     _tab_held = True
                     _tab_used_combo = False
                     return None  # suppress Tab keydown while tracking
-                if _tab_held and kc in _CAP_FONT_KC:
+                canon = _hk.tab_map.get(kc) if _tab_held else None
+                if canon in _hk.shift_kcs:
                     # Only claim '='/'-' when Shift is also held, so it's an
                     # explicit Shift+Tab combo and doesn't eat plain Tab+=/-.
                     if CG.CGEventGetFlags(event) & 0x20000:  # kCGEventFlagMaskShift
                         _tab_used_combo = True
-                        _key_bridge.send_key.emit(kc)
+                        _key_bridge.send_key.emit(canon)
                         return None  # consume Shift+Tab+=/-
-                if _tab_held and kc == 15:   # Tab+R → toggle the reworded view
+                elif canon == 15:   # Tab+R → toggle the reworded view
                     _tab_used_combo = True
                     _key_bridge.reword_toggle.emit()
                     return None
-                if _tab_held and kc in _GLOBAL_KC:
+                elif canon in _GLOBAL_KC:
                     _tab_used_combo = True
-                    _key_bridge.send_key.emit(kc)
+                    _key_bridge.send_key.emit(canon)
                     return None  # consume combo key
             elif etype == 11:  # keyup
-                if kc == _KC_TAB:
+                if kc == _hk.leader_kc:
                     was_combo = _tab_used_combo
                     _tab_held = False
                     _tab_used_combo = False
@@ -667,8 +672,9 @@ def _start_key_tap() -> None:
                         # Tab pressed alone — re-inject at kCGAnnotatedSessionEventTap (2)
                         # so our own session-level tap does NOT see it again (no loop).
                         CG.CGEventPost.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
-                        down = CG.CGEventCreateKeyboardEvent(None, ctypes.c_uint16(_KC_TAB), True)
-                        up = CG.CGEventCreateKeyboardEvent(None, ctypes.c_uint16(_KC_TAB), False)
+                        lk = _hk.leader_kc
+                        down = CG.CGEventCreateKeyboardEvent(None, ctypes.c_uint16(lk), True)
+                        up = CG.CGEventCreateKeyboardEvent(None, ctypes.c_uint16(lk), False)
                         if down:
                             CG.CGEventPost(2, down)  # kCGAnnotatedSessionEventTap
                         if up:

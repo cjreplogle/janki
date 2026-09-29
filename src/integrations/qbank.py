@@ -2363,6 +2363,21 @@ def _fix_ploidy(q):
     q["choices"] = [_RE_PLOIDY_1.sub("1N", c) for c in q.get("choices") or []]
 
 
+# OCR reads a capital T as "I" (or "l") in "T cells". "I cells" is never meant — except
+# I-cell disease (mucolipidosis II), which is left alone.
+_RE_T_CELL = re.compile(
+    r"(?<![A-Za-z0-9])[Il](?=[-\u2010\u2011 ]?(?:cells?\b(?![-\u2010\u2011 ]?disease)"
+    r"|lymphocytes?\b|helper\b|regs?\b|regulatory\b))")
+_RE_T_HELPER = re.compile(r"(?<![A-Za-z0-9])[Il]h(?=(?:1|2|17|22|9)\b|FH\b|fh\b)")
+
+
+def _fix_t_cells(line: str) -> str:
+    if not line or ("ell" not in line and "ymph" not in line and "elper" not in line
+                    and "reg" not in line and "h" not in line):
+        return line
+    return _RE_T_HELPER.sub("Th", _RE_T_CELL.sub("T", line))
+
+
 def _parse_ocr_blocks(blocks):
     """blocks = [(path, [lines], category, slide_id), …] in slide order →
     (questions, n_detected). A slide that yields questions (stem + ≥2 choices) is
@@ -2372,6 +2387,8 @@ def _parse_ocr_blocks(blocks):
     are numberless, so global matching is unsafe). Figures on a question's slide
     are attached to that question; a question whose text references a figure but
     has no separate figure image keeps its own screenshot (embedded graph/table)."""
+    blocks = [(p, [_fix_t_cells(l) for l in lines], c, sid)
+              for p, lines, c, sid in blocks]
     questions = []          # every question (with choices), in slide order
     answers = []            # (n_seen_before, num, letter, rat, category)
     slide_figs = {}         # slide_id → [figure image paths]

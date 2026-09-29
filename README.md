@@ -143,6 +143,8 @@ so nothing is left behind.
   controller to drive the reviewer even when Anki is not focused.
   (i.e. **`Tab+Z`** → again, overrides being unfocused). **`Cmd+Opt+A`** also will globally
   focus the Anki window regardless of whatever else you are doing.
+  Every shortcut (including the Tab chord key itself) can be changed in
+  **Settings → Hotkeys**.
 - **Pomodoro** — review-time work intervals, an in-window break screen
   (hold **Space** to skip), and a calm "break due" blue edge tint.
   Toggle the whole system on/off in settings. 

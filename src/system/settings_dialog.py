@@ -146,6 +146,8 @@ class GlassSettings(QDialog):
 
         tabs.addTab(prac_page, "Practice")
         tabs.addTab(rw_page, "Rephrase")
+        hk_page = QWidget(); hk_lay = QVBoxLayout(hk_page)
+        tabs.addTab(hk_page, "Hotkeys")
         tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
         tabs.setCurrentWidget(app_page)
 
@@ -368,6 +370,25 @@ class GlassSettings(QDialog):
                 pass
         self._uniform.stateChanged.connect(on_uniform)
         app_text_lay.addWidget(self._uniform)
+
+        # Hover / press motion on the deck list, toolbar and buttons (stands down on its
+        # own while the Anki Redesign add-on is enabled, which brings its own).
+        self._ui_anim = QCheckBox("Hover animations")
+        self._ui_anim.setToolTip(
+            "Deck names grow into a pill on hover, toolbar items and buttons fade their "
+            "highlight and lift slightly, and buttons press in when clicked. Follows the "
+            "macOS \"Reduce motion\" setting.")
+        self._ui_anim.setChecked(bool(self.cfg.get("ui_animations", True)))
+
+        def on_ui_anim(_s):
+            self.cfg["ui_animations"] = bool(self._ui_anim.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._reload_all_webviews()
+            except Exception:
+                pass
+        self._ui_anim.stateChanged.connect(on_ui_anim)
+        app_text_lay.addWidget(self._ui_anim)
 
         # === Focus ===========================================================
         # --- Card timer curve ------------------------------------------------
@@ -1973,12 +1994,16 @@ class GlassSettings(QDialog):
 
         # === Rephrase =======================================================
         self._build_reword_tab(rw_import_lay, rw_mobile_lay, rw_exp_lay)
+        try:
+            self._build_hotkeys_tab(hk_lay)
+        except Exception as _e:
+            log("hotkeys tab failed: %s" % _e)
 
         # Push each page's controls to the top.
         for pl in (app_win_lay, app_text_lay, app_mob_lay, flare_lay, timer_lay, cap_lay,
                    pomo_lay, lock_lay,
                    prac_app_lay, prac_qb_lay, gen_lay,
-                   rw_import_lay, rw_mobile_lay, rw_exp_lay):
+                   rw_import_lay, rw_mobile_lay, rw_exp_lay, hk_lay):
             pl.addStretch()
 
         # Pin "Load Question Banks to Anki" to the bottom of the Question Bank page
@@ -2267,6 +2292,185 @@ class GlassSettings(QDialog):
         target.setAcceptDrops(True)
         self._rp_drop_filter = _Drop(self)
         target.installEventFilter(self._rp_drop_filter)
+
+    def _build_hotkeys_tab(self, lay):
+        """Settings → Hotkeys: every Janki hotkey, grouped into collapsible sections
+        (all closed at first). Click a key to record a new one; ↺ restores the default.
+        Changes save and apply immediately."""
+        from aqt.qt import (QWidget, QHBoxLayout, QGridLayout, QLabel, QPushButton,
+                            QToolButton, Qt, QKeySequence, QTimer, QSize)
+        from ..util import hotkeys as hk
+
+        intro = QLabel(
+            "Click a shortcut, then press the new key. <b>Chord</b> shortcuts are pressed "
+            "while holding the chord key (Tab unless you change it) and work even when "
+            "Anki isn't focused (macOS, needs Accessibility permission). For chord "
+            "shortcuts press just the key that goes with the chord key.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color:#9aa0aa;")
+        lay.addWidget(intro)
+        warn = QLabel("")
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color:#e0a060;")
+        warn.setVisible(False)
+        lay.addWidget(warn)
+
+        buttons = {}                          # action id → capture button
+        QtMod = Qt.KeyboardModifier
+        _MODKEYS = {Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Meta, Qt.Key.Key_Alt,
+                    Qt.Key.Key_CapsLock, Qt.Key.Key_AltGr}
+
+        def _save(aid, b):
+            hks = dict(self.cfg.get("hotkeys") or {})
+            if b is None or b == hk.default(aid):
+                hks.pop(aid, None)
+            else:
+                hks[aid] = b
+            self.cfg["hotkeys"] = hks
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            hk.apply()
+            _refresh()
+
+        def _refresh():
+            for aid, btn in buttons.items():
+                if not btn._rec:
+                    btn.setText(hk.describe(aid, hk.binding(aid, self.cfg)))
+            clash = hk.conflicts(self.cfg)
+            warn.setVisible(bool(clash))
+            warn.setText("\u26a0 Same key used twice: " + "; ".join(
+                "%s \u2192 %s" % (k, ", ".join(labels)) for k, labels in clash))
+
+        class _Capture(QPushButton):
+            def __init__(self, aid, kind):
+                super().__init__()
+                self._aid, self._kind, self._rec, self._first = aid, kind, False, None
+                self.setMinimumWidth(170)
+                self.setAutoDefault(False); self.setDefault(False)
+                self.clicked.connect(self._toggle)
+
+            def _toggle(self):
+                if self._rec:
+                    self._stop()
+                    return
+                self._rec, self._first = True, None
+                self.setText("Press a key\u2026" if self._kind != "chord"
+                             else "Press the first key\u2026")
+                self.grabKeyboard()
+
+            def _stop(self, note=None):
+                self._rec = False
+                self.releaseKeyboard()
+                _refresh()
+                if note:
+                    self.setText(note)
+                    QTimer.singleShot(1600, _refresh)
+
+            def focusOutEvent(self, ev):
+                if self._rec:
+                    self._stop()
+                super().focusOutEvent(ev)
+
+            def event(self, ev):
+                # Catch Tab/Backtab here — otherwise Qt uses them to move focus.
+                from aqt.qt import QEvent
+                if self._rec and ev.type() == QEvent.Type.KeyPress:
+                    self._key(ev)
+                    return True
+                return super().event(ev)
+
+            def _key(self, ev):
+                if ev.key() in _MODKEYS or ev.isAutoRepeat():
+                    return
+                kc = int(ev.nativeVirtualKey())
+                m = ev.modifiers()
+                # Qt on macOS: Control = ⌘, Meta = ⌃, Alt = ⌥.
+                mods = [n for n, f in (("cmd", QtMod.ControlModifier),
+                                       ("ctrl", QtMod.MetaModifier),
+                                       ("opt", QtMod.AltModifier),
+                                       ("shift", QtMod.ShiftModifier)) if m & f]
+                kind = self._kind
+                if kind in ("leader", "tab", "shift"):
+                    _save(self._aid, {"kc": kc})
+                    self._stop()
+                elif kind == "chord":
+                    if self._first is None:
+                        self._first = kc
+                        self.setText("%s + now the second key\u2026" % hk.key_name(kc))
+                        return
+                    if kc == self._first:
+                        return
+                    _save(self._aid, {"kc": self._first, "kc2": kc})
+                    self._stop()
+                else:
+                    # A plain key here would be swallowed everywhere — require a modifier.
+                    if not any(x in mods for x in ("cmd", "ctrl", "opt")):
+                        self._stop("Add \u2318, \u2303 or \u2325")
+                        return
+                    if kind == "combo":
+                        _save(self._aid, {"kc": kc, "mods": mods})
+                    else:
+                        seq = QKeySequence(ev.keyCombination()).toString(
+                            QKeySequence.SequenceFormat.PortableText)
+                        _save(self._aid, {"seq": seq})
+                    self._stop()
+
+        for group in hk.GROUPS:
+            acts = [a for a in hk.ACTIONS if a[1] == group]
+            if not acts:
+                continue
+            head = QToolButton()
+            head.setText(group.replace("&", "&&"))       # a lone & is a Qt mnemonic
+            head.setCheckable(True)
+            head.setChecked(False)                         # every section starts closed
+            head.setArrowType(Qt.ArrowType.RightArrow)
+            head.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            head.setAutoRaise(True)
+            head.setStyleSheet("QToolButton{border:none;font-weight:600;font-size:16px;"
+                               "padding:6px 0;}")
+            head.setIconSize(QSize(14, 14))                # arrow scaled with the text
+            lay.addWidget(head)
+            body = QWidget()
+            grid = QGridLayout(body)
+            grid.setContentsMargins(18, 0, 0, 6)
+            grid.setVerticalSpacing(4)
+            for r, (aid, _g, label, kind, _d) in enumerate(acts):
+                grid.addWidget(QLabel(label + ("  (chord)" if kind in ("tab", "shift") else "")),
+                               r, 0)
+                btn = _Capture(aid, kind)
+                buttons[aid] = btn
+                grid.addWidget(btn, r, 1)
+                rst = QToolButton()
+                rst.setText("\u21ba")
+                rst.setToolTip("Restore the default (%s)" % hk.describe(aid, hk.default(aid)))
+                rst.setAutoRaise(True)
+                rst.clicked.connect(lambda _c=False, a=aid: _save(a, None))
+                grid.addWidget(rst, r, 2)
+            grid.setColumnStretch(0, 1)
+            body.setVisible(False)
+            lay.addWidget(body)
+
+            def _toggle(on, body=body, head=head):
+                body.setVisible(on)
+                head.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+                fit = getattr(self, "_fit_tabs", None)
+                if fit:
+                    QTimer.singleShot(0, fit)
+            head.toggled.connect(_toggle)
+
+        row = QHBoxLayout()
+        row.addStretch()
+        reset_all = QPushButton("Restore all defaults")
+        reset_all.setAutoDefault(False)
+
+        def _reset_all():
+            self.cfg["hotkeys"] = {}
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            hk.apply()
+            _refresh()
+        reset_all.clicked.connect(_reset_all)
+        row.addWidget(reset_all)
+        lay.addLayout(row)
+        _refresh()
 
     def _build_reword_tab(self, imp_lay, mob_lay, exp_lay):
         """Rephrase: show cards phrased differently (same card/scheduler data-space) so you

@@ -166,5 +166,10 @@
   "reword_prefetch_count": 3,
   "main_settings_button": false,
   "stats_rolling_avg": false,
-  "stats_rolling_window": 7
+  "stats_rolling_window": 7,
+  "ui_animations": true,
+  "first_card_fade": true,
+  "first_card_fade_ms": 450,
+  "deck_gap_px": 6,
+  "deck_group_gap_px": 6
 }

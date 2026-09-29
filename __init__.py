@@ -427,6 +427,14 @@ def _startup():
             _lock_sc.activated.connect(lambda: lockdown.toggle())
             mw._janki_lock_sc = _lock_sc   # keep ref alive
 
+        # Apply the user's hotkey choices (Settings → Hotkeys) to the key tap tables
+        # and the Qt shortcuts just created.
+        try:
+            from .src.util import hotkeys as _hotkeys
+            _hotkeys.apply()
+        except Exception as _hk_exc:
+            log("hotkeys apply: %s" % _hk_exc)
+
         # Window size: restore whatever it was last closed at (saved on quit by
         # _save_size). On the FIRST launch (nothing saved yet) fall back to the
         # configured default (open_win_width/height, 600x400). Clamped to screen.
