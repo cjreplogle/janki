@@ -32,7 +32,6 @@ _FONTS_URL = "/_addons/%s/assets/fonts" % _ADDON
 # family name so a hand-typed font still works.
 UI_FONTS = {
     "Lora": '"Lora",Georgia,"Times New Roman",serif',
-    "Anthropic Serif Text": '"Anthropic Serif Text",-apple-system,Georgia,serif',
     "Georgia": 'Georgia,"Times New Roman",serif',
     "System (sans-serif)": '-apple-system,system-ui,"Segoe UI",Roboto,sans-serif',
     "Helvetica": 'Helvetica,Arial,sans-serif',
@@ -56,8 +55,12 @@ if sys.platform == "darwin":
 DEFAULT_UI_FONT = "Lora"
 
 
+_RETIRED_FONTS = {"Anthropic Serif Text"}     # removed options → the default (Lora)
+
+
 def ui_font_label(cfg=None):
-    return (cfg or _cfg()).get("card_font", DEFAULT_UI_FONT)
+    lbl = (cfg or _cfg()).get("card_font", DEFAULT_UI_FONT)
+    return DEFAULT_UI_FONT if lbl in _RETIRED_FONTS else lbl
 
 
 def ui_font_stack(cfg=None):

@@ -4796,7 +4796,7 @@ _BACK_TMPL = ('<div class="jp-answered">{{FrontSide}}</div>\n'
 # the text-scroll); on the BACK (.jp-answered) the animation is disabled so the
 # highlighted answer is visible immediately.
 _CARD_CSS = (
-    ".card{font-family:\"Anthropic Serif Text\",Georgia,serif;font-size:20px;"
+    ".card{font-family:\"Lora\",Georgia,serif;font-size:20px;"
     "text-align:left;color:#ececec;background-color:#1c1d21;max-width:760px;"
     "margin:0 auto;padding:26px;transition:background-color .25s ease;}"
     ".jp-stem{margin-bottom:18px;line-height:1.5;"

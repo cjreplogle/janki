@@ -187,7 +187,7 @@ def _make_pomodoro():
             "display:flex;align-items:center;justify-content:center;"
             "background:transparent;"   # no slab — just the glass window behind
             # match the app's card serif (loaded in the reviewer webview already)
-            "font-family:\"Anthropic Serif Text\",-apple-system,Georgia,serif;}"
+            "font-family:\"Lora\",Georgia,serif;}"
             "#__janki_break .jb-panel{background:transparent;"   # fully transparent panel
             "padding:34px 52px;text-align:center;"
             "color:rgba(255,255,255,0.94);min-width:340px;"
