@@ -97,6 +97,15 @@ class _Follow(QObject):
         return False
 
 
+def want_button() -> bool:
+    """On Windows the Settings button defaults ON: Anki's menu bar (Tools → Janki:
+    Settings…) is hidden behind an Alt tap there, so this is the visible way in."""
+    import sys
+    if sys.platform.startswith("win"):
+        return bool(_cfg().get("main_settings_button_win", True))
+    return bool(_cfg().get("main_settings_button", False))
+
+
 def _host():
     tb = getattr(mw, "toolbar", None)
     return getattr(tb, "web", None)
@@ -120,12 +129,14 @@ def _set_geom(top, size):
     side = int(min(size + 4, 2 * centre, host.height()))
     side = max(side, 20)
     x = host.width() - side - 14
+    if getattr(mw, "_jk_frameless", False):
+        x -= 46 * 3 + 4        # clear the Windows caption buttons in the top-right
     y = int(round(max(0.0, centre - side / 2.0)))
     if _btn.size().width() != side or _btn.size().height() != side:
         _btn.setFixedSize(side, side)
     if (_btn.x(), _btn.y()) != (x, y):          # move only on a real change (no jitter)
         _btn.move(x, y)
-    if not _btn.isVisible() and bool(_cfg().get("main_settings_button", False)):
+    if not _btn.isVisible() and want_button():
         _btn.show()
     _btn.raise_()
 
@@ -184,7 +195,7 @@ def apply(on=None) -> None:
     """Show/hide the button per config main_settings_button (or `on`)."""
     global _btn, _filter
     if on is None:
-        on = bool(_cfg().get("main_settings_button", False))
+        on = want_button()
     host = _host()
     if not on or host is None:
         if _btn is not None:

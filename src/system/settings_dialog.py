@@ -1713,10 +1713,13 @@ class GlassSettings(QDialog):
         app_win_lay.addWidget(self._aot)
 
         self._gear = QCheckBox("Settings button in the top-right corner of the main window")
-        self._gear.setChecked(bool(self.cfg.get("main_settings_button", False)))
+        _gear_key = ("main_settings_button_win" if sys.platform.startswith("win")
+                     else "main_settings_button")
+        from ..features import settings_button as _sb
+        self._gear.setChecked(_sb.want_button())
 
         def on_gear(_state):
-            self.cfg["main_settings_button"] = self._gear.isChecked()
+            self.cfg[_gear_key] = self._gear.isChecked()
             mw.addonManager.writeConfig(__name__, self.cfg)
             try:
                 from ..features import settings_button
