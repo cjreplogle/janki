@@ -142,7 +142,7 @@ def backdrop_mode() -> str:
         m = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
     except Exception:
         m = "auto"
-    return m if m in ("auto", "on", "off") else "auto"
+    return m if m in ("auto", "on", "off", "live") else "auto"
 
 
 def dwm_blur_works() -> bool:
@@ -164,7 +164,7 @@ def backdrop_wanted() -> bool:
         mode = "auto"
     if mode == "on":
         return True
-    if mode == "off":
+    if mode in ("off", "live"):
         return False
     return transparency_effects_on() and not is_virtual_machine()
 

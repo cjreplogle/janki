@@ -1983,15 +1983,20 @@ class GlassSettings(QDialog):
                                "Windows' blur (solid grey where Windows can't draw it). "
                                "Off: fully see-through.")
             self._bd_box = _QCB()
-            for _t, _v in (("Auto", "auto"), ("On", "on"), ("Off", "off")):
+            _modes = (("Auto", "auto"), ("Live (frosts windows behind)", "live"),
+                      ("Windows blur", "on"), ("Off", "off"))
+            for _t, _v in _modes:
                 self._bd_box.addItem(_t, _v)
             _cur = str(self.cfg.get("win_backdrop", "auto")).lower()
-            self._bd_box.setCurrentIndex(max(0, [self._bd_box.itemData(i) for i in range(3)].index(_cur) if _cur in ("auto", "on", "off") else 0))
+            _vals = [v for _t, v in _modes]
+            self._bd_box.setCurrentIndex(_vals.index(_cur) if _cur in _vals else 0)
             _bd_hint = QLabel("")
             _bd_hint.setStyleSheet("color: gray;")
 
             def _bd_hint_text():
-                if _dwm.backdrop_wanted():
+                if _dwm.backdrop_mode() == "live":
+                    _bd_hint.setText("(hides Anki from screenshots & screen sharing)")
+                elif _dwm.backdrop_wanted():
                     _bd_hint.setText("(Windows blur)")
                 elif _dwm.janki_blur_wanted():
                     _bd_hint.setText("(Janki's wallpaper blur%s)" % (

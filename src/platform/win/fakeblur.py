@@ -83,8 +83,13 @@ class _Layer(QWidget):
         self.tint = QColor(18, 20, 30, 64)
 
     def paintEvent(self, _ev):
-        img, sr = _backdrop()
         p = QPainter(self)
+        if _live["on"] and _live["img"] is not None:
+            p.drawImage(self.rect(), _live["img"])
+            p.fillRect(self.rect(), self.tint)
+            p.end()
+            return
+        img, sr = _backdrop()
         if img is not None:
             top_left = self.mapToGlobal(self.rect().topLeft())
             src = QRect(top_left.x() - sr.x(), top_left.y() - sr.y(), self.width(), self.height())
@@ -99,6 +104,12 @@ class _Follow(QObject):
                                                 QEvent.Type.WindowStateChange):
             _layer.setGeometry(0, 0, mw.width(), mw.height())
             _layer.lower()
+            if _live["on"]:
+                import time
+                now = time.monotonic()
+                if now - _live.get("last", 0) > 0.033:   # ~30 fps while dragging
+                    _live["last"] = now
+                    _grab()
             _layer.update()
         return False
 
@@ -121,9 +132,77 @@ def enable(tint_rgba):
 
 
 def disable():
+    disable_live()
     if _layer is not None:
         _layer.hide()
 
 
 def active() -> bool:
     return _layer is not None and _layer.isVisible()
+
+
+# --- Live mode: frost the real windows behind Anki ------------------------------------
+# Captures the screen area behind the main window, blurs it and paints it like the
+# wallpaper slice. Anki excludes itself from screen capture (WDA_EXCLUDEFROMCAPTURE,
+# Windows 10 2004+) so the capture shows what's BEHIND it — which also means Anki's
+# window is hidden from screenshots and screen sharing while Live is on.
+_live = {"on": False, "timer": None, "img": None, "rect": None}
+WDA_NONE, WDA_EXCLUDEFROMCAPTURE = 0x0, 0x11
+
+
+def _affinity(hwnd, on):
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.SetWindowDisplayAffinity(
+            ctypes.c_void_p(int(hwnd)), WDA_EXCLUDEFROMCAPTURE if on else WDA_NONE))
+    except Exception:
+        return False
+
+
+def _grab():
+    """Capture + blur the screen behind the main window (skipped while minimised)."""
+    if not _live["on"] or _layer is None or mw.isMinimized() or not mw.isVisible():
+        return
+    try:
+        scr = mw.screen()
+        g = mw.frameGeometry()
+        sg = scr.geometry()
+        pm = scr.grabWindow(0, g.x() - sg.x(), g.y() - sg.y(), g.width(), g.height())
+        img = pm.toImage()
+        if img.isNull():
+            return
+        # Blur at reduced size (fast), then let drawImage scale it back up.
+        small = img.scaled(max(1, img.width() // 3), max(1, img.height() // 3),
+                           Qt.AspectRatioMode.IgnoreAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation)
+        _live["img"] = _blur(small, strength=3)
+        _live["rect"] = g
+        _layer.update()
+    except Exception:
+        pass
+
+
+def enable_live(tint_rgba) -> bool:
+    """Returns False if Windows won't exclude Anki from capture (then use wallpaper)."""
+    from aqt.qt import QTimer
+    if not _affinity(mw.winId(), True):
+        return False
+    enable(tint_rgba)
+    _live["on"] = True
+    if _live["timer"] is None:
+        t = QTimer(mw)
+        t.setInterval(350)                     # refresh what's behind a few times a second
+        t.timeout.connect(_grab)
+        _live["timer"] = t
+    _live["timer"].start()
+    _grab()
+    return True
+
+
+def disable_live():
+    if _live["on"]:
+        _live["on"] = False
+        _affinity(mw.winId(), False)
+        if _live["timer"] is not None:
+            _live["timer"].stop()
+        _live["img"] = None

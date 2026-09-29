@@ -86,11 +86,14 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             # paints a blurred wallpaper behind the window instead — Mica-style — and the
             # tint on top of it (so the window background itself stays clear).
             from ..platform.win import fakeblur
-            want_blur = (see_through and int(cfg.get("blur_radius", 20)) > 0
-                         and not _oled_active and dwm.janki_blur_wanted()
-                         and not has_background_image())
-            if want_blur:
-                fakeblur.enable((r, g, b, a))
+            blur_on = (see_through and int(cfg.get("blur_radius", 20)) > 0
+                       and not _oled_active and not has_background_image())
+            live = blur_on and dwm.backdrop_mode() == "live"
+            if live and fakeblur.enable_live((r, g, b, a)):
+                a = 0
+            elif blur_on and (dwm.janki_blur_wanted() or live):
+                fakeblur.disable_live()
+                fakeblur.enable((r, g, b, a))        # wallpaper blur
                 a = 0
             else:
                 fakeblur.disable()
