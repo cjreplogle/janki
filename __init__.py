@@ -25,6 +25,7 @@ Everything native is wrapped so a failure can never crash Anki.
 from .src.util import boot_timing as _bt   # startup timing log (first, to time imports)
 _bt.mark("janki import start")
 
+import os
 import sys
 from ctypes import c_void_p, c_bool
 
@@ -59,6 +60,15 @@ from .src.util import diagnostics, keytap
 from .src.integrations import gamepad
 from .src.integrations import amboss, mobilecards
 from .src.system import stock_selfheal, updater
+
+# macOS glass: patch now, while Anki's window and collection don't exist yet, so a fresh
+# patch is picked up by re-running Anki in place — installing needs only the one restart
+# Anki itself asks for. (_startup calls it again as the usual self-heal fallback.)
+if sys.platform == "darwin" and not os.environ.get("ANKI_GLASS"):
+    try:
+        stock_selfheal.maybe_self_heal(early=True)
+    except Exception as _early_sh_exc:
+        log("early self-heal: %s" % _early_sh_exc)
 _bt.mark("imported integrations/updater")
 
 # Catch Anki's own progress window + hover tooltips from the very start — the launch

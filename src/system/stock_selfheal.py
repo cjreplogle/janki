@@ -214,6 +214,35 @@ def _notify_once(h: str, msg: str) -> None:
         pass
 
 
+def _relaunch_in_place() -> bool:
+    """Re-run Anki in this same process (os.execv) so the patched files load now. Only
+    safe before the main window / collection exist (add-on import time). Returns False
+    if it can't (then the caller falls back to the restart prompt)."""
+    try:
+        from aqt import mw
+        if mw is not None and (mw.isVisible() or getattr(mw, "col", None) is not None):
+            return False
+        args = list(getattr(sys, "orig_argv", None) or ([sys.executable] + sys.argv))
+        log("self-heal: re-running Anki in place to start the glass")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execv(sys.executable, args)
+    except Exception as exc:
+        log("self-heal: in-place relaunch failed (%s)" % exc)
+    return False
+
+
+def _relaunch_after_quit() -> None:
+    """Reopen Anki a moment after this instance quits (macOS)."""
+    try:
+        app = _app_root(_aqt_dir()) if _aqt_dir() else None
+        target = str(app) if app else "Anki"
+        subprocess.Popen(["/bin/sh", "-c", 'sleep 2; open -a "$0"', target],
+                         start_new_session=True)
+    except Exception:
+        pass
+
+
 def _prompt_restart() -> None:
     try:
         from aqt import mw
@@ -223,14 +252,16 @@ def _prompt_restart() -> None:
             try:
                 box = QMessageBox(mw)
                 box.setWindowTitle("Janki")
-                box.setText("Janki set up its glass effect for this version of Anki.")
-                box.setInformativeText("Quit and reopen Anki once to turn the "
-                                       "frosted glass on. Everything else already works.")
-                quit_btn = box.addButton("Quit Anki now",
+                box.setText("Janki set up its frosted glass.")
+                box.setInformativeText("Anki needs to restart once to turn it on — "
+                                       "Janki will reopen it for you. Everything else "
+                                       "already works.")
+                quit_btn = box.addButton("Restart Anki now",
                                          QMessageBox.ButtonRole.AcceptRole)
                 box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
                 box.exec()
                 if box.clickedButton() is quit_btn:
+                    _relaunch_after_quit()
                     # Real shutdown — mw.close() would be swallowed by Janki's
                     # tray-minimize filter (turned into a hide), so the restart the
                     # glass patch needs would never happen and glass would stay off.
@@ -328,8 +359,10 @@ def unpatch(purge: bool = True) -> int:
 
 # --- entry point ---------------------------------------------------------------
 
-def maybe_self_heal() -> None:
-    """Entry point — safe to call unconditionally at startup."""
+def maybe_self_heal(early: bool = False) -> None:
+    """Entry point — safe to call unconditionally at startup. `early` = called at
+    add-on import, before Anki's window or collection opens: then a freshly applied
+    patch is picked up by re-running Anki in place (no second restart for the user)."""
     if sys.platform != "darwin":
         return
     if os.environ.get("ANKI_GLASS"):
@@ -374,6 +407,8 @@ def maybe_self_heal() -> None:
         # launch starts clean.
         clear_failure()
         log("self-heal: applied glass patch; restart needed.")
+        if early and _relaunch_in_place():
+            return                         # (not reached: the process was replaced)
         _prompt_restart()
     except Exception as exc:
         _notify_once(h, "couldn't install glass (%s); it's off." % type(exc).__name__)
