@@ -1972,9 +1972,36 @@ class GlassSettings(QDialog):
             self._wglass_btn.clicked.connect(_on_wglass)
             gen_lay.addWidget(self._wglass_btn)
 
+            # Rendering: Fast keeps Anki's GPU rendering (solid window + Janki-painted
+            # blur); See-through renders in software so Windows can show a clear window
+            # and its own Acrylic blur. Switching rewrites the start-up hook + restarts.
+            _rm_row = QHBoxLayout()
+            _rm_lbl = QLabel("Rendering")
+            self._rm_box = QComboBox()
+            self._rm_box.addItem("Fast (GPU) — smoothest", "gpu")
+            self._rm_box.addItem("See-through glass (software)", "software")
+            self._rm_box.setCurrentIndex(1 if _pb.render_mode() == "software" else 0)
+            self._rm_box.setToolTip(
+                "Fast: Anki keeps using the graphics card; the glass look (wallpaper or "
+                "Live blur) is painted by Janki. See-through: truly clear window and "
+                "Windows' own blur, but everything renders on the CPU (slower).")
+
+            def _on_rm(_i):
+                from aqt.utils import askUser
+                self.cfg["win_render"] = self._rm_box.currentData()
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                if _pb.install() and _pb.changed and askUser(
+                        "Restart Anki now to switch rendering?", parent=self, title="Janki"):
+                    _restart_anki(True)
+            self._rm_box.currentIndexChanged.connect(_on_rm)
+            _rm_row.addWidget(_rm_lbl)
+            _rm_row.addWidget(self._rm_box)
+            _rm_row.addStretch()
+            gen_lay.addLayout(_rm_row)
+
             # Windows' frosted blur behind the glass. Where Windows can't draw it (VMs,
             # transparency effects off) it shows as solid grey — "Auto" skips it there.
-            from aqt.qt import QComboBox as _QCB
+            from aqt.qt import QComboBox as _QCB  # noqa
             from ..platform.win import dwm as _dwm
             _bd_row = QHBoxLayout()
             _bd_lbl = QLabel("Windows frosted blur")

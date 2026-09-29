@@ -29,6 +29,28 @@ _FLAGS = ("--disable-gpu --disable-gpu-compositing "
           "--disable-features=CalculateNativeWinOcclusion "
           "--disable-renderer-backgrounding --disable-backgrounding-occluded-windows")
 _PTH_LINE = "import janki_preboot\n"
+# Fast (GPU) mode keeps Anki's GPU rendering; only occlusion throttling is turned off.
+_GPU_FLAGS = "--disable-features=CalculateNativeWinOcclusion --disable-renderer-backgrounding"
+
+
+def render_mode() -> str:
+    """Configured rendering: "gpu" (fast, default) or "software" (see-through glass)."""
+    try:
+        from aqt import mw
+        m = str((mw.addonManager.getConfig(__name__) or {}).get("win_render", "gpu")).lower()
+    except Exception:
+        m = "gpu"
+    return "software" if m == "software" else "gpu"
+
+
+def running_mode() -> str:
+    """The rendering mode THIS launch actually started with."""
+    return os.environ.get("JANKI_WIN_RENDER", "")
+
+
+def _module_text(mode=None) -> str:
+    sw = (mode or render_mode()) == "software"
+    return _MODULE % (sw, _FLAGS if sw else _GPU_FLAGS)
 
 _MODULE = '''"""Janki glass pre-launch hook (written by the Janki add-on; safe to delete)."""
 import os, sys, time
@@ -45,8 +67,10 @@ def _jlog(msg):
 
 
 _jlog("hook ran (python %%s)" %% sys.version.split()[0])
+SOFTWARE = %r      # True: see-through glass (software rendering); False: fast GPU mode
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", %r)
 os.environ["JANKI_WIN_PREBOOT"] = "2"   # "2" = this hook ran
+os.environ["JANKI_WIN_RENDER"] = "software" if SOFTWARE else "gpu"
 
 
 def _patch(aqt):
@@ -58,6 +82,10 @@ def _patch(aqt):
         _janki_alpha = True
 
         def __init__(self, *a, **k):
+            if not SOFTWARE:                     # fast mode: leave Anki's GPU setup alone
+                _jlog("GPU rendering (fast mode)")
+                super().__init__(*a, **k)
+                return
             try:
                 from PyQt6.QtGui import QSurfaceFormat
                 f = QSurfaceFormat.defaultFormat()
@@ -106,7 +134,7 @@ class _AfterAqt:
 
 
 sys.meta_path.insert(0, _AfterAqt())
-''' % _FLAGS
+'''
 
 
 def _pth_file():
@@ -190,7 +218,7 @@ def _clear_old_user_env():
 
 # Variables a relaunch should carry so the next Anki starts glass-ready even if the
 # hook can't run in it for some reason (harmless when it can).
-_ENV = {"QTWEBENGINE_CHROMIUM_FLAGS": _FLAGS}
+_ENV = {}   # the hook sets everything itself; nothing to carry into a relaunch
 
 
 changed = False     # set by install(): the hook on disk was missing or out of date
@@ -208,9 +236,10 @@ def install() -> bool:
         mp, pp = os.path.join(d, MOD_NAME), os.path.join(d, PTH_NAME)
         try:
             cur = open(mp, encoding="utf-8").read() if os.path.isfile(mp) else None
-            if cur != _MODULE:
+            want = _module_text()
+            if cur != want:
                 with open(mp, "w", encoding="utf-8") as f:
-                    f.write(_MODULE)
+                    f.write(want)
                 changed = True
             if not os.path.isfile(pp):
                 with open(pp, "w", encoding="utf-8") as f:

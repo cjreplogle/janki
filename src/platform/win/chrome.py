@@ -205,7 +205,9 @@ def install():
     mw._jk_frameless = True
     was_visible = mw.isVisible()
     geo = mw.geometry()
-    mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    import os
+    if os.environ.get("JANKI_WIN_RENDER") == "software":   # see-through glass only
+        mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     mw.setWindowFlags(mw.windowFlags() | Qt.WindowType.FramelessWindowHint)
     if was_visible:                       # setWindowFlags hides the window; bring it back
         mw.setGeometry(geo)

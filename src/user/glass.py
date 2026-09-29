@@ -67,7 +67,11 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
         from ..platform.win import preboot
         # Windows only draws a translucent window when it's frameless AND the webviews
         # render in software (the pre-launch hook). Otherwise: same colours, solid.
-        see_through = preboot.active() and (w is mw or bool(w.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        soft = preboot.active() and preboot.running_mode() == "software"
+        see_through = soft and (w is mw or bool(w.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        # Fast (GPU) mode: the main window is solid, but Janki paints its blur behind
+        # the (transparent) pages, so it looks like glass without software rendering.
+        gpu_glass = (w is mw and preboot.active() and not soft)
         if see_through:
             w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         blur = see_through and int(cfg.get("blur_radius", 20)) > 0 and not _oled_active
@@ -80,7 +84,7 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
         if _oled_active and w is mw:
             r = g = b = 0                      # OLED: true black, not the tint
             a = 255
-        elif not see_through:
+        elif not (see_through or gpu_glass):
             a = 255
         else:
             a = 255 * min(1.0, max(0.06, float(cfg.get("body_opacity", 0.25)) + extra_alpha))
@@ -89,12 +93,16 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             # paints a blurred wallpaper behind the window instead — Mica-style — and the
             # tint on top of it (so the window background itself stays clear).
             from ..platform.win import fakeblur
-            blur_on = (see_through and int(cfg.get("blur_radius", 20)) > 0
+            blur_on = ((see_through or gpu_glass) and int(cfg.get("blur_radius", 20)) > 0
                        and not _oled_active and not has_background_image())
             live = blur_on and dwm.backdrop_mode() == "live"
+            # GPU mode can't show Windows' own blur (needs a see-through window), so any
+            # blur mode except Off / Live falls back to the wallpaper blur there.
+            wall = blur_on and (dwm.janki_blur_wanted() or live or
+                                (gpu_glass and dwm.backdrop_mode() != "off"))
             if live and fakeblur.enable_live((r, g, b, a)):
                 a = 0
-            elif blur_on and (dwm.janki_blur_wanted() or live):
+            elif wall:
                 fakeblur.disable_live()
                 fakeblur.enable((r, g, b, a))        # wallpaper blur
                 a = 0
@@ -114,8 +122,10 @@ def _win_apply_main():
     except Exception as exc:
         log(f"win chrome: {exc}")
     try:
-        mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        from ..platform.win import preboot as _pb
+        if _pb.running_mode() == "software":   # see-through only in software mode
+            mw.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            mw.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         central = mw.centralWidget()
         if central:
             central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -2604,7 +2614,8 @@ def _patched_theme_did_change(self, *a, **k):
         pass
 
 
-if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "2":
+if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "2" \
+        and os.environ.get("JANKI_WIN_RENDER") == "software":
     # Translucency has to be set before the native window exists. Add-ons load before
     # Anki first shows the main window, so set it now (chrome.install() rebuilds the
     # window frameless if it was already created).

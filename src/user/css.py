@@ -529,7 +529,9 @@ _DECK_STICKY_JS = r"""(function(){
 # Readability halo for text on glass. Two blurred layers look best but are expensive
 # when the webviews draw in software — which the Windows glass needs (every typewriter
 # frame repaints them) — so Windows gets one tight layer.
-_TEXT_SHADOW = ("0 0 2px rgba(0,0,0,.95)" if sys.platform.startswith("win")
+_WIN_SOFT = (sys.platform.startswith("win")
+             and os.environ.get("JANKI_WIN_RENDER") == "software")
+_TEXT_SHADOW = ("0 0 2px rgba(0,0,0,.95)" if _WIN_SOFT
                 else "0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85)")
 
 _REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
@@ -1170,7 +1172,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Windows glass draws the webviews in software and re-copies the translucent
         # window every frame, so step every other frame there with twice the
         # characters per step: same typing speed, half the repaints.
-        f"  var JK_FR={2 if sys.platform.startswith('win') else 1};\n"
+        f"  var JK_FR={2 if _WIN_SOFT else 1};\n"
         "  function jkNext(f){ if(JK_FR>1){ requestAnimationFrame(function(){ requestAnimationFrame(f); }); }"
         " else { requestAnimationFrame(f); } }\n"
         f'  var PREV_HASH="{prev_hash}";\n'
