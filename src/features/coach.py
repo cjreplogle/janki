@@ -223,11 +223,50 @@ def _related_shown():
         return False
 
 
+# While the "On the card" step is up, the two hover-only corner buttons (rephrase
+# toggle bottom-left, related practice bottom-right) stay visible and glow softly, so
+# there's no hunting for them.
+_SPOT_CSS = ("#jk-rw-bar,#jk-pq-bar{opacity:1!important;pointer-events:auto!important;}"
+             "#jk-rw-bar>*,#jk-pq-bar>*{animation:jkSpot 1.6s ease-in-out infinite;"
+             "border-radius:8px;}"
+             "@keyframes jkSpot{0%,100%{box-shadow:0 0 0 0 rgba(156,188,243,0);}"
+             "50%{box-shadow:0 0 0 5px rgba(156,188,243,.45);}}")
+
+
+def _spot_buttons(on):
+    js = ("(function(){var s=document.getElementById('jk-tour-spot');"
+          + ("if(!s){s=document.createElement('style');s.id='jk-tour-spot';"
+             "document.head.appendChild(s);}s.textContent=%r;" % _SPOT_CSS if on
+             else "if(s)s.remove();")
+          + "})();")
+    try:
+        mw.web.eval(js)
+    except Exception:
+        pass
+
+
+def _on_card_shown(card):
+    """Re-apply the glow each time a card shows during the step (the reviewer swaps
+    card HTML, and Space → answer re-renders)."""
+    t = _tour
+    try:
+        if t is not None and t.steps[t.i].get("spot"):
+            QTimer.singleShot(60, lambda: _spot_buttons(True))
+    except Exception:
+        pass
+
+
+def _enter_oncard():
+    _open_sample()
+    QTimer.singleShot(900, lambda: _spot_buttons(True))
+
+
 def _oncard_done():
     return _reword_toggled() or _related_shown()
 
 
 def _leave_oncard():
+    _spot_buttons(False)
     try:
         from . import intersperse
         cids = set(_sample.get("mock_cids") or [])
@@ -419,11 +458,12 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
-        dict(target=None, title="On the card", hands_on=True, enter=_open_sample,
-             leave=_leave_oncard,
+        dict(target=None, title="On the card", hands_on=True, enter=_enter_oncard,
+             leave=_leave_oncard, spot=True,
              try_=("Show a related question", _show_related),
              detect=_oncard_done, done_msg="Those work on every card you study.",
-             text="Hover the card's bottom corners:<br>"
+             text="The two glowing buttons (normally they appear when you hover the "
+                  "card's bottom corners):<br>"
                   "• <b>Bottom-left</b> — flip between the card as written and a "
                   "<b>rephrasing</b> (or press <b>Tab+R</b>), so you learn the idea, not "
                   "the wording<br>"
@@ -927,6 +967,7 @@ class _Tour(QWidget):
         except Exception:
             pass
         _remove_signals()
+        _spot_buttons(False)
         _cleanup_sample()
 
         def _gone():
@@ -991,5 +1032,12 @@ except Exception:
 try:
     from aqt import gui_hooks as _gh2
     _gh2.card_will_show._hooks.insert(0, _seed_reword)
+except Exception:
+    pass
+
+
+try:
+    _gh2.reviewer_did_show_question.append(_on_card_shown)
+    _gh2.reviewer_did_show_answer.append(_on_card_shown)
 except Exception:
     pass
