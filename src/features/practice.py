@@ -128,10 +128,10 @@ def open_practice_hub():
     try:
         from . import stats_embed
         if stats_embed.is_open():
-            stats_embed.close_soon()
+            stats_embed.close_soon(sound="practice")
             _open_practice_hub_now()
         else:
-            stats_embed.fade_then(_open_practice_hub_now)
+            stats_embed.fade_then(_open_practice_hub_now, sound="practice")
     except Exception:
         _open_practice_hub_now()
 

@@ -880,7 +880,7 @@ _defer_close = False      # Stats is fading out; don't let navigation close it i
 _opening = False          # a Stats open is scheduled (ignore repeat clicks meanwhile)
 
 
-def close_soon(ms: int = 70, timeout: int = 1500) -> None:
+def close_soon(ms: int = 70, timeout: int = 1500, sound: str = "page") -> None:
     """Leave Stats for another page. The stats page fades out while the deck list behind it
     is redrawn, and Stats is only removed once that NEW page has loaded (at least `ms` for
     the fade, at most `timeout`). Revealing the collapsed list any earlier showed its last
@@ -889,7 +889,7 @@ def close_soon(ms: int = 70, timeout: int = 1500) -> None:
     if not is_open():
         return
     _defer_close = True
-    _page_sfx()
+    _page_sfx(sound)
     try:
         from ..util import perf_probe as _pp
         _pp.begin("leave Stats (close_soon)")

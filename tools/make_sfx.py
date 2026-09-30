@@ -188,9 +188,12 @@ def bank(name, voice, move, wet_scale=1.0):
     # (kept subtle: lower notes, dark soft swish, about half the level of the rest)
     save("settings", mix((0, sweep(0.12, 0.02, 0.04, 0.14, 21)),
                          (0.02, voice(392, 0.06, 0.075, 50)), (0.07, voice(523, 0.1, 0.075, 36))))
-    # stats open: a bright little flourish — three quick rising notes + a soft shimmer
-    save("stats",  mix((0, voice(988, 0.05, 0.16, 55)), (0.045, voice(1319, 0.05, 0.16, 55)),
+    # practice open: a bright little flourish — three quick rising notes + a shimmer
+    save("practice", mix((0, voice(988, 0.05, 0.16, 55)), (0.045, voice(1319, 0.05, 0.16, 55)),
                        (0.09, voice(1760, 0.12, 0.15, 30)), (0.09, sweep(0.14, 0.03, 0.45, 0.6, 31))))
+    # stats open: the same shape, lower and darker
+    save("stats",  mix((0, voice(392, 0.06, 0.16, 50)), (0.05, voice(523, 0.06, 0.16, 50)),
+                       (0.10, voice(659, 0.14, 0.15, 28)), (0.10, sweep(0.14, 0.03, 0.12, 0.22, 32))))
     # exit (quitting Anki): a soft falling swish under two descending notes
     save("exit",   mix((0, sweep(0.16, 0.035, 0.35, 0.06, 41)),
                        (0.0, voice(784, 0.07, 0.15, 45)), (0.07, voice(392, 0.16, 0.15, 24))))
