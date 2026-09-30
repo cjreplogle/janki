@@ -640,7 +640,9 @@ _DECK_WIDTH_JS = r"""(function(){
    // Practice view: pin the To-Do / Review / Completion columns to one width, so
    // revealing subdecks (or a fold animation) can't redistribute the table's width
    // between them — the bank-name column absorbs every change instead.
-   if(key.slice(-1)==='p'){ t.classList.add('jk-bank');
+   // Decks AND Practice: pinned count columns, fixed layout, one stable width —
+   // opening/closing subdecks never moves or slides a column.
+   if(true){ var view=key.slice(-1); t.classList.add('jk-bank');
      if(!document.getElementById('jk-bank-cols')){ var st=document.createElement('style');
        st.id='jk-bank-cols';
        st.textContent='table.jk-bank{table-layout:fixed;box-sizing:border-box;'
@@ -654,7 +656,7 @@ _DECK_WIDTH_JS = r"""(function(){
        document.head.appendChild(st);}
      // One fixed width for the whole Practice view (the widest it has needed, within
      // the window): expanding/collapsing banks never resizes or slides the table.
-     key='jkDeckW:p2';                       // fresh key: drop widths saved with the old floor
+     key='jkDeckW:'+view+'3';               // per view; fresh key drops older widths
      t.style.tableLayout='auto'; var nat0=natural(); t.style.tableLayout='';
      // never wider than the window: deeper subdeck names wrap instead of pushing the
      // columns off-screen
