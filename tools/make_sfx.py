@@ -82,13 +82,14 @@ def bell(f, dur, vol=0.2, decay=10.0):
 
 
 C5, E5, G5, C6, E6, A4 = 523.25, 659.25, 783.99, 1046.5, 1318.5, 440.0
-save("open",    mix((0, bell(C5, 0.1, 0.18, 26)), (0.055, bell(G5, 0.16, 0.18, 20))))
-save("reveal",  bell(E6, 0.25, 0.10, 14))
-save("again",   bell(C5, 0.28, 0.16, 11))     # the ratings climb C – E – G – C
-save("hard",    bell(E5, 0.28, 0.16, 11))
-save("good",    bell(G5, 0.3, 0.16, 10))
-save("easy",    bell(C6, 0.36, 0.15, 8))
-save("right",   mix((0, bell(C5, 0.2, 0.16, 13)), (0.09, bell(E5, 0.2, 0.16, 13)),
-                    (0.18, bell(G5, 0.42, 0.16, 7))))
-save("wrong",   bell(A4, 0.34, 0.15, 9))
+# Super quick, console-menu style: each tone ~50–70 ms with a fast fade.
+save("open",    mix((0, bell(C5, 0.05, 0.18, 55)), (0.035, bell(G5, 0.07, 0.18, 45))))
+save("reveal",  bell(E6, 0.05, 0.10, 60))
+save("again",   bell(C5, 0.06, 0.16, 50))     # the ratings climb C – E – G – C
+save("hard",    bell(E5, 0.06, 0.16, 50))
+save("good",    bell(G5, 0.06, 0.16, 50))
+save("easy",    bell(C6, 0.07, 0.15, 45))
+save("right",   mix((0, bell(C5, 0.045, 0.16, 60)), (0.035, bell(E5, 0.045, 0.16, 60)),
+                    (0.07, bell(G5, 0.08, 0.16, 40))))
+save("wrong",   bell(A4, 0.08, 0.15, 40))
 print("ok", sorted(os.listdir(OUT)))
