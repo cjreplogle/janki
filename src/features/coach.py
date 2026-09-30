@@ -242,6 +242,7 @@ class _Tour(QWidget):
         lay.addWidget(self.t_body)
         lay.addLayout(row)
         b.setFixedWidth(340)
+        b.hide()                               # shown once it's placed (no jump)
         self.bubble = b
         self.b_skip.clicked.connect(self.finish)
         self.b_try.clicked.connect(self._try)
@@ -318,8 +319,18 @@ class _Tour(QWidget):
     def _show_step(self, st, rect):
         self.hole = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
         self._place_bubble()
+        self.bubble.show()
         self._apply_mask()
         self.update()
+        if not self.isVisible():
+            # First step is measured, placed and masked while hidden — now appear
+            # in one fade (showing earlier made the bubble jump and the dim flicker).
+            self.opacity = 0.0
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.setFocus()
+            self.fade(1.0)
         if st.get("effect") == "flare":
             QTimer.singleShot(350, _demo_flare)
 
@@ -438,16 +449,14 @@ def start() -> None:
     if _tour is not None:
         return
     try:
-        if getattr(mw, "state", None) != "deckBrowser":
+        moved = getattr(mw, "state", None) != "deckBrowser"
+        if moved:
             mw.moveToState("deckBrowser")
         t = _Tour()
         _tour = t
         t.attach()
-        t.show()
-        t.raise_()
-        t.activateWindow()
-        t.setFocus()
-        QTimer.singleShot(250, lambda: (t.go(0), t.fade(1.0)))   # after the deck list draws
+        # Build the first step while hidden; _show_step reveals it with one fade.
+        QTimer.singleShot(300 if moved else 0, lambda: t.go(0))
     except Exception as exc:
         log("coach tour: %s" % exc)
         _tour = None
