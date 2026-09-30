@@ -31,7 +31,7 @@ def _path(name):
     return os.path.join(_DIR, b, name + ".wav")
 NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats",
        "practice", "sync", "tray", "lectures", "loaded", "close", "caption_in",
-       "caption_out", "lockdown",
+       "caption_out", "lockdown", "tab",
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}

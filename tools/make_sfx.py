@@ -219,6 +219,8 @@ def bank(name, voice, move, wet_scale=1.0):
     # caption in / out: a sideways slide, sweeping up as it appears, down as it leaves
     save("caption_in",  sweep(0.12, 0.05, 0.08, 0.42, 81, 1.4))
     save("caption_out", sweep(0.12, 0.05, 0.42, 0.08, 82, 1.4))
+    # settings tab switch: a very subtle, short slide
+    save("tab",    sweep(0.07, 0.022, 0.1, 0.3, 91, 1.4))
     # time's up (card-timer flare): three quick low "bumps" on the same note
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.07, 0.24, 45)),
                        (0.17, voice(220, 0.11, 0.24, 34))))       # three low bumps

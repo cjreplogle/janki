@@ -2656,9 +2656,17 @@ class GlassSettings(QDialog):
             "QPushButton:focus,QToolButton:focus,QComboBox:focus,QAbstractSpinBox:focus"
             "{border:1px solid rgba(156,188,243,.8);border-radius:6px;}"
             "QSlider:focus{background:rgba(156,188,243,.10);border-radius:6px;}"))
+        def _tab_sfx(_i):
+            if self.isVisible():                 # not while Settings is being set up
+                try:
+                    from ..features import sfx as _sfx
+                    _sfx.play("tab")
+                except Exception:
+                    pass
         for tw in tabws:
             try:
                 tw.currentChanged.connect(lambda _i, f=_fit: QTimer.singleShot(0, f))
+                tw.currentChanged.connect(_tab_sfx)
             except Exception:
                 pass
         QTimer.singleShot(0, _fit)
@@ -2916,7 +2924,7 @@ class GlassSettings(QDialog):
                  "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup",
                  "sync", "tray", "lectures", "loaded", "close", "caption_in",
-                 "caption_out", "lockdown", "exit")
+                 "caption_out", "lockdown", "tab", "exit")
         from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
 
         dlg_self = self
