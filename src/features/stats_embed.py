@@ -1081,6 +1081,10 @@ def _when_idle(fn, ms) -> None:
         t.setSingleShot(True)
 
         def _run():
+            # Never while you're about to study or studying: the stats page shares the
+            # renderer with the card, and its load stalled the first card's typing.
+            if getattr(mw, "state", None) in ("overview", "review"):
+                return                        # the next return to the deck list re-queues
             jobs, _idle["jobs"] = _idle["jobs"], []
             for j in jobs:
                 try:
@@ -1097,8 +1101,12 @@ def _when_idle(fn, ms) -> None:
 
 def _bump_idle(*_a) -> None:
     t = _idle["timer"]
-    if t is not None and t.isActive():
+    if t is None:
+        return
+    if t.isActive():
         t.start(max(_idle["ms"], 2500))          # still busy → wait again
+    elif _idle["jobs"] and getattr(mw, "state", None) == "deckBrowser":
+        t.start(max(_idle["ms"], 2500))          # held back during study → run later
 
 
 def _on_main_window_init() -> None:
