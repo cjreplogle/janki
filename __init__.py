@@ -1310,3 +1310,47 @@ def _reglass_later(delays):
             QTimer.singleShot(d, _g._reapply_native)
     except Exception:
         pass
+
+
+
+# Backup for when the global key tap isn't intercepting (e.g. no Accessibility): while
+# Tab is held, Anki's single-letter shortcuts (F = create filtered deck, …) must not
+# fire underneath a Janki Tab+key chord.
+def _install_tab_chord_guard():
+    try:
+        from aqt.qt import QObject, QEvent, QApplication, Qt as _Q
+
+        class _TabGuard(QObject):
+            held = False
+
+            def eventFilter(self, obj, ev):
+                t = ev.type()
+                if t in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
+                         QEvent.Type.ShortcutOverride):
+                    k = ev.key()
+                    if k == _Q.Key.Key_Tab:
+                        if t == QEvent.Type.KeyPress:
+                            _TabGuard.held = True
+                        elif t == QEvent.Type.KeyRelease and not ev.isAutoRepeat():
+                            _TabGuard.held = False
+                        return False
+                    if _TabGuard.held and _Q.Key.Key_A <= k <= _Q.Key.Key_Z \
+                            and not (ev.modifiers() & (_Q.KeyboardModifier.ControlModifier
+                                                       | _Q.KeyboardModifier.MetaModifier
+                                                       | _Q.KeyboardModifier.AltModifier)):
+                        if t == QEvent.Type.ShortcutOverride:
+                            ev.accept()          # claim it → no Anki shortcut fires
+                            return True
+                        return True              # and don't type the letter
+                return False
+        g = _TabGuard(mw)
+        QApplication.instance().installEventFilter(g)
+        mw._janki_tab_guard = g
+    except Exception as e:
+        log("tab chord guard: %s" % e)
+
+
+try:
+    gui_hooks.main_window_did_init.append(_install_tab_chord_guard)
+except Exception:
+    pass

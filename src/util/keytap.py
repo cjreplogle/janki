@@ -804,6 +804,10 @@ def _start_key_tap() -> None:
                     _key_bridge.send_key.emit(canon)
                     return None  # consume combo key
             elif etype == 11:  # keyup
+                # the key-up of a chord key: swallow it too, so Anki never sees a
+                # stray F (its "create filtered deck" shortcut) etc.
+                if _tab_held and kc != _hk.leader_kc and _hk.tab_map.get(kc) is not None:
+                    return None
                 if kc == _hk.leader_kc:
                     was_combo = _tab_used_combo
                     _tab_held = False
