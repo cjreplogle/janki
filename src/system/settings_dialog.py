@@ -2229,6 +2229,27 @@ class GlassSettings(QDialog):
         # (after the stretch, so it sits below the installed-banks list).
         prac_qb_lay.addWidget(_deck_btn)
 
+        # Bottom-right of General: jump to Anki's own Preferences (after the stretch,
+        # so it sits at the bottom).
+        _prefs_row = QHBoxLayout()
+        _prefs_row.addStretch()
+        _anki_prefs = QPushButton("Anki Preferences…")
+        _anki_prefs.setToolTip("Open Anki's own preferences (scheduling, sync, theme, "
+                               "video driver…).")
+        _anki_prefs.setStyleSheet(
+            "QPushButton{background-color:#55585e;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;}"
+            "QPushButton:hover{background-color:#61646b;}")
+
+        def _open_anki_prefs():
+            try:
+                mw.onPrefs()
+            except Exception as _e:
+                log("anki prefs: %s" % _e)
+        _anki_prefs.clicked.connect(_open_anki_prefs)
+        _prefs_row.addWidget(_anki_prefs)
+        gen_lay.addLayout(_prefs_row)
+
         # No Close button — the window's own close (red X / Esc) ends the dialog. Save
         # the Lectures fields however it closes (finished fires for accept AND reject).
         def _save_on_close(*_a):
