@@ -485,6 +485,13 @@ def _startup():
         _set_sc.activated.connect(lambda: settings_dialog._open_settings())
         mw._janki_settings_sc = _set_sc
 
+        # ⌘B / Ctrl+B: back one step — Stats → close; review/overview → the deck list,
+        # or the Practice view when studying a question bank; Practice view → Decks.
+        _back_sc = QShortcut(QKeySequence("Ctrl+B"), mw)
+        _back_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        _back_sc.activated.connect(lambda: _go_back())
+        mw._janki_back_sc = _back_sc
+
         # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
         # create the manager now so its CGEventTap signal handlers are live —
         # the backtick+Delete chord can then engage lockdown before any manual
@@ -1026,3 +1033,37 @@ try:
     gui_hooks.webview_did_receive_js_message.append(css.on_js_message)
 except Exception:
     pass
+
+
+def _go_back():
+    try:
+        from .src.features import practice as _pr, stats_embed as _se
+        if _se.is_open():
+            _se.fade_close()
+            return
+        st = getattr(mw, "state", None)
+        if st in ("review", "overview"):
+            try:
+                did = int(mw.col.decks.get_current_id())
+            except Exception:
+                did = None
+            in_bank = did is not None and (did in _pr._practice_dids()
+                                           or did in _pr._amboss_dids())
+            if st == "review":
+                try:
+                    focus._focus_restore_for_nav()
+                except Exception:
+                    pass
+            mw.moveToState("deckBrowser")
+            if in_bank:
+                _pr.open_practice_hub()
+            return
+        if st == "deckBrowser" and _pr._practice_view:
+            h = (getattr(mw.toolbar, "link_handlers", {}) or {}).get("decks")
+            if h:
+                h()
+            else:
+                _pr._practice_view = False
+                mw.deckBrowser.refresh()
+    except Exception as e:
+        log("go back: %s" % e)
