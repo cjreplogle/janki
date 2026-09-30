@@ -176,6 +176,29 @@ def _lectures_open():
     return d is not None and d.isVisible()
 
 
+def _focus_or_caption():
+    try:
+        from . import focus
+        from ..user import hud
+        return bool(focus._focus_mode_on or hud._caption_visible())
+    except Exception:
+        return False
+
+
+def _leave_review():
+    """Leaving the Focus & Caption step: switch both off if left on, back to decks."""
+    try:
+        from . import focus
+        from ..user import hud
+        if hud._caption_visible():
+            hud._toggle_coherence()
+        if focus._focus_mode_on:
+            focus._toggle_focus_mode()
+    except Exception as e:
+        log("coach leave review: %s" % e)
+    _back_to_decks()
+
+
 def _import_used():
     return _sig["import_open"] or _sig["import_done"]
 
@@ -249,11 +272,14 @@ def _steps():
              done_msg="Close Settings when you're done — the tour continues.",
              text="Everything Janki does is adjustable here — look, timers, Pomodoro, "
                   "lectures, and every hotkey (under <b>Hotkeys</b>)."),
-        dict(target=("main",), title="Focus & Caption",
-             text="While studying: <b>Tab+F</b> hides everything but the card; "
-                  "<b>Tab+\\</b> floats the card as a caption over other apps. "
-                  "<b>Z / X / C / V</b> rate cards like 1–4, even from another app "
-                  "with Tab held."),
+        dict(target=None, title="Focus & Caption", hands_on=True, enter=_open_sample,
+             leave=_leave_review,
+             try_=("Reopen the sample card", _open_sample),
+             detect=_focus_or_caption, done_msg="That's it — press it again to switch back.",
+             text="A sample card is open. Try:<br>• <b>Tab+F</b> — Focus mode hides "
+                  "everything but the card<br>• <b>Tab+\\</b> — Caption mode floats "
+                  "the card over other apps (move it with Tab+arrows)<br>Press the same "
+                  "keys again to switch back."),
         dict(target=("bottom", "Import File"), title="Import File",
              try_=("Try Import File", lambda: _click("bottom", "Import File")),
              detect=_import_used, wait=lambda: _sig["import_open"],
@@ -267,14 +293,12 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards."),
-        dict(target=None, title="Try it on a sample card", hands_on=True,
-             try_=("Open sample card", _open_sample),
+        dict(target=None, title="Reviewing", hands_on=True, enter=_open_sample,
+             try_=("Reopen the sample card", _open_sample),
              detect=_sample_answered, done_msg="Nice — you rated it.",
-             text="Open a sample card and try things for real (the tour steps aside):"
-                  "<br>• <b>Space</b> — show the answer<br>• <b>Z / X / C / V</b> — rate "
-                  "it<br>• <b>Tab+F</b> — Focus mode<br>• <b>Tab+\\</b> — Caption mode "
-                  "(press again to return)<br>The sample deck is removed when the tour "
-                  "ends."),
+             text="On the sample card:<br>• <b>Space</b> — show the answer<br>"
+                  "• <b>Z / X / C / V</b> — rate it (like 1–4), even from another app "
+                  "with Tab held<br>The sample deck is removed when the tour ends."),
         dict(target=None, title="Card timer & flares", effect="flare",
              try_=("Show again", lambda: _demo_flare()),
              text="While you review, a small ring fills; linger too long and the window "
@@ -447,6 +471,11 @@ class _Tour(QWidget):
         # Already true when the step starts (e.g. Practice view left open) → wait for
         # the user to do it, not count the leftover state.
         self._det = {"done": False, "base": base, "closed": False}
+        if st.get("enter"):
+            try:
+                st["enter"]()                      # e.g. open the sample card
+            except Exception as e:
+                log("coach enter: %s" % e)
         t = st.get("try_")
         self.b_try.setVisible(bool(t))
         if t:
