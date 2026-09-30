@@ -1094,6 +1094,12 @@ def _pick_tag_map_file(day_offset=0):
         "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
     if not fn:
         return False
+    return use_tag_map_file(fn, day_offset)
+
+
+def use_tag_map_file(fn, day_offset=0, open_after=True):
+    """Install `fn` as the lecture→tag map — the file picker's "Choose file…" step, also
+    used when a map file is dropped on the main window. Returns True if it loaded."""
     cur = mw.addonManager.getConfig(__name__) or {}
     # The base slot is reserved for a spreadsheet; a .txt/.json is always a
     # complementary layer (still resolves on its own with an empty base).
@@ -1108,7 +1114,8 @@ def _pick_tag_map_file(day_offset=0):
     _MAP_CACHE["key"] = None            # force a rebuild with the new path
     m2, _k2, _o2 = _get_map(_enabled_families())
     if m2:
-        QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
+        if open_after:
+            QTimer.singleShot(0, lambda: _open_today_dialog(day_offset))
         return True
     showInfo("Couldn't load any lectures from that file.\n\n"
              "Make sure it's a valid .xlsx spreadsheet, .txt or .json tag map.",
@@ -2470,8 +2477,13 @@ def build_settings_pages():
 
     def _add_txt():
         fns, _f = QFileDialog.getOpenFileNames(
-            src, "Choose .txt/.json tag list(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
-            "Text/JSON tag maps (*.txt *.json);;All files (*)")
+            src, "Choose tag map file(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
+            "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
+        # A spreadsheet is the base map (one slot); .txt/.json files layer on top.
+        sheets = [f for f in fns if f.lower().endswith((".xlsx", ".xlsm"))]
+        if sheets:
+            xlsx_edit.setText(sheets[-1])
+        fns = [f for f in fns if not f.lower().endswith((".xlsx", ".xlsm"))]
         existing = {txt_list.item(i).text() for i in range(txt_list.count())}
         for fn in fns:
             if fn and fn not in existing:

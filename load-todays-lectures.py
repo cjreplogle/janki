@@ -2086,8 +2086,13 @@ def build_settings_pages():
 
     def _add_txt():
         fns, _f = QFileDialog.getOpenFileNames(
-            src, "Choose .txt/.json tag list(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
-            "Text/JSON tag maps (*.txt *.json);;All files (*)")
+            src, "Choose tag map file(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
+            "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
+        # A spreadsheet is the base map (one slot); .txt/.json files layer on top.
+        sheets = [f for f in fns if f.lower().endswith((".xlsx", ".xlsm"))]
+        if sheets:
+            xlsx_edit.setText(sheets[-1])
+        fns = [f for f in fns if not f.lower().endswith((".xlsx", ".xlsm"))]
         existing = {txt_list.item(i).text() for i in range(txt_list.count())}
         for fn in fns:
             if fn and fn not in existing:

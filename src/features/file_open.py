@@ -57,13 +57,13 @@ def _doc_exts() -> tuple:
 
 def _dropped_paths(ev) -> list:
     """Local files carried by a drag that Janki imports here, or [] (then Anki handles
-    it): .jank/.qb/.rp and .docx question documents anywhere, plus .pptx/.json while the
-    Practice hub is showing."""
+    it): .jank/.qb/.rp, .docx question documents and .xlsx lecture maps anywhere, plus
+    .pptx/.json while the Practice hub is showing."""
     try:
         md = ev.mimeData()
         if not md or not md.hasUrls():
             return []
-        exts = _EXTS + (".docx",) + (_doc_exts() if _in_practice_view() else ())
+        exts = _EXTS + (".docx",) + _MAP_EXTS + (_doc_exts() if _in_practice_view() else ())
         out = [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
         return [p for p in out if p.lower().endswith(exts) and os.path.isfile(p)]
     except Exception:
@@ -99,10 +99,31 @@ def _open_doc(path: str) -> None:
                     % (os.path.basename(path), exc))
 
 
+_MAP_EXTS = (".xlsx", ".xlsm")   # lecture → tag map spreadsheets
+
+
+def _use_map(path: str) -> None:
+    """A spreadsheet dropped on the main window becomes the lecture → tag map (same as
+    "Choose file…" in the lecture loader), then the loader opens with it."""
+    from aqt.utils import tooltip
+    try:
+        from ..integrations import lectures
+        if lectures.use_tag_map_file(path):
+            tooltip("Lecture → tag map set: %s" % os.path.basename(path))
+    except Exception as exc:
+        from aqt.utils import showWarning
+        log("map drop %s: %s" % (os.path.basename(path), exc))
+        showWarning("Could not use %s as the lecture map:\n\n%s"
+                    % (os.path.basename(path), exc))
+
+
 def _handle_drop(paths) -> None:
     for p in paths:
-        if p.lower().endswith(_EXTS):
+        low = p.lower()
+        if low.endswith(_EXTS):
             _open(p)
+        elif low.endswith(_MAP_EXTS):
+            _use_map(p)
         else:
             _open_doc(p)
 
