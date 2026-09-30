@@ -191,6 +191,9 @@ def bank(name, voice, move, wet_scale=1.0):
     # stats open: a bright little flourish — three quick rising notes + a soft shimmer
     save("stats",  mix((0, voice(988, 0.05, 0.16, 55)), (0.045, voice(1319, 0.05, 0.16, 55)),
                        (0.09, voice(1760, 0.12, 0.15, 30)), (0.09, sweep(0.14, 0.03, 0.45, 0.6, 31))))
+    # exit (quitting Anki): a soft falling swish under two descending notes
+    save("exit",   mix((0, sweep(0.16, 0.035, 0.35, 0.06, 41)),
+                       (0.0, voice(784, 0.07, 0.15, 45)), (0.07, voice(392, 0.16, 0.15, 24))))
     # time's up (card-timer flare): a low double "bump" — same note twice, quick
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.1, 0.24, 35))))
     slides()

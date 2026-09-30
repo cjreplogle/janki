@@ -29,7 +29,8 @@ def _path(name):
             return p
         b = "mallet"
     return os.path.join(_DIR, b, name + ".wav")
-NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats"}
+NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats",
+       "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
 
@@ -125,10 +126,40 @@ def on_js_message(handled, message, context):
     return handled
 
 
+def play_on_exit():
+    """Quitting: Anki is gone within milliseconds, which would cut a QSoundEffect off —
+    so hand the exit sound to the system player, which outlives the app."""
+    c = _cfg()
+    vol = int(c.get("sfx_volume", 0))
+    if vol <= 0 or c.get("sfx_muted") or not c.get("sfx_nav", True) \
+            or "exit" in (c.get("sfx_disabled") or []):
+        return
+    path = _path("exit")
+    if not os.path.isfile(path):
+        return
+    gain = vol / 100.0 * float((c.get("sfx_gain") or {}).get("exit", 100)) / 100.0
+    try:
+        import subprocess, sys
+        if sys.platform == "darwin":
+            subprocess.Popen(["/usr/bin/afplay", "-v", "%.2f" % max(0.0, min(1.0, gain)), path],
+                             start_new_session=True, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        elif sys.platform.startswith("win"):
+            ps = ("(New-Object Media.SoundPlayer '%s').PlaySync()" % path.replace("'", "''"))
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                              "-Command", ps], creationflags=0x08000000)   # no window
+    except Exception as e:
+        log("sfx exit: %s" % e)
+
+
 def install():
     gui_hooks.reviewer_did_answer_card.append(_on_answer)
     gui_hooks.reviewer_did_show_answer.append(_on_show_answer)   # a subtle slide
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
+    try:
+        mw.app.aboutToQuit.connect(play_on_exit)
+    except Exception:
+        pass
     try:
         from aqt.qt import QTimer
         gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(3000, preload))
