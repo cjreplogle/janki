@@ -175,6 +175,7 @@
   "first_card_fade": true,
   "remote_zoom": true,
   "sfx_volume": 0,
+  "sfx_bank": "mallet",
   "sfx_nav": true,
   "sfx_review": true,
   "hid_zoom_in_usage": 12,

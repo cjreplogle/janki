@@ -9,25 +9,44 @@ from aqt import gui_hooks, mw
 
 from ..util.config import _cfg, log
 
-_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                    "assets", "sounds")
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+_DIR = os.path.join(_ROOT, "assets", "sounds")
+BANKS = ["mallet", "chime", "soft", "retro", "custom"]
+CUSTOM_DIR = os.path.join(_ROOT, "user_files", "sounds")
+
+
+def _bank():
+    b = str(_cfg().get("sfx_bank", "mallet"))
+    return b if b in BANKS else "mallet"
+
+
+def _path(name):
+    """This sound's file in the chosen set; Custom falls back to Mallet per sound."""
+    b = _bank()
+    if b == "custom":
+        p = os.path.join(CUSTOM_DIR, name + ".wav")
+        if os.path.isfile(p):
+            return p
+        b = "mallet"
+    return os.path.join(_DIR, b, name + ".wav")
 NAV = {"move", "select", "back", "open", "fold", "unfold", "page"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong"}
 _fx = {}
 
 
 def _effect(name):
-    fx = _fx.get(name)
+    path = _path(name)
+    fx = _fx.get(path)
     if fx is None:
         try:
             from aqt.qt import QUrl
             from PyQt6.QtMultimedia import QSoundEffect
             fx = QSoundEffect(mw)
-            fx.setSource(QUrl.fromLocalFile(os.path.join(_DIR, name + ".wav")))
-            _fx[name] = fx
+            fx.setSource(QUrl.fromLocalFile(path))
+            _fx[path] = fx
         except Exception as e:
             log("sfx %s: %s" % (name, e))
-            _fx[name] = False
+            _fx[path] = False
             return None
     return fx or None
 

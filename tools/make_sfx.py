@@ -67,15 +67,16 @@ def reverb(buf, wet=0.22, room=0.72, tail=0.28):
 
 # per-sound reverb amount (navigation stays crisp; chimes get a bit more space)
 WET = {"move": 0.08, "select": 0.14, "back": 0.14, "fold": 0.10, "unfold": 0.10,
-       "page": 0.14, "reveal": 0.12}
+       "page": 0.14, "reveal": 0.12, "_default": 0.24}
 
 
 def save(name, buf):
-    buf = reverb(buf, WET.get(name, 0.24))
+    buf = reverb(buf, WET.get(name, WET.get("_default", 0.24)))
     peak = max(1e-9, max(abs(x) for x in buf))
     g = min(1.0, 0.85 / peak)
     fade = int(SR * 0.004)
-    with wave.open(os.path.join(OUT, name + ".wav"), "wb") as w:
+    os.makedirs(os.path.join(OUT, BANK), exist_ok=True)
+    with wave.open(os.path.join(OUT, BANK, name + ".wav"), "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
         frames = bytearray()
         for i, x in enumerate(buf):
@@ -115,7 +116,7 @@ def pok(f, dur=0.09, vol=0.2, decay=38.0):
 
 
 
-def swish(dur=0.11, vol=0.07, seed=7):
+def swish(dur=0.11, vol=0.04, seed=7):
     rnd = random.Random(seed); n = int(SR * dur); out = []; lp = 0.0; lp2 = 0.0
     for k in range(n):
         t = k / n
@@ -141,28 +142,63 @@ def sweep(dur, vol, a0, a1, seed, shape=2.0):
 
 
 
+
+def square(f0, f1, dur, vol=0.12, decay=30.0, duty=0.5):
+    """Retro pulse wave (8-bit handheld style), gently band-limited by a 1-pole LP."""
+    n = int(SR * dur); out = []; ph = 0.0; lp = 0.0
+    for k in range(n):
+        t = k / SR
+        f = f0 + (f1 - f0) * min(1.0, t / dur)
+        ph = (ph + f / SR) % 1.0
+        lp += 0.35 * ((1.0 if ph < duty else -1.0) - lp)
+        out.append(lp * min(1.0, t / 0.001) * math.exp(-decay * t) * vol)
+    return out
+
+
 C5, E5, G5, C6, A4 = 523.25, 659.25, 783.99, 1046.5, 440.0
-os.makedirs(OUT, exist_ok=True)
+BANK = "mallet"
 
-# Navigation (unchanged): a barely-there tick for moving.
-save("move",    click(0.007, 0.16))
 
-# Menu-UI mallet set — rounded "pok" taps, quick, with a little room (see WET).
-save("select",  mix((0, pok(1175, 0.05, 0.2, 60)), (0.03, pok(1568, 0.08, 0.2, 45))))
-save("back",    mix((0, pok(988, 0.05, 0.2, 60)), (0.03, pok(740, 0.08, 0.2, 45))))
-save("open",    mix((0, pok(C5, 0.08, 0.2)), (0.045, pok(G5, 0.12, 0.2, 30))))
-save("again",   pok(C5, 0.1, 0.2))           # the ratings climb C – E – G – C
-save("hard",    pok(E5, 0.1, 0.2))
-save("good",    pok(G5, 0.1, 0.2))
-save("easy",    pok(C6, 0.11, 0.19, 34))
-save("right",   mix((0, pok(C5, 0.07, 0.19, 45)), (0.04, pok(E5, 0.07, 0.19, 45)),
-                    (0.08, pok(G5, 0.14, 0.19, 28))))
-save("wrong",   pok(A4, 0.12, 0.19, 30))
+def slides():
+    """Noise slides shared by every bank (no tone, so they suit all of them)."""
+    save("reveal",  swish())
+    save("unfold",  sweep(0.07, 0.06, 0.25, 0.55, 11))
+    save("fold",    sweep(0.07, 0.06, 0.55, 0.25, 12))
+    save("page",    sweep(0.15, 0.09, 0.03, 0.10, 13, 1.5))
 
-# Slides (noise, no tone): reveal = soft mid swish; fold/unfold = short high rustle
-# sweeping up/down; page = fuller low whoosh.
-save("reveal",  swish())
-save("unfold",  sweep(0.07, 0.06, 0.25, 0.55, 11))
-save("fold",    sweep(0.07, 0.06, 0.55, 0.25, 12))
-save("page",    sweep(0.15, 0.09, 0.03, 0.10, 13, 1.5))
+
+def bank(name, voice, move, wet_scale=1.0):
+    """One full set. voice(f, dur, vol, decay) makes a single note."""
+    global BANK
+    BANK = name
+    for k in list(WET):
+        WET[k] = WET[k]
+    save("move",   move)
+    save("select", mix((0, voice(1175, 0.05, 0.2, 60)), (0.03, voice(1568, 0.08, 0.2, 45))))
+    save("back",   mix((0, voice(988, 0.05, 0.2, 60)), (0.03, voice(740, 0.08, 0.2, 45))))
+    save("open",   mix((0, voice(C5, 0.08, 0.2, 38)), (0.045, voice(G5, 0.12, 0.2, 30))))
+    save("again",  voice(C5, 0.1, 0.2, 38))       # the ratings climb C – E – G – C
+    save("hard",   voice(E5, 0.1, 0.2, 38))
+    save("good",   voice(G5, 0.1, 0.2, 38))
+    save("easy",   voice(C6, 0.11, 0.19, 34))
+    save("right",  mix((0, voice(C5, 0.07, 0.19, 45)), (0.04, voice(E5, 0.07, 0.19, 45)),
+                       (0.08, voice(G5, 0.14, 0.19, 28))))
+    save("wrong",  voice(A4, 0.12, 0.19, 30))
+    slides()
+
+
+tick = click(0.007, 0.16)
+# Mallet (default): rounded "pok" taps — menu-UI style.
+bank("mallet", pok, tick)
+# Chime: clean bells (pure sine + faint octave).
+bank("chime", lambda f, d, v, k: bell(f, d, v * 0.85, k * 0.9), tick)
+# Soft: muted taps with a hint of click — the quietest set.
+bank("soft", lambda f, d, v, k: tap(f * 0.5, d, v * 0.8, k), click(0.006, 0.12))
+# Retro: 8-bit pulse blips, like an old handheld.
+_saved = dict(WET)
+for _k in WET:
+    WET[_k] = WET[_k] * 0.4                      # drier
+bank("retro", lambda f, d, v, k: square(f, f, d, v * 0.55, k, 0.25),
+     square(2000, 2000, 0.012, 0.05, 120))
+WET.clear(); WET.update(_saved)
 print("ok", sorted(os.listdir(OUT)))

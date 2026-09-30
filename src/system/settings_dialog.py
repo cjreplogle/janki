@@ -2800,12 +2800,46 @@ class GlassSettings(QDialog):
         """Focus ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing
         (original, synthesized). Volume 0 turns them all off."""
         from ..features import sfx
+        from aqt.qt import QComboBox
         intro = QLabel("Optional, very quiet clicks as you move around with the keyboard "
                        "or a remote, and as you reveal and rate cards. Off by default — "
                        "turn the volume up to try them.")
         intro.setWordWrap(True)
         intro.setStyleSheet("color: gray;")
         lay.addWidget(intro)
+
+        # Sound set: swap the whole bank (Custom = your own .wav files in a folder).
+        brow = QHBoxLayout()
+        brow.addWidget(QLabel("Sound set"))
+        bank = QComboBox()
+        for key, label in (("mallet", "Mallet"), ("chime", "Chime"), ("soft", "Soft"),
+                           ("retro", "Retro"), ("custom", "Custom folder")):
+            bank.addItem(label, key)
+        _cur = str(self.cfg.get("sfx_bank", "mallet"))
+        bank.setCurrentIndex(max(0, bank.findData(_cur)))
+        folder = QPushButton("Open folder…")
+        folder.setAutoDefault(False)
+        folder.setToolTip("Put move.wav, select.wav, good.wav … here (same names as the "
+                          "Preview buttons). Missing ones use the Mallet set.")
+        folder.setVisible(_cur == "custom")
+
+        def _bank_changed(_i):
+            k = bank.currentData()
+            self.cfg["sfx_bank"] = k
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            folder.setVisible(k == "custom")
+            sfx.play("select", force=True)
+
+        def _open_folder():
+            import os as _os
+            from aqt.utils import openFolder
+            _os.makedirs(sfx.CUSTOM_DIR, exist_ok=True)
+            openFolder(sfx.CUSTOM_DIR)
+        bank.currentIndexChanged.connect(_bank_changed)
+        folder.clicked.connect(_open_folder)
+        brow.addWidget(bank, 1)
+        brow.addWidget(folder)
+        lay.addLayout(brow)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Volume"))
