@@ -441,7 +441,8 @@ _DECK_KEYS_JS = r"""(function(){
  function cur(){return document.querySelector('tr.deck.jk-kb-row');}
  function poke(){clearTimeout(idle);idle=setTimeout(function(){var c=cur();
    if(c){hid=c.id;sel(null,true);}},3000);}
- function sel(tr,keep){if(!keep)hid=null;var o=cur();if(o){o.classList.remove('jk-kb-row');
+ function sel(tr,keep){if(!keep)hid=null;var o=cur();
+   document.documentElement.classList.toggle('jk-kbnav',!!tr);if(o){o.classList.remove('jk-kb-row');
    var a=o.querySelector('a.deck');if(a)a.classList.remove('jk-kb');}
    if(!tr)return; tr.classList.add('jk-kb-row');
    var a2=tr.querySelector('a.deck');if(a2)a2.classList.add('jk-kb');
@@ -870,7 +871,8 @@ def _build_css(cfg, context):
             parts.append("<style>html body a.deck.jk-kb{background:rgba(255,255,255,.12);"
                          "border-radius:6px;box-shadow:0 0 0 4px rgba(255,255,255,.12);}"
                          "</style>\n")
-        parts.append("<script>" + _DECK_KEYS_JS + "</script>\n")
+        parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}</style>"
+                     "<script>" + _DECK_KEYS_JS + "</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
