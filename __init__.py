@@ -994,3 +994,28 @@ try:
         gui_hooks.profile_did_open.append(lambda: _PQT.singleShot(4000, _perf_probe.install))
 except Exception:
     pass
+
+
+# Keyboard deck navigation needs the deck list focused; after a toolbar click the
+# focus stays in the toolbar web view, so arrows/Space went nowhere.
+def _focus_deck_list(*_a):
+    try:
+        from aqt.qt import QApplication, QTimer
+        def _go():
+            fw = QApplication.focusWidget()
+            # only within the main window, and never away from a native text field
+            if QApplication.activeWindow() is not mw or getattr(mw, "state", None) != "deckBrowser":
+                return
+            if fw is not None and (fw.inherits("QLineEdit") or fw.inherits("QTextEdit")
+                                   or fw.inherits("QPlainTextEdit")):
+                return
+            mw.web.setFocus()
+        QTimer.singleShot(0, _go)
+    except Exception:
+        pass
+
+
+try:
+    gui_hooks.deck_browser_did_render.append(_focus_deck_list)
+except Exception:
+    pass
