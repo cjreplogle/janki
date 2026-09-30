@@ -829,7 +829,7 @@ _animate_next_deck = False
 _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
                 "reduce)').matches)return;var b=document.body;if(!b)return;"
                 "b.style.transition='opacity .06s ease-out,transform .06s ease-out';"
-                "b.style.opacity='0';b.style.transform='translateY(4px)';}catch(e){}})();")
+                "b.style.opacity='0.35';b.style.transform='translateY(3px)';}catch(e){}})();")
 
 
 def fade_then(fn, web=None, ms: int = 0) -> None:
@@ -936,9 +936,13 @@ def animate_next_deck_render() -> None:
 # deck list takes longer to build than the Practice view, so that wait was noticeable).
 # On <html> (not <body>): Janki's own deck-list fade (html.glass-fading body{animation})
 # would otherwise override it; on the root the two simply combine.
-_DROP_CSS = ("<style>@media (prefers-reduced-motion: no-preference){html{animation:"
+# Starts at the level the outgoing page faded to (.35), so the switch is one continuous
+# dip instead of fade-out → blank → fade-in; the generic page fade stands down for it
+# (the two multiplied back to a blank first frame).
+_DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
+             "@media (prefers-reduced-motion: no-preference){html{animation:"
              "jkDrop .14s cubic-bezier(.2,.8,.2,1) both;}}"
-             "@keyframes jkDrop{from{opacity:0;transform:translateY(-8px);}"
+             "@keyframes jkDrop{from{opacity:.35;transform:translateY(-6px);}"
              "to{opacity:1;transform:none;}}</style>")
 
 
