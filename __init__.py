@@ -240,8 +240,30 @@ def _warn_if_light_mode():
         log("light-mode warn: %s" % exc)
 
 
+def _force_dark_mode():
+    """Janki's glass is built for Dark mode (light pages over the dark tint look
+    wrong), so switch Anki's Theme to Dark at startup — the same setting as
+    Preferences ▸ Appearance ▸ Theme. Picking Light later in a session isn't fought
+    (the light-mode tooltip still explains why); it's re-applied next launch. Opt out
+    with config "force_dark_mode": false."""
+    try:
+        if not _cfg().get("force_dark_mode", True):
+            return
+        from aqt.theme import theme_manager, Theme
+        if getattr(theme_manager, "night_mode", True):
+            return
+        mw.set_theme(Theme.DARK)
+        from aqt.utils import tooltip
+        QTimer.singleShot(1200, lambda: tooltip(
+            "Janki switched Anki to Dark mode — its glass theme is built for it.",
+            period=4000))
+    except Exception as exc:
+        log("force dark mode: %s" % exc)
+
+
 def _startup():
     _bt.mark("main window ready → _startup begins")
+    _force_dark_mode()
     try:
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
         # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a

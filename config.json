@@ -172,5 +172,6 @@
   "first_card_fade_ms": 450,
   "deck_gap_px": 6,
   "deck_group_gap_px": 6,
-  "zxcv_rating": true
+  "zxcv_rating": true,
+  "force_dark_mode": true
 }
