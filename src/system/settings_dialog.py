@@ -19,6 +19,17 @@ from . import stock_selfheal, updater
 class GlassSettings(QDialog):
     """macOS-Terminal-style controls: background color, opacity, blur radius."""
 
+    def _fade_close(self):
+        """Close with a short fade instead of vanishing (the shortcut toggle)."""
+        if getattr(self, "_jk_fading_out", False):
+            return
+        self._jk_fading_out = True
+        try:
+            from ..user import glass
+            glass._fade_window(self, self.windowOpacity(), 0.0, 160, then=self.close)
+        except Exception:
+            self.close()
+
     def __init__(self):
         super().__init__(mw)
         self.setWindowTitle("Janki")
@@ -32,7 +43,8 @@ class GlassSettings(QDialog):
                 _seq = _hk.binding(_aid).get("seq")
                 if _seq:
                     _sc = QShortcut(QKeySequence(_seq), self)
-                    _sc.activated.connect(lambda: None if QWidget.keyboardGrabber() else self.close())
+                    _sc.activated.connect(
+                        lambda: None if QWidget.keyboardGrabber() else self._fade_close())
                     self._jk_close_scs.append(_sc)
         except Exception as _e:
             log("settings close shortcut: %s" % _e)
