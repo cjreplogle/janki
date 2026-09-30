@@ -77,6 +77,11 @@ class _Tour(QWidget):
         self.hole = None                     # QRect in our coords, or None
         self.opacity = 0.0
         self._build_bubble()
+        try:                                    # Janki's UI font (Lora by default)
+            from ..user import css as _css
+            _css.apply_widget_ui_font(self)
+        except Exception:
+            pass
         self._cover()
         mw.installEventFilter(self)
 

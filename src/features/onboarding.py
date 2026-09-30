@@ -226,6 +226,11 @@ def show() -> None:
             glass.glass_dialog(d)
         except Exception:
             pass
+        try:                                    # Janki's UI font (Lora by default)
+            from ..user import css as _css
+            _css.apply_widget_ui_font(d)
+        except Exception:
+            pass
         d.resize(560, 420)
         outer = QVBoxLayout(d)
         if getattr(d, "_jk_expanded", False):
@@ -369,6 +374,11 @@ def show_tour_window() -> None:
         d.setWindowTitle("Janki tour")
         try:
             glass.glass_dialog(d)
+        except Exception:
+            pass
+        try:                                    # Janki's UI font (Lora by default)
+            from ..user import css as _css
+            _css.apply_widget_ui_font(d)
         except Exception:
             pass
         d.resize(560, 400)
