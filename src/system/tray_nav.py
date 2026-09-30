@@ -1289,10 +1289,19 @@ def _build() -> "QWidget":
     openb = QPushButton("Open Anki")
     openb.setObjectName("foot")
     openb.clicked.connect(_open_deck_browser)
+    try:                                          # lockdown: no escape routes here
+        from ..util import state as _st
+        _locked = bool(getattr(_st, "_lockdown_on", False))
+    except Exception:
+        _locked = False
     _add_corner_hint(openb, "⌘⌥A")
     frow.addWidget(openb)
     quitb = QPushButton("Quit")
     quitb.setObjectName("quit")
+    if _locked:
+        for _b in (openb, quitb):
+            _b.setEnabled(False)
+            _b.setToolTip("Unavailable during lockdown — hold Space to exit lockdown")
 
     def _do_quit():
         _hide()

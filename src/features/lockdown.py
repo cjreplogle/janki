@@ -49,7 +49,10 @@ _DISABLE_HIDE_APP        = 1 << 8   # 256
 # Canonical (valid) kiosk combinations. HideMenuBar requires HideDock, and
 # DisableProcessSwitching requires the Dock hidden too — both satisfied here.
 # An invalid combination throws an ObjC exception, so keep these exact.
-_MASK_STANDARD = (_HIDE_DOCK | _HIDE_MENUBAR | _DISABLE_PROC_SWITCHING
+# The menu bar AUTO-hides (slides down when the pointer touches the top) rather than
+# being hidden, so Janki's tray icon stays reachable while locked. AutoHideMenuBar
+# is valid with HideDock (the same pairing macOS uses for fullscreen apps).
+_MASK_STANDARD = (_HIDE_DOCK | _AUTO_HIDE_MENUBAR | _DISABLE_PROC_SWITCHING
                   | _DISABLE_HIDE_APP)
 _MASK_STRICT   = (_MASK_STANDARD | _DISABLE_FORCE_QUIT | _DISABLE_SESSION_TERM)
 
@@ -470,6 +473,21 @@ class _Caption:
             self._w.hide()
 
 
+def _native_fs():
+    """macOS: is the main NSWindow really fullscreen (styleMask bit 14)? None if unknown."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        from ctypes import c_void_p, c_ulong
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if not ns:
+            return None
+        return bool(msg(c_ulong, ns, b"styleMask") & (1 << 14))
+    except Exception:
+        return None
+
+
 class _SpaceFilter(QObject):
     """Best-effort backup for non-webview screens: the CGEventTap is the primary
     Space detector (it sees Space over the reviewer webview; this filter does not)."""
@@ -778,10 +796,29 @@ class Lockdown:
 
         # Take the window fullscreen (unless it already is — then leave it be so
         # unlock doesn't drop it out of the user's own fullscreen).
+        # Check macOS's REAL state: Qt can believe it's fullscreen after a refused
+        # transition, and then lockdown skipped fullscreen (title bar left showing,
+        # window movable). Retry once and verify.
         try:
-            if not mw.isFullScreen():
-                mw.showFullScreen()
+            nat = _native_fs()
+            really_fs = nat if nat is not None else mw.isFullScreen()
+            if not really_fs:
+                if mw.isFullScreen():
+                    mw.showNormal()             # clear Qt's stale "fullscreen"
+                QTimer.singleShot(0, mw.showFullScreen)
                 self._made_fs = True
+
+                def _verify(n=0):
+                    if not self.locked:
+                        return
+                    if _native_fs() is False:
+                        if n < 2:
+                            mw.showNormal()
+                            QTimer.singleShot(250, mw.showFullScreen)
+                            QTimer.singleShot(1500, lambda: _verify(n + 1))
+                        else:
+                            log("lockdown: macOS refused fullscreen twice")
+                QTimer.singleShot(1500, _verify)
         except Exception as e:
             log("lockdown fullscreen: %s" % e)
 
