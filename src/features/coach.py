@@ -65,7 +65,11 @@ def _steps():
 
 class _Tour(QWidget):
     def __init__(self):
-        super().__init__(mw)
+        # Its own transparent window over Anki's, not a child widget: on macOS the web
+        # views are native layers that always draw above sibling Qt widgets, so a child
+        # overlay ended up behind the deck list. Kept attached to the main window.
+        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.steps = _steps()
@@ -73,8 +77,24 @@ class _Tour(QWidget):
         self.hole = None                     # QRect in our coords, or None
         self.opacity = 0.0
         self._build_bubble()
-        self.setGeometry(0, 0, mw.width(), mw.height())
+        self._cover()
         mw.installEventFilter(self)
+
+    def _cover(self):
+        """Sit exactly over the main window (screen coords)."""
+        tl = mw.mapToGlobal(QPoint(0, 0))
+        self.setGeometry(tl.x(), tl.y(), mw.width(), mw.height())
+
+    def attach(self):
+        try:
+            if sys.platform == "darwin":
+                from ..user import glass
+                glass.keep_dialog_in_front(self)      # child window of the main window
+            elif sys.platform.startswith("win"):
+                from ..platform.win import shell
+                shell.set_owner(int(self.winId()), int(mw.winId()))
+        except Exception as e:
+            log("coach attach: %s" % e)
 
     # --- bubble -------------------------------------------------------------
     def _build_bubble(self):
@@ -228,8 +248,10 @@ class _Tour(QWidget):
     # --- lifecycle ------------------------------------------------------------
     def eventFilter(self, obj, ev):
         if obj is mw and ev.type() == QEvent.Type.Resize:
-            self.setGeometry(0, 0, mw.width(), mw.height())
+            self._cover()
             QTimer.singleShot(0, lambda: self.go(self.i))   # re-measure targets
+        elif obj is mw and ev.type() == QEvent.Type.Move:
+            self._cover()
         return False
 
     def keyPressEvent(self, ev):
@@ -276,8 +298,10 @@ def start() -> None:
             mw.moveToState("deckBrowser")
         t = _Tour()
         _tour = t
+        t.attach()
         t.show()
         t.raise_()
+        t.activateWindow()
         t.setFocus()
         QTimer.singleShot(250, lambda: (t.go(0), t.fade(1.0)))   # after the deck list draws
     except Exception as exc:
