@@ -196,7 +196,7 @@ def _fade_chrome(wv, visible: bool) -> None:
         pass
 
 
-def _focus_apply_card(hidden: bool, offset_px: int = 0) -> None:
+def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
     """Toggle the centre/tags CSS on the current card, wrapped in a FLIP so the card
     GLIDES between top-aligned and centred (measure top before+after, animate the
     delta via the Web Animations API — GPU transform, no reflow). offset_px folds in
@@ -216,8 +216,11 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0) -> None:
     )
     js = (
         "(function(){var el=document.getElementById('qa')"
-        "||document.body.firstElementChild;if(!el){" + mutate + "return;}"
+        "||document.body.firstElementChild;if(!el){" + (pre or "") + mutate + "return;}"
         "var first=el.getBoundingClientRect().top;"
+        # every other layout change of the toggle runs HERE, in the same task, so the
+        # browser can't paint an in-between frame (that was the jump)
+        + ("try{" + pre + "}catch(_){}" if pre else "")
         + mutate +
         "var last=el.getBoundingClientRect().top;"
         "var dy=(first-last)+(" + str(int(offset_px)) + ");"
@@ -591,7 +594,6 @@ def _focus_set_hidden(hidden: bool) -> None:
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
-            _mask_web()                # hide the stale frame while the web view moves
             _clamp_toolbar(True)       # deterministic 0-height top band
             bw = getattr(mw, "bottomWeb", None)
             if bw is not None:
@@ -604,9 +606,8 @@ def _focus_set_hidden(hidden: bool) -> None:
             # strip could otherwise linger as an empty band, and the card centres
             # within the lowered region (looks un-centred, pushed down by the gap).
             _reclaim_central_layout()
-            set_focus_flag()                 # let the inline trim run on future renders
-            trim_trailing_empties()          # shrink #qa to visible content so it centres
-            _focus_apply_card(True, off)     # +toolbar_h: card jumped up, slide down
+            # flag + trim + centre + slide in ONE script (no in-between frames)
+            _focus_apply_card(True, off, pre="window.__jankiFocus=true;" + _CORE_APPLY)
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
             # QWebEngine geometry can settle a frame late; re-reclaim + re-centre
             # once the resize has actually landed so no top gap survives.
@@ -620,10 +621,7 @@ def _focus_set_hidden(hidden: bool) -> None:
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
         # and fade the chrome back in over the top.
-        _mask_web()                    # hide the stale frame while the web view moves
         _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
-        set_focus_flag()               # stop the inline trim from running on new cards
-        trim_trailing_empties()        # _focus_hidden is now False → restores trimmed nodes
         bw = getattr(mw, "bottomWeb", None)
         if bw is not None:
             try:
@@ -631,8 +629,11 @@ def _focus_set_hidden(hidden: bool) -> None:
             except Exception:
                 pass
         _reclaim_central_layout()
-        _focus_apply_card(False, -toolbar_h)  # -toolbar_h: card jumped down, slide up
-        _focus_clear_anchor()                 # drop any answer-anchor inline overrides
+        # flag + restore trim + drop the answer anchor + slide, in ONE script
+        _focus_apply_card(False, -toolbar_h, pre=(
+            "window.__jankiFocus=false;" + _CORE_RESTORE +
+            "var _b=document.body;if(_b){_b.style.removeProperty('justify-content');"
+            "_b.style.removeProperty('padding-top');}"))
         for wv in chrome:
             _fade_chrome(wv, True)
 
