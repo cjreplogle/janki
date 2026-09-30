@@ -254,6 +254,19 @@ _TPL_BLOCK = (
     "  var cls=(document.body&&document.body.className||'')+' '+"
     "(document.documentElement&&document.documentElement.className||'')+' '+(qa.className||'');\n"
     "  if(!/mobile|ipad|iphone|android/i.test(cls)) return;   // mobile only\n"
+    # --- fit to screen: a card taller than the visible screen is scaled down (text and
+    # images together, CSS zoom) in small steps until it fits — down to ~62 %; past
+    # that it scrolls as before. Re-checked after images load and on rotation.
+    "  function jkFit(){ try{ qa.style.zoom=''; var vh=window.innerHeight||0, f=1, g=0;\n"
+    "    if(!vh) return;\n"
+    # measure the CARD's own height (body is forced to >= the screen height, so the
+    # page's scrollHeight can't tell "fits" from "overflows")
+    "    while(qa.getBoundingClientRect().height>vh-24&&f>0.63&&g<14){\n"
+    "      f=Math.round((f-0.03)*100)/100; qa.style.zoom=f; g++; }\n"
+    "  }catch(e){} }\n"
+    "  requestAnimationFrame(jkFit); setTimeout(jkFit,250);\n"
+    "  window.addEventListener('load',jkFit); window.addEventListener('resize',jkFit);\n"
+    "  Array.prototype.forEach.call(document.images||[],function(im){ if(!im.complete) im.addEventListener('load',jkFit); });\n"
     # --- tap-position flare (POC) — only fires when a tap actually DID something
     # (revealed the answer or graded), detected by a card re-render after the tap.
     # The touch listeners just RECORD the last tap (position + whether we were on the
