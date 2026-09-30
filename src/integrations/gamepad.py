@@ -400,6 +400,17 @@ def _start_hid_monitor():
                     elif ival == 0 and last == 1:    # button up
                         keytap._key_bridge.pomo_space.emit(False)
                     return
+                # Remote +/− (8bitdo Start/Select): zoom the card in/out. Works
+                # focused or not — zoom can't mis-rate anything.
+                if ival == 1 and last != 1:
+                    _c = _cfg()
+                    if _c.get("remote_zoom", True) and usage in (
+                            int(_c.get("hid_zoom_in_usage", 12)),
+                            int(_c.get("hid_zoom_out_usage", 11))):
+                        keytap._key_bridge.card_zoom.emit(
+                            0.05 if usage == int(_c.get("hid_zoom_in_usage", 12)) else -0.05)
+                        keytap._gtap_log(f"[hid] zoom button {usage}")
+                        return
                 if ival == 1 and last != 1:   # rising edge = button down
                     fwd = bool(state._remote_active and not state._anki_focused)
                     kc = _hid_button_map().get(usage)

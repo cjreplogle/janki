@@ -521,6 +521,19 @@ class GlassSettings(QDialog):
         self._ui_anim.stateChanged.connect(on_ui_anim)
         app_text_lay.addWidget(self._ui_anim)
 
+        # Remote +/− (8bitdo Start/Select) zoom the card text in/out.
+        self._remote_zoom = QCheckBox("Remote +/− buttons zoom the card")
+        self._remote_zoom.setToolTip(
+            "On an 8bitdo remote/controller, + zooms the card in and − zooms it out "
+            "(same as ⌘= / ⌘−). Needs the controller option in Hotkeys.")
+        self._remote_zoom.setChecked(bool(self.cfg.get("remote_zoom", True)))
+
+        def _on_remote_zoom(_s):
+            self.cfg["remote_zoom"] = bool(self._remote_zoom.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+        self._remote_zoom.stateChanged.connect(_on_remote_zoom)
+        app_text_lay.addWidget(self._remote_zoom)
+
         # === Focus ===========================================================
         # --- Card timer curve ------------------------------------------------
         # Show/hide the thin progress bar under the toolbar. Independent of the red

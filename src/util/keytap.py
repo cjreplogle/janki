@@ -70,12 +70,24 @@ class _KeyBridge(QObject):
     lockdown_enter = _pyqtSignal(bool)  # backtick+Delete pressed while unlocked → engage lockdown
     lockdown_warn = _pyqtSignal(bool)   # during very-strict warning: True=skip (Space/Enter), False=cancel (Esc)
     toggle_window = _pyqtSignal()       # Cmd+Opt+A → show Anki, or hide it if it's frontmost
+    card_zoom = _pyqtSignal(float)      # remote +/− → card zoom step
     reword_toggle = _pyqtSignal()       # Tab+R → toggle the reworded view of the current card
 
 _key_bridge = _KeyBridge()
 _key_bridge.send_key.connect(lambda kc: _send_key_to_anki(kc))
 _key_bridge.send_key_rf.connect(lambda kc: _send_key_to_anki(kc, reveal_first=True))
 _key_bridge.practice_or_rate.connect(lambda kc, fwd: _practice_or_rate(kc, fwd))
+
+
+def _remote_zoom(d):
+    try:
+        from ..features import focus
+        focus._change_card_zoom(d)
+    except Exception as e:
+        _gtap_log(f"remote zoom: {e}")
+
+
+_key_bridge.card_zoom.connect(_remote_zoom)
 _key_bridge.toggle_window.connect(lambda: _toggle_main_window())
 _key_bridge.reword_toggle.connect(lambda: _reword_toggle())
 
