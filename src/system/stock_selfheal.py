@@ -257,6 +257,11 @@ def _prompt_restart() -> None:
     global restart_pending
     restart_pending = True
     try:
+        from ..util import state as _st
+        _st.claim_prompt("glass")          # takes this launch's prompt slot
+    except Exception:
+        pass
+    try:
         from aqt import mw
         from aqt.qt import QMessageBox, QTimer
 

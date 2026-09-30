@@ -13,3 +13,26 @@ _remote_active = False      # True while the reviewer has a card up (gamepad gat
 _lockdown_on = False        # True while kiosk lockdown is engaged (read by CGEventTap thread)
 _lockdown_hold_committed = False  # True once the Space-hold-to-exit is underway (swallow Space)
 _lockdown_warn = False      # True during the very-strict pre-close warning (Space/Enter skip, Esc cancel)
+
+
+# --- Calm first launches: at most one Janki prompt per launch ------------------------
+# Glass restart, Accessibility explanation, update offer, Windows rendering restart all
+# claim this slot; whichever comes first wins, the rest wait for a later launch.
+_prompt_this_launch = None
+
+
+def claim_prompt(name: str) -> bool:
+    global _prompt_this_launch
+    if _prompt_this_launch not in (None, name):
+        return False
+    _prompt_this_launch = name
+    return True
+
+
+def first_run() -> bool:
+    """True on the first launch after Janki was installed (config onboarded unset)."""
+    try:
+        from aqt import mw
+        return not (mw.addonManager.getConfig(__name__) or {}).get("onboarded", False)
+    except Exception:
+        return False

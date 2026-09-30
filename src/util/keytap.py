@@ -528,7 +528,7 @@ _ax_poll = None
 def _explain_accessibility_when_ready() -> None:
     try:
         from ..system import stock_selfheal
-        if stock_selfheal.restart_pending:
+        if stock_selfheal.restart_pending or not state.claim_prompt("accessibility"):
             _start_key_tap._explained = False       # ask again next launch
             return
     except Exception:

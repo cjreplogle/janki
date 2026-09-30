@@ -126,7 +126,13 @@ def _install(path: str) -> None:
         mw.close()
 
 
-def _prompt_update(tag: str, url: str) -> None:
+def _prompt_update(tag: str, url: str, asked: bool = False) -> None:
+    try:
+        from ..util import state as _st
+        if not asked and not _st.claim_prompt("update"):
+            return                          # another Janki prompt this launch; next check
+    except Exception:
+        pass
     if not askUser("Janki %s is available (you have v%s).\n\nUpdate now?"
                    % (tag, _current_version()), title="Janki"):
         return
@@ -160,7 +166,7 @@ def check(interactive: bool = False) -> None:
                 showInfo("Couldn't check for updates (%s)." % exc, title="Janki")
             return
         if _ver_tuple(tag) > _ver_tuple(_current_version()):
-            _prompt_update(tag, url)
+            _prompt_update(tag, url, asked=interactive)   # a manual check always shows
         elif interactive:
             showInfo("Janki is up to date (v%s)." % _current_version(), title="Janki")
 
@@ -191,6 +197,9 @@ def maybe_auto_check() -> None:
             return
         if _checked_today():
             return
+        from ..util import state as _st
+        if _st.first_run():
+            return                          # keep the first launch after install calm
         _mark_checked()
         from aqt.qt import QTimer
         QTimer.singleShot(4000, lambda: check(interactive=False))

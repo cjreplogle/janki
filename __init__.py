@@ -254,6 +254,8 @@ def _force_dark_mode():
             return
         mw.set_theme(Theme.DARK)
         glass.on_theme_changed()          # keep the toolbar strip glass (no black bar)
+        if state.first_run():
+            return                        # first launch: switch silently, no extra note
         from aqt.utils import tooltip
         QTimer.singleShot(1200, lambda: tooltip(
             "Janki switched Anki to Dark mode — its glass theme is built for it.",
@@ -262,9 +264,20 @@ def _force_dark_mode():
         log("force dark mode: %s" % exc)
 
 
+def _mark_onboarded():
+    try:
+        c = _cfg()
+        if not c.get("onboarded", False):
+            c["onboarded"] = True
+            mw.addonManager.writeConfig(__name__, c)
+    except Exception:
+        pass
+
+
 def _startup():
     _bt.mark("main window ready → _startup begins")
     _force_dark_mode()
+    QTimer.singleShot(15000, _mark_onboarded)   # first launch counted once it settles
     try:
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
         # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a
@@ -870,7 +883,7 @@ def _startup():
                     if _pb.installed():
                         _pb.uninstall()            # leftover See-through hook
                     _need_restart = _pb.running_mode() == "software"   # leave software mode
-                if _need_restart:
+                if _need_restart and state.claim_prompt("win-render"):
                     def _ask_restart():
                         from aqt.utils import askUser
                         if askUser("Restart Anki now to switch Janki's Windows rendering "
