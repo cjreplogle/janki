@@ -559,7 +559,9 @@ _DECK_WIDTH_JS = r"""(function(){
        st.textContent='table.jk-bank{table-layout:fixed;}'
          +'table.jk-bank th.count,table.jk-bank tr.deck>td:not(.decktd):not(.opts)'
          +'{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}'
-         +'table.jk-bank td.decktd{overflow-wrap:anywhere;}';
+         +'table.jk-bank td.decktd{overflow-wrap:anywhere;}'
+         +'table.jk-bank td.opts,table.jk-bank th:last-child:not(.count)'
+         +'{width:2.4em;min-width:2.4em;}';
        document.head.appendChild(st);}
      // One fixed width for the whole Practice view (the widest it has needed, within
      // the window): expanding/collapsing banks never resizes or slides the table.
