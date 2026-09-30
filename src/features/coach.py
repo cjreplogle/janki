@@ -359,8 +359,17 @@ def _on_answer(_reviewer, card, _ease):
         _sig["answered"] = True
 
 
+def _k(aid):
+    """The user's current binding for a Janki hotkey, as shown in Settings."""
+    try:
+        from ..util import hotkeys
+        return hotkeys.describe(aid)
+    except Exception:
+        return ""
+
+
 def _steps():
-    key = "⌥⌘A" if _MAC else "Ctrl+Alt+A"
+    key = _k("toggle_window") or ("⌥⌘A" if _MAC else "Ctrl+Alt+A")
     return [
         dict(target=("toolbar", "Practice"), title="Practice question banks",
              try_=("Open Practice", lambda: _click("toolbar", "Practice")),
@@ -369,7 +378,7 @@ def _steps():
              text="Your question banks live here, where the deck list usually is. Drop "
                   "<b>.qb</b> or <b>.jank</b> files on the window to add banks, or a "
                   "question <b>.docx</b> to build one. While reviewing, <b>Tab+Q</b> pulls "
-                  "up questions related to the card."),
+                  "up questions related to the card.<br>Shortcut: <b>%s</b>." % _k("go_practice")),
         dict(target=None, title="Try a practice question", hands_on=True,
              try_=("Open a mock question", _open_mock_question),
              detect=_sample_answered, done_msg="That's how every bank question works.",
@@ -387,7 +396,8 @@ def _steps():
              detect=_settings_open, wait=_settings_open,
              done_msg="Close Settings when you're done — the tour continues.",
              text="Everything Janki does is adjustable here — look, timers, Pomodoro, "
-                  "lectures, and every hotkey (under <b>Hotkeys</b>)."),
+                  "lectures, and every hotkey (under <b>Hotkeys</b>).<br>Shortcut: <b>%s</b> "
+                  "opens it, press again to close." % _k("settings_alt")),
         dict(target=None, title="Focus & Caption", hands_on=True, enter=_open_sample,
              leave=_leave_review,
              try_=("Reopen the sample card", _open_sample),
@@ -408,7 +418,7 @@ def _steps():
              detect=_lectures_open, wait=_lectures_open,
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
-                  "today's cards."),
+                  "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
         dict(target=None, title="On the card", hands_on=True, enter=_open_sample,
              leave=_leave_oncard,
              try_=("Show a related question", _show_related),
@@ -424,12 +434,21 @@ def _steps():
              detect=_sample_answered, done_msg="Nice — you rated it.",
              text="On the sample card:<br>• <b>Space</b> — show the answer<br>"
                   "• <b>Z / X / C / V</b> — rate it (like 1–4), even from another app "
-                  "with Tab held<br>The sample deck is removed when the tour ends."),
+                  "with Tab held<br>• <b>%s</b> — back a step (to Decks or Practice)<br>"
+                  "The sample deck is removed when the tour ends." % _k("go_back")),
         dict(target=None, title="Card timer & flares", effect="flare",
              try_=("Show again", lambda: _demo_flare()),
              text="While you review, a small ring fills; linger too long and the window "
                   "edge glows red. A green flash like this one celebrates a card you've "
                   "finished for the day."),
+        dict(target=None, title="Getting around by keyboard",
+             text="• <b>↑ / ↓</b> pick a deck, <b>→ / ←</b> open or fold it, "
+                  "<b>Space</b> opens it — Space again starts studying<br>"
+                  "• <b>%s</b> Decks · <b>%s</b> Practice · <b>%s</b> back a step<br>"
+                  "• <b>%s</b> study your last deck · <b>%s</b> today's lectures<br>"
+                  "Change any of them in Settings ▸ Hotkeys."
+                  % (_k("go_decks"), _k("go_practice"), _k("go_back"),
+                     _k("open_deck_qt"), _k("lectures"))),
         dict(target=None, title="You're all set",
              text="Show or hide Anki from anywhere with <b>%s</b>. Full guides at "
                   "<a href='https://cjre.pl/ogle/janki' style='color:#9cbcf3'>"
