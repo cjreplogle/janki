@@ -167,11 +167,42 @@ def install_main_window_drop() -> None:
     mw._janki_drop_filter = f
 
 
+def _install_import_button() -> None:
+    """File ▸ Import / the deck list's Import File button don't go through
+    handleImport: Anki builds the picker's filter from its IMPORTERS list and passes the
+    choice straight to import_file. Registering a Janki importer there makes Janki's
+    files selectable and routes them exactly like a drag-and-drop."""
+    try:
+        from aqt.import_export import importing as _imp
+    except Exception:
+        return
+    if any(getattr(i, "_janki", False) for i in _imp.IMPORTERS):
+        return
+    exts = list(_EXTS) + [".docx"] + list(_MAP_EXTS)
+    if sys.platform == "darwin":
+        exts.append(".pptx")               # slide OCR is macOS-only
+
+    class JankiImporter(_imp.Importer):
+        _janki = True
+        accepted_file_endings = exts
+
+        @staticmethod
+        def do_import(mw_, path):
+            # After the picker closes, so any dialog we open isn't stacked under it.
+            QTimer.singleShot(0, lambda p=path: _handle_drop([p]))
+
+    _imp.IMPORTERS.insert(0, JankiImporter)
+
+
 def install() -> None:
     try:
         install_main_window_drop()
     except Exception as exc:
         log("main window drop: %s" % exc)
+    try:
+        _install_import_button()
+    except Exception as exc:
+        log("import button: %s" % exc)
     orig = AnkiQt.handleImport
     if getattr(orig, "_janki_file_open", False):
         return
