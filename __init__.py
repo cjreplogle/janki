@@ -484,8 +484,8 @@ def _startup():
         _set_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
         _set_sc.activated.connect(lambda: settings_dialog._open_settings())
         mw._janki_settings_sc = _set_sc
-        # ⌘O / Ctrl+O also opens Janki Settings (main window only).
-        _set_sc2 = QShortcut(QKeySequence("Ctrl+O"), mw)
+        # ⌘S / Ctrl+S also opens Janki Settings (main window only; Anki has no ⌘S there).
+        _set_sc2 = QShortcut(QKeySequence("Ctrl+S"), mw)
         _set_sc2.setContext(Qt.ShortcutContext.WindowShortcut)
         _set_sc2.activated.connect(lambda: settings_dialog._open_settings())
         mw._janki_settings_sc2 = _set_sc2
