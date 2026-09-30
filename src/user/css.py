@@ -556,7 +556,9 @@ _DECK_WIDTH_JS = r"""(function(){
    if(key.slice(-1)==='p'){ t.classList.add('jk-bank');
      if(!document.getElementById('jk-bank-cols')){ var st=document.createElement('style');
        st.id='jk-bank-cols';
-       st.textContent='table.jk-bank{table-layout:fixed;}'
+       st.textContent='table.jk-bank{table-layout:fixed;box-sizing:border-box;'
+         +'max-width:calc(100vw - 24px)!important;}'
+         +'table.jk-bank td.decktd a.deck{white-space:normal;}'
          +'table.jk-bank th.count,table.jk-bank tr.deck>td:not(.decktd):not(.opts)'
          +'{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}'
          +'table.jk-bank td.decktd{overflow-wrap:anywhere;}'
@@ -567,7 +569,9 @@ _DECK_WIDTH_JS = r"""(function(){
      // the window): expanding/collapsing banks never resizes or slides the table.
      key='jkDeckW:p2';                       // fresh key: drop widths saved with the old floor
      t.style.tableLayout='auto'; var nat0=natural(); t.style.tableLayout='';
-     var pw=Math.min(cap(), Math.max(nat0, stored()));
+     // never wider than the window: deeper subdeck names wrap instead of pushing the
+     // columns off-screen
+     var pw=Math.min(cap(), Math.max(nat0, Math.min(stored(), cap())));
      t.style.width=pw+'px'; put(key, String(pw)); put('jkColAnim','');
      window.addEventListener('resize', function(){
        t.style.width=Math.min(cap(), parseFloat(get(key))||nat0)+'px'; });
