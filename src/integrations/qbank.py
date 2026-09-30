@@ -1301,6 +1301,7 @@ def import_dialog():
     except Exception as e:
         showWarning("Could not import question bank:\n\n%s" % e)
         return
+    _sfx_loaded()
     tooltip("Imported “%s” (%s questions)." % (man.get("name", "bank"),
                                                man.get("count", "?")))
 
@@ -2870,6 +2871,7 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
             retag_from_lecture_map()
             assign_deck_tags_from_headers()
             n_inc = len(final_qs) - len(qs)
+            _sfx_loaded()
             tooltip("Imported “%s” (%d questions%s from slide OCR)."
                     % (man.get("name"), len(final_qs),
                        (" incl. %d incomplete" % n_inc) if n_inc else ""),
@@ -5305,6 +5307,14 @@ def contanki_for_state(new_state):
         log("contanki nav: %s" % e)
 
 
+def _sfx_loaded():
+    try:
+        from ..features import sfx as _sfx
+        _sfx.loaded()
+    except Exception:
+        pass
+
+
 def resume_contanki():
     """Force-resume Contanki if Janki suspended it (call when leaving the reviewer, so
     it never gets stuck suspended)."""
@@ -5933,6 +5943,7 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     retag_from_lecture_map()                   # M1 calendar map (if it matches)
     deck_tagged, _t = assign_deck_tags_from_headers()   # deterministic deck tags
     mined, _m = mine_concepts_from_banks()     # concept mining (AI-free bridge)
+    _sfx_loaded()
     tooltip("Imported “%s” (%d questions); %d deck-tagged from headers, %d concept-"
             "matched from text." % (man.get("name"), len(qs), deck_tagged, mined))
     if on_done:

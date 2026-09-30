@@ -30,7 +30,7 @@ def _path(name):
         b = "mallet"
     return os.path.join(_DIR, b, name + ".wav")
 NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats",
-       "practice", "sync", "tray",
+       "practice", "sync", "tray", "lectures", "loaded",
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
@@ -78,6 +78,11 @@ def play(name, force=False):
         fx.play()
     except Exception as e:
         log("sfx play: %s" % e)
+
+
+def loaded():
+    """A file finished importing / loading successfully."""
+    play("loaded")
 
 
 def preload():

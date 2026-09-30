@@ -201,6 +201,12 @@ def bank(name, voice, move, wet_scale=1.0):
                        (0.16, voice(784, 0.04, 0.11, 70)), (0.24, voice(880, 0.07, 0.12, 50))))
     # tray: a soft sideways wipe — short airy sweep that brightens as it passes
     save("tray",   sweep(0.1, 0.05, 0.12, 0.5, 61, 1.3))
+    # lectures wizard open: a soft papery flick with two warm notes (opening a notebook)
+    save("lectures", mix((0, sweep(0.08, 0.035, 0.3, 0.12, 71, 1.6)),
+                         (0.03, voice(440, 0.07, 0.15, 42)), (0.09, voice(587, 0.12, 0.15, 30))))
+    # loaded (files imported OK): a bright little "done" — quick G–C–E–G roll
+    save("loaded", mix((0, voice(784, 0.05, 0.15, 60)), (0.035, voice(1047, 0.05, 0.15, 60)),
+                       (0.07, voice(1319, 0.05, 0.15, 60)), (0.105, voice(1568, 0.14, 0.15, 26))))
     # exit (quitting Anki): a soft falling swish under two descending notes
     save("exit",   mix((0, sweep(0.16, 0.035, 0.35, 0.06, 41)),
                        (0.0, voice(784, 0.07, 0.15, 45)), (0.07, voice(392, 0.16, 0.15, 24))))

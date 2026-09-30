@@ -270,6 +270,11 @@ def import_jank(path: str, parent=None, on_done=None) -> None:
                 on_done()          # e.g. Settings refreshes its Installed Banks list
             except Exception:
                 pass
+        try:
+            from . import sfx as _sfx
+            _sfx.loaded()
+        except Exception:
+            pass
         showInfo(msg, parent=parent, title="Janki: .jank imported")
 
     if found["apkg"]:

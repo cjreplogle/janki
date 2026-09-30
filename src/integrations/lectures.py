@@ -1285,6 +1285,7 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
             cur["txt_paths"] = extras
             mw.addonManager.writeConfig(__name__, cur)
         d.accept()
+        _lec_sfx("loaded")
         tooltip("Tag map saved: %d lectures, %d tags (%d dropped).\n%s"
                 % (n, kept, dropped, map_path), period=5000)
         if open_after:
@@ -1419,6 +1420,14 @@ def _prompt_and_load_tag_map(day_offset=0):
         _import_dlg_open = False
 
 
+def _lec_sfx(name):
+    try:
+        from ..features import sfx as _sfx
+        _sfx.play(name)
+    except Exception:
+        pass
+
+
 def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -1426,6 +1435,8 @@ def _open_today_dialog(day_offset=0, auto=False):
         QStandardItemModel, QStandardItem, QCheckBox, QProgressBar,
         QPropertyAnimation, QEasingCurve, QToolButton,
     )
+    if not auto:
+        _lec_sfx("lectures")                 # the wizard opening (not the auto-run)
     cfg = _cfg()
     families = _enabled_families(cfg)
     cutoff = float(cfg.get("fuzzy_cutoff", 0.72))
@@ -2747,7 +2758,8 @@ def run_today(interactive=True, auto=False):
             return col.sched.unsuspend_cards(ids)
 
         CollectionOp(parent=mw, op=op).success(
-            lambda _c: tooltip("Janki Lectures: unsuspended %d cards for today." % box.get("n", 0))
+            lambda _c: (_lec_sfx("loaded"),
+                        tooltip("Janki Lectures: unsuspended %d cards for today." % box.get("n", 0)))
         ).run_in_background()
     except Exception as e:
         _log("run_today error: %s\n%s" % (e, traceback.format_exc()))

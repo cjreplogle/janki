@@ -28,9 +28,19 @@ def _open(path: str) -> None:
             from ..integrations import qbank
             qbank.import_qb(path, build_deck=True)
             tooltip("Imported question bank into the Practice deck: %s" % name)
+            try:
+                from . import sfx as _sfx
+                _sfx.loaded()
+            except Exception:
+                pass
         elif ext == ".rp":
             from . import reword
             imp, skip, _reasons = reword.import_rp(path)
+            try:
+                from . import sfx as _sfx
+                _sfx.loaded()
+            except Exception:
+                pass
             tooltip("Imported %d rephrasing%s from %s%s"
                     % (imp, "" if imp == 1 else "s", name,
                        " (%d skipped)" % skip if skip else ""))
