@@ -65,7 +65,7 @@ def _page(*widgets):
 
 def _welcome_page():
     return _page(
-        _title("Welcome to Janki"),
+        _title("Welcome to Janki!"),
         _body("Janki gives Anki its frosted-glass look and adds study tools — focus "
               "mode, card timers, practice questions, lecture loading and more.<br><br>"
               "This quick setup takes about a minute. You can skip anything and change "
