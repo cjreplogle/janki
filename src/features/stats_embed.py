@@ -882,8 +882,16 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
         except Exception:
             pass
         _defer_close = False
+        global _held_drop
+        held, _held_drop = _held_drop, False
         close(animate=False)
-        drop_in(mw.web)                          # the new list is ready → drop it in
+        if held:                                 # the new page's own drop-in, once
+            try:
+                mw.web.eval("document.documentElement.classList.add('jk-go');")
+            except Exception:
+                pass
+        else:
+            drop_in(mw.web)                      # the new list is ready → drop it in
 
     def _on_load(_ok=True):
         wait = int(ms - (_time.monotonic() - t0) * 1000)
@@ -946,13 +954,29 @@ _DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
              "to{opacity:1;transform:none;}}</style>")
 
 
+# Leaving Stats: the new page loads BEHIND the stats panel, so its drop-in waits,
+# paused on its first (invisible) frame, and plays once Stats is gone (close_soon adds
+# .jk-go). Playing it hidden and then again on reveal made the list blink.
+_DROP_CSS_HELD = ("<style>html.glass-fading body{animation:none!important;}"
+                  "html{animation:jkDropH .22s cubic-bezier(.2,.8,.2,1) both paused;}"
+                  "html.jk-go{animation-play-state:running;}"
+                  "@media (prefers-reduced-motion: reduce){html{animation:none;}}"
+                  "@keyframes jkDropH{from{opacity:0;transform:translateY(-6px);}"
+                  "to{opacity:1;transform:none;}}</style>")
+_held_drop = False
+
+
 def _on_will_set_content(web_content, context) -> None:
-    global _animate_next_deck
+    global _animate_next_deck, _held_drop
     try:
         from aqt.deckbrowser import DeckBrowser
         if _animate_next_deck and isinstance(context, DeckBrowser):
             _animate_next_deck = False
-            web_content.head += _DROP_CSS
+            if is_open() and _defer_close:
+                _held_drop = True
+                web_content.head += _DROP_CSS_HELD
+            else:
+                web_content.head += _DROP_CSS
     except Exception:
         pass
 

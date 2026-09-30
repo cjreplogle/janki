@@ -1094,7 +1094,10 @@ def _build_css(cfg, context):
             "  window.addEventListener('resize',sched); sched();\n"
             "})();</script>\n"
         )
-        parts.append(fade_in.replace('from{opacity:0}', 'from{opacity:.35}'))   # dip, not blank
+        # A touch more fade here: it reads nicely and covers the moment the first card
+        # takes if you hit Study right away.
+        parts.append(fade_in.replace('from{opacity:0}', 'from{opacity:.1}')
+                     .replace('glassFadeIn .15s', 'glassFadeIn .3s'))
     elif isinstance(context, Reviewer) and screens.get("reviewer", True):
         # Fade the FIRST card in when a study session starts. The reviewer page is
         # rebuilt on every entry to review, and Anki reveals each card by setting
