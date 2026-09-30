@@ -556,42 +556,6 @@ def _mask_web(hold_ms: int = 40, fade_ms: int = 70) -> None:
             pass
 
 
-# Pin the card to its WINDOW position while the chrome collapses/restores. The web view
-# moves by `shift` px (−toolbar on enter, +toolbar on exit) and resizes; Chromium's
-# resize handler runs before that frame paints, so re-pinning there keeps the card
-# exactly where it was on screen (no brief jump the "wrong" way) until the glide starts.
-_PIN_JS = (
-    "(function(shift){var el=document.getElementById('qa')||document.body.firstElementChild;"
-    "if(!el)return 0;if(window.__jkPinH)removeEventListener('resize',window.__jkPinH);"
-    "el.style.transform='';var r0=el.getBoundingClientRect().top;"
-    "window.__jkPinH=function(){el.style.transform='';var t=el.getBoundingClientRect().top;"
-    "el.style.transform='translateY('+(r0-t-shift)+'px)';};"
-    "addEventListener('resize',window.__jkPinH);return 1;})(%d)"
-)
-# Run inside the glide script right after its first measurement: stop pinning.
-_UNPIN_JS = ("if(window.__jkPinH){removeEventListener('resize',window.__jkPinH);"
-             "window.__jkPinH=null;}el.style.transform='';")
-
-
-def _pin_then(shift: int, then) -> None:
-    """Pin the card (see _PIN_JS), and only once that's in place run `then` (the
-    layout change). Falls back to running `then` directly if the page can't answer."""
-    web = getattr(mw, "web", None)
-    if web is None:
-        return then()
-    done = {"v": False}
-
-    def _go(*_a):
-        if not done["v"]:
-            done["v"] = True
-            then()
-    try:
-        web.evalWithCallback(_PIN_JS % int(shift), _go)
-        QTimer.singleShot(250, _go)              # never wait forever
-    except Exception:
-        _go()
-
-
 def _focus_set_hidden(hidden: bool) -> None:
     global _focus_hidden
     # TEMP breadcrumb: log every Focus-Mode chrome change + who triggered it, so an
@@ -630,11 +594,6 @@ def _focus_set_hidden(hidden: bool) -> None:
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
-            _pin_then(-off, lambda: _collapse(off))
-
-        def _collapse(off):
-            if not _focus_hidden:
-                return
             _clamp_toolbar(True)       # deterministic 0-height top band
             bw = getattr(mw, "bottomWeb", None)
             if bw is not None:
@@ -647,10 +606,8 @@ def _focus_set_hidden(hidden: bool) -> None:
             # strip could otherwise linger as an empty band, and the card centres
             # within the lowered region (looks un-centred, pushed down by the gap).
             _reclaim_central_layout()
-            # unpin + flag + trim + centre + slide in ONE script; the pin already held
-            # the card in place through the move, so no extra offset
-            _focus_apply_card(True, 0, pre=_UNPIN_JS + "window.__jankiFocus=true;"
-                              + _CORE_APPLY)
+            # flag + trim + centre + slide in ONE script (no in-between frames)
+            _focus_apply_card(True, off, pre="window.__jankiFocus=true;" + _CORE_APPLY)
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
             # QWebEngine geometry can settle a frame late; re-reclaim + re-centre
             # once the resize has actually landed so no top gap survives.
@@ -663,17 +620,7 @@ def _focus_set_hidden(hidden: bool) -> None:
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
-        # and fade the chrome back in over the top — with the card pinned through it.
-        _pin_then(toolbar_h, lambda: _restore(toolbar_h, chrome))
-
-    # Hide the card-timer progress bar in Focus Mode (restore it when off).
-    _apply_timer_focus()
-
-
-def _restore(toolbar_h, chrome):
-    if _focus_hidden:                     # toggled back on meanwhile
-        return
-    if True:
+        # and fade the chrome back in over the top.
         _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
         bw = getattr(mw, "bottomWeb", None)
         if bw is not None:
@@ -683,16 +630,14 @@ def _restore(toolbar_h, chrome):
                 pass
         _reclaim_central_layout()
         # flag + restore trim + drop the answer anchor + slide, in ONE script
-        _focus_apply_card(False, 0, pre=(
-            _UNPIN_JS + "window.__jankiFocus=false;" + _CORE_RESTORE +
+        _focus_apply_card(False, -toolbar_h, pre=(
+            "window.__jankiFocus=false;" + _CORE_RESTORE +
             "var _b=document.body;if(_b){_b.style.removeProperty('justify-content');"
             "_b.style.removeProperty('padding-top');}"))
         for wv in chrome:
             _fade_chrome(wv, True)
 
-
-def _apply_timer_focus():
-    """Hide the card-timer progress bar in Focus Mode (restore it when off)."""
+    # Hide the card-timer progress bar in Focus Mode (restore it when off).
     if card_timer._card_timer_instance is not None:
         try:
             card_timer._card_timer_instance.apply_focus()
