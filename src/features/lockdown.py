@@ -488,6 +488,102 @@ def _native_fs():
         return None
 
 
+_QUIT_DELAY_S = {"standard": 10, "strict": 20, "very_strict": 30}
+
+
+class _QuitGuard(QObject):
+    """During lockdown, quitting (⌘Q, the app menu, the tray's Quit, closing the window)
+    isn't blocked — it waits out a countdown first (longer at stricter levels), to
+    make quitting a deliberate choice. Esc cancels; when it reaches 0, Anki quits."""
+
+    def __init__(self):
+        super().__init__()
+        self._allow = False
+        self._left = 0
+        self._timer = None
+
+    def eventFilter(self, obj, ev):
+        try:
+            if self._allow or _mgr is None or not _mgr.locked:
+                return False
+            t = ev.type()
+            if t == QEvent.Type.KeyPress and self._timer is not None \
+                    and ev.key() == Qt.Key.Key_Escape:
+                self._cancel()
+                return True
+            if t == QEvent.Type.Quit or (t == QEvent.Type.Close and obj is mw):
+                ev.ignore()
+                self._start()
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _show(self):
+        try:
+            _mgr._caption.show(
+                "<div style='text-align:center'>Quitting Anki in <b style='font-size:1.4em'>"
+                "%d</b> s<br><span style='opacity:.7'>Esc to cancel</span></div>" % self._left)
+        except Exception:
+            pass
+
+    def _start(self):
+        if self._timer is not None:
+            return                                  # already counting down
+        level = str(_cfg().get("lockdown_level", "standard")).lower()
+        self._left = _QUIT_DELAY_S.get(level, 10)
+        self._timer = QTimer()
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+        self._show()
+        self._timer.start()
+
+    def _tick(self):
+        self._left -= 1
+        if self._left > 0:
+            self._show()
+            return
+        self._timer.stop()
+        self._timer = None
+        try:
+            _mgr._caption.hide()
+        except Exception:
+            pass
+        self._allow = True                          # let the real quit through now
+        try:
+            _mgr.unlock()
+        except Exception:
+            pass
+        try:
+            from ..system import tray as _tray
+            _tray._quit_from_tray()
+        except Exception:
+            mw.close()
+
+    def _cancel(self):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        try:
+            _mgr._caption.hide()
+        except Exception:
+            pass
+
+
+_quit_guard = None
+
+
+def _install_quit_guard():
+    global _quit_guard
+    if _quit_guard is None:
+        try:
+            from aqt.qt import QApplication
+            _quit_guard = _QuitGuard()
+            QApplication.instance().installEventFilter(_quit_guard)
+        except Exception as e:
+            log("lockdown quit guard: %s" % e)
+
+
 class _SpaceFilter(QObject):
     """Best-effort backup for non-webview screens: the CGEventTap is the primary
     Space detector (it sees Space over the reviewer webview; this filter does not)."""
@@ -830,6 +926,7 @@ class Lockdown:
         except Exception as e:
             log("lockdown focus mode: %s" % e)
 
+        _install_quit_guard()
         self._mask = mask
         self.locked = True
         state._lockdown_on = True

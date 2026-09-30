@@ -1292,14 +1292,16 @@ def _build() -> "QWidget":
     try:                                          # lockdown: no escape routes here
         from ..util import state as _st
         _locked = bool(getattr(_st, "_lockdown_on", False))
+        _very = str(_cfg().get("lockdown_level", "standard")).lower() == "very_strict"
     except Exception:
-        _locked = False
+        _locked, _very = False, False
     _add_corner_hint(openb, "⌘⌥A")
     frow.addWidget(openb)
     quitb = QPushButton("Quit")
     quitb.setObjectName("quit")
     if _locked:
-        for _b in (openb, quitb):
+        # Quit stays available (lockdown makes it wait out a countdown instead).
+        for _b in (openb,):
             _b.setEnabled(False)
             _b.setToolTip("Unavailable during lockdown — hold Space to exit lockdown")
 
