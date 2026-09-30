@@ -348,6 +348,18 @@ _tour = None
 
 
 def show_tour() -> None:
+    """The in-app guided tour (spotlights the real controls). Falls back to the
+    windowed tour below if the overlay can't start."""
+    try:
+        from . import coach
+        coach.start()
+        return
+    except Exception as exc:
+        log("coach tour unavailable (%s) — windowed tour" % exc)
+    show_tour_window()
+
+
+def show_tour_window() -> None:
     global _tour
     if _tour is not None:
         return
