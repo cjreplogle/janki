@@ -61,8 +61,10 @@ so nothing is left behind.
 ### Windows (beta)
 
 Janki now runs on Windows too. However, it does not meet my current performance and quality standards. Using it in its current state will be buggy. If you still feel so inclined, you may try it for yourself below.
+
 Download
 **[`janki-windows.ankiaddon`](https://github.com/cjreplogle/janki/releases)**
+
 Some features unavailable. 
 
 ## Features
