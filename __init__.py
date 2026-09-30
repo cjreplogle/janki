@@ -1077,3 +1077,10 @@ def _go_back():
                 mw.deckBrowser.refresh()
     except Exception as e:
         log("go back: %s" % e)
+
+
+try:
+    from .src.features import preload as _preload
+    _preload.install()
+except Exception:
+    pass

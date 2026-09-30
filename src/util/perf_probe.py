@@ -87,7 +87,6 @@ def install():
 
     def _loaded(ok):
         mark("web loadFinished")
-        _t["start"] = None
     mw.web.loadFinished.connect(_loaded)
 
     lh = getattr(mw.toolbar, "link_handlers", {}) or {}
@@ -97,3 +96,55 @@ def install():
             return _fn(*a, **k)
         lh[key] = clicked
     _w("probe installed; toolbar links: %s" % ",".join(lh))
+    install_review()
+
+
+def install_review():
+    """Stages of opening a deck → first card on screen."""
+    if not _ON:
+        return
+    from aqt import gui_hooks
+    from aqt.reviewer import Reviewer
+    from aqt import mw
+
+    o_show, o_next, o_sq = Reviewer.show, Reviewer.nextCard, Reviewer._showQuestion
+
+    def show(self, *a, **k):
+        begin("open deck → review")
+        mark("Reviewer.show (page reload starts)")
+        r = o_show(self, *a, **k)
+        mark("Reviewer.show returned")
+        return r
+
+    def nxt(self, *a, **k):
+        mark("nextCard (queue fetch)")
+        r = o_next(self, *a, **k)
+        mark("nextCard returned")
+        return r
+
+    def sq(self, *a, **k):
+        mark("_showQuestion start")
+        r = o_sq(self, *a, **k)
+        mark("_showQuestion done (card sent to page)")
+        return r
+    Reviewer.show, Reviewer.nextCard, Reviewer._showQuestion = show, nxt, sq
+
+    try:
+        h = gui_hooks.card_will_show
+        for i, cb in enumerate(list(h._hooks)):
+            def timed(text, card, kind, _cb=cb):
+                a = time.perf_counter()
+                out = _cb(text, card, kind)
+                d = (time.perf_counter() - a) * 1000
+                if d > 2:
+                    _w("    card_will_show %s.%s %.0fms" % (getattr(_cb, "__module__", "?"),
+                                                            getattr(_cb, "__name__", "?"), d))
+                return out
+            h._hooks[i] = timed
+    except Exception as e:
+        _w("cws wrap failed %r" % e)
+    try:
+        gui_hooks.reviewer_did_show_question.append(lambda c: mark("reviewer_did_show_question"))
+    except Exception:
+        pass
+    _w("review probe installed")
