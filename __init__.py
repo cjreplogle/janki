@@ -484,6 +484,11 @@ def _startup():
         _set_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
         _set_sc.activated.connect(lambda: settings_dialog._open_settings())
         mw._janki_settings_sc = _set_sc
+        # ⌘O / Ctrl+O also opens Janki Settings (main window only).
+        _set_sc2 = QShortcut(QKeySequence("Ctrl+O"), mw)
+        _set_sc2.setContext(Qt.ShortcutContext.WindowShortcut)
+        _set_sc2.activated.connect(lambda: settings_dialog._open_settings())
+        mw._janki_settings_sc2 = _set_sc2
 
         # ⌘B / Ctrl+B: back one step — Stats → close; review/overview → the deck list,
         # or the Practice view when studying a question bank; Practice view → Decks.
