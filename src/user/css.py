@@ -470,6 +470,7 @@ _DECK_KEYS_JS = r"""(function(){
    poke();
    if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
      if(!c){sel(start());return;}
+     if(k==='ArrowUp'&&i===0){sel(null);clearTimeout(idle);pycmd('janki:toolbar');return;}
      var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1); sel(rs[n]); return;}
    if(!c){ if(k==='Enter'||k===' '){e.preventDefault();sel(start());} return;}
    var col=c.querySelector('a.collapse'), sign=col?col.textContent.trim():'';
@@ -490,6 +491,8 @@ _DECK_KEYS_JS = r"""(function(){
    b.style.transition='opacity .1s ease-out'; b.style.opacity='0.35';
    setTimeout(function(){b.style.opacity='';},1500);   // safety: never stay dim
  },true);
+ // coming back down from the toolbar: select the first deck
+ window.jkDeckKbEnter=function(){var rs=rows();if(rs.length){sel(rs[0]);poke();}};
  function restore(){var id=null,on=null;
    try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
    if(!id||!on||Date.now()-(+on||0)>2500)return;
@@ -519,7 +522,9 @@ _PAD_NAV_JS = r"""(function(){
  function edge(id,on,k){if(on&&!last[id])key(k);last[id]=on;}
  function tick(){
    var ps=navigator.getGamepads?navigator.getGamepads():[];
+   var mine=document.hasFocus();
    for(var i=0;i<ps.length;i++){var g=ps[i];if(!g)continue;
+     if(!mine){last={};continue;}
      var b=function(n){return !!(g.buttons[n]&&g.buttons[n].pressed);};
      var ax=g.axes||[], x=ax[0]||0, y=ax[1]||0;
      edge(i+'u',b(12)||y<-0.5,'ArrowUp');   edge(i+'d',b(13)||y>0.5,'ArrowDown');
@@ -538,6 +543,28 @@ _OVERVIEW_KEYS_JS = r"""(function(){
    if(!document.getElementById('study'))return;       // only when there's something to study
    e.preventDefault(); pycmd('study');
  },true);
+})();"""
+
+# Toolbar keyboard/remote nav (entered with ↑ from the top deck): ←/→ move, Enter/
+# Space open, ↓/Esc go back to the deck list. Same lift + glow as hovering.
+_TOOLBAR_KEYS_JS = r"""(function(){
+ if(window.__jkTbKeys)return; window.__jkTbKeys=true;
+ function items(){return Array.prototype.filter.call(document.querySelectorAll('a.hitem'),
+   function(a){return a.offsetParent!==null;});}
+ function cur(){return document.querySelector('a.hitem.jk-tbsel');}
+ function sel(a){var c=cur();if(c)c.classList.remove('jk-tbsel');if(a)a.classList.add('jk-tbsel');}
+ // start on the page you came from (Decks, or Practice in the Practice view)
+ window.jkToolbarEnter=function(id){var it=items();if(!it.length)return;
+   sel(it.filter(function(a){return a.id===id;})[0]||it[0]);};
+ document.addEventListener('keydown',function(e){
+   if(e.metaKey||e.ctrlKey||e.altKey)return;
+   var c=cur(); if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
+   if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
+     sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
+   if(k==='Enter'||k===' '){e.preventDefault();sel(null);c.click();return;}
+   if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);pycmd('janki:deckfocus');}
+ },true);
+ document.addEventListener('mousemove',function(){var c=cur();if(c)sel(null);},{passive:true});
 })();"""
 
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=190, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
@@ -1262,6 +1289,10 @@ def _build_css(cfg, context):
         if focus._focus_hidden:
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
+        parts.append("<style>html body a.hitem.jk-tbsel{background:rgba(255,255,255,.12)!important;"
+                     "border-radius:8px;transform:translateY(-1px);}</style>"
+                     "<script>" + _TOOLBAR_KEYS_JS + "</script>\n")
+        parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
         if sys.platform.startswith("win") and _win_frameless():
             # Frameless window: no title bar above the toolbar, so give the pill some
@@ -2295,6 +2326,23 @@ def _congrats_keys(*_):
 
 
 def on_js_message(handled, message, context):
+    if message == "janki:toolbar":
+        try:
+            mw.toolbar.web.setFocus()
+            from ..features import practice as _pr
+            here = "janki_practice" if getattr(_pr, "_practice_view", False) else "decks"
+            mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);" % here)
+        except Exception:
+            pass
+        return (True, None)
+    if message == "janki:deckfocus":
+        try:
+            mw.web.setFocus()
+            if getattr(mw, "state", None) == "deckBrowser":
+                mw.web.eval("window.jkDeckKbEnter&&window.jkDeckKbEnter();")
+        except Exception:
+            pass
+        return (True, None)
     if message == "janki:decks":
         try:
             mw.moveToState("deckBrowser")
