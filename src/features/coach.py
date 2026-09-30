@@ -9,7 +9,7 @@ that page for the element's box via JS and maps it into window coordinates.
 import sys
 
 from aqt import mw
-from aqt.qt import (QWidget, QPainter, QPainterPath, QColor, QPen, QRectF, QRect,
+from aqt.qt import (QSize, QWidget, QPainter, QPainterPath, QColor, QPen, QRectF, QRect,
                     QPoint, QEvent, QObject, Qt, QTimer, QLabel, QPushButton, QFrame,
                     QVBoxLayout, QHBoxLayout)
 
@@ -361,7 +361,6 @@ class _Tour(QWidget):
                     self.t_title.setText("✓  " + st["title"])
                     self.t_body.setText(st["text"] + "<br><br><span style='color:#8fd18f'>"
                                         + st.get("done_msg", "Nice!") + "</span>")
-                    self.bubble.adjustSize()
                     self._place_bubble(animate=True)
                     self._apply_mask()
                     if not st.get("wait"):
@@ -478,6 +477,44 @@ class _Tour(QWidget):
                 st["enter"]()                      # e.g. open the sample card
             except Exception as e:
                 log("coach enter: %s" % e)
+        if self.bubble.isVisible():
+            # Old words fade out, box slides + resizes, new words fade in with it.
+            self._fade_text(0.0, 90, lambda: self._fill(st))
+        else:
+            self._fill(st)
+
+    def _text_widgets(self):
+        return (self.t_title, self.t_body, self.t_step, self.b_try)
+
+    def _fade_text(self, to, ms, done=None):
+        from aqt.qt import QGraphicsOpacityEffect, QVariantAnimation, QEasingCurve
+        effs = []
+        for w in self._text_widgets():
+            e = w.graphicsEffect()
+            if not isinstance(e, QGraphicsOpacityEffect):
+                e = QGraphicsOpacityEffect(w)
+                e.setOpacity(1.0)
+                w.setGraphicsEffect(e)
+            effs.append(e)
+        old = getattr(self, "_text_anim", None)
+        if old is not None:
+            old.stop()
+            old.deleteLater()            # don't pile up finished animations
+        start = effs[0].opacity()
+        an = QVariantAnimation(self)
+        an.setDuration(ms)
+        an.setStartValue(float(start))
+        an.setEndValue(float(to))
+        an.setEasingCurve(QEasingCurve.Type.OutCubic if to else QEasingCurve.Type.InCubic)
+        an.valueChanged.connect(lambda v: [e.setOpacity(v) for e in effs])
+        if done:
+            an.finished.connect(done)
+        self._text_anim = an
+        an.start()
+
+    def _fill(self, st):
+        if self.steps[self.i] is not st:
+            return                                # user already moved on
         t = st.get("try_")
         self.b_try.setVisible(bool(t))
         if t:
@@ -489,7 +526,6 @@ class _Tour(QWidget):
         self.t_step.setText("%d of %d" % (self.i + 1, len(self.steps)))
         self.b_back.setEnabled(self.i > 0)
         self.b_next.setText("Done" if self.i == len(self.steps) - 1 else "Next")
-        self.bubble.adjustSize()
         self._locate(st, lambda rect: self._show_step(st, rect))
 
     def _locate(self, st, done):
@@ -560,7 +596,9 @@ class _Tour(QWidget):
             an = getattr(self, "_bubble_anim", None)
             if an is not None and an.state() == an.State.Running:
                 end = an.endValue()                 # cover start + destination while
-                reg = reg.united(QRegion(QRect(end, self.bubble.size())))   # sliding
+                if isinstance(end, QPoint):          # sliding
+                    end = QRect(end, self.bubble.size())
+                reg = reg.united(QRegion(end))
             self.setMask(reg)
             QTimer.singleShot(0, lambda: (mw.activateWindow(), mw.setFocus()))
             return
@@ -583,8 +621,12 @@ class _Tour(QWidget):
         step = 150.0 * dt / (self._DUR / 1000.0)
         cur = min(target, cur + step) if target > cur else max(target, cur - step)
         self._dim_cur = cur
-        if cur != target:
-            QTimer.singleShot(16, self.update)
+        if cur != target and not getattr(self, "_dim_tick", False):
+            self._dim_tick = True
+            def _t():
+                self._dim_tick = False
+                self.update()
+            QTimer.singleShot(16, _t)
         return cur
 
     def _morph_hole(self, a, b):
@@ -592,6 +634,7 @@ class _Tour(QWidget):
         old = getattr(self, "_hole_anim", None)
         if old is not None:
             old.stop()
+            old.deleteLater()            # don't pile up finished animations
         an = QVariantAnimation(self)
         an.setDuration(self._DUR)
         an.setStartValue(0.0)
@@ -615,7 +658,11 @@ class _Tour(QWidget):
 
     def _place_bubble(self, animate=False):
         b, W, H = self.bubble, self.width(), self.height()
-        bw, bh = b.width(), b.sizeHint().height()
+        bw = b.width()
+        cur = b.geometry()
+        b.adjustSize()                 # measure the new text's height (no paint between)
+        bh = b.height()
+        b.setGeometry(cur)             # …then animate from where it was
         if self.steps[self.i].get("hands_on"):
             x, y = W - bw - 16, H - bh - 70          # out of the card's way
         elif self.hole is None:
@@ -628,22 +675,26 @@ class _Tour(QWidget):
                 y = h.top() + 24
         target = QPoint(x, max(12, y))
         b.raise_()
-        if animate and b.isVisible() and b.pos() != target:
+        goal = QRect(target, QSize(bw, bh))
+        if animate and b.isVisible() and b.geometry() != goal:
             from aqt.qt import QPropertyAnimation, QEasingCurve
             old = getattr(self, "_bubble_anim", None)
             if old is not None:
                 old.stop()
-            an = QPropertyAnimation(b, b"pos", self)
+                old.deleteLater()            # don't pile up finished animations
+            an = QPropertyAnimation(b, b"geometry", self)
             an.setDuration(self._DUR)
-            an.setStartValue(b.pos())
-            an.setEndValue(target)
+            an.setStartValue(b.geometry())
+            an.setEndValue(goal)
             an.setEasingCurve(QEasingCurve.Type.OutCubic)
             an.finished.connect(lambda: self._apply_mask())   # mask follows the bubble
             self._bubble_anim = an
             an.start()
             self._apply_mask()                     # travel-covering mask for the slide
         else:
-            b.move(target)
+            b.setGeometry(goal)
+        if b.graphicsEffect() is not None or self.t_title.graphicsEffect() is not None:
+            self._fade_text(1.0, self._DUR)        # new words arrive with the box
 
     # --- look ---------------------------------------------------------------
     def paintEvent(self, _ev):
