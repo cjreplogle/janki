@@ -70,6 +70,12 @@ _sample = {"did": None, "cids": [], "card": False, "mock": False}
 def _open_sample():
     """Create a one-card sample deck (Janki-written content) and start reviewing it."""
     try:
+        # Already studying the sample card (e.g. "On the card" → "Reviewing"): keep it —
+        # reopening flickered the reviewer for nothing.
+        if getattr(mw, "state", None) == "review":
+            cur = getattr(getattr(mw, "reviewer", None), "card", None)
+            if cur is not None and cur.id == _sample_basic_cid():
+                return
         col = mw.col
         if not _sample.get("card"):
             did = _sample["did"] or col.decks.id(_SAMPLE_DECK)
