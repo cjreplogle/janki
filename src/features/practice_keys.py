@@ -39,9 +39,12 @@ _JS = r"""<script>(function(){
    if(!lastM){lastM=p;return;} var mv=Math.abs(p[0]-lastM[0])+Math.abs(p[1]-lastM[1]); lastM=p;
    if(mv<3||!document.documentElement.classList.contains('jk-kbnav'))return;
    document.documentElement.classList.remove('jk-kbnav'); sel(null);},{passive:true});
- document.addEventListener('keydown',function(ev){
+ // window-capture runs before any document listener, so the card's older A–D picker
+ // (which mistook "ArrowDown" for "a") never sees the arrows
+ window.addEventListener('keydown',function(ev){
    if(ev.metaKey||ev.ctrlKey||ev.altKey)return;
    var k=ev.key; if(!/^Arrow(Up|Down|Left|Right)$/.test(k))return;
+   ev.stopImmediatePropagation();
    if(document.querySelector('.jp-answered'))return;
    var v=vis(); if(!v.length)return;
    ev.preventDefault(); ev.stopPropagation();

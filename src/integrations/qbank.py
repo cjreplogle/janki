@@ -4565,7 +4565,7 @@ _FRONT_JS = (
     # back, keys 1-4 must stay Anki's native grading).
     "var onKey=function(ev){if(done)return;"
     "if(document.querySelector('.jp-answered'))return;"
-    "var k=(ev.key||'').toLowerCase();var n=-1;"
+    "var k=(ev.key||'').toLowerCase();var n=-1;if(k.length!==1)return;"
     "if(k>='1'&&k<='4')n=k.charCodeAt(0)-49;else if(k>='a'&&k<='d')n=k.charCodeAt(0)-97;"
     "if(n<0||n>=vis.length)return;"
     "if(ev.preventDefault)ev.preventDefault();if(ev.stopPropagation)ev.stopPropagation();"
