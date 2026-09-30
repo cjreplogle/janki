@@ -512,11 +512,17 @@ class _Tour(QWidget):
             done(None)
 
     def _show_step(self, st, rect):
-        self.hole = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
-        self._place_bubble()
+        new = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
+        old = self.hole
+        first = not self.isVisible() or not self.bubble.isVisible()
+        self.hole = new
+        self._place_bubble(animate=not first)
         self.bubble.show()
-        self._apply_mask()
-        self.update()
+        if not first and old is not None and new is not None:
+            self._morph_hole(old, new)           # spotlight glides to the next control
+        else:
+            self._apply_mask()
+            self.update()
         if not self.isVisible():
             # First step is measured, placed and masked while hidden — now appear
             # in one fade (showing earlier made the bubble jump and the dim flicker).
@@ -543,7 +549,35 @@ class _Tour(QWidget):
             reg = reg.subtracted(QRegion(self.hole.adjusted(2, 2, -2, -2)))
         self.setMask(reg)
 
-    def _place_bubble(self):
+    _DUR = 240     # step transitions: quick, eased — smooth without feeling slow
+
+    def _morph_hole(self, a, b):
+        from aqt.qt import QVariantAnimation, QEasingCurve
+        old = getattr(self, "_hole_anim", None)
+        if old is not None:
+            old.stop()
+        an = QVariantAnimation(self)
+        an.setDuration(self._DUR)
+        an.setStartValue(0.0)
+        an.setEndValue(1.0)
+        an.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _v(t):
+            lerp = lambda x, y: int(round(x + (y - x) * t))
+            self.hole = QRect(lerp(a.x(), b.x()), lerp(a.y(), b.y()),
+                              lerp(a.width(), b.width()), lerp(a.height(), b.height()))
+            self.update()
+        an.valueChanged.connect(_v)
+
+        def _end():
+            self.hole = b
+            self._apply_mask()                   # click-through hole once it's arrived
+            self.update()
+        an.finished.connect(_end)
+        self._hole_anim = an
+        an.start()
+
+    def _place_bubble(self, animate=False):
         b, W, H = self.bubble, self.width(), self.height()
         bw, bh = b.width(), b.sizeHint().height()
         if self.steps[self.i].get("hands_on"):
@@ -556,8 +590,23 @@ class _Tour(QWidget):
             y = h.bottom() + 14 if h.bottom() + 14 + bh < H - 12 else h.top() - bh - 14
             if h.height() > H * 0.5:           # big target (deck list): inside it
                 y = h.top() + 24
-        b.move(x, max(12, y))
+        target = QPoint(x, max(12, y))
         b.raise_()
+        if animate and b.isVisible() and b.pos() != target:
+            from aqt.qt import QPropertyAnimation, QEasingCurve
+            old = getattr(self, "_bubble_anim", None)
+            if old is not None:
+                old.stop()
+            an = QPropertyAnimation(b, b"pos", self)
+            an.setDuration(self._DUR)
+            an.setStartValue(b.pos())
+            an.setEndValue(target)
+            an.setEasingCurve(QEasingCurve.Type.OutCubic)
+            an.finished.connect(lambda: self._apply_mask())   # mask follows the bubble
+            self._bubble_anim = an
+            an.start()
+        else:
+            b.move(target)
 
     # --- look ---------------------------------------------------------------
     def paintEvent(self, _ev):
