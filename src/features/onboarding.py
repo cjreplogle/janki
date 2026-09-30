@@ -195,6 +195,20 @@ def _done_page():
               "screen. The tour shows where each feature lives." % key), row)
 
 
+def _appear(d) -> None:
+    """Fade in + drop into place (starts transparent so there's no flash)."""
+    from ..user import glass
+    d.setWindowOpacity(0.0)
+    try:
+        glass.bring_dialog_to_front(d)
+    except Exception:
+        d.show()
+    try:
+        glass._fade_window(d, 0.0, 1.0, 260, drop=12)
+    except Exception:
+        d.setWindowOpacity(1.0)
+
+
 def show() -> None:
     """Open the setup window (once; marks the install onboarded when it closes)."""
     global _dlg
@@ -268,10 +282,7 @@ def show() -> None:
         d.finished.connect(_closed)
         _sync()
         _dlg = d
-        try:
-            glass.bring_dialog_to_front(d)
-        except Exception:
-            d.show()
+        _appear(d)
     except Exception as exc:
         log("onboarding: %s" % exc)
         _mark_done()
@@ -387,9 +398,6 @@ def show_tour() -> None:
         d.finished.connect(_closed)
         _sync()
         _tour = d
-        try:
-            glass.bring_dialog_to_front(d)
-        except Exception:
-            d.show()
+        _appear(d)
     except Exception as exc:
         log("tour: %s" % exc)
