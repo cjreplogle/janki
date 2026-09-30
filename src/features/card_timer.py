@@ -968,6 +968,26 @@ def _make_card_timer():
                     if host:
                         msg(c_void_p, host, b"addChildWindow:ordered:",
                             (c_void_p, c_long), (ns, 1))
+                    # A child added later sits above earlier ones — which put this
+                    # glow over an open Settings window / dialog. Re-stack any open
+                    # dialog that shares the parent back on top of the glow.
+                    try:
+                        from aqt.qt import QApplication, QDialog
+                        for w in QApplication.topLevelWidgets():
+                            if w is self or not w.isVisible() or not isinstance(w, QDialog):
+                                continue
+                            _iv = lambda x: int(getattr(x, "value", x) or 0)
+                            dw = msg(c_void_p, c_void_p(int(w.winId())), b"window")
+                            if not dw:
+                                continue
+                            if _iv(msg(c_void_p, dw, b"parentWindow")) == _iv(host):
+                                msg(None, host, b"removeChildWindow:", (c_void_p,), (dw,))
+                                msg(c_void_p, host, b"addChildWindow:ordered:",
+                                    (c_void_p, c_long), (dw, 1))
+                            else:                      # separate window: just lift it
+                                msg(None, dw, b"orderFront:", (c_void_p,), (None,))
+                    except Exception:
+                        pass
                 # Undo any transient resign-key from showing this overlay — keeps the
                 # fullscreen window key and DOM focus in the AMBOSS / reviewer webview
                 # (no window.blur). Only when Anki is frontmost (see helper).
