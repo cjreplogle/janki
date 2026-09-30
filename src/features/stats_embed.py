@@ -828,7 +828,7 @@ _animate_next_deck = False
 # The outgoing view fades out (and dips slightly) while the switch happens.
 _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
                 "reduce)').matches)return;var b=document.body;if(!b)return;"
-                "b.style.transition='opacity .06s ease-out,transform .06s ease-out';"
+                "b.style.transition='opacity .1s ease-out,transform .1s ease-out';"
                 "b.style.opacity='0.35';b.style.transform='translateY(3px)';}catch(e){}})();")
 
 
@@ -941,7 +941,7 @@ def animate_next_deck_render() -> None:
 # (the two multiplied back to a blank first frame).
 _DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
              "@media (prefers-reduced-motion: no-preference){html{animation:"
-             "jkDrop .14s cubic-bezier(.2,.8,.2,1) both;}}"
+             "jkDrop .22s cubic-bezier(.2,.8,.2,1) both;}}"
              "@keyframes jkDrop{from{opacity:.35;transform:translateY(-6px);}"
              "to{opacity:1;transform:none;}}</style>")
 
