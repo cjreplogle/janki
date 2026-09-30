@@ -828,7 +828,7 @@ _animate_next_deck = False
 # The outgoing view fades out (and dips slightly) while the switch happens.
 _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
                 "reduce)').matches)return;var b=document.body;if(!b)return;"
-                "b.style.transition='opacity .08s ease-out,transform .08s ease-out';"
+                "b.style.transition='opacity .06s ease-out,transform .06s ease-out';"
                 "b.style.opacity='0';b.style.transform='translateY(4px)';}catch(e){}})();")
 
 
@@ -899,7 +899,7 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
 def fade_close() -> None:
     """Stats → deck list with the fade: stats page fades out, then the list drops in."""
     if is_open():
-        fade_then(close, _web, 80)
+        fade_then(close, _web, 50)
 
 
 def drop_in(web=None) -> None:
@@ -937,7 +937,7 @@ def animate_next_deck_render() -> None:
 # On <html> (not <body>): Janki's own deck-list fade (html.glass-fading body{animation})
 # would otherwise override it; on the root the two simply combine.
 _DROP_CSS = ("<style>@media (prefers-reduced-motion: no-preference){html{animation:"
-             "jkDrop .2s cubic-bezier(.2,.8,.2,1) both;}}"
+             "jkDrop .14s cubic-bezier(.2,.8,.2,1) both;}}"
              "@keyframes jkDrop{from{opacity:0;transform:translateY(-8px);}"
              "to{opacity:1;transform:none;}}</style>")
 
@@ -1022,7 +1022,7 @@ def _patched_on_stats(orig):
                 global _opening
                 _opening = False
                 open_stats()
-            return fade_then(_go, None, 80)     # deck list fades out, stats reveals in
+            return fade_then(_go, None, 50)     # deck list fades out, stats reveals in
         except Exception as exc:
             log("stats panel failed, using the window: %s" % exc)
             return orig(*a, **k)
