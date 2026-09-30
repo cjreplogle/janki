@@ -27,17 +27,103 @@ def _el_js(selector_text):
             "return [r.left,r.top,r.width,r.height];}}return null;})()" % selector_text)
 
 
+def _click_js(text):
+    return ("(function(){var want=%r;var els=document.querySelectorAll('a,button,.hitem');"
+            "for(var i=0;i<els.length;i++){if((els[i].textContent||'').trim()===want)"
+            "{els[i].click();return true;}}return false;})()" % text)
+
+
+def _click(where, text):
+    try:
+        web = mw.toolbar.web if where == "toolbar" else mw.bottomWeb
+        web.eval(_click_js(text))
+    except Exception as e:
+        log("coach click: %s" % e)
+
+
+def _open_settings():
+    try:
+        from ..system import settings_dialog
+        settings_dialog._open_settings()
+    except Exception as e:
+        log("coach settings: %s" % e)
+
+
+def _back_to_decks():
+    """Leave the Practice view so later steps point at the normal deck list."""
+    try:
+        from . import practice
+        if getattr(practice, "_practice_view", False):
+            practice._practice_view = False
+        mw.moveToState("deckBrowser")
+        mw.deckBrowser.refresh()
+    except Exception:
+        pass
+
+
+# --- Sample card (created for the hands-on step, removed when the tour ends) --------
+_SAMPLE_DECK = "Janki Tour (sample)"
+_sample = {"did": None, "cids": []}
+
+
+def _open_sample():
+    """Create a one-card sample deck (Janki-written content) and start reviewing it."""
+    try:
+        col = mw.col
+        if _sample["did"] is None:
+            did = col.decks.id(_SAMPLE_DECK)
+            model = col.models.by_name("Basic") or col.models.current()
+            note = col.new_note(model)
+            note.fields[0] = ("<b>Janki sample card</b><br><br>Which shortcut hides "
+                              "everything except this card?")
+            if len(note.fields) > 1:
+                note.fields[1] = ("<b>Tab+F</b> — Focus mode. Tab+\\ turns the card "
+                                  "into a caption over other apps.")
+            col.add_note(note, did)
+            _sample["did"] = did
+            _sample["cids"] = list(note.card_ids())
+        col.decks.select(_sample["did"])
+        mw.moveToState("overview")
+        QTimer.singleShot(200, lambda: mw.moveToState("review"))
+    except Exception as e:
+        log("coach sample: %s" % e)
+
+
+def _cleanup_sample():
+    """Delete the sample deck + card, and any review logged on it (stats untouched)."""
+    did, cids = _sample["did"], _sample["cids"]
+    if did is None:
+        return
+    try:
+        if cids:
+            mw.col.db.execute("delete from revlog where cid in (%s)"
+                              % ",".join(str(int(c)) for c in cids))
+        mw.col.decks.remove([did])
+    except Exception as e:
+        log("coach sample cleanup: %s" % e)
+    _sample["did"], _sample["cids"] = None, []
+    try:
+        mw.moveToState("deckBrowser")
+    except Exception:
+        pass
+
+
 def _steps():
     key = "⌥⌘A" if _MAC else "Ctrl+Alt+A"
     return [
         dict(target=("toolbar", "Practice"), title="Practice question banks",
+             try_=("Open Practice", lambda: _click("toolbar", "Practice")),
+             leave=_back_to_decks,
              text="Your question banks live here, where the deck list usually is. Drop "
                   "<b>.qb</b> or <b>.jank</b> files on the window to add banks, or a "
                   "question <b>.docx</b> to build one. While reviewing, <b>Tab+Q</b> pulls "
                   "up questions related to the card."),
         dict(target=("toolbar", "Stats"), title="Stats",
+             try_=("Open Stats", lambda: _click("toolbar", "Stats")),
+             leave=_back_to_decks,
              text="A cleaner stats view, right inside the window."),
         dict(target=("gear",), title="Janki Settings",
+             try_=("Open Settings", _open_settings),
              text="Everything Janki does is adjustable here — look, timers, Pomodoro, "
                   "lectures, and every hotkey (under <b>Hotkeys</b>)."),
         dict(target=("main",), title="Focus & Caption",
@@ -46,13 +132,23 @@ def _steps():
                   "<b>Z / X / C / V</b> rate cards like 1–4, even from another app "
                   "with Tab held."),
         dict(target=("bottom", "Import File"), title="Import File",
+             try_=("Try Import File", lambda: _click("bottom", "Import File")),
              text="Brings in Anki decks and Janki files alike — <b>.jank</b> bundles, "
                   "<b>.qb</b> banks, question <b>.docx</b> files, lecture spreadsheets. "
                   "Dragging them onto the window works too."),
         dict(target=("bottom", "Load Lectures"), title="Today's lectures",
+             try_=("Open the lecture loader", lambda: _click("bottom", "Load Lectures")),
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards."),
+        dict(target=None, title="Try it on a sample card", hands_on=True,
+             try_=("Open sample card", _open_sample),
+             text="Open a sample card and try things for real (the tour steps aside):"
+                  "<br>• <b>Space</b> — show the answer<br>• <b>Z / X / C / V</b> — rate "
+                  "it<br>• <b>Tab+F</b> — Focus mode<br>• <b>Tab+\\</b> — Caption mode "
+                  "(press again to return)<br>The sample deck is removed when the tour "
+                  "ends."),
         dict(target=None, title="Card timer & flares", effect="flare",
+             try_=("Show again", lambda: _demo_flare()),
              text="While you review, a small ring fills; linger too long and the window "
                   "edge glows red. A green flash like this one celebrates a card you've "
                   "finished for the day."),
@@ -111,7 +207,8 @@ class _Tour(QWidget):
             "QPushButton{background:rgba(255,255,255,0.08);color:#ececec;border:none;"
             "border-radius:7px;padding:5px 12px;}"
             "QPushButton:hover{background:rgba(255,255,255,0.16);}"
-            "QPushButton#jkNext{background:#9cbcf3;color:#10213f;font-weight:600;}")
+            "QPushButton#jkNext{background:#9cbcf3;color:#10213f;font-weight:600;}"
+            "QPushButton#jkTry{background:rgba(156,188,243,0.18);color:#cfe0ff;}")
         lay = QVBoxLayout(b)
         lay.setContentsMargins(16, 14, 16, 12)
         lay.setSpacing(8)
@@ -127,13 +224,16 @@ class _Tour(QWidget):
         row = QHBoxLayout()
         self.t_step = QLabel()
         self.t_step.setStyleSheet("color:#9aa0aa;")
+        self.b_try = QPushButton("Try it")
+        self.b_try.setObjectName("jkTry")
         self.b_skip = QPushButton("Skip")
         self.b_back = QPushButton("Back")
         self.b_next = QPushButton("Next")
         self.b_next.setObjectName("jkNext")
-        for w in (self.b_skip, self.b_back, self.b_next):
+        for w in (self.b_try, self.b_skip, self.b_back, self.b_next):
             w.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(self.t_step)
+        row.addWidget(self.b_try)
         row.addStretch()
         row.addWidget(self.b_skip)
         row.addWidget(self.b_back)
@@ -144,17 +244,37 @@ class _Tour(QWidget):
         b.setFixedWidth(340)
         self.bubble = b
         self.b_skip.clicked.connect(self.finish)
+        self.b_try.clicked.connect(self._try)
         self.b_back.clicked.connect(lambda: self.go(self.i - 1))
         self.b_next.clicked.connect(lambda: self.go(self.i + 1))
 
     # --- steps --------------------------------------------------------------
+    def _try(self):
+        t = self.steps[self.i].get("try_")
+        if t:
+            t[1]()
+
     def go(self, i):
+        prev = self.steps[self.i] if 0 <= self.i < len(self.steps) else None
+        if prev is not None and i != self.i and prev.get("leave"):
+            prev["leave"]()
+            QTimer.singleShot(300, lambda n=i: self._go(n))   # after the redraw
+            return
+        self._go(i)
+
+    def _go(self, i):
         if i >= len(self.steps):
             return self.finish()
         self.i = max(0, i)
         st = self.steps[self.i]
+        t = st.get("try_")
+        self.b_try.setVisible(bool(t))
+        if t:
+            self.b_try.setText(t[0])
         self.t_title.setText(st["title"])
-        self.t_body.setText(st["text"])
+        self.t_body.setText(st["text"] + (
+            "<br><br><span style='color:#9aa0aa'>Click the highlighted button to try "
+            "it — the tour waits.</span>" if st.get("target") and st.get("try_") else ""))
         self.t_step.setText("%d of %d" % (self.i + 1, len(self.steps)))
         self.b_back.setEnabled(self.i > 0)
         self.b_next.setText("Done" if self.i == len(self.steps) - 1 else "Next")
@@ -198,14 +318,31 @@ class _Tour(QWidget):
     def _show_step(self, st, rect):
         self.hole = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
         self._place_bubble()
+        self._apply_mask()
         self.update()
         if st.get("effect") == "flare":
             QTimer.singleShot(350, _demo_flare)
 
+    def _apply_mask(self):
+        """The lit hole is a real hole: clicks there reach Anki, so the highlighted
+        control can actually be used while the tour stays up. Hands-on steps: only the
+        bubble takes input, and keys go to Anki."""
+        from aqt.qt import QRegion
+        if self.steps[self.i].get("hands_on"):
+            self.setMask(QRegion(self.bubble.geometry()))
+            QTimer.singleShot(0, lambda: (mw.activateWindow(), mw.setFocus()))
+            return
+        reg = QRegion(self.rect())
+        if self.hole is not None and self.hole.height() < self.height() * 0.5:
+            reg = reg.subtracted(QRegion(self.hole.adjusted(2, 2, -2, -2)))
+        self.setMask(reg)
+
     def _place_bubble(self):
         b, W, H = self.bubble, self.width(), self.height()
         bw, bh = b.width(), b.sizeHint().height()
-        if self.hole is None:
+        if self.steps[self.i].get("hands_on"):
+            x, y = W - bw - 16, H - bh - 70          # out of the card's way
+        elif self.hole is None:
             x, y = (W - bw) // 2, (H - bh) // 2
         else:
             h = self.hole
@@ -226,7 +363,8 @@ class _Tour(QWidget):
             cut = QPainterPath()
             cut.addRoundedRect(QRectF(self.hole), 10, 10)
             path = path.subtracted(cut)
-        p.fillPath(path, QColor(0, 0, 0, int(150 * self.opacity)))
+        dim = 0 if self.steps[self.i].get("hands_on") else 150
+        p.fillPath(path, QColor(0, 0, 0, int(dim * self.opacity)))
         if self.hole is not None:
             p.setPen(QPen(QColor(156, 188, 243, int(200 * self.opacity)), 2))
             p.drawRoundedRect(QRectF(self.hole), 10, 10)
@@ -274,6 +412,7 @@ class _Tour(QWidget):
     def finish(self):
         global _tour
         mw.removeEventFilter(self)
+        _cleanup_sample()
 
         def _gone():
             global _tour
