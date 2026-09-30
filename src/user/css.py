@@ -483,7 +483,7 @@ _DECK_KEYS_JS = r"""(function(){
      for(var j=i-1;j>=0;j--)if(ind(rs[j])<ind(c)){sel(rs[j]);return;} return;}
    if(k==='Enter'||k===' '){e.preventDefault();
      try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
-     sfx('select'); var a=c.querySelector('a.deck'); if(a)a.click();}
+     sfx('open'); var a=c.querySelector('a.deck'); if(a)a.click();}
  },true);
  // Opening a deck: the list dips to 35% at once, and the overview rises from 35% —
  // one continuous dip instead of fade-out, blank, fade-in.
@@ -548,7 +548,7 @@ _OVERVIEW_KEYS_JS = r"""(function(){
    if(e.key!==' '&&e.key!=='Enter')return;
    var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
    if(!document.getElementById('study'))return;       // only when there's something to study
-   e.preventDefault(); pycmd('janki:sfx:open'); pycmd('study');
+   e.preventDefault(); pycmd('janki:sfx:select'); pycmd('study');
  },true);
 })();"""
 
