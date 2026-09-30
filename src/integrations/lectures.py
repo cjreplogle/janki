@@ -1712,13 +1712,14 @@ def _open_today_dialog(day_offset=0, auto=False):
         if suffix not in present_fams:          # only families present in the map
             continue
         cb = QCheckBox(_FAM_SHORT_UI.get(suffix, label))
-        cb.setChecked(True)
+        cb.setChecked(False)          # every source starts off — tick the ones you want
         src_cbs[suffix] = cb
         src_row.addWidget(cb)
     src_row.addStretch(1)
     if len(src_cbs) > 1:
         v.addLayout(src_row)
     elif len(src_cbs) == 1:
+        next(iter(src_cbs.values())).setChecked(True)   # no choice to make
         # Only one source in the map → no choice to make, but show it read-only so
         # it's clear what's being pulled. (The hidden checkbox stays ticked, so
         # _selected_families() still returns it and the apply works.)
@@ -1729,8 +1730,9 @@ def _open_today_dialog(day_offset=0, auto=False):
 
     def _selected_families():
         """Suffixes whose source checkbox is ticked (defaults to all enabled)."""
-        sel = {suf for suf, cb in src_cbs.items() if cb.isChecked()}
-        return sel or set(src_cbs.keys())   # never let an empty selection zero-out
+        # Nothing ticked = nothing unsuspended (the counts show 0 until a source is
+        # chosen).
+        return {suf for suf, cb in src_cbs.items() if cb.isChecked()}
 
     table = QTableWidget(0, 5, dlg)
     table.setHorizontalHeaderLabels(

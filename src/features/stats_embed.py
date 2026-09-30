@@ -828,7 +828,7 @@ _animate_next_deck = False
 # The outgoing view fades out (and dips slightly) while the switch happens.
 _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
                 "reduce)').matches)return;var b=document.body;if(!b)return;"
-                "b.style.transition='opacity .1s ease-out,transform .1s ease-out';"
+                "b.style.transition='opacity .14s ease-out,transform .14s ease-out';"
                 "b.style.opacity='%s';b.style.transform='translateY(3px)';}catch(e){}})();")
 
 
@@ -862,6 +862,11 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
         return
     _defer_close = True
     try:
+        from ..util import perf_probe as _pp
+        _pp.begin("leave Stats (close_soon)")
+    except Exception:
+        _pp = None
+    try:
         _web.eval("(function(){try{var b=document.body;if(!b)return;b.style.transition="
                   "'opacity .1s ease-out,transform .1s ease-out';b.style.opacity='0';"
                   "b.style.transform='translateY(4px)';}catch(e){}})();")
@@ -872,11 +877,13 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
     t0 = _time.monotonic()
     state = {"done": False}
 
-    def _done():
+    def _done(why="load"):
         global _defer_close
         if state["done"]:
             return
         state["done"] = True
+        if _pp:
+            _pp.mark("stats closes (%s)" % why)
         try:
             mw.web.loadFinished.disconnect(_on_load)
         except Exception:
@@ -894,6 +901,8 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
             drop_in(mw.web)                      # the new list is ready → drop it in
 
     def _on_load(_ok=True):
+        if _pp:
+            _pp.mark("new page loadFinished")
         wait = int(ms - (_time.monotonic() - t0) * 1000)
         QTimer.singleShot(max(0, wait), _done)
 
@@ -901,7 +910,7 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
         mw.web.loadFinished.connect(_on_load)
     except Exception:
         pass
-    QTimer.singleShot(timeout, _done)            # no page load came → close anyway
+    QTimer.singleShot(timeout, lambda: _done("TIMEOUT"))   # no page load came → close anyway
 
 
 def fade_close() -> None:
@@ -949,7 +958,7 @@ def animate_next_deck_render() -> None:
 # (the two multiplied back to a blank first frame).
 _DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
              "@media (prefers-reduced-motion: no-preference){html{animation:"
-             "jkDrop .22s cubic-bezier(.2,.8,.2,1) both;}}"
+             "jkDrop .32s cubic-bezier(.2,.8,.2,1) both;}}"
              "@keyframes jkDrop{from{opacity:.35;transform:translateY(-6px);}"
              "to{opacity:1;transform:none;}}</style>")
 
