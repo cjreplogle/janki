@@ -545,9 +545,18 @@ _DECK_WIDTH_JS = r"""(function(){
    if(key.slice(-1)==='p'){ t.classList.add('jk-bank');
      if(!document.getElementById('jk-bank-cols')){ var st=document.createElement('style');
        st.id='jk-bank-cols';
-       st.textContent='table.jk-bank th.count,table.jk-bank tr.deck>td:not(.decktd):not(.opts)'
-         +'{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}';
-       document.head.appendChild(st);} }
+       st.textContent='table.jk-bank{table-layout:fixed;}'
+         +'table.jk-bank th.count,table.jk-bank tr.deck>td:not(.decktd):not(.opts)'
+         +'{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}'
+         +'table.jk-bank td.decktd{overflow-wrap:anywhere;}';
+       document.head.appendChild(st);}
+     // One fixed width for the whole Practice view (the widest it has needed, within
+     // the window): expanding/collapsing banks never resizes or slides the table.
+     var pw=Math.min(cap(), Math.max(natural(), stored(), 640));
+     t.style.width=pw+'px'; put(key, String(pw)); put('jkColAnim','');
+     window.addEventListener('resize', function(){
+       t.style.width=Math.min(cap(), Math.max(parseFloat(get(key))||0, 640))+'px'; });
+     return; }
    var nat=natural(), prev=Math.min(stored(), cap());
    var target=Math.max(nat, prev), start=prev||nat;
    t.style.width=target+'px'; var fin=centres();
