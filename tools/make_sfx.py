@@ -213,6 +213,12 @@ def bank(name, voice, move, wet_scale=1.0):
     # close (Settings / lecture wizard): the muted settings sound, mirrored downward
     save("close",  mix((0, sweep(0.12, 0.02, 0.14, 0.04, 22)),
                        (0.02, voice(523, 0.06, 0.075, 50)), (0.07, voice(392, 0.1, 0.075, 36))))
+    # lockdown: a soft solid "clunk" — low click + two notes settling down (a latch)
+    save("lockdown", mix((0, click(0.01, 0.2, 9)), (0, voice(330, 0.07, 0.2, 40)),
+                         (0.06, voice(247, 0.14, 0.2, 26))))
+    # caption in / out: a sideways slide, sweeping up as it appears, down as it leaves
+    save("caption_in",  sweep(0.12, 0.05, 0.08, 0.42, 81, 1.4))
+    save("caption_out", sweep(0.12, 0.05, 0.42, 0.08, 82, 1.4))
     # time's up (card-timer flare): three quick low "bumps" on the same note
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.07, 0.24, 45)),
                        (0.17, voice(220, 0.11, 0.24, 34))))       # three low bumps

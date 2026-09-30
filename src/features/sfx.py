@@ -30,7 +30,8 @@ def _path(name):
         b = "mallet"
     return os.path.join(_DIR, b, name + ".wav")
 NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats",
-       "practice", "sync", "tray", "lectures", "loaded", "close",
+       "practice", "sync", "tray", "lectures", "loaded", "close", "caption_in",
+       "caption_out", "lockdown",
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}

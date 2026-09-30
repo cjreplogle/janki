@@ -924,6 +924,11 @@ def _toggle_coherence():
         return
     global _coherence_hud
     keytap._gtap_log("_toggle_coherence called")
+    try:                                          # slide in / slide out
+        from ..features import sfx as _sfx
+        _sfx.play("caption_out" if _caption_visible() else "caption_in")
+    except Exception:
+        pass
     if _coherence_hud is None:
         try:
             keytap._gtap_log("creating HUD...")

@@ -761,6 +761,11 @@ class Lockdown:
             pass
 
     def _engage(self, mask: int) -> None:
+        try:
+            from . import sfx as _sfx
+            _sfx.play("lockdown")
+        except Exception:
+            pass
         self._caption.hide()
         _activate_and_raise()
         if not _set_presentation_options(mask):
