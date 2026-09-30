@@ -2347,8 +2347,14 @@ class GlassSettings(QDialog):
             if page is None:
                 return 0
             nested = _direct_nested(page)
-            if nested is not None:                     # page just hosts a nested group
-                return _eff_h(nested)
+            if nested is not None:                     # page hosts a nested group
+                extra = 0                              # + rows beside it (e.g. the
+                lay_ = page.layout()                   #   Disable animations button)
+                for i in range(lay_.count()):
+                    it = lay_.itemAt(i)
+                    if it is not None and it.widget() is not nested:
+                        extra += it.sizeHint().height() + lay_.spacing()
+                return _eff_h(nested) + extra
             h = page.sizeHint().height()
             # Word-wrapped explanation labels: sizeHint guesses a wrap width, so it can
             # be far too tall (dead space under text-heavy pages like Rephrase) or too
