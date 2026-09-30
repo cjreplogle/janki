@@ -1127,7 +1127,9 @@ def _go_decks():
                 focus._focus_restore_for_nav()
             except Exception:
                 pass
-        mw.moveToState("deckBrowser")
+        # same dip as the toolbar switches: this page fades, the list rises in
+        _se.animate_next_deck_render()
+        _se.fade_then(lambda: mw.moveToState("deckBrowser"))
     except Exception as e:
         log("go decks: %s" % e)
 
@@ -1138,13 +1140,13 @@ def _go_practice():
         st = getattr(mw, "state", None)
         if st == "deckBrowser" and _pr._practice_view:
             return
-        if st != "deckBrowser":
-            if st == "review":
-                try:
-                    focus._focus_restore_for_nav()
-                except Exception:
-                    pass
-            mw.moveToState("deckBrowser")
+        if st == "review":
+            try:
+                focus._focus_restore_for_nav()
+            except Exception:
+                pass
+        # open_practice_hub fades the current page and drops the Practice view in
+        # (from Stats, the reviewer or the overview alike) — one render, no flash.
         _pr.open_practice_hub()
     except Exception as e:
         log("go practice: %s" % e)
