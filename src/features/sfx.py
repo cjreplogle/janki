@@ -29,7 +29,7 @@ def _path(name):
             return p
         b = "mallet"
     return os.path.join(_DIR, b, name + ".wav")
-NAV = {"move", "select", "back", "open", "fold", "unfold", "page"}
+NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
 

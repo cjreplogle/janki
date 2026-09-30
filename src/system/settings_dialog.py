@@ -2878,7 +2878,7 @@ class GlassSettings(QDialog):
         _pl.setWordWrap(True)
         lay.addWidget(_pl)
         prev = _QGL()
-        names = ("move", "select", "back", "open", "fold", "unfold", "page",
+        names = ("move", "select", "back", "open", "settings", "fold", "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup")
         from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
 
@@ -3529,6 +3529,11 @@ def _open_settings(section=None, float_above=False):
             existing = None                       # underlying window was destroyed
     d = GlassSettings()
     _settings_instance = d
+    try:
+        from ..features import sfx as _sfx
+        _sfx.play("settings")
+    except Exception:
+        pass
 
     def _forget(*_a):
         global _settings_instance

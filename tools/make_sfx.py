@@ -184,6 +184,9 @@ def bank(name, voice, move, wet_scale=1.0):
     save("right",  mix((0, voice(C5, 0.07, 0.19, 45)), (0.04, voice(E5, 0.07, 0.19, 45)),
                        (0.08, voice(G5, 0.14, 0.19, 28))))
     save("wrong",  voice(A4, 0.12, 0.19, 30))
+    # settings open: a soft upward swish under a quick rising pair
+    save("settings", mix((0, sweep(0.12, 0.05, 0.08, 0.4, 21)),
+                         (0.02, voice(784, 0.06, 0.18, 50)), (0.07, voice(1175, 0.12, 0.18, 32))))
     # time's up (card-timer flare): a low double "bump" — same note twice, quick
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.1, 0.24, 35))))
     slides()
