@@ -2879,7 +2879,7 @@ class GlassSettings(QDialog):
         lay.addWidget(_pl)
         prev = _QGL()
         names = ("move", "select", "back", "open", "fold", "unfold", "page",
-                 "reveal", "again", "hard", "good", "easy", "right", "wrong")
+                 "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup")
         from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
 
         dlg_self = self
@@ -2888,7 +2888,7 @@ class GlassSettings(QDialog):
             """Click = preview; drag sideways = this sound's level (0–200 % of the main
             volume, shown as a bar along the bottom); right-click = off/on."""
             def __init__(b, name):
-                super().__init__(name.capitalize())
+                super().__init__({"timeup": "Time's up"}.get(name, name.capitalize()))
                 b._name, b._press, b._drag, b._start = name, None, False, 100
 
             def _gain(b):
@@ -2918,7 +2918,7 @@ class GlassSettings(QDialog):
             def mouseReleaseEvent(b, ev):
                 if b._drag:
                     b._press, b._drag = None, False
-                    b.setText(b._name.capitalize())
+                    b.setText({"timeup": "Time's up"}.get(b._name, b._name.capitalize()))
                     mw.addonManager.writeConfig(__name__, dlg_self.cfg)
                     sfx.play(b._name, force=True)
                     b.setDown(False)

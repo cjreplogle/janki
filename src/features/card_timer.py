@@ -891,6 +891,12 @@ def _make_card_timer():
                     except Exception:
                         pass
                 self.reposition()
+                if self._cycles is None and not self.isVisible():   # red "time's up"
+                    try:
+                        from . import sfx
+                        sfx.play("timeup")
+                    except Exception:
+                        pass
                 self._prog = 0.0
                 self._cycles_done = 0
                 # Seed at the trough so opacity-driven pulse doesn't flash full-bright
