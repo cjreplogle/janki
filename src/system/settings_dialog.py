@@ -2476,18 +2476,108 @@ class GlassSettings(QDialog):
         # sub-tabs (Appearance ▸ Window/Text/…), ↑ climbs back to the main tabs.
         from aqt.qt import QObject, QEvent, Qt as _KQt
 
+        # Then ↓/↑ walk the page's controls (top to bottom), ←/→ adjust the focused
+        # one (slider, number box, dropdown), Space toggles/presses; ↑ from the first
+        # control returns to the tab row it came from.
+        from aqt.qt import (QWidget as _QW, QAbstractButton as _QAB, QComboBox as _QCB,
+                            QSlider as _QSL, QAbstractSpinBox as _QSB, QTabBar as _QTB,
+                            QLineEdit as _QLE, QTextEdit as _QTE,
+                            QPlainTextEdit as _QPTE, QAbstractItemView as _QIV,
+                            QPoint as _QP)
+        _NAV = (_QAB, _QCB, _QSL, _QSB)
+
+        def _page_of(w):
+            """(deepest current tab page containing w, its QTabWidget)."""
+            best = (None, None)
+            for tw in tabws:
+                pg = tw.currentWidget()
+                if pg is not None and (w is pg or pg.isAncestorOf(w)):
+                    if best[0] is None or best[0].isAncestorOf(pg):
+                        best = (pg, tw)
+            return best
+
+        def _controls(page):
+            out = []
+            for w in page.findChildren(_QW):
+                if isinstance(w, _QTB) or not w.isVisible() or not w.isEnabled():
+                    continue
+                if isinstance(w, _NAV) or isinstance(w, (_QLE, _QIV)):
+                    if w.focusPolicy() & _KQt.FocusPolicy.TabFocus or isinstance(w, _NAV):
+                        out.append(w)
+            def key(w):
+                p = w.mapTo(self, _QP(0, 0))
+                return (p.y() // 8, p.x())
+            return sorted(out, key=key)
+
+        def _focus(w):
+            w.setFocus(_KQt.FocusReason.TabFocusReason)
+            try:
+                sa = w.parent()
+                while sa is not None and not hasattr(sa, "ensureWidgetVisible"):
+                    sa = sa.parent()
+                if sa is not None:
+                    sa.ensureWidgetVisible(w)
+            except Exception:
+                pass
+
         class _TabKeys(QObject):
             def eventFilter(self_, obj, ev):
-                if ev.type() != QEvent.Type.KeyPress:
+                if ev.type() != QEvent.Type.KeyPress or ev.modifiers() & (
+                        _KQt.KeyboardModifier.ControlModifier
+                        | _KQt.KeyboardModifier.MetaModifier
+                        | _KQt.KeyboardModifier.AltModifier):
                     return False
+                if _QW.keyboardGrabber() is not None:
+                    return False                      # a hotkey is being recorded
                 k = ev.key()
-                if k == _KQt.Key.Key_Down and obj is tabs.tabBar():
-                    sub = _direct_nested(tabs.currentWidget())
-                    if sub is not None:
-                        sub.tabBar().setFocus(_KQt.FocusReason.TabFocusReason)
+                if isinstance(obj, _QTB):
+                    tw = next((t for t in tabws if t.tabBar() is obj), None)
+                    if tw is None:
+                        return False
+                    if k == _KQt.Key.Key_Down:
+                        sub = _direct_nested(tw.currentWidget())
+                        if sub is not None:
+                            _focus(sub.tabBar())
+                            return True
+                        c = _controls(tw.currentWidget())
+                        if c:
+                            _focus(c[0])
                         return True
-                elif k == _KQt.Key.Key_Up and obj is not tabs.tabBar():
-                    tabs.tabBar().setFocus(_KQt.FocusReason.TabFocusReason)
+                    if k == _KQt.Key.Key_Up and obj is not tabs.tabBar():
+                        _focus(tabs.tabBar())
+                        return True
+                    return False
+                # a control inside a page
+                if isinstance(obj, (_QTE, _QPTE)):
+                    return False                      # multi-line text keeps its arrows
+                if k in (_KQt.Key.Key_Down, _KQt.Key.Key_Up):
+                    if isinstance(obj, _QIV):
+                        return False                  # lists move their own selection
+                    page, tw = _page_of(obj)
+                    if page is None:
+                        return False
+                    c = _controls(page)
+                    if obj not in c:
+                        return False
+                    i = c.index(obj) + (1 if k == _KQt.Key.Key_Down else -1)
+                    if i < 0:
+                        _focus(tw.tabBar())
+                    elif i < len(c):
+                        _focus(c[i])
+                    return True
+                if k in (_KQt.Key.Key_Left, _KQt.Key.Key_Right):
+                    d = 1 if k == _KQt.Key.Key_Right else -1
+                    if isinstance(obj, _QCB):
+                        n = obj.count()
+                        if n:
+                            obj.setCurrentIndex(max(0, min(n - 1, obj.currentIndex() + d)))
+                        return True
+                    if isinstance(obj, _QSB):
+                        obj.stepBy(d)
+                        return True
+                if k in (_KQt.Key.Key_Return, _KQt.Key.Key_Enter) and \
+                        isinstance(obj, _QAB):
+                    obj.click()
                     return True
                 return False
         self._tab_keys = _TabKeys(self)
@@ -2498,6 +2588,18 @@ class GlassSettings(QDialog):
                 tb.installEventFilter(self._tab_keys)
             except Exception:
                 pass
+        for w in self.findChildren(_QW):
+            if isinstance(w, _NAV):
+                w.setFocusPolicy(_KQt.FocusPolicy.StrongFocus)   # macOS skips these
+            if isinstance(w, _NAV + (_QLE, _QTE, _QPTE,
+                                     _QIV)):
+                w.installEventFilter(self._tab_keys)
+        # a visible focus mark, since macOS draws none on styled controls
+        self.setStyleSheet(self.styleSheet() + (
+            "QCheckBox:focus,QRadioButton:focus{color:#cfe0ff;}"
+            "QPushButton:focus,QToolButton:focus,QComboBox:focus,QAbstractSpinBox:focus"
+            "{border:1px solid rgba(156,188,243,.8);border-radius:6px;}"
+            "QSlider:focus{background:rgba(156,188,243,.10);border-radius:6px;}"))
         for tw in tabws:
             try:
                 tw.currentChanged.connect(lambda _i, f=_fit: QTimer.singleShot(0, f))
