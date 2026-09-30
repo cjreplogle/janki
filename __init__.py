@@ -489,6 +489,11 @@ def _startup():
         _set_sc2.setContext(Qt.ShortcutContext.WindowShortcut)
         _set_sc2.activated.connect(lambda: settings_dialog._open_settings())
         mw._janki_settings_sc2 = _set_sc2
+        # ⌘O / Ctrl+O: study the last deck straight away (same as Tab+O).
+        _open_sc = QShortcut(QKeySequence("Ctrl+O"), mw)
+        _open_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        _open_sc.activated.connect(lambda: focus._open_last_deck())
+        mw._janki_open_last_sc = _open_sc
 
         # ⌘B / Ctrl+B: back one step — Stats → close; review/overview → the deck list,
         # or the Practice view when studying a question bank; Practice view → Decks.
