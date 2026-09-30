@@ -616,8 +616,9 @@ def _startup():
                     mw.showNormal()
             except Exception:
                 pass
-        for _d in (1500, 3000):
-            QTimer.singleShot(_d, _unfullscreen_late)
+        if sys.platform == "darwin":            # (a macOS restore quirk only)
+            for _d in (1500, 3000):
+                QTimer.singleShot(_d, _unfullscreen_late)
 
         def _save_size():
             # Remember the current window geometry + fullscreen/maximized state so

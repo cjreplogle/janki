@@ -40,7 +40,7 @@ class _CapButton(QWidget):
             else:
                 p.fillRect(self.rect(), QColor(255, 255, 255, 18 if self._down else 28))
         kind = self._kind
-        if kind == "max" and mw.isMaximized():
+        if kind == "max" and (mw.isMaximized() or mw.isFullScreen()):
             kind = "restore"
         fam = next((f for f in ("Segoe Fluent Icons", "Segoe MDL2 Assets")
                     if f in QFontDatabase.families()), None)
@@ -127,7 +127,35 @@ class _PlaceOnResize(QObject):
                 b.update()
         if ev.type() == QEvent.Type.WindowStateChange:
             sync_fullscreen()
+            _keep_lights_on_top()
         return False
+
+
+_lights_timer = None
+
+
+def _keep_lights_on_top():
+    """In fullscreen the web views/Focus Mode chrome can end up above the caption
+    buttons (so – □ × stop responding). Keep lifting them while fullscreen."""
+    global _lights_timer
+    try:
+        from aqt.qt import QTimer
+        if _lights_timer is None:
+            _lights_timer = QTimer(mw)
+            _lights_timer.setInterval(1000)
+
+            def _tick():
+                if not (mw.isFullScreen() or mw.isMaximized()):
+                    _lights_timer.stop()
+                    return
+                if _lights is not None:
+                    _lights.setVisible(True)
+                    _lights.place()
+            _lights_timer.timeout.connect(_tick)
+        if mw.isFullScreen() or mw.isMaximized():
+            _lights_timer.start()
+    except Exception:
+        pass
 
 
 def sync_fullscreen():
@@ -135,7 +163,7 @@ def sync_fullscreen():
     fullscreen app); restore them when leaving."""
     try:
         from . import dwm
-        fs = mw.isFullScreen()
+        fs = mw.isFullScreen() or mw.isMaximized()   # both fill the screen: square
         dwm.set_fullscreen(int(mw.winId()), fs)
         # – □ × stay reachable in fullscreen too (top right)
         if _lights is not None:
@@ -161,14 +189,20 @@ def sync_fullscreen():
 
 
 def toggle_maximize():
-    if mw.isMaximized():
+    """□: fullscreen → back to a normal window (a way out of fullscreen); maximized →
+    normal; normal → maximized."""
+    if mw.isFullScreen() or mw.isMaximized():
         mw.showNormal()
     else:
         mw.showMaximized()
 
 
 def start_move():
-    """Begin a native window drag (Aero Snap works). Called on toolbar mouse-down."""
+    """Begin a native window drag (Aero Snap works). Called on toolbar mouse-down.
+    Never in fullscreen: dragging a fullscreen window moved it while Qt still
+    thought it was fullscreen — the two then disagreed about the state."""
+    if mw.isFullScreen():
+        return
     try:
         h = mw.windowHandle()
         if h is not None:

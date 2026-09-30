@@ -944,7 +944,7 @@ def _build_css(cfg, context):
     # Windows fullscreen: square corners (chrome.sync_fullscreen also squares any
     # page already on screen when fullscreen toggles).
     try:
-        if sys.platform.startswith("win") and mw.isFullScreen():
+        if sys.platform.startswith("win") and (mw.isFullScreen() or mw.isMaximized()):
             r = 0
     except Exception:
         pass
