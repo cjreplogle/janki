@@ -2078,6 +2078,20 @@ class GlassSettings(QDialog):
             _bd_row.addStretch()
             gen_lay.addLayout(_bd_row)
 
+        # --- Tour ------------------------------------------------------------
+        self._tour_btn = QPushButton("Take the Janki tour…")
+        self._tour_btn.setToolTip("A short walk-through of where each feature lives.")
+        self._tour_btn.setStyleSheet(
+            "QPushButton{background-color:#4f5b75;color:white;border:none;"
+            "padding:5px 12px;border-radius:5px;margin-top:8px;}"
+            "QPushButton:hover{background-color:#5b6886;}")
+
+        def _open_tour():
+            from ..features import onboarding
+            onboarding.show_tour()
+        self._tour_btn.clicked.connect(_open_tour)
+        gen_lay.addWidget(self._tour_btn)
+
         # --- Updates --------------------------------------------------------
         # Janki auto-checks on launch; this is the manual trigger (moved here from
         # the Tools menu).

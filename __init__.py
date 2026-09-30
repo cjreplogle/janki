@@ -277,7 +277,20 @@ def _mark_onboarded():
 def _startup():
     _bt.mark("main window ready → _startup begins")
     _force_dark_mode()
-    QTimer.singleShot(15000, _mark_onboarded)   # first launch counted once it settles
+    if state.first_run():
+        # One guided "Welcome to Janki" setup instead of scattered prompts — after the
+        # glass has loaded; if a glass restart is pending it waits for the next launch.
+        def _welcome():
+            try:
+                if stock_selfheal.restart_pending:
+                    return
+                if state.claim_prompt("onboarding"):
+                    from .src.features import onboarding
+                    onboarding.show()
+            except Exception as _ob_exc:
+                log("onboarding: %s" % _ob_exc)
+                _mark_onboarded()
+        QTimer.singleShot(5500, _welcome)
     try:
         # Self-heal FIRST (runs even when the add-on is otherwise dormant): if an
         # Anki update reverted our stock .pyc glass patch, re-apply it + prompt a
