@@ -85,7 +85,7 @@ def on_js_message(handled, message, context):
 
 def install():
     gui_hooks.reviewer_did_answer_card.append(_on_answer)
-    # (no sound on revealing the answer — only ratings/picks make one)
+    gui_hooks.reviewer_did_show_answer.append(_on_show_answer)   # a subtle slide
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
     try:
         from aqt.qt import QTimer

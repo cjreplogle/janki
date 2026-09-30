@@ -84,7 +84,21 @@ def bell(f, dur, vol=0.2, decay=10.0):
 C5, E5, G5, C6, E6, A4 = 523.25, 659.25, 783.99, 1046.5, 1318.5, 440.0
 # Super quick, console-menu style: each tone ~50–70 ms with a fast fade.
 save("open",    mix((0, bell(C5, 0.05, 0.18, 55)), (0.035, bell(G5, 0.07, 0.18, 45))))
-save("reveal",  bell(E6, 0.05, 0.10, 60))
+# Reveal: a barely-there "slide" — soft filtered-noise swish with a gentle rise and
+# fall and a slowly opening filter (no tone), very low level.
+def swish(dur=0.11, vol=0.07, seed=7):
+    rnd = random.Random(seed); n = int(SR * dur); out = []; lp = 0.0; lp2 = 0.0
+    for k in range(n):
+        t = k / n
+        a = 0.04 + 0.22 * t                       # filter opens as it slides
+        lp += a * (rnd.uniform(-1, 1) - lp)
+        lp2 += a * (lp - lp2)
+        env = math.sin(math.pi * t) ** 2          # smooth in and out
+        out.append(lp2 * env * vol * 6)
+    return out
+
+
+save("reveal",  swish())
 save("again",   bell(C5, 0.06, 0.16, 50))     # the ratings climb C – E – G – C
 save("hard",    bell(E5, 0.06, 0.16, 50))
 save("good",    bell(G5, 0.06, 0.16, 50))
