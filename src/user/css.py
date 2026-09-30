@@ -1053,14 +1053,14 @@ def _build_css(cfg, context):
             "html body > center {\n"
             "  width:100% !important; max-width:100% !important;\n"
             "  text-align:center !important; padding:0 !important; margin:0 !important; }\n"
-            # Counts and Study Now hug the centre line with an equal gap either side,
-            # so the pair balances under the deck title (centring each in its own
-            # half left them far apart and weighted to the right).
+            # Counts + Study Now are one tight group centred under the deck title:
+            # each cell only as wide as its contents (equal halves left dead space
+            # beside the narrower counts, pulling the group's centre off).
             "html body center > table {\n"
             "  width:auto !important; max-width:100% !important;\n"
             "  margin:0 auto !important; table-layout:auto !important; }\n"
             "html body center > table > tbody > tr > td {\n"
-            "  width:50% !important; vertical-align:middle !important;\n"
+            "  width:auto !important; vertical-align:middle !important;\n"
             "  word-wrap:break-word !important; }\n"
             "html body center > table > tbody > tr > td:first-child {\n"
             "  text-align:right !important; padding-right:22px !important; }\n"
@@ -1071,8 +1071,8 @@ def _build_css(cfg, context):
             "html body center > table td table td:first-child {\n"
             "  text-align:right !important; padding:1px 8px 1px 0 !important; }\n"
             "html body center > table td table td:last-child {\n"
-            "  text-align:left !important; padding:1px 0 !important;\n"
-            "  min-width:2.2em !important; }\n"
+            "  text-align:left !important; padding:1px 0 !important; }\n"
+            "html body center > table td table { border-spacing:0 5px !important; }\n"
             # Study Now: larger, evenly padded (centred in its half, level with the
             # counts) and a pale blue matching the New count, with dark text.
             "html body button#study {\n"
