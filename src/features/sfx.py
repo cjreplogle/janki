@@ -30,7 +30,7 @@ def _path(name):
         b = "mallet"
     return os.path.join(_DIR, b, name + ".wav")
 NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "stats",
-       "practice",
+       "practice", "sync",
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
@@ -161,6 +161,16 @@ def install():
     gui_hooks.reviewer_did_answer_card.append(_on_answer)
     gui_hooks.reviewer_did_show_answer.append(_on_show_answer)   # a subtle slide
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
+    try:                                        # a sync you start yourself (not auto)
+        orig = mw.on_sync_button_clicked
+        if not getattr(orig, "_jk_sfx", False):
+            def _sync_clicked(*a, **k):
+                play("sync")
+                return orig(*a, **k)
+            _sync_clicked._jk_sfx = True
+            mw.on_sync_button_clicked = _sync_clicked
+    except Exception:
+        pass
     try:
         mw.app.aboutToQuit.connect(play_on_exit)
     except Exception:

@@ -194,6 +194,11 @@ def bank(name, voice, move, wet_scale=1.0):
     # stats open: the same shape, lower and darker
     save("stats",  mix((0, voice(392, 0.06, 0.16, 50)), (0.05, voice(523, 0.06, 0.16, 50)),
                        (0.10, voice(659, 0.14, 0.15, 28)), (0.10, sweep(0.14, 0.03, 0.12, 0.22, 32))))
+    # sync (clicked): a "loading" wind-up — four soft ticks stepping up over a gentle
+    # rising swish, like a spinner getting going
+    save("sync",   mix((0, sweep(0.34, 0.025, 0.06, 0.3, 51, 1.2)),
+                       (0.00, voice(587, 0.04, 0.11, 70)), (0.08, voice(659, 0.04, 0.11, 70)),
+                       (0.16, voice(784, 0.04, 0.11, 70)), (0.24, voice(880, 0.07, 0.12, 50))))
     # exit (quitting Anki): a soft falling swish under two descending notes
     save("exit",   mix((0, sweep(0.16, 0.035, 0.35, 0.06, 41)),
                        (0.0, voice(784, 0.07, 0.15, 45)), (0.07, voice(392, 0.16, 0.15, 24))))

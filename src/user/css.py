@@ -570,7 +570,7 @@ _TOOLBAR_KEYS_JS = r"""(function(){
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault(); sfx('move');
      if(k==='ArrowRight'&&i===it.length-1){sel(null);pycmd('janki:gear');return;}  // → the gear
      sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
-   if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';sfx('select');c.click();
+   if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';if(id!=='sync')sfx('select');c.click();
      pycmd('janki:tbkeep:'+id);return;}   // stay on the toolbar: ←/→ + Space keep going
    if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);sfx('move');pycmd('janki:deckfocus');}
  },true);
