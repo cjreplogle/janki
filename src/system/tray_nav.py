@@ -1521,9 +1521,16 @@ def _natively_on_screen(w) -> bool:
 
 
 def show_navigator() -> None:
-    """Rebuild fresh (decks/counts change) and pop the glass navigator."""
+    """Rebuild fresh (decks/counts change) and pop the glass navigator.
+
+    macOS only: Windows' tray (see tray.py) uses a native QMenu instead — a
+    ported glass popup relying on this many native-window tricks wasn't worth
+    it there, and Explorer's own menu is the more native fit anyway. The
+    Windows-specific helpers elsewhere in this module (_apply_glass_panel,
+    _install_win_dismiss, _anchor_point's taskbar-aware branch) stay: they're
+    shared by other Windows glass popups/dialogs, not just this navigator."""
     global _nav
-    if sys.platform != "darwin" and not sys.platform.startswith("win"):
+    if sys.platform != "darwin":
         return
     # Deterministic toggle: visible → hide, hidden → show. The global dismiss monitor
     # ignores menu-bar-strip clicks (see _install_global_dismiss), so it no longer races

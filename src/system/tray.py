@@ -146,8 +146,15 @@ def _apply_tray(on: bool) -> None:
             # macOS: clicking the icon opens the GLASS NAVIGATOR (decks + toggles +
             # open/quit) instead of a native menu — richer, and themed like the main
             # window. No context menu is set, so the click reaches us as a Trigger.
-            # Other platforms keep the plain cross-platform QMenu.
-            if sys.platform == "darwin" or sys.platform.startswith("win"):
+            if sys.platform == "darwin":
+                _tray_icon.activated.connect(_on_tray_activated)
+            elif sys.platform.startswith("win"):
+                # Windows gets its own idiom instead of the ported glass popup: a
+                # native right-click menu (Explorer draws/positions/dismisses it for
+                # free — the mac popup's DWM overlay + polling dismiss never felt
+                # native here) and a left-click that just toggles the window, the
+                # way most Windows tray apps behave.
+                _tray_icon.setContextMenu(_build_win_menu())
                 _tray_icon.activated.connect(_on_tray_activated)
             else:
                 menu = QMenu()
@@ -193,6 +200,77 @@ def _apply_tray(on: bool) -> None:
             pass
 
 
+def _open_settings_from_tray() -> None:
+    try:
+        from . import settings_dialog
+        settings_dialog._open_settings()
+    except Exception as exc:
+        log(f"tray settings: {exc}")
+
+
+def _open_anki_prefs_from_tray() -> None:
+    # Root Anki's own Preferences (not Janki's). On Windows the menu bar (where
+    # this normally lives) is hidden behind an Alt tap, so the tray is otherwise
+    # the only way in.
+    try:
+        mw.onPrefs()
+    except Exception as exc:
+        log(f"tray anki prefs: {exc}")
+
+
+def _open_addons_from_tray() -> None:
+    try:
+        from aqt.addons import onAddonsDialog
+        onAddonsDialog(mw)
+    except Exception as exc:
+        log(f"tray addons: {exc}")
+
+
+def _build_win_menu() -> "QMenu":
+    """Windows tray menu: the same modes/actions the mac glass navigator offers
+    (decks aside — a plain QMenu has no room for a scrollable deck tree, and
+    Explorer's own menu is the more native way to spend this space), as plain
+    checkable/triggerable items. Rebuilt once; _sync_tray_actions keeps the
+    checkmarks live each time it's about to show."""
+    global _tray_caption_action, _tray_focus_action, _tray_lockdown_action
+    menu = QMenu()
+    restore_action = QAction("Open Anki", mw)
+    restore_action.triggered.connect(lambda: _restore_window())
+    menu.addAction(restore_action)
+    last_deck_action = QAction("Study last deck", mw)
+    last_deck_action.triggered.connect(lambda _c=False: focus._open_last_deck())
+    menu.addAction(last_deck_action)
+    menu.addSeparator()
+    _tray_caption_action = QAction("Caption Mode", mw)
+    _tray_caption_action.setCheckable(True)
+    _tray_caption_action.triggered.connect(lambda: hud._toggle_coherence())
+    menu.addAction(_tray_caption_action)
+    _tray_focus_action = QAction("Focus Mode", mw)
+    _tray_focus_action.setCheckable(True)
+    _tray_focus_action.triggered.connect(lambda: focus._toggle_focus_mode())
+    menu.addAction(_tray_focus_action)
+    _tray_lockdown_action = QAction("Lockdown", mw)
+    _tray_lockdown_action.setCheckable(True)
+    _tray_lockdown_action.triggered.connect(lambda: lockdown.toggle())
+    menu.addAction(_tray_lockdown_action)
+    menu.addSeparator()
+    settings_action = QAction("Janki Settings…", mw)
+    settings_action.triggered.connect(lambda: _open_settings_from_tray())
+    menu.addAction(settings_action)
+    prefs_action = QAction("Anki Preferences…", mw)
+    prefs_action.triggered.connect(lambda: _open_anki_prefs_from_tray())
+    menu.addAction(prefs_action)
+    addons_action = QAction("Add-ons…", mw)
+    addons_action.triggered.connect(lambda: _open_addons_from_tray())
+    menu.addAction(addons_action)
+    menu.addSeparator()
+    quit_action = QAction("Quit", mw)
+    quit_action.triggered.connect(lambda: _quit_from_tray())
+    menu.addAction(quit_action)
+    menu.aboutToShow.connect(_sync_tray_actions)
+    return menu
+
+
 def _tray_should_show() -> bool:
     """The menu-bar icon (tray menu) appears whenever "Keep running in the tray when the
     window is closed" is on. (The separate "Show menu-bar icon" setting was removed.)"""
@@ -206,14 +284,28 @@ def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
         # otherwise trigger the activate→reopen hook and yank the window back. Set it
         # before anything else so it lands no matter the event order.
         suppress_reopen()
-        # macOS / Windows: open the glass navigator (decks + toggles + open/quit).
-        if sys.platform == "darwin" or sys.platform.startswith("win"):
+        # macOS: open the glass navigator (decks + toggles + open/quit).
+        if sys.platform == "darwin":
             try:
                 from . import tray_nav
                 tray_nav.show_navigator()
                 return
             except Exception as e:
                 log(f"tray navigator: {e}")
+        elif sys.platform.startswith("win") and reason == QSystemTrayIcon.ActivationReason.Trigger:
+            # Windows: left-click toggles the window (the setContextMenu handles
+            # right-click natively) — restore if hidden/minimized, tuck back into
+            # the tray if it's already up front, like most Windows tray apps.
+            if not mw.isVisible() or mw.isMinimized():
+                _restore_window()
+                try:
+                    from ..user import glass
+                    glass._wake_main_webviews()
+                except Exception:
+                    pass
+            else:
+                _minimize_to_tray()
+            return
         # Other platforms (or if the navigator failed): just RESTORE on click —
         # never hide. The menu's "Open Anki" / close-to-tray handle hiding.
         if not mw.isVisible() or mw.isMinimized():

@@ -553,23 +553,43 @@ def _startup():
                 w = int(c.get("last_win_w", 0) or 0)
                 h = int(c.get("last_win_h", 0) or 0)
                 saved = (w > 0 and h > 0)
-                if not saved:                              # first launch → default
-                    w = int(c.get("open_win_width", 600) or 600)
-                    h = int(c.get("open_win_height", 400) or 400)
                 scr = mw.screen() if hasattr(mw, "screen") else None
                 avail = scr.availableGeometry() if scr else None
+                resized_up = False
+                if sys.platform.startswith("win") and avail is not None:
+                    # Windows' frameless glass chrome (caption buttons, toolbar pill)
+                    # needs real room. Treat a saved size that's too small a FRACTION
+                    # of the actual screen the same as "nothing saved" and re-default
+                    # it — a size chosen on a smaller display (or a stale pre-2.1.6
+                    # 600x400) shouldn't leave the chrome cramped forever just because
+                    # it was saved once.
+                    min_w, min_h = avail.width() * 0.55, avail.height() * 0.55
+                    if not saved or w < min_w or h < min_h:
+                        w = int(avail.width() * 0.78)
+                        h = int(avail.height() * 0.82)
+                        resized_up = True
+                elif not saved:                             # first launch → default
+                    w = int(c.get("open_win_width", 600) or 600)
+                    h = int(c.get("open_win_height", 400) or 400)
                 if avail is not None:
                     w = max(480, min(w, avail.width()))
                     h = max(300, min(h, avail.height()))
                 mw.resize(w, h)
                 # Restore the last position too (clamped so it can't land off-screen
-                # if the display setup changed). Only when we have a saved geometry.
-                if saved and c.get("last_win_x") is not None and c.get("last_win_y") is not None:
+                # if the display setup changed). Only when we have a saved geometry
+                # AND we didn't just override the size — a position chosen for the
+                # old, smaller window could leave most of a bigger one off-screen, so
+                # that case centers instead (below).
+                if saved and not resized_up and c.get("last_win_x") is not None \
+                        and c.get("last_win_y") is not None:
                     x = int(c.get("last_win_x")); y = int(c.get("last_win_y"))
                     if avail is not None:
                         x = max(avail.x(), min(x, avail.x() + avail.width() - 120))
                         y = max(avail.y(), min(y, avail.y() + avail.height() - 80))
                     mw.move(x, y)
+                elif resized_up and avail is not None:
+                    mw.move(avail.x() + (avail.width() - w) // 2,
+                             avail.y() + (avail.height() - h) // 2)
                 # Re-apply fullscreen/maximized LAST, on top of the normal geometry
                 # above (so exiting fullscreen returns to the saved windowed size).
                 # Without this the window always reopened windowed even if it was
