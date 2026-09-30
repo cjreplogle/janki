@@ -594,13 +594,9 @@ def _startup():
                 # above (so exiting fullscreen returns to the saved windowed size).
                 # Without this the window always reopened windowed even if it was
                 # closed fullscreen/maximized.
-                if c.get("last_win_fs"):
-                    # Only once the window is really up: asking macOS for fullscreen
-                    # while the window is hidden / mid-transition is refused (the
-                    # system "nope" beep) yet Qt still records it as fullscreen, so
-                    # everything behaved as if fullscreen until toggled by hand.
-                    _restore_fullscreen_when_ready()
-                elif c.get("last_win_max"):
+                # Never reopen straight into fullscreen (it's easy to have quit from
+                # fullscreen / lockdown); open windowed at the saved size instead.
+                if c.get("last_win_max") and not c.get("last_win_fs"):
                     mw.showMaximized()
             except Exception as _e:
                 log("win geom restore: %s" % _e)
