@@ -539,7 +539,13 @@ def _mask_web(hold_ms: int = 40, fade_ms: int = 70) -> None:
             except Exception:
                 w.close()
         QTimer.singleShot(hold_ms, _fade)
-        QTimer.singleShot(hold_ms + fade_ms + 400, lambda: w.isVisible() and w.close())
+        def _safety(win=w):
+            try:
+                if win.isVisible():
+                    win.close()
+            except RuntimeError:
+                pass                             # already closed + deleted (normal)
+        QTimer.singleShot(hold_ms + fade_ms + 400, _safety)
     except Exception as e:
         try:
             keytap._gtap_log(f"focus mask: {e}")
