@@ -2825,9 +2825,8 @@ class GlassSettings(QDialog):
         row.addWidget(val)
         lay.addLayout(row)
 
-        for key, label, sample in (("sfx_nav", "Navigation sounds (menus, decks, toolbar)", "move"),
-                                   ("sfx_review", "Review sounds (reveal, ratings, "
-                                                  "practice right/wrong)", "good")):
+        for key, label, sample in (("sfx_nav", "Navigation sounds", "move"),
+                                   ("sfx_review", "Review sounds", "good")):
             cb = QCheckBox(label)
             cb.setChecked(bool(self.cfg.get(key, True)))
 
@@ -2844,11 +2843,15 @@ class GlassSettings(QDialog):
         prev = _QGL()
         names = ("move", "select", "back", "open", "fold", "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong")
+        from aqt.qt import QSizePolicy as _QSP
         for i, name in enumerate(names):
             b = QPushButton(name.capitalize())
             b.setAutoDefault(False)
+            # shrink to fit — this tab must never widen the Settings window
+            b.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Fixed)
+            b.setMinimumWidth(0)
             b.clicked.connect(lambda _c=False, n=name: sfx.play(n, force=True))
-            prev.addWidget(b, i // 7, i % 7)
+            prev.addWidget(b, i // 5, i % 5)
         lay.addLayout(prev)
         lay.addStretch()
 
