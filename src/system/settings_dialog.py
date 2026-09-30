@@ -2471,6 +2471,33 @@ class GlassSettings(QDialog):
                 pass
 
         self._fit_tabs = _fit
+
+        # Keyboard: ←/→ switch tabs on the focused bar; ↓ drops into the open tab's
+        # sub-tabs (Appearance ▸ Window/Text/…), ↑ climbs back to the main tabs.
+        from aqt.qt import QObject, QEvent, Qt as _KQt
+
+        class _TabKeys(QObject):
+            def eventFilter(self_, obj, ev):
+                if ev.type() != QEvent.Type.KeyPress:
+                    return False
+                k = ev.key()
+                if k == _KQt.Key.Key_Down and obj is tabs.tabBar():
+                    sub = _direct_nested(tabs.currentWidget())
+                    if sub is not None:
+                        sub.tabBar().setFocus(_KQt.FocusReason.TabFocusReason)
+                        return True
+                elif k == _KQt.Key.Key_Up and obj is not tabs.tabBar():
+                    tabs.tabBar().setFocus(_KQt.FocusReason.TabFocusReason)
+                    return True
+                return False
+        self._tab_keys = _TabKeys(self)
+        for tw in tabws:
+            try:
+                tb = tw.tabBar()
+                tb.setFocusPolicy(_KQt.FocusPolicy.StrongFocus)
+                tb.installEventFilter(self._tab_keys)
+            except Exception:
+                pass
         for tw in tabws:
             try:
                 tw.currentChanged.connect(lambda _i, f=_fit: QTimer.singleShot(0, f))
