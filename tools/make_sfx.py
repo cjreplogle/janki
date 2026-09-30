@@ -210,6 +210,9 @@ def bank(name, voice, move, wet_scale=1.0):
     # exit (quitting Anki): a soft falling swish under two descending notes
     save("exit",   mix((0, sweep(0.16, 0.035, 0.35, 0.06, 41)),
                        (0.0, voice(784, 0.07, 0.15, 45)), (0.07, voice(392, 0.16, 0.15, 24))))
+    # close (Settings / lecture wizard): the muted settings sound, mirrored downward
+    save("close",  mix((0, sweep(0.12, 0.02, 0.14, 0.04, 22)),
+                       (0.02, voice(523, 0.06, 0.075, 50)), (0.07, voice(392, 0.1, 0.075, 36))))
     # time's up (card-timer flare): three quick low "bumps" on the same note
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.07, 0.24, 45)),
                        (0.17, voice(220, 0.11, 0.24, 34))))       # three low bumps

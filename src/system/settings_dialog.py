@@ -2881,7 +2881,7 @@ class GlassSettings(QDialog):
         names = ("move", "select", "back", "open", "settings", "stats", "practice", "fold",
                  "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup",
-                 "sync", "tray", "lectures", "loaded", "exit")
+                 "sync", "tray", "lectures", "loaded", "close", "exit")
         from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
 
         dlg_self = self
@@ -3548,6 +3548,11 @@ def _open_settings(section=None, float_above=False):
         global _settings_instance
         if _settings_instance is d:
             _settings_instance = None
+        try:
+            from ..features import sfx as _sfx
+            _sfx.play("close")
+        except Exception:
+            pass
     try:
         d.finished.connect(_forget)
     except Exception:

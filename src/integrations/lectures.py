@@ -1818,7 +1818,7 @@ def _open_today_dialog(day_offset=0, auto=False):
     st = {"offset": None, "target": None, "events": [], "combos": [],
           "auto_keys": [], "has_day_state": False, "active_set": set(),
           "closed": False, "resolve": {}}
-    dlg.finished.connect(lambda _r: st.__setitem__("closed", True))
+    dlg.finished.connect(lambda _r: (st.__setitem__("closed", True), _lec_sfx("close")))
 
     _FAM_SHORT = {"ak": "#AK", "aj": "AJ", "huc": "hUtChCOM"}
 
