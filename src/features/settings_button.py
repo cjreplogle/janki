@@ -26,6 +26,33 @@ class _GearButton(QToolButton):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)   # keyboard nav only, not clicks
+
+    # Keyboard / remote nav reaches it with → past the last toolbar item: focus looks
+    # like hover; Enter/Space open; ← back to the toolbar; ↓ into the page.
+    def focusInEvent(self, ev):
+        self._hover = True; self.update(); super().focusInEvent(ev)
+
+    def focusOutEvent(self, ev):
+        self._hover = False; self.update(); super().focusOutEvent(ev)
+
+    def keyPressEvent(self, ev):
+        k = ev.key()
+        try:
+            from aqt import mw
+            if k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                self.click(); return
+            if k == Qt.Key.Key_Left:
+                mw.toolbar.web.setFocus()
+                mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter('sync',true);")
+                return
+            if k in (Qt.Key.Key_Down, Qt.Key.Key_Escape):
+                from ..user import css as _css
+                _css.on_js_message((False, None), "janki:deckfocus", None)
+                return
+        except Exception:
+            pass
+        super().keyPressEvent(ev)
 
     def enterEvent(self, ev):
         self._hover = True; self.update(); super().enterEvent(ev)

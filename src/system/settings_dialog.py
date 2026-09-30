@@ -2239,8 +2239,13 @@ class GlassSettings(QDialog):
         _doc_link.setOpenExternalLinks(True)
         _doc_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         _doc_link.setToolTip("Open the Janki documentation on GitHub")
-        _doc_link.setStyleSheet("margin-top: 8px;")
-        gen_lay.addWidget(_doc_link)
+        # Documentation link and "Anki Preferences…" share one row (the button is
+        # added to it further down, where it's built).
+        _doc_row = QHBoxLayout()
+        _doc_row.setContentsMargins(0, 8, 0, 0)
+        _doc_row.addWidget(_doc_link)
+        _doc_row.addStretch()
+        gen_lay.addLayout(_doc_row)
 
         # --- Mobile cards (iPad / iPhone) -----------------------------------
         # AnkiMobile can't run add-ons, so this bakes Janki's look into your note
@@ -2344,10 +2349,7 @@ class GlassSettings(QDialog):
         # (after the stretch, so it sits below the installed-banks list).
         prac_qb_lay.addWidget(_deck_btn)
 
-        # Bottom-right of General: jump to Anki's own Preferences (after the stretch,
-        # so it sits at the bottom).
-        _prefs_row = QHBoxLayout()
-        _prefs_row.addStretch()
+        # Anki's own Preferences, on the Documentation row.
         _anki_prefs = QPushButton("Anki Preferences…")
         _anki_prefs.setToolTip("Open Anki's own preferences (scheduling, sync, theme, "
                                "video driver…).")
@@ -2362,8 +2364,7 @@ class GlassSettings(QDialog):
             except Exception as _e:
                 log("anki prefs: %s" % _e)
         _anki_prefs.clicked.connect(_open_anki_prefs)
-        _prefs_row.addWidget(_anki_prefs)
-        gen_lay.addLayout(_prefs_row)
+        _doc_row.addWidget(_anki_prefs)
 
         # No Close button — the window's own close (red X / Esc) ends the dialog. Save
         # the Lectures fields however it closes (finished fires for accept AND reject).

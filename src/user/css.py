@@ -559,12 +559,13 @@ _TOOLBAR_KEYS_JS = r"""(function(){
  function cur(){return document.querySelector('a.hitem.jk-tbsel');}
  function sel(a){var c=cur();if(c)c.classList.remove('jk-tbsel');if(a)a.classList.add('jk-tbsel');}
  // start on the page you came from (Decks, or Practice in the Practice view)
- window.jkToolbarEnter=function(id){var it=items();if(!it.length)return;
-   sel(it.filter(function(a){return a.id===id;})[0]||it[0]);};
+ window.jkToolbarEnter=function(id,last){var it=items();if(!it.length)return;
+   sel(last?it[it.length-1]:(it.filter(function(a){return a.id===id;})[0]||it[0]));};
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
    var c=cur(); if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
+     if(k==='ArrowRight'&&i===it.length-1){sel(null);pycmd('janki:gear');return;}  // → the gear
      sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
    if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';c.click();
      pycmd('janki:tbkeep:'+id);return;}   // stay on the toolbar: ←/→ + Space keep going
@@ -2339,6 +2340,18 @@ def on_js_message(handled, message, context):
             here = ("stats" if _se.is_open() else
                     "janki_practice" if getattr(_pr, "_practice_view", False) else "decks")
             mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);" % here)
+        except Exception:
+            pass
+        return (True, None)
+    if message == "janki:gear":
+        try:
+            from ..features import settings_button as _sb
+            b = _sb._btn
+            if b is not None and b.isVisible():
+                from aqt.qt import Qt as _Qt
+                b.setFocus(_Qt.FocusReason.TabFocusReason)
+            else:                                    # no gear → stay on the last item
+                mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter('',true);")
         except Exception:
             pass
         return (True, None)
