@@ -159,11 +159,82 @@ def _cleanup_sample():
         pass
 
 
+# --- Detecting that the user did the step's action -----------------------------------
+_sig = {"import_open": False, "import_done": False, "answered": False}
+
+
+def _practice_open():
+    from . import practice
+    return bool(getattr(practice, "_practice_view", False))
+
+
+def _stats_open():
+    from . import stats_embed
+    return stats_embed.is_open()
+
+
+def _settings_open():
+    from ..system import settings_dialog
+    d = settings_dialog._settings_instance
+    return d is not None and d.isVisible()
+
+
+def _lectures_open():
+    from ..integrations import lectures
+    d = lectures._lectures_dlg
+    return d is not None and d.isVisible()
+
+
+def _import_used():
+    return _sig["import_open"] or _sig["import_done"]
+
+
+def _sample_answered():
+    return _sig["answered"]
+
+
+def _install_signals():
+    """Import File's picker is native (not a Qt window), so wrap Anki's onImport for
+    the tour; the answer hook tells us a sample card / mock question was answered."""
+    from aqt import gui_hooks
+    if not getattr(mw, "_jk_coach_import_wrapped", False):
+        orig = mw.onImport
+
+        def _wrapped(*a, **k):
+            _sig["import_open"] = True
+            try:
+                return orig(*a, **k)
+            finally:
+                _sig["import_open"] = False
+                _sig["import_done"] = True
+        mw.onImport = _wrapped
+        mw._jk_coach_import_orig = orig
+        mw._jk_coach_import_wrapped = True
+    gui_hooks.reviewer_did_answer_card.append(_on_answer)
+
+
+def _remove_signals():
+    from aqt import gui_hooks
+    if getattr(mw, "_jk_coach_import_wrapped", False):
+        mw.onImport = mw._jk_coach_import_orig
+        mw._jk_coach_import_wrapped = False
+    try:
+        gui_hooks.reviewer_did_answer_card.remove(_on_answer)
+    except Exception:
+        pass
+
+
+def _on_answer(_reviewer, card, _ease):
+    if card is not None and card.id in (_sample.get("cids") or []):
+        _sig["answered"] = True
+
+
 def _steps():
     key = "⌥⌘A" if _MAC else "Ctrl+Alt+A"
     return [
         dict(target=("toolbar", "Practice"), title="Practice question banks",
              try_=("Open Practice", lambda: _click("toolbar", "Practice")),
+             detect=_practice_open, done_msg="That's your Practice view.",
              leave=_back_to_decks,
              text="Your question banks live here, where the deck list usually is. Drop "
                   "<b>.qb</b> or <b>.jank</b> files on the window to add banks, or a "
@@ -171,16 +242,20 @@ def _steps():
                   "up questions related to the card."),
         dict(target=None, title="Try a practice question", hands_on=True,
              try_=("Open a mock question", _open_mock_question),
+             detect=_sample_answered, done_msg="That's how every bank question works.",
              leave=_back_to_decks,
              text="Here's how a bank question works: click an answer, see it turn "
                   "green or red with the explanation, then Continue. Getting it right retires the question "
                   "and counts toward the bank's Completion."),
         dict(target=("toolbar", "Stats"), title="Stats",
              try_=("Open Stats", lambda: _click("toolbar", "Stats")),
+             detect=_stats_open, done_msg="Your stats, right in the window.",
              leave=_back_to_decks,
              text="A cleaner stats view, right inside the window."),
         dict(target=("gear",), title="Janki Settings",
              try_=("Open Settings", _open_settings),
+             detect=_settings_open, wait=_settings_open,
+             done_msg="Close Settings when you're done — the tour continues.",
              text="Everything Janki does is adjustable here — look, timers, Pomodoro, "
                   "lectures, and every hotkey (under <b>Hotkeys</b>)."),
         dict(target=("main",), title="Focus & Caption",
@@ -190,15 +265,20 @@ def _steps():
                   "with Tab held."),
         dict(target=("bottom", "Import File"), title="Import File",
              try_=("Try Import File", lambda: _click("bottom", "Import File")),
+             detect=_import_used, wait=lambda: _sig["import_open"],
+             done_msg="Pick a file or cancel — the tour continues.",
              text="Brings in Anki decks and Janki files alike — <b>.jank</b> bundles, "
                   "<b>.qb</b> banks, question <b>.docx</b> files, lecture spreadsheets. "
                   "Dragging them onto the window works too."),
         dict(target=("bottom", "Load Lectures"), title="Today's lectures",
              try_=("Open the lecture loader", lambda: _click("bottom", "Load Lectures")),
+             detect=_lectures_open, wait=_lectures_open,
+             done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards."),
         dict(target=None, title="Try it on a sample card", hands_on=True,
              try_=("Open sample card", _open_sample),
+             detect=_sample_answered, done_msg="Nice — you rated it.",
              text="Open a sample card and try things for real (the tour steps aside):"
                   "<br>• <b>Space</b> — show the answer<br>• <b>Z / X / C / V</b> — rate "
                   "it<br>• <b>Tab+F</b> — Focus mode<br>• <b>Tab+\\</b> — Caption mode "
@@ -237,6 +317,45 @@ class _Tour(QWidget):
             pass
         self._cover()
         mw.installEventFilter(self)
+        self._det = {"done": False, "t": None}
+        self._poll = QTimer(self)
+        self._poll.setInterval(250)
+        self._poll.timeout.connect(self._check)
+        self._poll.start()
+
+    def _check(self):
+        """Did the user do this step's thing? Show a ✓; move on — right away for
+        in-window features, after the window it opened is closed for dialogs."""
+        if not (0 <= self.i < len(self.steps)):
+            return
+        st = self.steps[self.i]
+        det = st.get("detect")
+        if not det:
+            return
+        try:
+            if not self._det["done"]:
+                now = det()
+                if self._det.get("base"):
+                    if not now:
+                        self._det["base"] = False    # reset; next "on" counts
+                    return
+                if now:
+                    self._det["done"] = True
+                    self.t_title.setText("✓  " + st["title"])
+                    self.t_body.setText(st["text"] + "<br><br><span style='color:#8fd18f'>"
+                                        + st.get("done_msg", "Nice!") + "</span>")
+                    self.bubble.adjustSize()
+                    self._place_bubble()
+                    self._apply_mask()
+                    if not st.get("wait"):
+                        QTimer.singleShot(1400, lambda n=self.i: self.i == n and self.go(n + 1))
+                return
+            wait = st.get("wait")
+            if wait and not self._det.get("closed") and not wait():
+                self._det["closed"] = True           # closed → advance once
+                QTimer.singleShot(400, lambda n=self.i: self.i == n and self.go(n + 1))
+        except Exception as e:
+            log("coach detect: %s" % e)
 
     def _cover(self):
         """Sit exactly over the main window (screen coords)."""
@@ -328,6 +447,15 @@ class _Tour(QWidget):
             return self.finish()
         self.i = max(0, i)
         st = self.steps[self.i]
+        _sig.update(import_done=False, answered=False)
+        base = False
+        try:
+            base = bool(st.get("detect") and st["detect"]())
+        except Exception:
+            pass
+        # Already true when the step starts (e.g. Practice view left open) → wait for
+        # the user to do it, not count the leftover state.
+        self._det = {"done": False, "base": base, "closed": False}
         t = st.get("try_")
         self.b_try.setVisible(bool(t))
         if t:
@@ -483,6 +611,11 @@ class _Tour(QWidget):
     def finish(self):
         global _tour
         mw.removeEventFilter(self)
+        try:
+            self._poll.stop()
+        except Exception:
+            pass
+        _remove_signals()
         _cleanup_sample()
 
         def _gone():
@@ -514,6 +647,7 @@ def start() -> None:
             mw.moveToState("deckBrowser")
         t = _Tour()
         _tour = t
+        _install_signals()
         t.attach()
         # Build the first step while hidden; _show_step reveals it with one fade.
         QTimer.singleShot(300 if moved else 0, lambda: t.go(0))
