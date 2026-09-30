@@ -2839,7 +2839,8 @@ class GlassSettings(QDialog):
             lay.addWidget(cb)
 
         from aqt.qt import QGridLayout as _QGL
-        lay.addWidget(QLabel("Preview:"))
+        _pl = QLabel("Preview (right-click a sound to turn it off or on):")
+        lay.addWidget(_pl)
         prev = _QGL()
         names = ("move", "select", "back", "open", "fold", "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong")
@@ -2851,6 +2852,26 @@ class GlassSettings(QDialog):
             b.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Fixed)
             b.setMinimumWidth(0)
             b.clicked.connect(lambda _c=False, n=name: sfx.play(n, force=True))
+
+            def _paint(btn=b, n=name):
+                off = n in (self.cfg.get("sfx_disabled") or [])
+                f = btn.font(); f.setStrikeOut(off); btn.setFont(f)
+                btn.setStyleSheet("color: rgba(255,255,255,0.35);" if off else "")
+                btn.setToolTip("%s — off (right-click to turn on)" % n.capitalize() if off
+                               else "Right-click to turn this sound off")
+
+            def _toggle(_pos=None, btn=b, n=name, paint=_paint):
+                dis = list(self.cfg.get("sfx_disabled") or [])
+                if n in dis:
+                    dis.remove(n)
+                else:
+                    dis.append(n)
+                self.cfg["sfx_disabled"] = dis
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                paint()
+            b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            b.customContextMenuRequested.connect(_toggle)
+            _paint()
             prev.addWidget(b, i // 5, i % 5)
         lay.addLayout(prev)
         lay.addStretch()

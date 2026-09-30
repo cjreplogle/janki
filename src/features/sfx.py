@@ -38,6 +38,8 @@ def play(name, force=False):
     if (vol <= 0 or c.get("sfx_muted", False)) and not force:
         return
     if not force:
+        if name in (c.get("sfx_disabled") or []):    # switched off individually
+            return
         if name in NAV and not c.get("sfx_nav", True):
             return
         if name in REVIEW and not c.get("sfx_review", True):
