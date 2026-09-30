@@ -288,7 +288,7 @@ class GlassSettings(QDialog):
         _lh = QLabel("Glass")
         _lh.setStyleSheet("font-weight:600;")
         _lhr = QHBoxLayout(); _lhr.addWidget(_lh); _lhr.addStretch(1)
-        self._glass_on = QCheckBox("Enabled")
+        self._glass_on = QCheckBox()
         self._glass_on.setToolTip("Blur what's behind the Anki window. Off = faster.")
         self._glass_on.setChecked(self.cfg.get("glass_enabled", True) is not False)
 
@@ -322,7 +322,7 @@ class GlassSettings(QDialog):
             _rh = QLabel("Photo Background")
             _rh.setStyleSheet("font-weight:600;")
             _rhr = QHBoxLayout(); _rhr.addWidget(_rh); _rhr.addStretch(1)
-            self._photo_on = QCheckBox("Enabled")
+            self._photo_on = QCheckBox()
             self._photo_on.setToolTip("Show your background photo behind Anki.")
             self._photo_on.setChecked(self.cfg.get("photo_bg_enabled", True) is not False)
 
