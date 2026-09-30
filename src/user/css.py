@@ -1780,7 +1780,7 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             web_content.head += "\n" + _typewriter_head(_cfg(), prev_hash=prev)
         # Review history charts (calendar heatmap + reviews plot) on the deck
         # browser home screen. Optional — hidden via Settings → General.
-        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", True):
+        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", False):
             web_content.head += "\n" + _stats_head()
         # In the Practice view, relabel the deck browser's bottom "Import File" button
         # to "Import Bank" (its click is redirected to the bank importer — see

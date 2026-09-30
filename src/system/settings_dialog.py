@@ -1732,7 +1732,7 @@ class GlassSettings(QDialog):
 
         self._deck_stats = QCheckBox(
             "Show review history chart on the deck screen (Reviews plot)")
-        self._deck_stats.setChecked(bool(self.cfg.get("deck_stats", True)))
+        self._deck_stats.setChecked(bool(self.cfg.get("deck_stats", False)))
 
         def on_deck_stats(_state):
             self.cfg["deck_stats"] = self._deck_stats.isChecked()
