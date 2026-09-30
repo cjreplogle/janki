@@ -57,12 +57,13 @@ def _doc_exts() -> tuple:
 
 def _dropped_paths(ev) -> list:
     """Local files carried by a drag that Janki imports here, or [] (then Anki handles
-    it): .jank/.qb/.rp anywhere, plus .docx/.pptx while the Practice hub is showing."""
+    it): .jank/.qb/.rp and .docx question documents anywhere, plus .pptx/.json while the
+    Practice hub is showing."""
     try:
         md = ev.mimeData()
         if not md or not md.hasUrls():
             return []
-        exts = _EXTS + (_doc_exts() if _in_practice_view() else ())
+        exts = _EXTS + (".docx",) + (_doc_exts() if _in_practice_view() else ())
         out = [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
         return [p for p in out if p.lower().endswith(exts) and os.path.isfile(p)]
     except Exception:
@@ -79,7 +80,7 @@ def _refresh_practice_view() -> None:
 
 
 def _open_doc(path: str) -> None:
-    """Build a bank from a .docx/.pptx dropped on the Practice hub (the same dialogs as
+    """Build a bank from a dropped .docx (anywhere) or .pptx (Practice hub) (the same dialogs as
     Settings → Practice), straight into the Practice deck."""
     from ..integrations import qbank
     try:
