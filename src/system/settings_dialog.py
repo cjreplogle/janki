@@ -2350,7 +2350,7 @@ class GlassSettings(QDialog):
         prac_qb_lay.addWidget(_deck_btn)
 
         # Anki's own Preferences, on the Documentation row.
-        _anki_prefs = QPushButton("Anki Preferences…")
+        _anki_prefs = QPushButton("Native Preferences…")
         _anki_prefs.setToolTip("Open Anki's own preferences (scheduling, sync, theme, "
                                "video driver…).")
         _anki_prefs.setStyleSheet(
