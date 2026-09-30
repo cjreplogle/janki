@@ -47,7 +47,7 @@ except Exception as _e:
 
 _bt.mark("imported aqt")
 from .src.util.bridge import _bridge
-from .src.util.config import log, ACTIVE, GLASS, _cfg
+from .src.util.config import log, ACTIVE, GLASS, _cfg, _cfg_raw
 from .src.util import state
 _bt.mark("imported util")
 from .src.features import card_timer, focus, lockdown, pomodoro, intersperse, reword
@@ -270,7 +270,7 @@ def _force_dark_mode():
 
 def _mark_onboarded():
     try:
-        c = _cfg()
+        c = _cfg_raw()
         if not c.get("onboarded", False):
             c["onboarded"] = True
             mw.addonManager.writeConfig(__name__, c)
@@ -594,7 +594,7 @@ def _startup():
             try:
                 from .src.platform.win import shell as _wsh
                 if _wsh.register_file_types():
-                    _c = _cfg(); _c["win_assoc_done"] = True
+                    _c = _cfg_raw(); _c["win_assoc_done"] = True
                     mw.addonManager.writeConfig(__name__, _c)
             except Exception as _fa_exc:
                 log("file associations: %s" % _fa_exc)

@@ -154,7 +154,8 @@ def _safe_q(k, name):
 def backdrop_mode() -> str:
     try:
         from aqt import mw
-        m = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
+        c = mw.addonManager.getConfig(__name__) or {}
+        m = "off" if c.get("disable_animations") or c.get("glass_enabled", True) is False else str(c.get("win_backdrop", "auto")).lower()
     except Exception:
         m = "auto"
     return m if m in ("auto", "on", "off", "live", "wallpaper") else "auto"
@@ -175,7 +176,8 @@ def backdrop_wanted() -> bool:
     are off or this is a virtual machine)."""
     try:
         from aqt import mw
-        mode = str((mw.addonManager.getConfig(__name__) or {}).get("win_backdrop", "auto")).lower()
+        c = mw.addonManager.getConfig(__name__) or {}
+        mode = "off" if c.get("disable_animations") or c.get("glass_enabled", True) is False else str(c.get("win_backdrop", "auto")).lower()
     except Exception:
         mode = "auto"
     if mode == "on":

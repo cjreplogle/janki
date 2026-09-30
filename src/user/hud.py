@@ -10,7 +10,7 @@ from aqt import mw
 from aqt.qt import Qt, QTimer
 
 from ..util.bridge import _bridge
-from ..util.config import _cfg
+from ..util.config import _cfg, _cfg_raw
 from ..util import state
 from ..features import card_timer
 from . import css
@@ -877,7 +877,7 @@ def _nudge_coherence(dr, dc):
     ci = max(0, min(2, _COH_COLS.index(col) + dc))
     new_pos = f"{_COH_ROWS[ri]}-{_COH_COLS[ci]}"
     old_narrow = (col != 'center')
-    cfg = _cfg() or {}
+    cfg = _cfg_raw() or {}
     cfg['coherence_position'] = new_pos
     mw.addonManager.writeConfig(__name__, cfg)
     keytap._gtap_log(f"coherence_position → {new_pos}")

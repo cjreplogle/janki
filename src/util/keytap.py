@@ -8,7 +8,7 @@ from aqt import mw
 from aqt.qt import QObject, QTimer
 
 from .bridge import _bridge
-from .config import log, _cfg
+from .config import log, _cfg, _cfg_raw
 from . import state
 from . import hotkeys as _hk
 from ..features import focus
@@ -465,7 +465,7 @@ def _adjust_caption_font(delta: int) -> None:
     the caption HUD is on screen."""
     if not hud._caption_visible():
         return
-    cfg = _cfg() or {}
+    cfg = _cfg_raw() or {}
     cur = max(8, int(cfg.get('caption_font_size', 20)))
     new = max(10, min(48, cur + delta))
     if new == cur:
@@ -560,7 +560,7 @@ def _explain_accessibility() -> None:
         if box.clickedButton() is go:
             _start_key_tap()               # now shows macOS's prompt + starts watching
         else:
-            cfg = _cfg()
+            cfg = _cfg_raw()
             cfg["ax_prompt_declined"] = True
             mw.addonManager.writeConfig(__name__, cfg)
     except Exception as exc:

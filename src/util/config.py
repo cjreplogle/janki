@@ -96,6 +96,25 @@ else:
 # Config
 # ---------------------------------------------------------------------------
 
-def _cfg() -> dict:
+# "Disable animations" (Settings → Appearance): turns off the heavy visual work at
+# read time — the saved settings underneath are left alone, so switching it back
+# restores them. Core features (timers, flares, practice, hotkeys…) are untouched.
+_NO_ANIM = {"ui_animations": False, "typewriter": False, "first_card_fade": False,
+            "blur_radius": 0, "bg_blur": 0, "win_backdrop": "off"}
+# Glass switch off (Settings → Appearance → Window): no window blur.
+_NO_GLASS = {"blur_radius": 0, "win_backdrop": "off"}
+
+
+def _cfg_raw() -> dict:
+    """The stored config, without overrides — use this when writing config back."""
     c = mw.addonManager.getConfig(__name__)
     return c if c else {}
+
+
+def _cfg() -> dict:
+    c = _cfg_raw()
+    if c.get("disable_animations"):
+        c = dict(c, **_NO_ANIM)
+    if c.get("glass_enabled", True) is False:
+        c = dict(c, **_NO_GLASS)
+    return c

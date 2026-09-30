@@ -10,7 +10,7 @@ from aqt import mw
 from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
                     QStackedWidget, QTimer, Qt, QCheckBox, QFileDialog)
 
-from ..util.config import _cfg, log
+from ..util.config import _cfg, _cfg_raw, log
 
 _MAC = sys.platform == "darwin"
 _dlg = None
@@ -18,7 +18,7 @@ _dlg = None
 
 def _mark_done():
     try:
-        c = _cfg()
+        c = _cfg_raw()
         c["onboarded"] = True
         mw.addonManager.writeConfig(__name__, c)
     except Exception:
@@ -122,7 +122,7 @@ def _controller_page():
     status = _status()
 
     def _on(_s):
-        c = _cfg()
+        c = _cfg_raw()
         c["hid_controller"] = cb.isChecked()
         mw.addonManager.writeConfig(__name__, c)
         if cb.isChecked():
@@ -281,7 +281,7 @@ def show() -> None:
             try:                                   # skipped the hotkeys step → don't
                 from ..util import keytap          # re-ask on its own later
                 if _MAC and not keytap.ax_trusted():
-                    c = _cfg()
+                    c = _cfg_raw()
                     c["ax_prompt_declined"] = True
                     mw.addonManager.writeConfig(__name__, c)
             except Exception:

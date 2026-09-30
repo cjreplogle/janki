@@ -6,7 +6,7 @@ from aqt import mw
 from aqt.qt import Qt, QTimer
 
 from ..util.bridge import _bridge
-from ..util.config import _cfg, log
+from ..util.config import _cfg, _cfg_raw, log
 from ..util import state
 from . import card_timer
 from ..util import keytap
@@ -601,7 +601,7 @@ def _apply_card_zoom() -> None:
 
 
 def _change_card_zoom(delta: float) -> None:
-    cfg = _cfg()
+    cfg = _cfg_raw()
     z = max(0.5, min(3.0, round(float(cfg.get("card_zoom", 1.0)) + delta, 2)))
     cfg["card_zoom"] = z
     try:

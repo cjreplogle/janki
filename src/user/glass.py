@@ -9,7 +9,7 @@ from aqt.webview import AnkiWebView
 from aqt.qt import QColor, QEvent, QObject, Qt, QTimer
 
 from ..util.bridge import NSRect, _bridge, _cgs
-from ..util.config import log, GLASS, _cfg
+from ..util.config import log, GLASS, _cfg, _cfg_raw
 from ..features import card_timer, pomodoro
 from . import css
 from ..system import tray
@@ -301,7 +301,7 @@ def _apply_desat(alpha: float):
 
 
 def _set_neutralize(alpha: float):
-    cfg = _cfg()
+    cfg = _cfg_raw()
     cfg["neutralize"] = round(float(alpha), 2)
     mw.addonManager.writeConfig(__name__, cfg)
     _apply_desat(alpha)
@@ -321,7 +321,7 @@ def _apply_frost_alpha(a: float):
 
 
 def _set_frost_alpha(a: float):
-    cfg = _cfg()
+    cfg = _cfg_raw()
     cfg["frost_alpha"] = round(float(a), 2)
     mw.addonManager.writeConfig(__name__, cfg)
     _apply_frost_alpha(a)
@@ -364,7 +364,7 @@ def _apply_blur(radius: float):
 
 
 def _set_blur(radius: float):
-    cfg = _cfg()
+    cfg = _cfg_raw()
     cfg["blur_radius"] = int(radius)
     mw.addonManager.writeConfig(__name__, cfg)
     _apply_window_blur(radius)
@@ -408,7 +408,7 @@ def _set_material(m: int):
     """Change the vibrancy material live (controls how grey/opaque the frost is)."""
     if not GLASS:
         return
-    cfg = _cfg()
+    cfg = _cfg_raw()
     cfg["material"] = int(m)
     mw.addonManager.writeConfig(__name__, cfg)
     if _WIN:
@@ -2179,6 +2179,8 @@ def _current_bg_path(repick=False):
     """The image to show this session. One is chosen at random from the pool and
     cached so it stays put until the app restarts (or the pool changes)."""
     global _bg_chosen
+    if _cfg().get("photo_bg_enabled", True) is False:
+        return None                       # switched off; keep the pick for later
     files = _bg_files()
     if not files:
         _bg_chosen = None

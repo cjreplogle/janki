@@ -7,7 +7,7 @@ from aqt import mw
 from aqt.qt import QCheckBox, QColor, QColorDialog, QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QSlider, QSpinBox, Qt, QVBoxLayout
 from aqt.utils import tooltip
 
-from ..util.config import log, _cfg, SAFE
+from ..util.config import log, _cfg, _cfg_raw, SAFE
 from ..features import card_timer, focus, pomodoro, reword
 from ..user import glass, hud, css
 from . import tray
@@ -32,7 +32,7 @@ class GlassSettings(QDialog):
             _css.apply_widget_ui_font(self)      # use the chosen Interface font here too
         except Exception:
             pass
-        self.cfg = _cfg()
+        self.cfg = _cfg_raw()
         self.cfg.setdefault("tint_mode", "custom")
         lay = QVBoxLayout(self)
         # Tight top: with the content extended under the titlebar the top tab row sits
@@ -87,6 +87,29 @@ class GlassSettings(QDialog):
         app_page = QWidget(); _app_outer = QVBoxLayout(app_page)
         _app_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
         app_tabs = QTabWidget(); _app_outer.addWidget(app_tabs)
+        # Bottom-right: one switch that drops the heavy visuals (blur, text/hover
+        # animations, card fade) while keeping every feature working.
+        _na_row = QHBoxLayout(); _na_row.addStretch(1)
+        self._no_anim = QCheckBox("Disable animations")
+        self._no_anim.setToolTip(
+            "Faster on slow machines: turns off glass blur, text typing, hover motion and "
+            "the card fade. Your other settings are kept and come back when unchecked.")
+        self._no_anim.setChecked(bool(self.cfg.get("disable_animations", False)))
+
+        def _on_no_anim(_s):
+            self.cfg["disable_animations"] = bool(self._no_anim.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._apply_window_blur(_cfg().get("blur_radius", 20))
+            except Exception:
+                pass
+            try:
+                glass._reload_all_webviews()
+            except Exception:
+                pass
+        self._no_anim.stateChanged.connect(_on_no_anim)
+        _na_row.addWidget(self._no_anim)
+        _app_outer.addLayout(_na_row)
         self._app_tabs = app_tabs
         app_win_page = QWidget();  app_win_lay = QVBoxLayout(app_win_page)
         app_text_page = QWidget(); app_text_lay = QVBoxLayout(app_text_page)
@@ -264,7 +287,25 @@ class GlassSettings(QDialog):
         _left = QVBoxLayout()
         _lh = QLabel("Glass")
         _lh.setStyleSheet("font-weight:600;")
-        _left.addWidget(_lh)
+        _lhr = QHBoxLayout(); _lhr.addWidget(_lh); _lhr.addStretch(1)
+        self._glass_on = QCheckBox("Enabled")
+        self._glass_on.setToolTip("Blur what's behind the Anki window. Off = faster.")
+        self._glass_on.setChecked(self.cfg.get("glass_enabled", True) is not False)
+
+        def _on_glass(_s):
+            self.cfg["glass_enabled"] = self._glass_on.isChecked()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._apply_window_blur(_cfg().get("blur_radius", 20))
+            except Exception:
+                pass
+            try:
+                diagnostics._live_apply(self.cfg)
+            except Exception:
+                pass
+        self._glass_on.stateChanged.connect(_on_glass)
+        _lhr.addWidget(self._glass_on)
+        _left.addLayout(_lhr)
         _mk_slider(_left, "body_opacity", "Opacity", 0, 100, 100.0,
                    lambda v: diagnostics._live_apply(self.cfg))
         _mk_slider(_left, "blur_radius", "Blur radius", 0, 80, 1.0,
@@ -280,7 +321,21 @@ class GlassSettings(QDialog):
             _right = QVBoxLayout()
             _rh = QLabel("Photo Background")
             _rh.setStyleSheet("font-weight:600;")
-            _right.addWidget(_rh)
+            _rhr = QHBoxLayout(); _rhr.addWidget(_rh); _rhr.addStretch(1)
+            self._photo_on = QCheckBox("Enabled")
+            self._photo_on.setToolTip("Show your background photo behind Anki.")
+            self._photo_on.setChecked(self.cfg.get("photo_bg_enabled", True) is not False)
+
+            def _on_photo(_s):
+                self.cfg["photo_bg_enabled"] = self._photo_on.isChecked()
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                try:
+                    glass._apply_bg_image()
+                except Exception:
+                    pass
+            self._photo_on.stateChanged.connect(_on_photo)
+            _rhr.addWidget(self._photo_on)
+            _right.addLayout(_rhr)
             def _apply_photo_opacity(_v):
                 mw.addonManager.writeConfig(__name__, self.cfg)
                 glass._apply_bg_image()
@@ -321,13 +376,13 @@ class GlassSettings(QDialog):
                     "Images (*.png *.jpg *.jpeg *.heic *.gif *.tiff *.bmp *.webp)")
                 if paths:
                     glass.add_background_images(paths)
-                    self.cfg = _cfg()
+                    self.cfg = _cfg_raw()
                     _refresh_bg_btn()
                     tooltip("Added — one is shown at random each launch.")
 
             def _on_bg_clear():
                 glass.clear_background_images()
-                self.cfg = _cfg()
+                self.cfg = _cfg_raw()
                 _refresh_bg_btn()
                 tooltip("Backgrounds cleared.")
 
@@ -2205,11 +2260,6 @@ class GlassSettings(QDialog):
         _mob_row.addWidget(self._mob_revert)
         app_mob_lay.addLayout(_mob_row)
 
-        hint = QLabel("Color + opacity set the tint; blur radius blurs the desktop "
-                      "behind Anki (like Terminal). Changes apply live and save "
-                      "automatically.")
-        hint.setWordWrap(True)
-        app_win_lay.addWidget(hint)
 
         # === Rephrase =======================================================
         self._build_reword_tab(rw_import_lay, rw_mobile_lay, rw_exp_lay)
