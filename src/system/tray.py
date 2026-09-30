@@ -284,6 +284,12 @@ def _on_tray_activated(reason: "QSystemTrayIcon.ActivationReason") -> None:
         # otherwise trigger the activate→reopen hook and yank the window back. Set it
         # before anything else so it lands no matter the event order.
         suppress_reopen()
+        if sys.platform != "darwin":             # macOS plays it in show_navigator
+            try:
+                from ..features import sfx
+                sfx.play("tray")
+            except Exception:
+                pass
         # macOS: open the glass navigator (decks + toggles + open/quit).
         if sys.platform == "darwin":
             try:

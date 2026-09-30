@@ -1538,6 +1538,11 @@ def show_navigator() -> None:
     if _nav is not None and _nav.isVisible() and _natively_on_screen(_nav):
         _hide()
         return
+    try:
+        from ..features import sfx
+        sfx.play("tray")                         # soft wipe as the menu opens
+    except Exception:
+        pass
     global _keep_hidden
     try:
         # Clicking the icon activates the app; stop that from yanking the hidden
