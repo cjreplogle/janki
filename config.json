@@ -52,7 +52,7 @@
   "typewriter_static": true,
   "typewriter_speed": 1.5,
   "global_keys": true,
-  "hid_controller": true,
+  "hid_controller": false,
   "hid_button_kc": {
     "5": 18,
     "2": 19,

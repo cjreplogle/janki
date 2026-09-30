@@ -522,6 +522,44 @@ def stop_key_tap() -> None:
     _key_tap_running = False
 
 
+_ax_poll = None
+
+
+def _wait_for_accessibility() -> None:
+    """After the Accessibility prompt, watch for the grant and start the key tap the
+    moment it lands — no Anki restart needed (macOS applies the grant to the running
+    process). Gives up quietly after 10 minutes."""
+    global _ax_poll
+    if _ax_poll is not None:
+        return
+    try:
+        import time as _t
+        t = QTimer(mw)
+        t.setInterval(2000)
+        start = _t.monotonic()
+
+        def _tick():
+            global _ax_poll
+            if ax_trusted():
+                t.stop()
+                _ax_poll = None
+                _gtap_log("Accessibility granted — starting key tap (no restart)")
+                _start_key_tap()
+                try:
+                    from aqt.utils import tooltip
+                    tooltip("Janki hotkeys are on.", period=2500)
+                except Exception:
+                    pass
+            elif _t.monotonic() - start > 600:
+                t.stop()
+                _ax_poll = None
+        t.timeout.connect(_tick)
+        t.start()
+        _ax_poll = t
+    except Exception as exc:
+        log(f"accessibility poll: {exc}")
+
+
 def _start_key_tap() -> None:
     global _key_tap_running
     if _key_tap_running:
@@ -572,6 +610,7 @@ def _start_key_tap() -> None:
                     "Grant access in:\n"
                     "System Settings → Privacy & Security → Accessibility → Anki"
                 ))
+            _wait_for_accessibility()
             return
 
         # All CF/CG functions that return opaque pointers must have restype=c_void_p
