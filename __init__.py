@@ -595,7 +595,11 @@ def _startup():
                 # Without this the window always reopened windowed even if it was
                 # closed fullscreen/maximized.
                 if c.get("last_win_fs"):
-                    mw.showFullScreen()
+                    # Only once the window is really up: asking macOS for fullscreen
+                    # while the window is hidden / mid-transition is refused (the
+                    # system "nope" beep) yet Qt still records it as fullscreen, so
+                    # everything behaved as if fullscreen until toggled by hand.
+                    _restore_fullscreen_when_ready()
                 elif c.get("last_win_max"):
                     mw.showMaximized()
             except Exception as _e:
@@ -1249,3 +1253,45 @@ try:
     _sfx_mod.install()
 except Exception:
     pass
+
+
+
+def _native_fullscreen():
+    """macOS: is the NSWindow actually fullscreen (styleMask bit 14)? None if unknown."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        from ctypes import c_void_p, c_ulong
+        from .src.util.bridge import _bridge
+        msg, _cls = _bridge()
+        ns = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
+        if not ns:
+            return None
+        return bool(msg(c_ulong, ns, b"styleMask") & (1 << 14))
+    except Exception:
+        return None
+
+
+def _restore_fullscreen_when_ready(tries=0):
+    from aqt.qt import QTimer
+    try:
+        if not mw.isVisible() or mw.isMinimized():
+            if tries < 20:                       # wait (up to ~10 s) for the window
+                QTimer.singleShot(500, lambda: _restore_fullscreen_when_ready(tries + 1))
+            return
+        QTimer.singleShot(400, mw.showFullScreen)   # let the first show settle
+        QTimer.singleShot(1800, _resync_fullscreen)
+    except Exception as e:
+        log("fs restore: %s" % e)
+
+
+def _resync_fullscreen():
+    """If Qt believes the window is fullscreen but macOS doesn't (a refused
+    transition), put Qt back in step so nothing acts as if fullscreen."""
+    try:
+        nat = _native_fullscreen()
+        if nat is False and mw.isFullScreen():
+            log("fullscreen out of sync (Qt yes, macOS no) → showNormal")
+            mw.showNormal()
+    except Exception as e:
+        log("fs resync: %s" % e)
