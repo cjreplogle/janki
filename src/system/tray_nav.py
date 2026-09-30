@@ -1108,6 +1108,39 @@ def _build() -> "QWidget":
     opts_btn.setObjectName("gear")            # 1.5× the header's other icon buttons
     opts_btn.setToolTip("Janki settings")
     opts_btn.clicked.connect(_open_settings)
+    # Quick mute for Janki's sounds (keeps the volume setting; one tap to unmute).
+    mute_btn = QPushButton()
+    mute_btn.setObjectName("icon")
+
+    def _sync_mute():
+        try:
+            c = _cfg()
+            on = int(c.get("sfx_volume", 0)) > 0 and not c.get("sfx_muted", False)
+        except Exception:
+            on = False
+        mute_btn.setText("\U0001F50A\uFE0E" if on else "\U0001F507\uFE0E")
+        mute_btn.setToolTip("Mute Janki sounds" if on else
+                            "Janki sounds are off — click to unmute" if _cfg().get("sfx_muted")
+                            else "Janki sounds are off (turn them up in Settings ▸ Focus ▸ Sounds)")
+
+    def _toggle_mute():
+        try:
+            from aqt import mw as _mw
+            c = _mw.addonManager.getConfig(__name__) or {}
+            if int(c.get("sfx_volume", 0)) <= 0 and not c.get("sfx_muted"):
+                _open_settings()                 # nothing to mute: take them to the slider
+                return
+            c["sfx_muted"] = not c.get("sfx_muted", False)
+            _mw.addonManager.writeConfig(__name__, c)
+            if not c["sfx_muted"]:
+                from ..features import sfx
+                sfx.play("select")
+        except Exception as exc:
+            log(f"tray mute: {exc}")
+        _sync_mute()
+    mute_btn.clicked.connect(_toggle_mute)
+    _sync_mute()
+    hrow.addWidget(mute_btn)
     hrow.addWidget(opts_btn)
     lay.addLayout(hrow)
 

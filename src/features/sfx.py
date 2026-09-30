@@ -35,7 +35,7 @@ def _effect(name):
 def play(name, force=False):
     c = _cfg()
     vol = int(c.get("sfx_volume", 0))          # off unless turned up
-    if vol <= 0 and not force:
+    if (vol <= 0 or c.get("sfx_muted", False)) and not force:
         return
     if not force:
         if name in NAV and not c.get("sfx_nav", True):
