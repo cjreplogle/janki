@@ -3238,6 +3238,15 @@ def _open_settings(section=None, float_above=False):
         pass
 
     _apply_settings_section(d, section)
+    # Size it to the open tab BEFORE it appears — fitting after show made it jump.
+    try:
+        d.ensurePolished()
+        d.layout().activate()
+        fit = getattr(d, "_fit_tabs", None)
+        if fit:
+            fit()
+    except Exception:
+        pass
     # Keep the always-in-front main window from floating over this dialog.
     try:
         from ..user import glass
