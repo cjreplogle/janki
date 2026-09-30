@@ -5279,6 +5279,31 @@ def sync_contanki_for_card():
         log("contanki sync: %s" % e)
 
 
+_contanki_nav_paused = False
+
+
+def contanki_for_state(new_state):
+    """On the deck list / overview (and Stats, which sits on the deck list) Janki's own
+    controller navigation drives the page exactly like the keyboard; Contanki reading
+    the same pad there made presses land twice. Pause it off the reviewer, resume in
+    review (where sync_contanki_for_card takes over)."""
+    global _contanki_nav_paused
+    con = getattr(mw, "contanki", None)
+    if con is None:
+        return
+    try:
+        if new_state in ("deckBrowser", "overview"):
+            if not _contanki_nav_paused:
+                con.suspend()
+                _contanki_nav_paused = True
+        elif _contanki_nav_paused:
+            _contanki_nav_paused = False
+            if not _contanki_suspended_by_us:
+                con.resume()
+    except Exception as e:
+        log("contanki nav: %s" % e)
+
+
 def resume_contanki():
     """Force-resume Contanki if Janki suspended it (call when leaving the reviewer, so
     it never gets stuck suspended)."""

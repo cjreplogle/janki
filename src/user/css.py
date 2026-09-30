@@ -517,9 +517,13 @@ _DECK_KEYS_JS = r"""(function(){
 # the raw X/Y axes (the 8bitdo Zero 2 reports its d-pad as axes).
 _PAD_NAV_JS = r"""(function(){
  if(window.__jkPadNav||!navigator.getGamepads)return; window.__jkPadNav=true;
- var last={};
+ var last={}, held={};
  function key(k){document.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));}
- function edge(id,on,k){if(on&&!last[id])key(k);last[id]=on;}
+ // press = one key; held d-pad repeats like a held arrow key (Enter never repeats)
+ function edge(id,on,k){var t=Date.now();
+   if(on&&!last[id]){key(k);held[id]=t+380;}
+   else if(on&&k!=='Enter'&&held[id]&&t>=held[id]){key(k);held[id]=t+90;}
+   if(!on)held[id]=0; last[id]=on;}
  function tick(){
    var ps=navigator.getGamepads?navigator.getGamepads():[];
    var mine=document.hasFocus();

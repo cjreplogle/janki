@@ -855,6 +855,7 @@ def _startup():
                     try:
                         from .src.integrations import qbank
                         qbank.resume_contanki()  # never leave Contanki suspended off-reviewer
+                        qbank.contanki_for_state(new_state)   # …except for Janki's nav
                     except Exception:
                         pass
                     hud.caption_practice_gate()  # restore caption when leaving practice

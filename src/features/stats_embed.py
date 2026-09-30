@@ -768,6 +768,15 @@ _UP_TO_TOOLBAR_JS = ("document.addEventListener('keydown',function(e){"
                      "if(f)f('janki:toolbar');},true);")
 
 
+def _pad_js() -> str:
+    """The same controller → key reader the deck list uses (so ↑ etc. work in Stats)."""
+    try:
+        from ..user import css as _css
+        return _css._PAD_NAV_JS
+    except Exception:
+        return ""
+
+
 def _install_page_script() -> None:
     """Inject the glass CSS + reveal script at DOCUMENT CREATION (before the page paints),
     so a fresh load never flashes Anki's opaque canvas or finished cards first. Rebuilt
@@ -778,7 +787,8 @@ def _install_page_script() -> None:
         for old in scripts.find("janki-stats"):
             scripts.remove(old)
         src = ("window.__jkHold=%s;" % ("false" if is_open() else "true")
-               + (_page_js() if _glass_on() else "") + _ANIM_JS + _UP_TO_TOOLBAR_JS)
+               + (_page_js() if _glass_on() else "") + _ANIM_JS + _UP_TO_TOOLBAR_JS
+               + _pad_js())
         sc = QWebEngineScript()
         sc.setName("janki-stats")
         sc.setSourceCode(src)

@@ -69,9 +69,18 @@ def _is_practice(card):
         return False
 
 
+def _dpad_js():
+    try:
+        from ..user import css as _css
+        js = _css._PAD_NAV_JS.replace("edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');", "")
+        return "<script>" + js + "</script>"
+    except Exception:
+        return ""
+
+
 def _on_card_will_show(text, card, kind):
     if isinstance(kind, str) and kind == "reviewQuestion" and _is_practice(card):
-        return text + _JS
+        return text + _JS + _dpad_js()
     return text
 
 
