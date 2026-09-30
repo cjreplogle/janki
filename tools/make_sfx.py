@@ -186,8 +186,8 @@ def bank(name, voice, move, wet_scale=1.0):
     save("wrong",  voice(A4, 0.12, 0.19, 30))
     # settings open: a soft upward swish under a quick rising pair
     # (kept subtle: lower notes, dark soft swish, about half the level of the rest)
-    save("settings", mix((0, sweep(0.12, 0.025, 0.05, 0.18, 21)),
-                         (0.02, voice(523, 0.06, 0.09, 55)), (0.07, voice(784, 0.1, 0.09, 40))))
+    save("settings", mix((0, sweep(0.12, 0.02, 0.04, 0.14, 21)),
+                         (0.02, voice(392, 0.06, 0.075, 50)), (0.07, voice(523, 0.1, 0.075, 36))))
     # stats open: a bright little flourish — three quick rising notes + a soft shimmer
     save("stats",  mix((0, voice(988, 0.05, 0.16, 55)), (0.045, voice(1319, 0.05, 0.16, 55)),
                        (0.09, voice(1760, 0.12, 0.15, 30)), (0.09, sweep(0.14, 0.03, 0.45, 0.6, 31))))
