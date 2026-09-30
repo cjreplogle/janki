@@ -63,6 +63,7 @@ def _back_to_decks():
 
 # --- Sample card (created for the hands-on step, removed when the tour ends) --------
 _SAMPLE_DECK = "Janki Tour (sample)"
+_MOCK_DECK = "Janki Tour (practice)"      # own deck, so reviewing it shows the question
 _sample = {"did": None, "cids": [], "card": False, "mock": False}
 
 
@@ -97,8 +98,8 @@ def _open_mock_question():
     try:
         from ..integrations import qbank
         col = mw.col
-        did = _sample["did"] or col.decks.id(_SAMPLE_DECK)
-        _sample["did"] = did
+        did = col.decks.id(_MOCK_DECK)
+        _sample["mock_did"] = did
         if not _sample.get("mock"):
             # Original, Janki-written vignette in the usual board style.
             q = {"stem": "A 26-year-old woman comes to the clinic because of fatigue "
@@ -141,18 +142,24 @@ def _open_mock_question():
 
 
 def _cleanup_sample():
-    """Delete the sample deck + card, and any review logged on it (stats untouched)."""
-    did, cids = _sample["did"], _sample["cids"]
-    if did is None:
-        return
+    """Delete the tour decks + their cards, and any review logged on them (stats
+    untouched). By NAME too, so leftovers from an interrupted tour go as well."""
     try:
+        col = mw.col
+        dids = [d for d in (col.decks.id_for_name(n) for n in (_SAMPLE_DECK, _MOCK_DECK)) if d]
+        if not dids:
+            _sample.update(did=None, mock_did=None, cids=[], card=False, mock=False)
+            return
+        cids = list(_sample.get("cids") or [])
+        for d in dids:
+            cids += list(col.decks.cids(d, children=True))
         if cids:
-            mw.col.db.execute("delete from revlog where cid in (%s)"
-                              % ",".join(str(int(c)) for c in cids))
-        mw.col.decks.remove([did])
+            col.db.execute("delete from revlog where cid in (%s)"
+                           % ",".join(str(int(c)) for c in set(cids)))
+        col.decks.remove(dids)
     except Exception as e:
         log("coach sample cleanup: %s" % e)
-    _sample.update(did=None, cids=[], card=False, mock=False)
+    _sample.update(did=None, mock_did=None, cids=[], card=False, mock=False)
     try:
         mw.moveToState("deckBrowser")
     except Exception:
@@ -645,6 +652,7 @@ def start() -> None:
         moved = getattr(mw, "state", None) != "deckBrowser"
         if moved:
             mw.moveToState("deckBrowser")
+        _cleanup_sample()                      # leftovers from an interrupted tour
         t = _Tour()
         _tour = t
         _install_signals()
