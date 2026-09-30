@@ -485,6 +485,68 @@ def _reclaim_central_layout() -> None:
         pass
 
 
+_mask_win = None
+
+
+def _mask_web(hold_ms: int = 40, fade_ms: int = 70) -> None:
+    """Cover the reviewer with a snapshot of itself while the chrome collapses/restores.
+    Moving the web view shows its OLD frame at the NEW position for a frame or two
+    (the card visibly jumps before it starts gliding). The snapshot sits exactly where
+    the card was, hides that stale frame, then fades out as the glide begins. A
+    separate frameless top-level window — native web views draw over child widgets."""
+    global _mask_win
+    web = getattr(mw, "web", None)
+    if web is None or not web.isVisible():
+        return
+    try:
+        from aqt.qt import QLabel, QPropertyAnimation, QEasingCurve
+        pm = web.grab()
+        if pm.isNull():
+            return
+        old = _mask_win
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                pass
+        w = QLabel(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+                   | Qt.WindowType.WindowDoesNotAcceptFocus
+                   | Qt.WindowType.WindowTransparentForInput)
+        w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        w.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        w.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        w.setPixmap(pm)
+        tl = web.mapToGlobal(web.rect().topLeft())
+        w.setGeometry(tl.x(), tl.y(), web.width(), web.height())
+        w.show()
+        try:
+            from ..user import glass as _glass
+            _glass.keep_dialog_in_front(w)
+        except Exception:
+            w.raise_()
+        _mask_win = w
+
+        def _fade():
+            try:
+                an = QPropertyAnimation(w, b"windowOpacity", w)
+                an.setDuration(fade_ms)
+                an.setStartValue(1.0)
+                an.setEndValue(0.0)
+                an.setEasingCurve(QEasingCurve.Type.OutCubic)
+                an.finished.connect(w.close)
+                w._jk_an = an
+                an.start()
+            except Exception:
+                w.close()
+        QTimer.singleShot(hold_ms, _fade)
+        QTimer.singleShot(hold_ms + fade_ms + 400, lambda: w.isVisible() and w.close())
+    except Exception as e:
+        try:
+            keytap._gtap_log(f"focus mask: {e}")
+        except Exception:
+            pass
+
+
 def _focus_set_hidden(hidden: bool) -> None:
     global _focus_hidden
     # TEMP breadcrumb: log every Focus-Mode chrome change + who triggered it, so an
@@ -523,6 +585,7 @@ def _focus_set_hidden(hidden: bool) -> None:
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
+            _mask_web()                # hide the stale frame while the web view moves
             _clamp_toolbar(True)       # deterministic 0-height top band
             bw = getattr(mw, "bottomWeb", None)
             if bw is not None:
@@ -551,6 +614,7 @@ def _focus_set_hidden(hidden: bool) -> None:
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
         # and fade the chrome back in over the top.
+        _mask_web()                    # hide the stale frame while the web view moves
         _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
         set_focus_flag()               # stop the inline trim from running on new cards
         trim_trailing_empties()        # _focus_hidden is now False → restores trimmed nodes
