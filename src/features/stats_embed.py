@@ -851,11 +851,20 @@ _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-redu
                 "b.style.opacity='%s';b.style.transform='translateY(3px)';}catch(e){}})();")
 
 
+def _page_sfx():
+    try:
+        from . import sfx
+        sfx.play("page")
+    except Exception:
+        pass
+
+
 def fade_then(fn, web=None, ms: int = 0, to: float = 0.35) -> None:
     """Fade the current view out and run `fn` (the actual switch). Page switches start at
     once (ms=0): the old page fades WHILE the new one builds, instead of waiting for the
     fade and then for the build. Instant panel swaps (Stats) pass a short delay so their
     fade-out is still seen."""
+    _page_sfx()
     try:
         (web or mw.web).eval(_FADE_OUT_JS % to)
     except Exception:
@@ -880,6 +889,7 @@ def close_soon(ms: int = 70, timeout: int = 1500) -> None:
     if not is_open():
         return
     _defer_close = True
+    _page_sfx()
     try:
         from ..util import perf_probe as _pp
         _pp.begin("leave Stats (close_soon)")

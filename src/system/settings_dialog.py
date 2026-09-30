@@ -2839,15 +2839,16 @@ class GlassSettings(QDialog):
             cb.stateChanged.connect(_t)
             lay.addWidget(cb)
 
-        prev = QHBoxLayout()
-        prev.addWidget(QLabel("Preview:"))
-        for name in ("move", "select", "back", "open", "reveal", "again", "hard", "good",
-                     "easy", "right", "wrong"):
+        from aqt.qt import QGridLayout as _QGL
+        lay.addWidget(QLabel("Preview:"))
+        prev = _QGL()
+        names = ("move", "select", "back", "open", "fold", "unfold", "page",
+                 "reveal", "again", "hard", "good", "easy", "right", "wrong")
+        for i, name in enumerate(names):
             b = QPushButton(name.capitalize())
             b.setAutoDefault(False)
             b.clicked.connect(lambda _c=False, n=name: sfx.play(n, force=True))
-            prev.addWidget(b)
-        prev.addStretch()
+            prev.addWidget(b, i // 7, i % 7)
         lay.addLayout(prev)
         lay.addStretch()
 
@@ -3027,6 +3028,11 @@ class GlassSettings(QDialog):
                 # (same 240ms OutCubic), so rows never get squeezed while it grows.
                 from aqt.qt import QVariantAnimation, QEasingCurve
                 head.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+                try:
+                    from ..features import sfx as _sfx
+                    _sfx.play("unfold" if on else "fold")
+                except Exception:
+                    pass
                 fit = getattr(self, "_fit_tabs", None)
                 old = getattr(body, "_jk_anim", None)
                 if old is not None:

@@ -11,7 +11,7 @@ from ..util.config import _cfg, log
 
 _DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                     "assets", "sounds")
-NAV = {"move", "select", "back", "open"}
+NAV = {"move", "select", "back", "open", "fold", "unfold", "page"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong"}
 _fx = {}
 

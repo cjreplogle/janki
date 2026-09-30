@@ -99,6 +99,25 @@ def swish(dur=0.11, vol=0.07, seed=7):
 
 
 save("reveal",  swish())
+
+
+def sweep(dur, vol, a0, a1, seed, shape=2.0):
+    """Filtered-noise slide whose brightness moves a0 → a1 (0..1 filter coefficient)."""
+    rnd = random.Random(seed); n = int(SR * dur); out = []; lp = lp2 = 0.0
+    for k in range(n):
+        t = k / n
+        a = a0 + (a1 - a0) * t
+        lp += a * (rnd.uniform(-1, 1) - lp)
+        lp2 += a * (lp - lp2)
+        out.append(lp2 * (math.sin(math.pi * t) ** shape) * vol * 6)
+    return out
+
+
+# Distinct slides: fold/unfold = short, high, light rustle sweeping up (open) or down
+# (close); page = fuller, lower whoosh for switching Decks / Practice / Stats.
+save("unfold",  sweep(0.07, 0.06, 0.25, 0.55, 11))
+save("fold",    sweep(0.07, 0.06, 0.55, 0.25, 12))
+save("page",    sweep(0.15, 0.09, 0.03, 0.10, 13, 1.5))
 save("again",   bell(C5, 0.06, 0.16, 50))     # the ratings climb C – E – G – C
 save("hard",    bell(E5, 0.06, 0.16, 50))
 save("good",    bell(G5, 0.06, 0.16, 50))
