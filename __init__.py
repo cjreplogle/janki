@@ -512,6 +512,18 @@ def _startup():
         _prac_sc.setContext(Qt.ShortcutContext.WindowShortcut)
         _prac_sc.activated.connect(lambda: _go_practice())
         mw._janki_practice_sc = _prac_sc
+        # ⌘L / Ctrl+L: the Load today's lectures wizard.
+        _lec_sc = QShortcut(QKeySequence("Ctrl+L"), mw)
+        _lec_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+
+        def _open_lectures():
+            try:
+                from .src.integrations import lectures as _lec
+                _lec.run_today(interactive=True)
+            except Exception as e:
+                log("lectures shortcut: %s" % e)
+        _lec_sc.activated.connect(_open_lectures)
+        mw._janki_lectures_sc = _lec_sc
 
         # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
         # create the manager now so its CGEventTap signal handlers are live —

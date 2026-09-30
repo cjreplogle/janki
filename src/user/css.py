@@ -473,6 +473,14 @@ _DECK_KEYS_JS = r"""(function(){
      try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
      var a=c.querySelector('a.deck'); if(a)a.click();}
  },true);
+ // Opening a deck: the list dips to 35% at once, and the overview rises from 35% —
+ // one continuous dip instead of fade-out, blank, fade-in.
+ document.addEventListener('click',function(e){
+   var a=e.target.closest&&e.target.closest('a.deck'); if(!a)return;
+   var b=document.body; if(!b)return;
+   b.style.transition='opacity .1s ease-out'; b.style.opacity='0.35';
+   setTimeout(function(){b.style.opacity='';},1500);   // safety: never stay dim
+ },true);
  function restore(){var id=null,on=null;
    try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
    if(!id||!on||Date.now()-(+on||0)>2500)return;
@@ -1086,7 +1094,7 @@ def _build_css(cfg, context):
             "  window.addEventListener('resize',sched); sched();\n"
             "})();</script>\n"
         )
-        parts.append(fade_in)
+        parts.append(fade_in.replace('from{opacity:0}', 'from{opacity:.35}'))   # dip, not blank
     elif isinstance(context, Reviewer) and screens.get("reviewer", True):
         # Fade the FIRST card in when a study session starts. The reviewer page is
         # rebuilt on every entry to review, and Anki reveals each card by setting

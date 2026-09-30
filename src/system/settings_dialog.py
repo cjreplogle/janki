@@ -22,6 +22,20 @@ class GlassSettings(QDialog):
     def __init__(self):
         super().__init__(mw)
         self.setWindowTitle("Janki")
+        # The Settings shortcuts (⌘S / ⌘⌥S, or whatever they're rebound to) close it
+        # again when pressed inside the window — a toggle.
+        try:
+            from aqt.qt import QShortcut, QKeySequence, QWidget
+            from ..util import hotkeys as _hk
+            self._jk_close_scs = []
+            for _aid in ("settings_alt", "settings"):
+                _seq = _hk.binding(_aid).get("seq")
+                if _seq:
+                    _sc = QShortcut(QKeySequence(_seq), self)
+                    _sc.activated.connect(lambda: None if QWidget.keyboardGrabber() else self.close())
+                    self._jk_close_scs.append(_sc)
+        except Exception as _e:
+            log("settings close shortcut: %s" % _e)
         try:
             from ..user import glass
             glass.glass_dialog(self)             # frost like the main window (macOS)
