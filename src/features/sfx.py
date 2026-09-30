@@ -87,10 +87,30 @@ def _is_practice(card):
         return False
 
 
+_easy_streak = 0
+
+
+def _arpeggio(n):
+    """Easy streaks climb the rating notes (C–E–G–C): the last n of them, quickly."""
+    from aqt.qt import QTimer
+    notes = ["again", "hard", "good", "easy"][-n:]
+    for i, name in enumerate(notes):
+        QTimer.singleShot(i * 55, lambda nm=name: play(nm))
+
+
 def _on_answer(reviewer, card, ease):
+    global _easy_streak
     if _is_practice(card):
         return                                  # the pick already played right/wrong
-    play({1: "again", 2: "hard", 3: "good", 4: "easy"}.get(int(ease), "good"))
+    ease = int(ease)
+    if ease == 4:
+        _easy_streak += 1
+        if _easy_streak >= 2:
+            _arpeggio(min(4, _easy_streak))     # 2 → G C, 3 → E G C, 4+ → C E G C
+            return
+    else:
+        _easy_streak = 0
+    play({1: "again", 2: "hard", 3: "good", 4: "easy"}.get(ease, "good"))
 
 
 def _on_show_answer(card):
