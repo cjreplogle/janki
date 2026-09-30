@@ -475,6 +475,12 @@ def _startup():
             _zscs.append(_sc)
         mw._janki_zoom_scs = _zscs   # keep refs alive
 
+        # Open Janki Settings: ⌘⌥S (Mac) / Ctrl+Alt+S (Windows); rebindable in Hotkeys.
+        _set_sc = QShortcut(QKeySequence("Ctrl+Alt+S"), mw)
+        _set_sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        _set_sc.activated.connect(lambda: settings_dialog._open_settings())
+        mw._janki_settings_sc = _set_sc
+
         # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
         # create the manager now so its CGEventTap signal handlers are live —
         # the backtick+Delete chord can then engage lockdown before any manual

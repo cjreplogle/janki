@@ -34,6 +34,7 @@ ACTIONS = [
     ("focus_mode",    "Window & focus", "Toggle Focus Mode",                   "tab",    {"kc": 3}),
     ("open_deck",     "Window & focus", "Open last-studied deck",              "tab",    {"kc": 31}),
     ("toggle_window", "Window & focus", "Show / hide Anki (from anywhere)",    "combo",  {"kc": 0, "mods": ["cmd", "opt"]}),
+    ("settings",      "Window & focus", "Open Janki Settings",                 "qt",     {"seq": "Ctrl+Alt+S"}),
     ("zoom_in",       "Window & focus", "Card zoom in",                        "qt",     {"seq": "Ctrl+="}),
     ("zoom_out",      "Window & focus", "Card zoom out",                       "qt",     {"seq": "Ctrl+-"}),
     ("caption",       "Caption",       "Toggle caption HUD",                   "tab",    {"kc": 42}),
@@ -196,5 +197,8 @@ def apply():
         lk = getattr(mw, "_janki_lock_sc", None)
         if lk is not None:
             lk.setKey(QKeySequence(binding("lockdown", cfg)["seq"]))
+        st = getattr(mw, "_janki_settings_sc", None)
+        if st is not None:
+            st.setKey(QKeySequence(binding("settings", cfg)["seq"]))
     except Exception as exc:
         log("hotkeys apply (qt): %s" % exc)
