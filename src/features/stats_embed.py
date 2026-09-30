@@ -994,7 +994,7 @@ def _on_state_change(new_state=None, *_a) -> None:
                 _mode = "col"
                 if _load_key() != _loaded_key:
                     _refresh_data()
-            QTimer.singleShot(1500, _bg)
+            _when_idle(_bg, 2500)
         except Exception:
             pass
 
@@ -1029,6 +1029,39 @@ def _patched_on_stats(orig):
     return onStats
 
 
+# Background stats work (preload / quiet refresh) runs a backend graphs query; while it
+# runs, a Decks/Practice click waits behind it. So it only starts once you've paused:
+# any navigation or deck-list render pushes it back.
+_idle = {"timer": None, "jobs": [], "ms": 0}
+
+
+def _when_idle(fn, ms) -> None:
+    from aqt.qt import QTimer
+    if _idle["timer"] is None:
+        t = QTimer(mw)
+        t.setSingleShot(True)
+
+        def _run():
+            jobs, _idle["jobs"] = _idle["jobs"], []
+            for j in jobs:
+                try:
+                    j()
+                except Exception as exc:
+                    log("stats idle job: %s" % exc)
+        t.timeout.connect(_run)
+        _idle["timer"] = t
+    if fn not in _idle["jobs"]:
+        _idle["jobs"].append(fn)
+    _idle["ms"] = max(ms, _idle["ms"] if _idle["timer"].isActive() else 0)
+    _idle["timer"].start(_idle["ms"])
+
+
+def _bump_idle(*_a) -> None:
+    t = _idle["timer"]
+    if t is not None and t.isActive():
+        t.start(max(_idle["ms"], 2500))          # still busy → wait again
+
+
 def _on_main_window_init() -> None:
     # The toolbar's Stats link calls mw.onStats at click time; the "T" shortcut was bound
     # when the window was built, so rebind it to the patched handler as well.
@@ -1036,7 +1069,7 @@ def _on_main_window_init() -> None:
     mw.onStats = _patched_on_stats(orig)
     try:
         from aqt.qt import QTimer
-        QTimer.singleShot(6000, _preload)        # after launch settles
+        _when_idle(_preload, 6000)               # after launch settles + you pause
     except Exception:
         pass
     try:
@@ -1086,6 +1119,8 @@ def install() -> None:
     try:
         gui_hooks.main_window_did_init.append(_on_main_window_init)
         gui_hooks.state_did_change.append(_on_state_change)
+        gui_hooks.state_did_change.append(_bump_idle)
+        gui_hooks.deck_browser_did_render.append(_bump_idle)
         gui_hooks.webview_will_set_content.append(_on_will_set_content)
         gui_hooks.top_toolbar_did_init_links.append(_wrap_toolbar_links)
     except Exception as exc:
