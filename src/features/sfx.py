@@ -48,7 +48,8 @@ def play(name, force=False):
     if fx is None:
         return
     try:
-        fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 30) / 100.0)))
+        gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0   # per-sound level
+        fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 30) / 100.0 * gain)))
         fx.play()
     except Exception as e:
         log("sfx play: %s" % e)

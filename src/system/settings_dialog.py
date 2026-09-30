@@ -2839,14 +2839,73 @@ class GlassSettings(QDialog):
             lay.addWidget(cb)
 
         from aqt.qt import QGridLayout as _QGL
-        _pl = QLabel("Preview (right-click a sound to turn it off or on):")
+        _pl = QLabel("Preview — click to hear, drag sideways to set a sound's level, "
+                     "right-click to turn it off or on:")
+        _pl.setWordWrap(True)
         lay.addWidget(_pl)
         prev = _QGL()
         names = ("move", "select", "back", "open", "fold", "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong")
-        from aqt.qt import QSizePolicy as _QSP
+        from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
+
+        dlg_self = self
+
+        class _SoundBtn(QPushButton):
+            """Click = preview; drag sideways = this sound's level (0–200 % of the main
+            volume, shown as a bar along the bottom); right-click = off/on."""
+            def __init__(b, name):
+                super().__init__(name.capitalize())
+                b._name, b._press, b._drag, b._start = name, None, False, 100
+
+            def _gain(b):
+                return int((dlg_self.cfg.get("sfx_gain") or {}).get(b._name, 100))
+
+            def mousePressEvent(b, ev):
+                if ev.button() == Qt.MouseButton.LeftButton:
+                    b._press, b._drag, b._start = ev.position().x(), False, b._gain()
+                super().mousePressEvent(ev)
+
+            def mouseMoveEvent(b, ev):
+                if b._press is not None:
+                    dx = ev.position().x() - b._press
+                    if not b._drag and abs(dx) > 4:
+                        b._drag = True
+                        b.setDown(False)
+                    if b._drag:
+                        g = max(0, min(200, int(round(b._start + dx * 1.5))))
+                        gains = dict(dlg_self.cfg.get("sfx_gain") or {})
+                        gains[b._name] = g
+                        dlg_self.cfg["sfx_gain"] = gains
+                        b.setText("%d%%" % g)
+                        b.update()
+                        return
+                super().mouseMoveEvent(ev)
+
+            def mouseReleaseEvent(b, ev):
+                if b._drag:
+                    b._press, b._drag = None, False
+                    b.setText(b._name.capitalize())
+                    mw.addonManager.writeConfig(__name__, dlg_self.cfg)
+                    sfx.play(b._name, force=True)
+                    b.setDown(False)
+                    return                                  # a drag isn't a click
+                b._press = None
+                super().mouseReleaseEvent(ev)
+
+            def paintEvent(b, ev):
+                super().paintEvent(ev)
+                p = _QP(b)
+                p.setRenderHint(_QP.RenderHint.Antialiasing)
+                w = (b.width() - 12) * b._gain() / 200.0
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(_QC(156, 188, 243, 90))
+                p.drawRoundedRect(6, b.height() - 5, b.width() - 12, 2, 1, 1)
+                p.setBrush(_QC(156, 188, 243, 220))
+                p.drawRoundedRect(6, b.height() - 5, max(0.0, w), 2, 1, 1)
+                p.end()
+
         for i, name in enumerate(names):
-            b = QPushButton(name.capitalize())
+            b = _SoundBtn(name)
             b.setAutoDefault(False)
             # shrink to fit — this tab must never widen the Settings window
             b.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Fixed)
