@@ -66,7 +66,11 @@ def tap(f, dur=0.05, vol=0.22, decay=60.0):
 
 
 save("move",    click(0.007, 0.16))
-save("select",  tap(520, 0.06, 0.24, 55))
+# Select: crisp console-style confirm — a bright pluck that glides down fast, a
+# second quieter partial an octave+fifth up for sparkle, and a tiny click on top.
+save("select",  mix((0, click(0.004, 0.18, 5)),
+                    (0, tone(1500, 950, 0.045, 0.30, 75)),
+                    (0, tone(2250, 1500, 0.03, 0.08, 110))))
 save("back",    tap(390, 0.06, 0.22, 55))
 # Review sounds: clean bell tones (pure sine + a faint octave, smooth 6 ms attack,
 # no click texture), all in C major so they read as positive. "Wrong" is a soft
