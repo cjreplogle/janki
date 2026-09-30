@@ -172,7 +172,7 @@
   "glass_enabled": true,
   "photo_bg_enabled": true,
   "first_card_fade": true,
-  "first_card_fade_ms": 450,
+  "first_card_fade_ms": 220,
   "deck_gap_px": 6,
   "deck_group_gap_px": 6,
   "zxcv_rating": true,

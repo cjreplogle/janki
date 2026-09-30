@@ -1062,7 +1062,7 @@ def _build_css(cfg, context):
         # #qa's opacity to 1 in one jump; catch that first reveal and animate it in.
         # Later cards keep Anki's (and the typewriter's) normal behaviour.
         if cfg.get("first_card_fade", True):
-            _fd = int(cfg.get("first_card_fade_ms", 450))
+            _fd = int(cfg.get("first_card_fade_ms", 220))
             parts.append(
                 "<script>(function(){\n"
                 "  if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)"
@@ -1070,7 +1070,9 @@ def _build_css(cfg, context):
                 "  function arm(){ var qa=document.getElementById('qa'); if(!qa) return;\n"
                 "    var mo=new MutationObserver(function(){\n"
                 "      if(qa.style.opacity==='1'&&qa.childNodes.length){ mo.disconnect();\n"
-                "        try{ qa.animate([{opacity:0},{opacity:1}],"
+                # starts partly visible: the card is there in ~80ms (measured); a fade
+                # from 0 made it feel late
+                "        try{ qa.animate([{opacity:.3},{opacity:1}],"
                 "{duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'}); }catch(e){} } });\n"
                 "    mo.observe(qa,{attributes:true,attributeFilter:['style']});\n"
                 "    setTimeout(function(){ mo.disconnect(); }, 8000); }\n"
