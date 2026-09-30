@@ -563,10 +563,12 @@ _DECK_WIDTH_JS = r"""(function(){
        document.head.appendChild(st);}
      // One fixed width for the whole Practice view (the widest it has needed, within
      // the window): expanding/collapsing banks never resizes or slides the table.
-     var pw=Math.min(cap(), Math.max(natural(), stored(), 640));
+     key='jkDeckW:p2';                       // fresh key: drop widths saved with the old floor
+     t.style.tableLayout='auto'; var nat0=natural(); t.style.tableLayout='';
+     var pw=Math.min(cap(), Math.max(nat0, stored()));
      t.style.width=pw+'px'; put(key, String(pw)); put('jkColAnim','');
      window.addEventListener('resize', function(){
-       t.style.width=Math.min(cap(), Math.max(parseFloat(get(key))||0, 640))+'px'; });
+       t.style.width=Math.min(cap(), parseFloat(get(key))||nat0)+'px'; });
      return; }
    var nat=natural(), prev=Math.min(stored(), cap());
    var target=Math.max(nat, prev), start=prev||nat;
