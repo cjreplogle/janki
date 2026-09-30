@@ -507,6 +507,11 @@ def _startup():
         _decks_sc.setContext(Qt.ShortcutContext.WindowShortcut)
         _decks_sc.activated.connect(lambda: _go_decks())
         mw._janki_decks_sc = _decks_sc
+        # ⌘G / Ctrl+G: open the Practice view.
+        _prac_sc = QShortcut(QKeySequence("Ctrl+G"), mw)
+        _prac_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        _prac_sc.activated.connect(lambda: _go_practice())
+        mw._janki_practice_sc = _prac_sc
 
         # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
         # create the manager now so its CGEventTap signal handlers are live —
@@ -1113,3 +1118,21 @@ def _go_decks():
         mw.moveToState("deckBrowser")
     except Exception as e:
         log("go decks: %s" % e)
+
+
+def _go_practice():
+    try:
+        from .src.features import practice as _pr
+        st = getattr(mw, "state", None)
+        if st == "deckBrowser" and _pr._practice_view:
+            return
+        if st != "deckBrowser":
+            if st == "review":
+                try:
+                    focus._focus_restore_for_nav()
+                except Exception:
+                    pass
+            mw.moveToState("deckBrowser")
+        _pr.open_practice_hub()
+    except Exception as e:
+        log("go practice: %s" % e)

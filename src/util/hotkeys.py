@@ -39,6 +39,7 @@ ACTIONS = [
     ("zoom_out",      "Window & focus", "Card zoom out",                       "qt",     {"seq": "Ctrl+-"}),
     ("go_back",       "Navigation",    "Back one step",                        "qt",     {"seq": "Ctrl+B"}),
     ("go_decks",      "Navigation",    "Go to the Decks list",                 "qt",     {"seq": "Ctrl+D"}),
+    ("go_practice",   "Navigation",    "Open Practice",                        "qt",     {"seq": "Ctrl+G"}),
     ("open_deck_qt",  "Navigation",    "Study the last deck",                  "qt",     {"seq": "Ctrl+O"}),
     ("settings_alt",  "Navigation",    "Open Janki Settings (alternate)",      "qt",     {"seq": "Ctrl+S"}),
     ("caption",       "Caption",       "Toggle caption HUD",                   "tab",    {"kc": 42}),
@@ -203,6 +204,7 @@ def apply():
             lk.setKey(QKeySequence(binding("lockdown", cfg)["seq"]))
         for attr, aid in (("_janki_settings_sc", "settings"), ("_janki_back_sc", "go_back"),
                           ("_janki_decks_sc", "go_decks"),
+                          ("_janki_practice_sc", "go_practice"),
                           ("_janki_open_last_sc", "open_deck_qt"),
                           ("_janki_settings_sc2", "settings_alt")):
             sc = getattr(mw, attr, None)
