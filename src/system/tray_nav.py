@@ -1245,7 +1245,15 @@ def _build() -> "QWidget":
     rwb.setObjectName(_TOGGLE_ON_NAME["reword"] if _toggle_states().get("reword", False)
                       else "tgl")
     rwb.setToolTip("Show cards rephrased (display-only; never edits your notes)")
-    rwb.clicked.connect(lambda _c=False: _toggle("reword"))
+    def _rw_clicked(_c=False):
+        was = bool(_toggle_states().get("reword", False))
+        _toggle("reword")
+        try:
+            from ..features import sfx
+            sfx.play("rephrase_off" if was else "rephrase_on")
+        except Exception:
+            pass
+    rwb.clicked.connect(_rw_clicked)
     _toggle_btns["reword"] = rwb
     rwb._jk_on_name = _TOGGLE_ON_NAME["reword"]
     _add_corner_hint(rwb, "Tab+R")

@@ -221,6 +221,11 @@ def bank(name, voice, move, wet_scale=1.0):
     save("caption_out", sweep(0.12, 0.05, 0.42, 0.08, 82, 1.4))
     # settings tab switch: a very subtle, short slide
     save("tab",    sweep(0.07, 0.011, 0.1, 0.3, 91, 1.4))
+    # rephrase on / off (tray): a quick flip with a little sparkle — up for on,
+    # down (and softer) for off
+    save("rephrase_on",  mix((0, voice(659, 0.05, 0.15, 60)), (0.04, voice(988, 0.09, 0.15, 40)),
+                             (0.05, sweep(0.08, 0.02, 0.4, 0.6, 101))))
+    save("rephrase_off", mix((0, voice(988, 0.05, 0.12, 60)), (0.04, voice(659, 0.09, 0.12, 40))))
     # time's up (card-timer flare): three quick low "bumps" on the same note
     save("timeup", mix((0, voice(220, 0.07, 0.24, 45)), (0.085, voice(220, 0.07, 0.24, 45)),
                        (0.17, voice(220, 0.11, 0.24, 34))))       # three low bumps

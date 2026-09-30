@@ -2924,7 +2924,7 @@ class GlassSettings(QDialog):
                  "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup",
                  "sync", "tray", "lectures", "loaded", "close", "caption_in",
-                 "caption_out", "lockdown", "tab", "exit")
+                 "caption_out", "lockdown", "tab", "rephrase_on", "rephrase_off", "exit")
         from aqt.qt import QSizePolicy as _QSP, QPainter as _QP, QColor as _QC
 
         dlg_self = self
@@ -2934,7 +2934,8 @@ class GlassSettings(QDialog):
             volume, shown as a bar along the bottom); right-click = off/on."""
             def __init__(b, name):
                 super().__init__({"timeup": "Time's up", "caption_in": "Caption in",
-                                  "caption_out": "Caption out"}.get(name, name.capitalize()))
+                                  "caption_out": "Caption out", "rephrase_on": "Rephrase on",
+                                  "rephrase_off": "Rephrase off"}.get(name, name.capitalize()))
                 b._name, b._press, b._drag, b._start = name, None, False, 100
 
             def _gain(b):
@@ -2965,7 +2966,8 @@ class GlassSettings(QDialog):
                 if b._drag:
                     b._press, b._drag = None, False
                     b.setText({"timeup": "Time's up", "caption_in": "Caption in",
-                               "caption_out": "Caption out"}.get(b._name, b._name.capitalize()))
+                               "caption_out": "Caption out", "rephrase_on": "Rephrase on",
+                               "rephrase_off": "Rephrase off"}.get(b._name, b._name.capitalize()))
                     mw.addonManager.writeConfig(__name__, dlg_self.cfg)
                     sfx.play(b._name, force=True)
                     b.setDown(False)
