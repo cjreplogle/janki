@@ -484,6 +484,26 @@ _DECK_KEYS_JS = r"""(function(){
  else restore();
 })();"""
 
+# The remote (a gamepad — no key events) drives the same keyboard handlers: d-pad →
+# arrow keys, face buttons → Enter ("next"). Standard-mapping d-pad buttons 12–15 or
+# the raw X/Y axes (the 8bitdo Zero 2 reports its d-pad as axes).
+_PAD_NAV_JS = r"""(function(){
+ if(window.__jkPadNav||!navigator.getGamepads)return; window.__jkPadNav=true;
+ var last={};
+ function key(k){document.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));}
+ function edge(id,on,k){if(on&&!last[id])key(k);last[id]=on;}
+ function tick(){
+   var ps=navigator.getGamepads?navigator.getGamepads():[];
+   for(var i=0;i<ps.length;i++){var g=ps[i];if(!g)continue;
+     var b=function(n){return !!(g.buttons[n]&&g.buttons[n].pressed);};
+     var ax=g.axes||[], x=ax[0]||0, y=ax[1]||0;
+     edge(i+'u',b(12)||y<-0.5,'ArrowUp');   edge(i+'d',b(13)||y>0.5,'ArrowDown');
+     edge(i+'l',b(14)||x<-0.5,'ArrowLeft'); edge(i+'r',b(15)||x>0.5,'ArrowRight');
+     edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');}
+   if(document.hasFocus())requestAnimationFrame(tick);else setTimeout(tick,200);}
+ tick();
+})();"""
+
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=190, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
 
 # Deck list width + columns: Anki sizes the table to its widest VISIBLE deck name, so
@@ -798,6 +818,7 @@ def _build_css(cfg, context):
                          "border-radius:6px;box-shadow:0 0 0 4px rgba(255,255,255,.12);}"
                          "</style>\n")
         parts.append("<script>" + _DECK_KEYS_JS + "</script>\n")
+        parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
         parts.append("<style>" + _DECK_STICKY_CSS + "</style>\n"
@@ -2163,6 +2184,38 @@ def _ensure_congrats_glass(*_):
         mw.web.eval(_congrats_font_js(cfg))
     except Exception:
         pass
+
+
+# "Finished this deck for now": Space (or Enter) goes back to the deck list. Only on
+# the congrats page; the listener is harmless elsewhere since it checks the URL.
+_CONGRATS_KEYS_JS = (
+    "(function(){if(window.__jkCongratsKeys)return;window.__jkCongratsKeys=true;"
+    "document.addEventListener('keydown',function(e){"
+    "if(!/congrats/.test(location.href))return;"
+    "if(e.metaKey||e.ctrlKey||e.altKey)return;"
+    "if(e.key!==' '&&e.key!=='Enter')return;"
+    "var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT|BUTTON|A/.test(t.tagName)))return;"
+    "e.preventDefault();var f=window.pycmd||window.bridgeCommand;if(f)f('janki:decks');},true);})();")
+
+
+def _congrats_keys(*_):
+    try:
+        if "congrats" in mw.web.url().toString():
+            mw.web.eval(_CONGRATS_KEYS_JS)
+            mw.web.eval(_PAD_NAV_JS)
+            mw.web.setFocus()
+    except Exception:
+        pass
+
+
+def on_js_message(handled, message, context):
+    if message == "janki:decks":
+        try:
+            mw.moveToState("deckBrowser")
+        except Exception:
+            pass
+        return (True, None)
+    return handled
 
 
 # Rescue black/grey card text on the dark glass / OLED background, WITHOUT

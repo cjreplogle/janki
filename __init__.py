@@ -798,6 +798,7 @@ def _startup():
         # the deck-finished "Congratulations" page (loaded via load_sveltekit_page).
         try:
             mw.web.loadFinished.connect(css._ensure_congrats_glass)
+            mw.web.loadFinished.connect(css._congrats_keys)
         except Exception:
             pass
 
@@ -1017,5 +1018,11 @@ def _focus_deck_list(*_a):
 
 try:
     gui_hooks.deck_browser_did_render.append(_focus_deck_list)
+except Exception:
+    pass
+
+
+try:
+    gui_hooks.webview_did_receive_js_message.append(css.on_js_message)
 except Exception:
     pass
