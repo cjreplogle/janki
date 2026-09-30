@@ -2800,8 +2800,9 @@ class GlassSettings(QDialog):
         """Focus ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing
         (original, synthesized). Volume 0 turns them all off."""
         from ..features import sfx
-        intro = QLabel("Short, soft sounds as you move around with the keyboard or a "
-                       "remote, and as you reveal and rate cards.")
+        intro = QLabel("Optional, very quiet clicks as you move around with the keyboard "
+                       "or a remote, and as you reveal and rate cards. Off by default — "
+                       "turn the volume up to try them.")
         intro.setWordWrap(True)
         intro.setStyleSheet("color: gray;")
         lay.addWidget(intro)
@@ -2810,7 +2811,7 @@ class GlassSettings(QDialog):
         row.addWidget(QLabel("Volume"))
         vol = QSlider(Qt.Orientation.Horizontal)
         vol.setRange(0, 100)
-        vol.setValue(int(self.cfg.get("sfx_volume", 35)))
+        vol.setValue(int(self.cfg.get("sfx_volume", 0)))
         val = QLabel("%d%%" % vol.value() if vol.value() else "Off")
         val.setMinimumWidth(36)
 

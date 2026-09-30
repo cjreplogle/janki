@@ -34,7 +34,7 @@ def _effect(name):
 
 def play(name, force=False):
     c = _cfg()
-    vol = int(c.get("sfx_volume", 35))
+    vol = int(c.get("sfx_volume", 0))          # off unless turned up
     if vol <= 0 and not force:
         return
     if not force:
@@ -46,7 +46,7 @@ def play(name, force=False):
     if fx is None:
         return
     try:
-        fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 35) / 100.0)))
+        fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 30) / 100.0)))
         fx.play()
     except Exception as e:
         log("sfx play: %s" % e)

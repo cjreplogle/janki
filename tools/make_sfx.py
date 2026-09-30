@@ -59,17 +59,21 @@ def save(name, buf):
 
 
 os.makedirs(OUT, exist_ok=True)
-save("move",    mix((0, click()), (0, tone(1850, 1750, 0.045, 0.22, 70))))
-save("select",  mix((0, tone(740, 760, 0.06, 0.45, 30)), (0.045, tone(1110, 1120, 0.09, 0.4, 28))))
-save("back",    mix((0, tone(990, 980, 0.05, 0.4, 32)), (0.04, tone(660, 650, 0.09, 0.38, 30))))
-save("open",    mix((0, tone(523, 530, 0.07, 0.35, 22)), (0.05, tone(784, 790, 0.08, 0.35, 22)),
-                    (0.10, tone(1047, 1050, 0.16, 0.32, 16))))
-save("reveal",  tone(880, 1320, 0.09, 0.33, 26, "tri"))
-save("again",   tone(330, 300, 0.12, 0.45, 20, "tri"))
-save("hard",    tone(440, 435, 0.1, 0.42, 22))
-save("good",    mix((0, tone(659, 660, 0.12, 0.42, 20))))
-save("easy",    mix((0, tone(784, 790, 0.08, 0.4, 24)), (0.06, tone(1175, 1180, 0.16, 0.38, 18))))
-save("right",   mix((0, tone(659, 660, 0.07, 0.38, 26)), (0.06, tone(880, 880, 0.07, 0.38, 26)),
-                    (0.12, tone(1319, 1320, 0.18, 0.36, 14))))
-save("wrong",   mix((0, tone(392, 385, 0.1, 0.4, 20, "tri")), (0.09, tone(311, 300, 0.16, 0.38, 16, "tri"))))
+# Deliberately understated: muted wooden clicks/taps (low-passed, very short, low
+# level) rather than beeps — present, but easy to ignore.
+def tap(f, dur=0.05, vol=0.22, decay=60.0):
+    return mix((0, click(0.006, vol * 0.6)), (0, tone(f, f * 0.97, dur, vol, decay)))
+
+
+save("move",    click(0.007, 0.16))
+save("select",  tap(520, 0.06, 0.24, 55))
+save("back",    tap(390, 0.06, 0.22, 55))
+save("open",    mix((0, tap(440, 0.05, 0.2, 60)), (0.07, tap(587, 0.08, 0.2, 45))))
+save("reveal",  tap(660, 0.05, 0.14, 70))
+save("again",   tap(300, 0.07, 0.2, 45))
+save("hard",    tap(392, 0.06, 0.18, 55))
+save("good",    tap(494, 0.06, 0.18, 55))
+save("easy",    mix((0, tap(494, 0.05, 0.16, 60)), (0.06, tap(659, 0.07, 0.16, 50))))
+save("right",   mix((0, tap(523, 0.05, 0.2, 55)), (0.07, tap(784, 0.09, 0.2, 40))))
+save("wrong",   tap(262, 0.09, 0.22, 35))
 print("ok", sorted(os.listdir(OUT)))
