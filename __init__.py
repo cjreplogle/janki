@@ -1150,3 +1150,10 @@ def _go_practice():
         _pr.open_practice_hub()
     except Exception as e:
         log("go practice: %s" % e)
+
+
+try:
+    from .src.features import practice_keys as _practice_keys
+    _practice_keys.install()
+except Exception:
+    pass

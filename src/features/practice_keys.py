@@ -1,0 +1,75 @@
+"""Arrow keys on a practice question: ↑/↓ (or ←/→) highlight an answer choice,
+Enter/Space picks it — the same pick() a click runs (tint, explanation, grade).
+With nothing highlighted, Enter/Space keep Anki's normal behaviour."""
+from aqt import gui_hooks, mw
+
+from ..util.config import log
+
+_JS = r"""<script>(function(){
+ if(window.__jkPqKeys)return; window.__jkPqKeys=true;
+ function vis(){var box=document.getElementById('jp-choices')||document.body;
+   if(box.classList&&box.classList.contains('jp-locked'))return [];
+   return Array.prototype.filter.call(document.querySelectorAll('.jp-choice'),
+     function(e){return !e.classList.contains('jp-dropped')&&e.offsetParent!==null;});}
+ function cur(){return document.querySelector('.jp-choice.jp-kb');}
+ function sel(e){var c=cur();if(c)c.classList.remove('jp-kb');if(e){e.classList.add('jp-kb');
+   var r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)e.scrollIntoView({block:'nearest'});}}
+ document.addEventListener('keydown',function(ev){
+   if(ev.metaKey||ev.ctrlKey||ev.altKey)return;
+   var k=ev.key; if(!/^Arrow(Up|Down|Left|Right)$/.test(k))return;
+   if(document.querySelector('.jp-answered'))return;
+   var v=vis(); if(!v.length)return;
+   ev.preventDefault(); ev.stopPropagation();
+   var c=cur(), i=c?v.indexOf(c):-1, d=(k==='ArrowDown'||k==='ArrowRight')?1:-1;
+   sel(v[i<0?(d>0?0:v.length-1):Math.max(0,Math.min(v.length-1,i+d))]);
+ },true);
+ // Python asks this on Enter/Space: pick the highlighted choice if there is one.
+ window.jankiPickHighlighted=function(){var c=cur();if(!c||!vis().length)return false;
+   c.classList.remove('jp-kb');if(c.__jpPick)c.__jpPick();else c.click();return true;};
+})();</script>
+<style>.jp-choice.jp-kb{outline:2px solid rgba(156,188,243,.85);outline-offset:2px;
+ border-radius:8px;}</style>"""
+
+
+def _is_practice(card):
+    try:
+        from ..integrations import qbank
+        return card.note().note_type()["name"] == qbank._MODEL_NAME
+    except Exception:
+        return False
+
+
+def _on_card_will_show(text, card, kind):
+    if isinstance(kind, str) and kind == "reviewQuestion" and _is_practice(card):
+        return text + _JS
+    return text
+
+
+def _wrap_enter():
+    from aqt.reviewer import Reviewer
+    orig = Reviewer.onEnterKey
+    if getattr(orig, "_jk_pq", False):
+        return
+
+    def onEnterKey(self, *a, **k):
+        try:
+            if self.state == "question" and self.card is not None and _is_practice(self.card):
+                def _cb(picked, _self=self):
+                    if not picked:
+                        orig(_self, *a, **k)
+                self.web.evalWithCallback(
+                    "window.jankiPickHighlighted?window.jankiPickHighlighted():false", _cb)
+                return None
+        except Exception as e:
+            log("practice keys: %s" % e)
+        return orig(self, *a, **k)
+    onEnterKey._jk_pq = True
+    Reviewer.onEnterKey = onEnterKey
+
+
+def install():
+    gui_hooks.card_will_show.append(_on_card_will_show)
+    try:
+        _wrap_enter()
+    except Exception as e:
+        log("practice keys wrap: %s" % e)
