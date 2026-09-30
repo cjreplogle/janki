@@ -437,8 +437,11 @@ _DECK_KEYS_JS = r"""(function(){
    function(r){return r.querySelector('a.deck')&&r.offsetParent!==null;});}
  function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
    return td.textContent.match(/^\xa0*/)[0].length;}
+ var hid=null, idle=null;          // remembered row while the highlight is hidden
  function cur(){return document.querySelector('tr.deck.jk-kb-row');}
- function sel(tr){var o=cur();if(o){o.classList.remove('jk-kb-row');
+ function poke(){clearTimeout(idle);idle=setTimeout(function(){var c=cur();
+   if(c){hid=c.id;sel(null,true);}},3000);}
+ function sel(tr,keep){if(!keep)hid=null;var o=cur();if(o){o.classList.remove('jk-kb-row');
    var a=o.querySelector('a.deck');if(a)a.classList.remove('jk-kb');}
    if(!tr)return; tr.classList.add('jk-kb-row');
    var a2=tr.querySelector('a.deck');if(a2)a2.classList.add('jk-kb');
@@ -451,7 +454,11 @@ _DECK_KEYS_JS = r"""(function(){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
    var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
    var k=e.key, rs=rows(); if(!rs.length)return;
+   if(!/^(Arrow(Up|Down|Left|Right)|Enter| )$/.test(k))return;
    var c=cur(), i=c?rs.indexOf(c):-1;
+   if(!c&&hid){var h=document.getElementById(hid);   // first press after idle:
+     if(h){e.preventDefault();sel(h);poke();return;}}   //   just show it again
+   poke();
    if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
      if(!c){sel(start());return;}
      var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1); sel(rs[n]); return;}
@@ -468,10 +475,11 @@ _DECK_KEYS_JS = r"""(function(){
  },true);
  function restore(){var id=null,on=null;
    try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
-   if(on!=='1'||!id)return; var tr=document.getElementById(id); if(tr)sel(tr);}
+   if(!id||!on||Date.now()-(+on||0)>2500)return;
+   var tr=document.getElementById(id); if(tr){sel(tr);poke();}}
  // keep the selection across the redraw an expand/collapse causes
  document.addEventListener('keydown',function(e){
-   if(/^Arrow/.test(e.key)){try{sessionStorage.setItem('jkKbAct','1');}catch(x){}}},true);
+   if(/^Arrow/.test(e.key)){try{sessionStorage.setItem('jkKbAct',String(Date.now()));}catch(x){}}},true);
  // real mouse use hands control back to the pointer (ignore the synthetic move a
  // redraw fires under a still cursor)
  var t0=Date.now(), last=null;
