@@ -1102,7 +1102,16 @@ except Exception:
     pass
 
 
+def _sfx(name):
+    try:
+        from .src.features import sfx as _s
+        _s.play(name)
+    except Exception:
+        pass
+
+
 def _go_back():
+    _sfx("back")
     try:
         from .src.features import practice as _pr, stats_embed as _se
         if _se.is_open():
@@ -1137,6 +1146,7 @@ def _go_back():
 
 
 def _go_decks():
+    _sfx("back")
     try:
         from .src.features import practice as _pr, stats_embed as _se
         if _se.is_open():
@@ -1167,6 +1177,7 @@ def _go_decks():
 
 
 def _go_practice():
+    _sfx("select")
     try:
         from .src.features import practice as _pr
         st = getattr(mw, "state", None)
@@ -1209,5 +1220,12 @@ try:
     gui_hooks.deck_browser_did_render.append(_contanki_nav_enforce)
     gui_hooks.overview_did_refresh.append(_contanki_nav_enforce)
     gui_hooks.profile_did_open.append(lambda: _CQT.singleShot(500, _contanki_nav_enforce))
+except Exception:
+    pass
+
+
+try:
+    from .src.features import sfx as _sfx_mod
+    _sfx_mod.install()
 except Exception:
     pass

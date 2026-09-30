@@ -437,6 +437,7 @@ _DECK_KEYS_JS = r"""(function(){
    function(r){return r.querySelector('a.deck')&&r.offsetParent!==null;});}
  function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
    return td.textContent.match(/^\xa0*/)[0].length;}
+ function sfx(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
  var hid=null, idle=null;          // remembered row while the highlight is hidden
  var __jkSync=false;
  // Contanki (the remote) and Tab move the browser's focus between deck links: follow
@@ -470,18 +471,19 @@ _DECK_KEYS_JS = r"""(function(){
    poke();
    if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
      if(!c){sel(start());return;}
-     if(k==='ArrowUp'&&i===0){sel(null);clearTimeout(idle);pycmd('janki:toolbar');return;}
-     var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1); sel(rs[n]); return;}
+     if(k==='ArrowUp'&&i===0){sel(null);clearTimeout(idle);sfx('move');pycmd('janki:toolbar');return;}
+     var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1);
+     if(rs[n]!==c)sfx('move'); sel(rs[n]); return;}
    if(!c){ if(k==='Enter'||k===' '){e.preventDefault();sel(start());} return;}
    var col=c.querySelector('a.collapse'), sign=col?col.textContent.trim():'';
-   if(k==='ArrowRight'){e.preventDefault(); if(sign==='+')col.click();
+   if(k==='ArrowRight'){e.preventDefault(); sfx('move'); if(sign==='+')col.click();
      else if(i+1<rs.length&&ind(rs[i+1])>ind(c))sel(rs[i+1]); return;}
-   if(k==='ArrowLeft'){e.preventDefault();
+   if(k==='ArrowLeft'){e.preventDefault(); sfx('move');
      if(sign==='-'||sign==='\u2212'){col.click();return;}
      for(var j=i-1;j>=0;j--)if(ind(rs[j])<ind(c)){sel(rs[j]);return;} return;}
    if(k==='Enter'||k===' '){e.preventDefault();
      try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
-     var a=c.querySelector('a.deck'); if(a)a.click();}
+     sfx('select'); var a=c.querySelector('a.deck'); if(a)a.click();}
  },true);
  // Opening a deck: the list dips to 35% at once, and the overview rises from 35% —
  // one continuous dip instead of fade-out, blank, fade-in.
@@ -542,11 +544,11 @@ _OVERVIEW_KEYS_JS = r"""(function(){
  if(window.__jkOvKeys)return; window.__jkOvKeys=true;
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
-   if(e.key==='ArrowUp'){e.preventDefault();pycmd('janki:toolbar');return;}
+   if(e.key==='ArrowUp'){e.preventDefault();pycmd('janki:sfx:move');pycmd('janki:toolbar');return;}
    if(e.key!==' '&&e.key!=='Enter')return;
    var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
    if(!document.getElementById('study'))return;       // only when there's something to study
-   e.preventDefault(); pycmd('study');
+   e.preventDefault(); pycmd('janki:sfx:open'); pycmd('study');
  },true);
 })();"""
 
@@ -554,6 +556,7 @@ _OVERVIEW_KEYS_JS = r"""(function(){
 # Space open, ↓/Esc go back to the deck list. Same lift + glow as hovering.
 _TOOLBAR_KEYS_JS = r"""(function(){
  if(window.__jkTbKeys)return; window.__jkTbKeys=true;
+ function sfx(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
  function items(){return Array.prototype.filter.call(document.querySelectorAll('a.hitem'),
    function(a){return a.offsetParent!==null;});}
  function cur(){return document.querySelector('a.hitem.jk-tbsel');}
@@ -564,12 +567,12 @@ _TOOLBAR_KEYS_JS = r"""(function(){
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
    var c=cur(); if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
-   if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
+   if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault(); sfx('move');
      if(k==='ArrowRight'&&i===it.length-1){sel(null);pycmd('janki:gear');return;}  // → the gear
      sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
-   if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';c.click();
+   if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';sfx('select');c.click();
      pycmd('janki:tbkeep:'+id);return;}   // stay on the toolbar: ←/→ + Space keep going
-   if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);pycmd('janki:deckfocus');}
+   if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);sfx('move');pycmd('janki:deckfocus');}
  },true);
  document.addEventListener('mousemove',function(){var c=cur();if(c)sel(null);},{passive:true});
 })();"""
@@ -2319,7 +2322,7 @@ _CONGRATS_KEYS_JS = (
     "if(e.metaKey||e.ctrlKey||e.altKey)return;"
     "if(e.key!==' '&&e.key!=='Enter')return;"
     "var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT|BUTTON|A/.test(t.tagName)))return;"
-    "e.preventDefault();var f=window.pycmd||window.bridgeCommand;if(f)f('janki:decks');},true);})();")
+    "e.preventDefault();var f=window.pycmd||window.bridgeCommand;if(f){f('janki:sfx:back');f('janki:decks');}},true);})();")
 
 
 def _congrats_keys(*_):

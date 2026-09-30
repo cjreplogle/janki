@@ -41,6 +41,11 @@ class _GearButton(QToolButton):
         try:
             from aqt import mw
             if k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                try:
+                    from . import sfx
+                    sfx.play("select")
+                except Exception:
+                    pass
                 self.click(); return
             if k == Qt.Key.Key_Left:
                 mw.toolbar.web.setFocus()

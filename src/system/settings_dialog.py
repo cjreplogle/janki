@@ -213,6 +213,9 @@ class GlassSettings(QDialog):
         focus_tabs.addTab(cap_page, "Caption")
         focus_tabs.addTab(pomo_page, "Pomodoro")
         focus_tabs.addTab(lock_page, "Lockdown")
+        snd_page = QWidget(); snd_lay = QVBoxLayout(snd_page)
+        focus_tabs.addTab(snd_page, "Sounds")
+        self._build_sounds_tab(snd_lay)
 
         tabs.addTab(app_page, "Appearance")
         tabs.addTab(focus_page, "Focus")
@@ -2524,6 +2527,11 @@ class GlassSettings(QDialog):
             return sorted(out, key=key)
 
         def _focus(w):
+            try:
+                from ..features import sfx as _sfx
+                _sfx.play("move")
+            except Exception:
+                pass
             w.setFocus(_KQt.FocusReason.TabFocusReason)
             try:
                 sa = w.parent()
@@ -2787,6 +2795,60 @@ class GlassSettings(QDialog):
         target.setAcceptDrops(True)
         self._rp_drop_filter = _Drop(self)
         target.installEventFilter(self._rp_drop_filter)
+
+    def _build_sounds_tab(self, lay):
+        """Focus ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing
+        (original, synthesized). Volume 0 turns them all off."""
+        from ..features import sfx
+        intro = QLabel("Short, soft sounds as you move around with the keyboard or a "
+                       "remote, and as you reveal and rate cards.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: gray;")
+        lay.addWidget(intro)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Volume"))
+        vol = QSlider(Qt.Orientation.Horizontal)
+        vol.setRange(0, 100)
+        vol.setValue(int(self.cfg.get("sfx_volume", 35)))
+        val = QLabel("%d%%" % vol.value() if vol.value() else "Off")
+        val.setMinimumWidth(36)
+
+        def _vol(v):
+            self.cfg["sfx_volume"] = int(v)
+            val.setText("%d%%" % v if v else "Off")
+            mw.addonManager.writeConfig(__name__, self.cfg)
+        vol.valueChanged.connect(_vol)
+        vol.sliderReleased.connect(lambda: sfx.play("select", force=True))
+        row.addWidget(vol, 1)
+        row.addWidget(val)
+        lay.addLayout(row)
+
+        for key, label, sample in (("sfx_nav", "Navigation sounds (menus, decks, toolbar)", "move"),
+                                   ("sfx_review", "Review sounds (reveal, ratings, "
+                                                  "practice right/wrong)", "good")):
+            cb = QCheckBox(label)
+            cb.setChecked(bool(self.cfg.get(key, True)))
+
+            def _t(_s, cb=cb, key=key, sample=sample):
+                self.cfg[key] = bool(cb.isChecked())
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                if cb.isChecked():
+                    sfx.play(sample, force=True)
+            cb.stateChanged.connect(_t)
+            lay.addWidget(cb)
+
+        prev = QHBoxLayout()
+        prev.addWidget(QLabel("Preview:"))
+        for name in ("move", "select", "back", "open", "reveal", "again", "hard", "good",
+                     "easy", "right", "wrong"):
+            b = QPushButton(name.capitalize())
+            b.setAutoDefault(False)
+            b.clicked.connect(lambda _c=False, n=name: sfx.play(n, force=True))
+            prev.addWidget(b)
+        prev.addStretch()
+        lay.addLayout(prev)
+        lay.addStretch()
 
     def _build_hotkeys_tab(self, lay):
         """Settings → Hotkeys: every Janki hotkey, grouped into collapsible sections

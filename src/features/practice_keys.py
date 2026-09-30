@@ -6,12 +6,24 @@ from aqt import gui_hooks, mw
 from ..util.config import log
 
 _JS = r"""<script>(function(){
+ // right/wrong chime on any pick (click, key or remote) — per card: each card
+ // brings new answer boxes, so this part runs every time
+ var box=document.getElementById('jp-choices');
+ if(box&&!box.__jkObs&&window.MutationObserver){box.__jkObs=true;var played=false;
+   new MutationObserver(function(){if(played)return;
+     var f=function(n){try{pycmd('janki:sfx:'+n);}catch(x){}};
+     if(box.querySelector('.jp-right')){played=true;f('right');}
+     else if(box.querySelector('.jp-wrong')){played=true;f('wrong');}})
+   .observe(box,{subtree:true,attributes:true,attributeFilter:['class']});}
+})();
+(function(){
  if(window.__jkPqKeys)return; window.__jkPqKeys=true;
  function vis(){var box=document.getElementById('jp-choices')||document.body;
    if(box.classList&&box.classList.contains('jp-locked'))return [];
    return Array.prototype.filter.call(document.querySelectorAll('.jp-choice'),
      function(e){return !e.classList.contains('jp-dropped')&&e.offsetParent!==null;});}
  function cur(){return document.querySelector('.jp-choice.jp-kb');}
+ function sfx(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
  // One floating outline that glides between choices (transform/size only — the
  // card's layout never moves).
  function ring(){var g=document.getElementById('jk-pq-sel');if(g)return g;
@@ -50,7 +62,7 @@ _JS = r"""<script>(function(){
    ev.preventDefault(); ev.stopPropagation();
    document.documentElement.classList.add('jk-kbnav');
    var c=cur(), i=c?v.indexOf(c):-1, d=(k==='ArrowDown'||k==='ArrowRight')?1:-1;
-   sel(v[i<0?(d>0?0:v.length-1):Math.max(0,Math.min(v.length-1,i+d))]);
+   sfx('move'); sel(v[i<0?(d>0?0:v.length-1):Math.max(0,Math.min(v.length-1,i+d))]);
  },true);
  // Python asks this on Enter/Space: pick the highlighted choice if there is one.
  window.jankiPickHighlighted=function(){var c=cur();if(!c||!vis().length)return false;
