@@ -548,6 +548,13 @@ def _startup():
         # _save_size). On the FIRST launch (nothing saved yet) fall back to the
         # configured default (open_win_width/height, 600x400). Clamped to screen.
         def _restore_size():
+            # Anki's own restoreGeometry brings the saved FULLSCREEN state back too —
+            # open windowed instead (then apply the saved normal size below).
+            try:
+                if mw.isFullScreen():
+                    mw.showNormal()
+            except Exception:
+                pass
             try:
                 c = _cfg()
                 w = int(c.get("last_win_w", 0) or 0)

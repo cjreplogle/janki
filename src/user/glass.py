@@ -1018,6 +1018,22 @@ class _FullscreenWatcher(QObject):
                 # re-assert at several points as it settles (respects OLED).
                 for d in (80, 400, 900, 1400, 2200, 3500):   # slow transitions too
                     QTimer.singleShot(d, _reapply_native)
+                if sys.platform == "darwin" and \
+                        bool(ev.oldState() & Qt.WindowState.WindowFullScreen) and \
+                        not mw.isFullScreen():
+                    # Leaving fullscreen can leave the titlebar as a solid band until
+                    # the window is moved — so move it: 1 px and straight back.
+                    def _nudge():
+                        try:
+                            if mw.isFullScreen() or mw.isMinimized():
+                                return
+                            p = mw.pos()
+                            mw.move(p.x() + 1, p.y())
+                            QTimer.singleShot(30, lambda: (mw.move(p), _reapply_native()))
+                        except Exception:
+                            pass
+                    for d in (1000, 2000):
+                        QTimer.singleShot(d, _nudge)
                 if card_timer._card_timer_instance:          # realign the top timer bar after the frame settles
                     for d in (0, 450, 1000):
                         QTimer.singleShot(d, card_timer._card_timer_instance.reposition)
