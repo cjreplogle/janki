@@ -100,13 +100,28 @@ def _open_mock_question():
         did = _sample["did"] or col.decks.id(_SAMPLE_DECK)
         _sample["did"] = did
         if not _sample.get("mock"):
-            q = {"stem": "Which Janki shortcut pulls up practice questions related to "
-                         "the card you're reviewing?",
-                 "choices": ["Tab+F", "Tab+Q", "Tab+R", "Tab+\\"],
+            # Original, Janki-written vignette in the usual board style.
+            q = {"stem": "A 26-year-old woman comes to the clinic because of fatigue "
+                         "and shortness of breath on exertion for 3 months. Her menstrual "
+                         "periods are heavy and last 7 days. She follows a vegetarian "
+                         "diet. Her conjunctivae are pale. Laboratory studies show "
+                         "hemoglobin 9.1 g/dL, mean corpuscular volume 71 fL, and an "
+                         "increased red cell distribution width. Which of the following "
+                         "is the most likely additional laboratory finding?",
+                 "choices": ["Decreased total iron-binding capacity",
+                             "Decreased serum ferritin",
+                             "Increased serum iron",
+                             "Increased transferrin saturation",
+                             "Increased hemoglobin A2"],
                  "answer": 1,
-                 "explanation": "Tab+Q opens related practice questions. Tab+F is Focus "
-                                "mode, Tab+R switches rephrasings, Tab+\\ is Caption "
-                                "mode."}
+                 "explanation": "Heavy menses and a vegetarian diet cause iron "
+                                "deficiency anemia: microcytic with a high RDW. Iron "
+                                "stores are depleted, so serum ferritin is low (the "
+                                "earliest and most specific finding), while total "
+                                "iron-binding capacity rises and serum iron and "
+                                "transferrin saturation fall. Increased hemoglobin A2 "
+                                "suggests beta-thalassemia trait, which typically has a "
+                                "normal RDW and normal iron studies."}
             model = qbank._ensure_model()
             note = col.new_note(model)
             vals = {"Question": qbank._stem_html(q, ""), "Choices": qbank._choices_html(q),
