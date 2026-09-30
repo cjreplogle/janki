@@ -609,6 +609,16 @@ def _startup():
                 log("win geom restore: %s" % _e)
         QTimer.singleShot(300, _restore_size)
 
+        def _unfullscreen_late():
+            # macOS may finish entering the restored fullscreen after _restore_size.
+            try:
+                if mw.isFullScreen() and not getattr(mw, "_janki_user_fs", False):
+                    mw.showNormal()
+            except Exception:
+                pass
+        for _d in (1500, 3000):
+            QTimer.singleShot(_d, _unfullscreen_late)
+
         def _save_size():
             # Remember the current window geometry + fullscreen/maximized state so
             # the next launch reopens exactly as left. Skipped while hidden (closed
