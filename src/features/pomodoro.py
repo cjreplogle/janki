@@ -545,6 +545,18 @@ def _make_pomodoro():
                     self._xp.hide()
             except Exception:
                 pass
+            # Same for the blue "break due" tint (its own top-level window): hide it
+            # while Anki is minimized/hidden so it doesn't glow over the desktop where
+            # the window was, and bring it back when the window returns.
+            try:
+                gone = mw.isMinimized() or not mw.isVisible()
+                if gone and self._tint.isVisible():
+                    self._tint.hide()
+                elif (not gone and self._break_pending and not self._on_break
+                      and not self._tint.isVisible()):
+                    self._tint.show()
+            except Exception:
+                pass
             if self._on_break:
                 self._break_rem_ms -= 50
                 if self._break_rem_ms <= 0:
