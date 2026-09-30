@@ -1016,7 +1016,7 @@ class _FullscreenWatcher(QObject):
                 _sync_oled()
                 # fullscreen enter/exit animates (~1s) and rebuilds the frame —
                 # re-assert at several points as it settles (respects OLED).
-                for d in (80, 400, 900, 1400):
+                for d in (80, 400, 900, 1400, 2200, 3500):   # slow transitions too
                     QTimer.singleShot(d, _reapply_native)
                 if card_timer._card_timer_instance:          # realign the top timer bar after the frame settles
                     for d in (0, 450, 1000):

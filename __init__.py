@@ -1281,6 +1281,7 @@ def _restore_fullscreen_when_ready(tries=0):
             return
         QTimer.singleShot(400, mw.showFullScreen)   # let the first show settle
         QTimer.singleShot(1800, _resync_fullscreen)
+        _reglass_later((2600, 4000))
     except Exception as e:
         log("fs restore: %s" % e)
 
@@ -1293,5 +1294,19 @@ def _resync_fullscreen():
         if nat is False and mw.isFullScreen():
             log("fullscreen out of sync (Qt yes, macOS no) → showNormal")
             mw.showNormal()
+            _reglass_later((300, 1000, 2000))       # titlebar glass after the change
     except Exception as e:
         log("fs resync: %s" % e)
+
+
+
+def _reglass_later(delays):
+    """Re-assert the window glass (transparent titlebar etc.) after a state change —
+    a late fullscreen restore could leave the macOS titlebar as a solid band."""
+    from aqt.qt import QTimer
+    try:
+        from .src.user import glass as _g
+        for d in delays:
+            QTimer.singleShot(d, _g._reapply_native)
+    except Exception:
+        pass
