@@ -253,6 +253,7 @@ def _force_dark_mode():
         if getattr(theme_manager, "night_mode", True):
             return
         mw.set_theme(Theme.DARK)
+        glass.on_theme_changed()          # keep the toolbar strip glass (no black bar)
         from aqt.utils import tooltip
         QTimer.singleShot(1200, lambda: tooltip(
             "Janki switched Anki to Dark mode — its glass theme is built for it.",
@@ -605,6 +606,7 @@ def _startup():
         QTimer.singleShot(2500, _warn_if_light_mode)
         if hasattr(gui_hooks, "theme_did_change"):
             gui_hooks.theme_did_change.append(_warn_if_light_mode)
+            gui_hooks.theme_did_change.append(glass.on_theme_changed)
 
         # Quit cleanly: tear down the floating coherence HUD / XP bar when the
         # main window closes, so closing Anki (red button) quits everything

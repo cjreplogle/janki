@@ -2631,6 +2631,27 @@ if GLASS:
         AnkiWebView.on_theme_did_change = _patched_theme_did_change
 
 
+def on_theme_changed(*_a):
+    """Anki repaints its web views with the new theme's solid canvas when the theme
+    changes (e.g. Janki forcing Dark at startup); the toolbar strip in particular came
+    back opaque as a black bar. Re-assert transparency, redraw the toolbar with its glass
+    CSS, and re-apply the window glass — a few times, as Anki's repaint settles."""
+    if not GLASS:
+        return
+
+    def _fix():
+        try:
+            _clear_existing_webviews()
+            tb = getattr(mw, "toolbar", None)
+            if tb is not None and hasattr(tb, "redraw"):
+                tb.redraw()
+            _reapply_native()
+        except Exception as exc:
+            log(f"theme glass fix: {exc}")
+    for ms in (0, 150, 600):
+        QTimer.singleShot(ms, _fix)
+
+
 def _clear_existing_webviews():
     if not GLASS:
         return
