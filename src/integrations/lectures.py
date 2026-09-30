@@ -1487,6 +1487,13 @@ def _open_today_dialog(day_offset=0, auto=False):
             self._sorted = False
 
         def showPopup(self):
+            if not getattr(self, "_glassed", False):
+                self._glassed = True
+                try:
+                    from ..user import glass as _glass
+                    _glass.glass_combo_popup(self)
+                except Exception:
+                    self.setMaxVisibleItems(10)
             if not self._sorted and self._event:
                 self._sorted = True
                 try:
@@ -2000,8 +2007,12 @@ def _open_today_dialog(day_offset=0, auto=False):
                 return
             if cgen == st.get("cgen", 0):   # else a suspend/unsuspend invalidated it
                 frag_ids.update(res)
-            _update_count_bar()
-            _repaint()
+            # Neighbour pre-warming finishes a query every few ms; repainting the whole
+            # table (and re-unioning every lecture's card sets) after each one lagged
+            # the day buttons. Only repaint when the day on screen gained a count.
+            if set(res) & (st.get("cur_needed") or set()):
+                _update_count_bar()
+                _repaint()
             _pump()
 
         QueryOp(parent=dlg, op=op, success=done).run_in_background()
@@ -2161,11 +2172,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             evi = QTableWidgetItem(ev + ("   (~)" if fuzzy else ""))
             combo = _SimCombo(ev)                           # sorts by similarity on open
             combo.setModel(combo_model)                    # shared model — cheap
-            try:                                           # ~10 rows + glass popup
-                from ..user import glass as _glass
-                _glass.glass_combo_popup(combo)
-            except Exception:
-                combo.setMaxVisibleItems(10)
+            combo.setMaxVisibleItems(10)                   # glass popup styled on open
             combo.setCurrentIndex(model_row.get(resolved, 0))
             if has_day_state:
                 disp = m[resolved]["display"] if resolved else None

@@ -443,6 +443,17 @@ def _steps():
              text="Everything Janki does is adjustable here — look, timers, Pomodoro, "
                   "lectures, and every hotkey (under <b>Hotkeys</b>).<br>Shortcut: <b>%s</b> "
                   "opens it, press again to close." % _k("settings_alt")),
+        dict(target=None, title="On the card", hands_on=True, enter=_enter_oncard,
+             leave=_leave_oncard, spot=True,
+             try_=("Show a related question", _show_related),
+             detect=_oncard_done, done_msg="Those work on every card you study.",
+             text="The two glowing buttons (normally they appear when you hover the "
+                  "card's bottom corners):<br>"
+                  "• <b>Bottom-left</b> — flip between the card as written and a "
+                  "<b>rephrasing</b> (or press <b>Tab+R</b>), so you learn the idea, not "
+                  "the wording<br>"
+                  "• <b>Bottom-right</b> — a <b>related practice question</b> from your "
+                  "banks (or <b>Tab+Q</b>); press it again to come back"),
         dict(target=None, title="Focus & Caption", hands_on=True, enter=_open_sample,
              leave=_leave_review,
              try_=("Reopen the sample card", _open_sample),
@@ -464,17 +475,6 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
-        dict(target=None, title="On the card", hands_on=True, enter=_enter_oncard,
-             leave=_leave_oncard, spot=True,
-             try_=("Show a related question", _show_related),
-             detect=_oncard_done, done_msg="Those work on every card you study.",
-             text="The two glowing buttons (normally they appear when you hover the "
-                  "card's bottom corners):<br>"
-                  "• <b>Bottom-left</b> — flip between the card as written and a "
-                  "<b>rephrasing</b> (or press <b>Tab+R</b>), so you learn the idea, not "
-                  "the wording<br>"
-                  "• <b>Bottom-right</b> — a <b>related practice question</b> from your "
-                  "banks (or <b>Tab+Q</b>); press it again to come back"),
         dict(target=None, title="Reviewing", hands_on=True, enter=_open_sample,
              try_=("Reopen the sample card", _open_sample),
              detect=_sample_answered, done_msg="Nice — you rated it.",
