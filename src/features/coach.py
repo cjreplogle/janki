@@ -63,15 +63,15 @@ def _back_to_decks():
 
 # --- Sample card (created for the hands-on step, removed when the tour ends) --------
 _SAMPLE_DECK = "Janki Tour (sample)"
-_sample = {"did": None, "cids": []}
+_sample = {"did": None, "cids": [], "card": False, "mock": False}
 
 
 def _open_sample():
     """Create a one-card sample deck (Janki-written content) and start reviewing it."""
     try:
         col = mw.col
-        if _sample["did"] is None:
-            did = col.decks.id(_SAMPLE_DECK)
+        if not _sample.get("card"):
+            did = _sample["did"] or col.decks.id(_SAMPLE_DECK)
             model = col.models.by_name("Basic") or col.models.current()
             note = col.new_note(model)
             note.fields[0] = ("<b>Janki sample card</b><br><br>Which shortcut hides "
@@ -81,12 +81,48 @@ def _open_sample():
                                   "into a caption over other apps.")
             col.add_note(note, did)
             _sample["did"] = did
-            _sample["cids"] = list(note.card_ids())
+            _sample["cids"] = list(_sample["cids"]) + list(note.card_ids())
+            _sample["card"] = True
         col.decks.select(_sample["did"])
         mw.moveToState("overview")
         QTimer.singleShot(200, lambda: mw.moveToState("review"))
     except Exception as e:
         log("coach sample: %s" % e)
+
+
+def _open_mock_question():
+    """A Janki-written multiple-choice question as a real Janki Practice card (same
+    picking, colouring, explanation and Continue as a bank question), in the sample
+    deck — removed with it when the tour ends."""
+    try:
+        from ..integrations import qbank
+        col = mw.col
+        did = _sample["did"] or col.decks.id(_SAMPLE_DECK)
+        _sample["did"] = did
+        if not _sample.get("mock"):
+            q = {"stem": "Which Janki shortcut pulls up practice questions related to "
+                         "the card you're reviewing?",
+                 "choices": ["Tab+F", "Tab+Q", "Tab+R", "Tab+\\"],
+                 "answer": 1,
+                 "explanation": "Tab+Q opens related practice questions. Tab+F is Focus "
+                                "mode, Tab+R switches rephrasings, Tab+\\ is Caption "
+                                "mode."}
+            model = qbank._ensure_model()
+            note = col.new_note(model)
+            vals = {"Question": qbank._stem_html(q, ""), "Choices": qbank._choices_html(q),
+                    "Answer": qbank._answer_letter(q), "Explanation": q["explanation"],
+                    "QID": "jankitour_1"}
+            for k, v in vals.items():
+                if k in note:
+                    note[k] = v
+            col.add_note(note, did)
+            _sample["cids"] = list(_sample["cids"]) + list(note.card_ids())
+            _sample["mock"] = True
+        col.decks.select(did)
+        mw.moveToState("overview")
+        QTimer.singleShot(200, lambda: mw.moveToState("review"))
+    except Exception as e:
+        log("coach mock question: %s" % e)
 
 
 def _cleanup_sample():
@@ -101,7 +137,7 @@ def _cleanup_sample():
         mw.col.decks.remove([did])
     except Exception as e:
         log("coach sample cleanup: %s" % e)
-    _sample["did"], _sample["cids"] = None, []
+    _sample.update(did=None, cids=[], card=False, mock=False)
     try:
         mw.moveToState("deckBrowser")
     except Exception:
@@ -118,6 +154,12 @@ def _steps():
                   "<b>.qb</b> or <b>.jank</b> files on the window to add banks, or a "
                   "question <b>.docx</b> to build one. While reviewing, <b>Tab+Q</b> pulls "
                   "up questions related to the card."),
+        dict(target=None, title="Try a practice question", hands_on=True,
+             try_=("Open a mock question", _open_mock_question),
+             leave=_back_to_decks,
+             text="Here's how a bank question works: click an answer, see it turn "
+                  "green or red with the explanation, then Continue. Getting it right retires the question "
+                  "and counts toward the bank's Completion."),
         dict(target=("toolbar", "Stats"), title="Stats",
              try_=("Open Stats", lambda: _click("toolbar", "Stats")),
              leave=_back_to_decks,
@@ -233,13 +275,16 @@ class _Tour(QWidget):
         for w in (self.b_try, self.b_skip, self.b_back, self.b_next):
             w.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(self.t_step)
-        row.addWidget(self.b_try)
         row.addStretch()
         row.addWidget(self.b_skip)
         row.addWidget(self.b_back)
         row.addWidget(self.b_next)
         lay.addWidget(self.t_title)
         lay.addWidget(self.t_body)
+        try_row = QHBoxLayout()                # own row, so long labels never clip
+        try_row.addWidget(self.b_try)
+        try_row.addStretch()
+        lay.addLayout(try_row)
         lay.addLayout(row)
         b.setFixedWidth(340)
         b.hide()                               # shown once it's placed (no jump)
