@@ -114,6 +114,26 @@ class GlassSettings(QDialog):
             except Exception:
                 pass
         self._no_anim.toggled.connect(_on_no_anim)
+
+        def _offer_restart(on):
+            if not on:
+                return
+            from aqt.utils import askUser
+            if not askUser("Animations are off. Some of them only fully stop after a "
+                           "restart.\n\nRestart Anki now?", parent=self, title="Janki"):
+                return
+            try:
+                if sys.platform.startswith("win"):
+                    from ..platform.win import shell as _wsh
+                    _wsh.relaunch_after_exit()
+                else:
+                    from . import stock_selfheal as _ssh
+                    _ssh._relaunch_after_quit()
+            except Exception as e:
+                log("restart: %s" % e)
+            self.close()
+            mw.unloadProfileAndExit()
+        self._no_anim.toggled.connect(_offer_restart)
         _na_row.addWidget(self._no_anim)
         _app_outer.addLayout(_na_row)
         self._app_tabs = app_tabs
