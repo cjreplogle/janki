@@ -1064,6 +1064,32 @@ except Exception:
     pass
 
 
+def _refocus_after_load(*_a):
+    # The render hooks fire before the new page exists; a focus set then can be lost
+    # when the page swaps in (keys then "sometimes" did nothing). Re-take it on load —
+    # unless the keyboard is deliberately on the toolbar.
+    try:
+        if mw.toolbar.web.hasFocus() or mw.toolbar.web.focusProxy() and \
+                mw.toolbar.web.focusProxy().hasFocus():
+            return
+    except Exception:
+        pass
+    _focus_deck_list()
+
+
+def _hook_web_load():
+    try:
+        mw.web.loadFinished.connect(_refocus_after_load)
+    except Exception:
+        pass
+
+
+try:
+    gui_hooks.main_window_did_init.append(_hook_web_load)
+except Exception:
+    pass
+
+
 try:
     gui_hooks.webview_did_receive_js_message.append(css.on_js_message)
 except Exception:
