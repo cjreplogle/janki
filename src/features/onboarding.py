@@ -180,7 +180,11 @@ def _lectures_page():
 def _done_page():
     key = "⌥⌘A" if _MAC else "Ctrl+Alt+A"
     tour = QPushButton("Take the tour (optional)…")
-    tour.clicked.connect(lambda: QTimer.singleShot(0, show_tour))
+    def _go():
+        if _dlg is not None:
+            _dlg.accept()                      # finish the setup, then open the tour
+        QTimer.singleShot(0, show_tour)
+    tour.clicked.connect(_go)
     row = QHBoxLayout()
     row.addWidget(tour)
     row.addStretch()
