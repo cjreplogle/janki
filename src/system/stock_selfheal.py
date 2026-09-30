@@ -250,7 +250,12 @@ def _relaunch_after_quit() -> None:
         pass
 
 
+restart_pending = False     # a glass restart is waiting — hold other prompts
+
+
 def _prompt_restart() -> None:
+    global restart_pending
+    restart_pending = True
     try:
         from aqt import mw
         from aqt.qt import QMessageBox, QTimer

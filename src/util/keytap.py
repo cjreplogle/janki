@@ -525,6 +525,17 @@ def stop_key_tap() -> None:
 _ax_poll = None
 
 
+def _explain_accessibility_when_ready() -> None:
+    try:
+        from ..system import stock_selfheal
+        if stock_selfheal.restart_pending:
+            _start_key_tap._explained = False       # ask again next launch
+            return
+    except Exception:
+        pass
+    _explain_accessibility()
+
+
 def _explain_accessibility() -> None:
     """Why Janki asks for Accessibility, shown before macOS's own dialog."""
     try:
@@ -622,7 +633,10 @@ def _start_key_tap() -> None:
             _start_key_tap._explained = True
             if _cfg().get("ax_prompt_declined", False):
                 return
-            QTimer.singleShot(0, _explain_accessibility)
+            # Don't stack this on the glass setup: wait until the glass has loaded
+            # (confirmed stable ~4 s in), and skip this launch entirely if a glass
+            # restart is still pending — it'll ask on the next (glass) launch.
+            QTimer.singleShot(5500, _explain_accessibility_when_ready)
             return
 
         if not trusted:
