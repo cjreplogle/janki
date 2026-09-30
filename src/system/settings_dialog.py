@@ -2930,15 +2930,22 @@ class GlassSettings(QDialog):
 
             def paintEvent(b, ev):
                 super().paintEvent(ev)
-                p = _QP(b)
-                p.setRenderHint(_QP.RenderHint.Antialiasing)
-                w = (b.width() - 12) * b._gain() / 200.0
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(_QC(156, 188, 243, 90))
-                p.drawRoundedRect(6, b.height() - 5, b.width() - 12, 2, 1, 1)
-                p.setBrush(_QC(156, 188, 243, 220))
-                p.drawRoundedRect(6, b.height() - 5, max(0.0, w), 2, 1, 1)
-                p.end()
+                # Never let an exception escape a paint override: PyQt6 aborts the
+                # whole app on it (that was the crash when opening this tab).
+                try:
+                    from aqt.qt import QRectF as _QRF
+                    p = _QP(b)
+                    p.setRenderHint(_QP.RenderHint.Antialiasing)
+                    full = float(max(0, b.width() - 12))
+                    y = float(b.height() - 5)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(_QC(156, 188, 243, 90))
+                    p.drawRoundedRect(_QRF(6.0, y, full, 2.0), 1.0, 1.0)
+                    p.setBrush(_QC(156, 188, 243, 220))
+                    p.drawRoundedRect(_QRF(6.0, y, full * b._gain() / 200.0, 2.0), 1.0, 1.0)
+                    p.end()
+                except Exception as _e:
+                    log("sound button paint: %s" % _e)
 
         for i, name in enumerate(names):
             b = _SoundBtn(name)
