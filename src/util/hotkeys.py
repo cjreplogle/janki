@@ -37,6 +37,10 @@ ACTIONS = [
     ("settings",      "Window & focus", "Open Janki Settings",                 "qt",     {"seq": "Ctrl+Alt+S"}),
     ("zoom_in",       "Window & focus", "Card zoom in",                        "qt",     {"seq": "Ctrl+="}),
     ("zoom_out",      "Window & focus", "Card zoom out",                       "qt",     {"seq": "Ctrl+-"}),
+    ("go_back",       "Navigation",    "Back one step",                        "qt",     {"seq": "Ctrl+B"}),
+    ("go_decks",      "Navigation",    "Go to the Decks list",                 "qt",     {"seq": "Ctrl+D"}),
+    ("open_deck_qt",  "Navigation",    "Study the last deck",                  "qt",     {"seq": "Ctrl+O"}),
+    ("settings_alt",  "Navigation",    "Open Janki Settings (alternate)",      "qt",     {"seq": "Ctrl+S"}),
     ("caption",       "Caption",       "Toggle caption HUD",                   "tab",    {"kc": 42}),
     ("cap_up",        "Caption",       "Move caption up",                      "tab",    {"kc": 126}),
     ("cap_down",      "Caption",       "Move caption down",                    "tab",    {"kc": 125}),
@@ -49,7 +53,7 @@ ACTIONS = [
      {"seq": "Ctrl+Alt+L" if sys.platform.startswith("win") else "Ctrl+Meta+L"}),
     ("lock_chord",    "Lockdown",      "Lockdown chord (engage / hold to exit)", "chord", {"kc": 50, "kc2": 51}),
 ]
-GROUPS = ["Review", "Window & focus", "Caption", "Lockdown", "Chord key"]
+GROUPS = ["Review", "Navigation", "Window & focus", "Caption", "Lockdown", "Chord key"]
 _BY_ID = {a[0]: a for a in ACTIONS}
 
 # CGEventFlags bits for the tap-side combos.
@@ -197,8 +201,12 @@ def apply():
         lk = getattr(mw, "_janki_lock_sc", None)
         if lk is not None:
             lk.setKey(QKeySequence(binding("lockdown", cfg)["seq"]))
-        st = getattr(mw, "_janki_settings_sc", None)
-        if st is not None:
-            st.setKey(QKeySequence(binding("settings", cfg)["seq"]))
+        for attr, aid in (("_janki_settings_sc", "settings"), ("_janki_back_sc", "go_back"),
+                          ("_janki_decks_sc", "go_decks"),
+                          ("_janki_open_last_sc", "open_deck_qt"),
+                          ("_janki_settings_sc2", "settings_alt")):
+            sc = getattr(mw, attr, None)
+            if sc is not None:
+                sc.setKey(QKeySequence(binding(aid, cfg)["seq"]))
     except Exception as exc:
         log("hotkeys apply (qt): %s" % exc)

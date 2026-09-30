@@ -2791,11 +2791,34 @@ class GlassSettings(QDialog):
             lay.addWidget(body)
 
             def _toggle(on, body=body, head=head):
-                body.setVisible(on)
+                # The section unfolds in step with the window's own height animation
+                # (same 240ms OutCubic), so rows never get squeezed while it grows.
+                from aqt.qt import QVariantAnimation, QEasingCurve
                 head.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
                 fit = getattr(self, "_fit_tabs", None)
+                old = getattr(body, "_jk_anim", None)
+                if old is not None:
+                    old.stop()
+                body.setMaximumHeight(16777215)
+                h = body.sizeHint().height()
+                body.setVisible(on)
                 if fit:
-                    QTimer.singleShot(0, fit)
+                    fit()                                  # measures the final size
+                an = QVariantAnimation(body)
+                an.setDuration(240)
+                an.setEasingCurve(QEasingCurve.Type.OutCubic)
+                an.setStartValue(0.0 if on else float(h))
+                an.setEndValue(float(h) if on else 0.0)
+                an.valueChanged.connect(lambda v, b=body: b.setMaximumHeight(int(v)))
+                if not on:
+                    body.setVisible(True)                  # fold away, then hide
+                def _done(b=body, on=on):
+                    b.setMaximumHeight(16777215)
+                    b.setVisible(on)
+                an.finished.connect(_done)
+                body._jk_anim = an
+                body.setMaximumHeight(0 if on else h)
+                an.start()
             head.toggled.connect(_toggle)
 
         row = QHBoxLayout()
