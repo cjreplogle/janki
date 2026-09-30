@@ -538,6 +538,7 @@ _OVERVIEW_KEYS_JS = r"""(function(){
  if(window.__jkOvKeys)return; window.__jkOvKeys=true;
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
+   if(e.key==='ArrowUp'){e.preventDefault();pycmd('janki:toolbar');return;}
    if(e.key!==' '&&e.key!=='Enter')return;
    var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
    if(!document.getElementById('study'))return;       // only when there's something to study
@@ -561,7 +562,8 @@ _TOOLBAR_KEYS_JS = r"""(function(){
    var c=cur(); if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
      sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
-   if(k==='Enter'||k===' '){e.preventDefault();sel(null);c.click();return;}
+   if(k==='Enter'||k===' '){e.preventDefault();var id=c.id||'';c.click();
+     pycmd('janki:tbkeep:'+id);return;}   // stay on the toolbar: ←/→ + Space keep going
    if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);pycmd('janki:deckfocus');}
  },true);
  document.addEventListener('mousemove',function(){var c=cur();if(c)sel(null);},{passive:true});
@@ -2329,17 +2331,40 @@ def on_js_message(handled, message, context):
     if message == "janki:toolbar":
         try:
             mw.toolbar.web.setFocus()
-            from ..features import practice as _pr
-            here = "janki_practice" if getattr(_pr, "_practice_view", False) else "decks"
+            from ..features import practice as _pr, stats_embed as _se
+            here = ("stats" if _se.is_open() else
+                    "janki_practice" if getattr(_pr, "_practice_view", False) else "decks")
             mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);" % here)
         except Exception:
             pass
         return (True, None)
     if message == "janki:deckfocus":
         try:
-            mw.web.setFocus()
-            if getattr(mw, "state", None) == "deckBrowser":
-                mw.web.eval("window.jkDeckKbEnter&&window.jkDeckKbEnter();")
+            from ..features import stats_embed as _se
+            if _se.is_open() and _se._web is not None:
+                _se._web.setFocus()                      # ↓ into Stats
+            else:
+                mw.web.setFocus()
+                if getattr(mw, "state", None) == "deckBrowser":
+                    mw.web.eval("window.jkDeckKbEnter&&window.jkDeckKbEnter();")
+        except Exception:
+            pass
+        return (True, None)
+    if isinstance(message, str) and message.startswith("janki:tbkeep:"):
+        # Opened a page from the toolbar by keyboard: once it has taken over (and
+        # grabbed focus), hand the keyboard back to the toolbar on the same item.
+        tid = message.split(":", 2)[2]
+        try:
+            from aqt.qt import QTimer
+            def _back():
+                try:
+                    mw.toolbar.web.setFocus()
+                    mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);"
+                                        % tid)
+                except Exception:
+                    pass
+            if tid in ("decks", "stats", "janki_practice"):   # pages, not dialogs
+                QTimer.singleShot(450, _back)
         except Exception:
             pass
         return (True, None)

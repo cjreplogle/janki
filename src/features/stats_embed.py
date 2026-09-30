@@ -759,6 +759,15 @@ def _load_key():
 _page_ready = False       # the graphs page has been fully loaded at least once
 
 
+# ↑ at the top of Stats hands the keyboard to the toolbar (keep moving between pages).
+_UP_TO_TOOLBAR_JS = ("document.addEventListener('keydown',function(e){"
+                     "if(e.key!=='ArrowUp'||e.metaKey||e.ctrlKey||e.altKey)return;"
+                     "var t=e.target;if(t&&/INPUT|TEXTAREA|SELECT/.test(t.tagName))return;"
+                     "if((window.scrollY||document.documentElement.scrollTop)>2)return;"
+                     "e.preventDefault();var f=window.pycmd||window.bridgeCommand;"
+                     "if(f)f('janki:toolbar');},true);")
+
+
 def _install_page_script() -> None:
     """Inject the glass CSS + reveal script at DOCUMENT CREATION (before the page paints),
     so a fresh load never flashes Anki's opaque canvas or finished cards first. Rebuilt
@@ -769,7 +778,7 @@ def _install_page_script() -> None:
         for old in scripts.find("janki-stats"):
             scripts.remove(old)
         src = ("window.__jkHold=%s;" % ("false" if is_open() else "true")
-               + (_page_js() if _glass_on() else "") + _ANIM_JS)
+               + (_page_js() if _glass_on() else "") + _ANIM_JS + _UP_TO_TOOLBAR_JS)
         sc = QWebEngineScript()
         sc.setName("janki-stats")
         sc.setSourceCode(src)
