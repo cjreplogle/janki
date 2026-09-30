@@ -984,6 +984,25 @@ def _build_css(cfg, context):
         # doesn't mark top-level rows, but they're the only ones whose name cell has no
         # leading &nbsp; indent — tag those, then pad every top-level row after the
         # first. Runs after all Python-side rewrites (e.g. the Practice view's banks).
+        # Pre-paint: apply the remembered width + fixed columns synchronously while the
+        # page is still parsing, so the first frame after a +/− redraw is already
+        # laid out (the width script below used to pin it a frame later → a jump).
+        try:
+            from ..features import practice as _prv
+            _view = "p" if getattr(_prv, "_practice_view", False) else "d"
+        except Exception:
+            _view = "d"
+        parts.append(
+            "<script>(function(){try{var w=parseFloat(sessionStorage.getItem('jkDeckW:%s3'))||0;"
+            "var T='body center > table:first-of-type';"
+            "var css=T+'{table-layout:fixed!important;max-width:calc(100vw - 24px)!important;}'"
+            "+T+' th.count,'+T+' tr.deck>td:not(.decktd):not(.opts)'"
+            "+'{width:7.2em!important;min-width:7.2em!important;max-width:7.2em!important;"
+            "box-sizing:border-box!important;}'"
+            "+T+' td.opts,'+T+' th:last-child:not(.count){width:2.4em!important;}'"
+            "+(w?T+'{width:'+w+'px!important;}':'');"
+            "document.write('<style id=jk-prepaint>'+css+'</style>');}catch(e){}})();</script>\n"
+            % _view)
         parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
         # Keyboard-only deck navigation (↑/↓ move, →/← expand/collapse, Enter/Space
         # open). The selection reuses the hover look; with hover motion off it's a
