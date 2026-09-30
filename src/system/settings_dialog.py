@@ -2526,6 +2526,29 @@ class GlassSettings(QDialog):
                 return (p.y() // 8, p.x())
             return sorted(out, key=key)
 
+        def _spatial(obj, c, dx, dy):
+            """Nearest control from obj in direction (dx, dy): must lie that way, and
+            the score favours being straight ahead over being merely close."""
+            from aqt.qt import QPoint as _P
+            def ctr(w):
+                p = w.mapTo(self, _P(0, 0))
+                return p.x() + w.width() / 2.0, p.y() + w.height() / 2.0
+            ox, oy = ctr(obj)
+            best, score = None, None
+            for w in c:
+                if w is obj:
+                    continue
+                x, y = ctr(w)
+                ax, ay = x - ox, y - oy
+                along = ax * dx + ay * dy            # distance in the pressed direction
+                if along <= 4:
+                    continue
+                side = abs(ax * dy) + abs(ay * dx)   # sideways offset
+                sc = along + side * 5.0
+                if score is None or sc < score:
+                    best, score = w, sc
+            return best
+
         def _focus(w):
             try:
                 from ..features import sfx as _sfx
@@ -2581,11 +2604,22 @@ class GlassSettings(QDialog):
                     c = _controls(page)
                     if obj not in c:
                         return False
-                    i = c.index(obj) + (1 if k == _KQt.Key.Key_Down else -1)
-                    if i < 0:
-                        _focus(tw.tabBar())
-                    elif i < len(c):
-                        _focus(c[i])
+                    nxt = _spatial(obj, c, 0, 1 if k == _KQt.Key.Key_Down else -1)
+                    if nxt is not None:
+                        _focus(nxt)
+                    elif k == _KQt.Key.Key_Up:
+                        _focus(tw.tabBar())           # top of the page → back to its tabs
+                    return True
+                # ←/→ on plain buttons/checkboxes move sideways (grids like the sound
+                # previews); sliders/dropdowns/number boxes keep ←/→ for adjusting
+                if k in (_KQt.Key.Key_Left, _KQt.Key.Key_Right) and \
+                        isinstance(obj, _QAB):
+                    page, tw = _page_of(obj)
+                    if page is not None:
+                        c = _controls(page)
+                        nxt = _spatial(obj, c, 1 if k == _KQt.Key.Key_Right else -1, 0)
+                        if nxt is not None:
+                            _focus(nxt)
                     return True
                 if k in (_KQt.Key.Key_Left, _KQt.Key.Key_Right):
                     d = 1 if k == _KQt.Key.Key_Right else -1
