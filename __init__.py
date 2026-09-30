@@ -806,6 +806,8 @@ def _startup():
         if hasattr(gui_hooks, 'state_did_change'):
             def _on_state_change(new_state: str, old_state: str) -> None:
                 state._remote_active = (new_state == 'review')
+                if new_state == 'review':
+                    focus.engage_on_review()        # Focus Mode armed elsewhere → on now
                 if new_state != 'review':
                     focus._focus_restore_for_nav()
                     amboss._stop_amboss_size_watch()

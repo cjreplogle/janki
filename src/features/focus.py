@@ -677,6 +677,19 @@ def _open_last_deck() -> None:
         keytap._gtap_log(f"open last deck failed: {e}")
 
 
+def engage_on_review() -> None:
+    """Focus Mode switched on outside the reviewer (deck list, overview): hide the
+    chrome as soon as a review starts, instead of waiting for the idle fallback."""
+    if not _focus_mode_on or _focus_hidden:
+        return
+    from aqt.qt import QTimer
+
+    def _go():
+        if _focus_mode_on and not _focus_hidden and getattr(mw, "state", None) == "review":
+            _focus_set_hidden(True)
+    QTimer.singleShot(60, _go)          # let the reviewer lay out its first card
+
+
 def _focus_restore_for_nav() -> None:
     """Leaving the reviewer must not leave the app headless — show the chrome
     again (Focus Mode stays armed and re-hides after idle back in review)."""
