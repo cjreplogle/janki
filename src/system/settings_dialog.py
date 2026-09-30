@@ -90,7 +90,13 @@ class GlassSettings(QDialog):
         # Bottom-right: one switch that drops the heavy visuals (blur, text/hover
         # animations, card fade) while keeping every feature working.
         _na_row = QHBoxLayout(); _na_row.addStretch(1)
-        self._no_anim = QCheckBox("Disable animations")
+        self._no_anim = QPushButton("Disable animations")
+        self._no_anim.setCheckable(True)
+        self._no_anim.setObjectName("jkNoAnim")
+        # Red while on, so it's obvious the visuals are switched off.
+        self._no_anim.setStyleSheet(
+            "QPushButton#jkNoAnim:checked{background:#c0392b;color:white;"
+            "border:1px solid #e74c3c;border-radius:6px;padding:4px 12px;}")
         self._no_anim.setToolTip(
             "Faster on slow machines: turns off glass blur, text typing, hover motion and "
             "the card fade. Your other settings are kept and come back when unchecked.")
@@ -107,7 +113,7 @@ class GlassSettings(QDialog):
                 glass._reload_all_webviews()
             except Exception:
                 pass
-        self._no_anim.stateChanged.connect(_on_no_anim)
+        self._no_anim.toggled.connect(_on_no_anim)
         _na_row.addWidget(self._no_anim)
         _app_outer.addLayout(_na_row)
         self._app_tabs = app_tabs
