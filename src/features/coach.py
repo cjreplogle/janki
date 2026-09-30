@@ -360,7 +360,7 @@ class _Tour(QWidget):
                     self.t_body.setText(st["text"] + "<br><br><span style='color:#8fd18f'>"
                                         + st.get("done_msg", "Nice!") + "</span>")
                     self.bubble.adjustSize()
-                    self._place_bubble()
+                    self._place_bubble(animate=True)
                     self._apply_mask()
                     if not st.get("wait"):
                         QTimer.singleShot(1400, lambda n=self.i: self.i == n and self.go(n + 1))
@@ -554,7 +554,12 @@ class _Tour(QWidget):
         bubble takes input, and keys go to Anki."""
         from aqt.qt import QRegion
         if self.steps[self.i].get("hands_on"):
-            self.setMask(QRegion(self.bubble.geometry()))
+            reg = QRegion(self.bubble.geometry())
+            an = getattr(self, "_bubble_anim", None)
+            if an is not None and an.state() == an.State.Running:
+                end = an.endValue()                 # cover start + destination while
+                reg = reg.united(QRegion(QRect(end, self.bubble.size())))   # sliding
+            self.setMask(reg)
             QTimer.singleShot(0, lambda: (mw.activateWindow(), mw.setFocus()))
             return
         reg = QRegion(self.rect())
@@ -563,6 +568,22 @@ class _Tour(QWidget):
         self.setMask(reg)
 
     _DUR = 240     # step transitions: quick, eased — smooth without feeling slow
+
+    def _dim_now(self):
+        """Dim level eased toward the step's target (150 normal, 0 hands-on), so
+        switching between hands-on and normal steps fades instead of snapping."""
+        import time
+        target = 0.0 if self.steps[self.i].get("hands_on") else 150.0
+        now = time.monotonic()
+        cur = getattr(self, "_dim_cur", target)
+        dt = now - getattr(self, "_dim_t", now)
+        self._dim_t = now
+        step = 150.0 * dt / (self._DUR / 1000.0)
+        cur = min(target, cur + step) if target > cur else max(target, cur - step)
+        self._dim_cur = cur
+        if cur != target:
+            QTimer.singleShot(16, self.update)
+        return cur
 
     def _morph_hole(self, a, b):
         from aqt.qt import QVariantAnimation, QEasingCurve
@@ -618,6 +639,7 @@ class _Tour(QWidget):
             an.finished.connect(lambda: self._apply_mask())   # mask follows the bubble
             self._bubble_anim = an
             an.start()
+            self._apply_mask()                     # travel-covering mask for the slide
         else:
             b.move(target)
 
@@ -631,8 +653,7 @@ class _Tour(QWidget):
             cut = QPainterPath()
             cut.addRoundedRect(QRectF(self.hole), 10, 10)
             path = path.subtracted(cut)
-        dim = 0 if self.steps[self.i].get("hands_on") else 150
-        p.fillPath(path, QColor(0, 0, 0, int(dim * self.opacity)))
+        p.fillPath(path, QColor(0, 0, 0, int(self._dim_now() * self.opacity)))
         if self.hole is not None:
             p.setPen(QPen(QColor(156, 188, 243, int(200 * self.opacity)), 2))
             p.drawRoundedRect(QRectF(self.hole), 10, 10)
