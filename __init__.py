@@ -982,3 +982,13 @@ except Exception as _ol_exc:
     log("overlay_leave failed to install: %s" % _ol_exc)
 _bt.mark("imported lectures → janki import done")
 _bt.arm_first_render()
+
+
+# Opt-in switch-timing probe (only when user_files/perf_probe exists).
+try:
+    from .src.util import perf_probe as _perf_probe
+    if _perf_probe._ON and hasattr(gui_hooks, "profile_did_open"):
+        from aqt.qt import QTimer as _PQT
+        gui_hooks.profile_did_open.append(lambda: _PQT.singleShot(4000, _perf_probe.install))
+except Exception:
+    pass

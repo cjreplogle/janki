@@ -937,8 +937,8 @@ def animate_next_deck_render() -> None:
 # On <html> (not <body>): Janki's own deck-list fade (html.glass-fading body{animation})
 # would otherwise override it; on the root the two simply combine.
 _DROP_CSS = ("<style>@media (prefers-reduced-motion: no-preference){html{animation:"
-             "jkDrop .2s cubic-bezier(.2,.8,.2,1) both;}}"
-             "@keyframes jkDrop{from{opacity:0;transform:translateY(-8px);}"
+             "jkDrop .16s cubic-bezier(.2,.8,.2,1) both;}}"
+             "@keyframes jkDrop{from{opacity:.6;transform:translateY(-6px);}"
              "to{opacity:1;transform:none;}}</style>")
 
 

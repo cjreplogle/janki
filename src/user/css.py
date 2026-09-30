@@ -718,8 +718,10 @@ def _build_css(cfg, context):
     #   * Skipped renders add no class → body shows at normal opacity 1 (no hide,
     #     so it can never get stuck invisible and there's no blink).
     fade_in = (
-        "<style>@keyframes glassFadeIn{from{opacity:0}to{opacity:1}}\n"
-        "html.glass-fading body{animation:glassFadeIn .25s ease-out both;}</style>\n"
+        # Starts partly visible and short: the page is ready in ~50ms (measured), so a
+        # fade from 0 only made switches LOOK slow.
+        "<style>@keyframes glassFadeIn{from{opacity:.45}to{opacity:1}}\n"
+        "html.glass-fading body{animation:glassFadeIn .16s ease-out both;}</style>\n"
         "<script>(function(){\n"
         f"  var TOKEN='{hud._menu_fade_token}';\n"
         "  if(sessionStorage.getItem('glassFadeToken')===TOKEN) return;  // already faded\n"

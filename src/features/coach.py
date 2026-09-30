@@ -96,6 +96,18 @@ def _open_mock_question():
     picking, colouring, explanation and Continue as a bank question), in the sample
     deck — removed with it when the tour ends."""
     try:
+        did = _ensure_mock()
+        col = mw.col
+        col.decks.select(did)
+        mw.moveToState("overview")
+        QTimer.singleShot(200, lambda: mw.moveToState("review"))
+    except Exception as e:
+        log("coach mock question: %s" % e)
+
+
+def _ensure_mock():
+    """Create the tour's mock practice note once; returns its deck id."""
+    if True:
         from ..integrations import qbank
         col = mw.col
         did = col.decks.id(_MOCK_DECK)
@@ -117,22 +129,124 @@ def _open_mock_question():
                     note[k] = v
             col.add_note(note, did)
             _sample["cids"] = list(_sample["cids"]) + list(note.card_ids())
+            _sample["mock_cids"] = list(note.card_ids())
             _sample["mock"] = True
-        col.decks.select(did)
-        mw.moveToState("overview")
-        QTimer.singleShot(200, lambda: mw.moveToState("review"))
+        return did
+
+
+# --- On-card effects: rephrasing toggle + related practice question ------------------
+_TOUR_REWORD = ("<b>Janki sample card</b><br><br>Which key combo hides everything but "
+                "the card you're studying?")
+
+
+def _sample_basic_cid():
+    for cid in _sample.get("cids") or []:
+        if cid not in (_sample.get("mock_cids") or []):
+            return cid
+    return None
+
+
+def _seed_reword(text, card, kind):
+    """card_will_show (runs before Janki's reword hook): give the sample card a
+    rephrasing — in memory only — so the real Original/Reworded toggle and Tab+R work
+    on it. Returns the text unchanged."""
+    try:
+        if _tour is None or card.id != _sample_basic_cid():
+            return text
+        if not isinstance(kind, str) or "question" not in kind.lower():
+            return text
+        from . import reword
+        key = reword._key(card.note().id, card.ord, "q")
+        store = reword._load()
+        if key not in store:
+            store[key] = {"src": reword._hash(reword._plain(text)),
+                          "variants": [_TOUR_REWORD], "janki_tour": True}
+            _sample["rw_key"] = key
+            reword._cycle.setdefault(int(card.id), 1)     # open on the rephrasing
     except Exception as e:
-        log("coach mock question: %s" % e)
+        log("coach reword seed: %s" % e)
+    return text
+
+
+def _unseed_reword():
+    key = _sample.pop("rw_key", None)
+    try:
+        from . import reword
+        cid = _sample_basic_cid()
+        if cid is not None:
+            reword._cycle.pop(int(cid), None)
+        if key:
+            store = reword._load()
+            if store.pop(key, None) is not None:
+                import json, os
+                p = reword._store_path()
+                try:                                   # only rewrite if it leaked to disk
+                    on_disk = json.load(open(p, encoding="utf-8")) if os.path.isfile(p) else {}
+                except Exception:
+                    on_disk = {}
+                if key in on_disk:
+                    reword._save()
+    except Exception as e:
+        log("coach reword unseed: %s" % e)
+
+
+def _reword_toggled():
+    cid = _sample_basic_cid()
+    try:
+        from . import reword
+        return cid is not None and reword._cycle.get(int(cid), 1) == 0
+    except Exception:
+        return False
+
+
+def _show_related():
+    """What Tab+Q does, with the tour's mock question as the related match."""
+    try:
+        from . import intersperse
+        if getattr(mw, "state", None) != "review" or mw.reviewer.card is None:
+            _open_sample()
+            QTimer.singleShot(700, _show_related)
+            return
+        _ensure_mock()
+        cids = _sample.get("mock_cids") or []
+        if cids:
+            intersperse._inline_queue.extend(cids)
+            mw.reviewer.nextCard()
+    except Exception as e:
+        log("coach related: %s" % e)
+
+
+def _related_shown():
+    try:
+        return mw.reviewer.card.id in (_sample.get("mock_cids") or [])
+    except Exception:
+        return False
+
+
+def _oncard_done():
+    return _reword_toggled() or _related_shown()
+
+
+def _leave_oncard():
+    try:
+        from . import intersperse
+        cids = set(_sample.get("mock_cids") or [])
+        intersperse._inline_queue[:] = [c for c in intersperse._inline_queue if c not in cids]
+        if _related_shown():
+            intersperse.exit_inline()
+    except Exception:
+        pass
 
 
 def _cleanup_sample(leave=True):
+    _unseed_reword()
     """Delete the tour decks + their cards, and any review logged on them (stats
     untouched). By NAME too, so leftovers from an interrupted tour go as well."""
     try:
         col = mw.col
         dids = [d for d in (col.decks.id_for_name(n) for n in (_SAMPLE_DECK, _MOCK_DECK)) if d]
         if not dids:
-            _sample.update(did=None, mock_did=None, cids=[], card=False, mock=False)
+            _sample.update(did=None, mock_did=None, cids=[], mock_cids=[], card=False, mock=False)
             return
         cids = list(_sample.get("cids") or [])
         for d in dids:
@@ -143,7 +257,7 @@ def _cleanup_sample(leave=True):
         col.decks.remove(dids)
     except Exception as e:
         log("coach sample cleanup: %s" % e)
-    _sample.update(did=None, mock_did=None, cids=[], card=False, mock=False)
+    _sample.update(did=None, mock_did=None, cids=[], mock_cids=[], card=False, mock=False)
     if not leave:
         return
     try:
@@ -295,6 +409,16 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards."),
+        dict(target=None, title="On the card", hands_on=True, enter=_open_sample,
+             leave=_leave_oncard,
+             try_=("Show a related question", _show_related),
+             detect=_oncard_done, done_msg="Those work on every card you study.",
+             text="Hover the card's bottom corners:<br>"
+                  "• <b>Bottom-left</b> — flip between the card as written and a "
+                  "<b>rephrasing</b> (or press <b>Tab+R</b>), so you learn the idea, not "
+                  "the wording<br>"
+                  "• <b>Bottom-right</b> — a <b>related practice question</b> from your "
+                  "banks (or <b>Tab+Q</b>); press it again to come back"),
         dict(target=None, title="Reviewing", hands_on=True, enter=_open_sample,
              try_=("Reopen the sample card", _open_sample),
              detect=_sample_answered, done_msg="Nice — you rated it.",
@@ -841,5 +965,12 @@ try:
     from aqt import gui_hooks as _gh
     _gh.profile_did_open.append(_purge_leftovers)
     _gh.profile_will_close.append(_purge_leftovers)
+except Exception:
+    pass
+
+
+try:
+    from aqt import gui_hooks as _gh2
+    _gh2.card_will_show._hooks.insert(0, _seed_reword)
 except Exception:
     pass

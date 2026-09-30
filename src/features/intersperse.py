@@ -285,6 +285,14 @@ def _install_nextcard_wrap():
     Reviewer.nextCard = _wrapped
 
 
+def _tour_sample(card) -> bool:
+    try:
+        from . import coach
+        return coach._tour is not None and card.id == coach._sample_basic_cid()
+    except Exception:
+        return False
+
+
 def practice_now():
     """Tab+Q entry point: show a relevant practice question INLINE in the reviewer
     (review mode), for the card you're on, then return to it. Reuses the inline
@@ -298,6 +306,10 @@ def practice_now():
     # Already on a practice question → Tab+Q exits back to the card you were on.
     if _is_practice_note(card) or is_inline_active(getattr(card, "id", None)):
         exit_inline()
+        return
+    if _tour_sample(card):                 # guided tour: its own mock question
+        from . import coach
+        coach._show_related()
         return
     try:
         leaves = qbank.card_leaf_keys(card)
@@ -704,7 +716,8 @@ def practice_button_html(card) -> str:
     try:
         cid = getattr(card, "id", None)
         inline = is_inline_active(cid)
-        if not inline and (_is_practice_note(card) or not qbank._practice_deck_exists()):
+        if not inline and not _tour_sample(card) and (
+                _is_practice_note(card) or not qbank._practice_deck_exists()):
             return ""
         label = "Back to card" if inline else "Practice"
     except Exception:
