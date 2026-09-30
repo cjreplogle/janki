@@ -512,6 +512,17 @@ _PAD_NAV_JS = r"""(function(){
  tick();
 })();"""
 
+_OVERVIEW_KEYS_JS = r"""(function(){
+ if(window.__jkOvKeys)return; window.__jkOvKeys=true;
+ document.addEventListener('keydown',function(e){
+   if(e.metaKey||e.ctrlKey||e.altKey)return;
+   if(e.key!==' '&&e.key!=='Enter')return;
+   var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
+   if(!document.getElementById('study'))return;       // only when there's something to study
+   e.preventDefault(); pycmd('study');
+ },true);
+})();"""
+
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=190, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
 
 # Deck list width + columns: Anki sizes the table to its widest VISIBLE deck name, so
@@ -1001,6 +1012,9 @@ def _build_css(cfg, context):
             )
         parts.append(bottom_round)
     elif isinstance(context, Overview) and screens.get("overview", True):
+        # Space / Enter (or the remote's face button) = Study Now.
+        parts.append("<script>" + _OVERVIEW_KEYS_JS + "</script>\n")
+        parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         # flex-start + clamp() top-padding: gap from toolbar is proportional to
         # available height so it never crops in short windows and never wastes
         # excessive space in tall ones. Table capped at min(400px,100%) for narrow

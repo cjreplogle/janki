@@ -1022,7 +1022,8 @@ def _focus_deck_list(*_a):
         def _go():
             fw = QApplication.focusWidget()
             # only within the main window, and never away from a native text field
-            if QApplication.activeWindow() is not mw or getattr(mw, "state", None) != "deckBrowser":
+            if QApplication.activeWindow() is not mw or \
+                    getattr(mw, "state", None) not in ("deckBrowser", "overview"):
                 return
             if fw is not None and (fw.inherits("QLineEdit") or fw.inherits("QTextEdit")
                                    or fw.inherits("QPlainTextEdit")):
@@ -1035,6 +1036,7 @@ def _focus_deck_list(*_a):
 
 try:
     gui_hooks.deck_browser_did_render.append(_focus_deck_list)
+    gui_hooks.overview_did_refresh.append(_focus_deck_list)
 except Exception:
     pass
 
