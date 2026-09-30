@@ -137,8 +137,25 @@ def sync_fullscreen():
         from . import dwm
         fs = mw.isFullScreen()
         dwm.set_fullscreen(int(mw.winId()), fs)
+        # – □ × stay reachable in fullscreen too (top right)
         if _lights is not None:
-            _lights.setVisible(not fs)
+            _lights.setVisible(True)
+            try:
+                _lights.raise_()
+            except Exception:
+                pass
+        # Square the page corners Janki's CSS rounds (the top/bottom web views round
+        # the window's outer corners) — none in fullscreen; restored on leaving.
+        js = ("(function(){var h=document.documentElement;if(!h)return;"
+              + ("h.style.setProperty('border-radius','0','important');" if fs
+                 else "h.style.removeProperty('border-radius');") + "})()")
+        for wv in (getattr(mw, "toolbarWeb", None), getattr(mw, "web", None),
+                   getattr(mw, "bottomWeb", None)):
+            try:
+                if wv is not None:
+                    wv.eval(js)
+            except Exception:
+                pass
     except Exception:
         pass
 

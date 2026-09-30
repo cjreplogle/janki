@@ -941,6 +941,13 @@ def _build_css(cfg, context):
 
     screens = cfg.get("screens", {})
     r = int(cfg.get("win_corner_radius", 11))
+    # Windows fullscreen: square corners (chrome.sync_fullscreen also squares any
+    # page already on screen when fullscreen toggles).
+    try:
+        if sys.platform.startswith("win") and mw.isFullScreen():
+            r = 0
+    except Exception:
+        pass
 
     # QtWebEngine surfaces ignore native layer masks, so round the WINDOW's outer
     # corners here in CSS: the top webview gets rounded top corners, the bottom
