@@ -68,14 +68,27 @@ def tap(f, dur=0.05, vol=0.22, decay=60.0):
 save("move",    click(0.007, 0.16))
 save("select",  tap(520, 0.06, 0.24, 55))
 save("back",    tap(390, 0.06, 0.22, 55))
-# Review sounds get room to ring out (longer tails, slower fades, wider note gaps);
-# the navigation clicks above stay short.
-save("open",    mix((0, tap(440, 0.12, 0.2, 24)), (0.13, tap(587, 0.22, 0.2, 14))))
-save("reveal",  tap(660, 0.16, 0.14, 22))
-save("again",   tap(300, 0.22, 0.2, 14))
-save("hard",    tap(392, 0.2, 0.18, 16))
-save("good",    tap(494, 0.2, 0.18, 16))
-save("easy",    mix((0, tap(494, 0.12, 0.16, 22)), (0.12, tap(659, 0.24, 0.16, 13))))
-save("right",   mix((0, tap(523, 0.12, 0.2, 22)), (0.13, tap(784, 0.28, 0.2, 11))))
-save("wrong",   mix((0, tap(294, 0.14, 0.2, 18)), (0.14, tap(247, 0.28, 0.2, 11))))
+# Review sounds: clean bell tones (pure sine + a faint octave, smooth 6 ms attack,
+# no click texture), all in C major so they read as positive. "Wrong" is a soft
+# neutral note rather than a falling "sad" one. Navigation clicks above unchanged.
+def bell(f, dur, vol=0.2, decay=10.0):
+    n = int(SR * dur); out = []; ph = 0.0
+    for k in range(n):
+        t = k / SR
+        ph += 2 * math.pi * f / SR
+        s_ = math.sin(ph) + 0.12 * math.sin(2 * ph) + 0.04 * math.sin(3 * ph)
+        out.append(s_ * min(1.0, t / 0.006) * math.exp(-decay * t) * vol)
+    return out
+
+
+C5, E5, G5, C6, E6, A4 = 523.25, 659.25, 783.99, 1046.5, 1318.5, 440.0
+save("open",    mix((0, bell(C5, 0.25, 0.18, 12)), (0.11, bell(G5, 0.35, 0.18, 9))))
+save("reveal",  bell(E6, 0.25, 0.10, 14))
+save("again",   bell(A4, 0.28, 0.16, 11))
+save("hard",    bell(C5, 0.28, 0.16, 11))
+save("good",    bell(E5, 0.3, 0.16, 10))
+save("easy",    mix((0, bell(G5, 0.22, 0.15, 12)), (0.10, bell(C6, 0.36, 0.15, 8))))
+save("right",   mix((0, bell(C5, 0.2, 0.16, 13)), (0.09, bell(E5, 0.2, 0.16, 13)),
+                    (0.18, bell(G5, 0.42, 0.16, 7))))
+save("wrong",   bell(A4, 0.34, 0.15, 9))
 print("ok", sorted(os.listdir(OUT)))
