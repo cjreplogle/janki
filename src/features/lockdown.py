@@ -766,6 +766,11 @@ class Lockdown:
             _sfx.play("lockdown")
         except Exception:
             pass
+        try:                                     # the tray menu mustn't linger on top
+            from ..system import tray_nav as _tn
+            _tn._hide()
+        except Exception:
+            pass
         self._caption.hide()
         _activate_and_raise()
         if not _set_presentation_options(mask):
