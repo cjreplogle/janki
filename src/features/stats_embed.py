@@ -851,20 +851,20 @@ _FADE_OUT_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-redu
                 "b.style.opacity='%s';b.style.transform='translateY(3px)';}catch(e){}})();")
 
 
-def _page_sfx():
+def _page_sfx(name="page"):
     try:
         from . import sfx
-        sfx.play("page")
+        sfx.play(name)
     except Exception:
         pass
 
 
-def fade_then(fn, web=None, ms: int = 0, to: float = 0.35) -> None:
+def fade_then(fn, web=None, ms: int = 0, to: float = 0.35, sound: str = "page") -> None:
     """Fade the current view out and run `fn` (the actual switch). Page switches start at
     once (ms=0): the old page fades WHILE the new one builds, instead of waiting for the
     fade and then for the build. Instant panel swaps (Stats) pass a short delay so their
     fade-out is still seen."""
-    _page_sfx()
+    _page_sfx(sound)
     try:
         (web or mw.web).eval(_FADE_OUT_JS % to)
     except Exception:
@@ -1090,7 +1090,7 @@ def _patched_on_stats(orig):
                 open_stats()
             # Fade the list fully out: it's hidden while Stats is up, and its last frame
             # is what flashes when Stats closes — it has to be blank.
-            return fade_then(_go, None, 110, to=0.0)
+            return fade_then(_go, None, 110, to=0.0, sound="stats")
         except Exception as exc:
             log("stats panel failed, using the window: %s" % exc)
             return orig(*a, **k)
