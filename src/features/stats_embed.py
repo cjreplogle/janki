@@ -852,7 +852,7 @@ _defer_close = False      # Stats is fading out; don't let navigation close it i
 _opening = False          # a Stats open is scheduled (ignore repeat clicks meanwhile)
 
 
-def close_soon(ms: int = 110, timeout: int = 1500) -> None:
+def close_soon(ms: int = 70, timeout: int = 1500) -> None:
     """Leave Stats for another page. The stats page fades out while the deck list behind it
     is redrawn, and Stats is only removed once that NEW page has loaded (at least `ms` for
     the fade, at most `timeout`). Revealing the collapsed list any earlier showed its last
@@ -868,7 +868,7 @@ def close_soon(ms: int = 110, timeout: int = 1500) -> None:
         _pp = None
     try:
         _web.eval("(function(){try{var b=document.body;if(!b)return;b.style.transition="
-                  "'opacity .1s ease-out,transform .1s ease-out';b.style.opacity='0';"
+                  "'opacity .07s ease-out,transform .07s ease-out';b.style.opacity='0.35';"
                   "b.style.transform='translateY(4px)';}catch(e){}})();")
     except Exception:
         pass
@@ -967,10 +967,10 @@ _DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
 # paused on its first (invisible) frame, and plays once Stats is gone (close_soon adds
 # .jk-go). Playing it hidden and then again on reveal made the list blink.
 _DROP_CSS_HELD = ("<style>html.glass-fading body{animation:none!important;}"
-                  "html{animation:jkDropH .22s cubic-bezier(.2,.8,.2,1) both paused;}"
+                  "html{animation:jkDropH .32s cubic-bezier(.2,.8,.2,1) both paused;}"
                   "html.jk-go{animation-play-state:running;}"
                   "@media (prefers-reduced-motion: reduce){html{animation:none;}}"
-                  "@keyframes jkDropH{from{opacity:0;transform:translateY(-6px);}"
+                  "@keyframes jkDropH{from{opacity:.35;transform:translateY(-6px);}"
                   "to{opacity:1;transform:none;}}</style>")
 _held_drop = False
 
