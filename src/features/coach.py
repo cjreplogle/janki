@@ -125,7 +125,7 @@ def _open_mock_question():
         log("coach mock question: %s" % e)
 
 
-def _cleanup_sample():
+def _cleanup_sample(leave=True):
     """Delete the tour decks + their cards, and any review logged on them (stats
     untouched). By NAME too, so leftovers from an interrupted tour go as well."""
     try:
@@ -144,6 +144,8 @@ def _cleanup_sample():
     except Exception as e:
         log("coach sample cleanup: %s" % e)
     _sample.update(did=None, mock_did=None, cids=[], card=False, mock=False)
+    if not leave:
+        return
     try:
         mw.moveToState("deckBrowser")
     except Exception:
@@ -745,3 +747,23 @@ def start() -> None:
     except Exception as exc:
         log("coach tour: %s" % exc)
         _tour = None
+
+
+# The tour decks only exist while the tour runs; each tour builds them fresh (new,
+# unreviewed cards). If Anki quit mid-tour, sweep leftovers on profile open/close so
+# they never show up in the collection.
+def _purge_leftovers(*_a):
+    if _tour is None:
+        try:
+            if mw.col is not None:
+                _cleanup_sample(leave=False)
+        except Exception as e:
+            log("coach purge: %s" % e)
+
+
+try:
+    from aqt import gui_hooks as _gh
+    _gh.profile_did_open.append(_purge_leftovers)
+    _gh.profile_will_close.append(_purge_leftovers)
+except Exception:
+    pass

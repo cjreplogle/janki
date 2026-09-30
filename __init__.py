@@ -51,6 +51,10 @@ from .src.util.config import log, ACTIVE, GLASS, _cfg
 from .src.util import state
 _bt.mark("imported util")
 from .src.features import card_timer, focus, lockdown, pomodoro, intersperse, reword
+try:
+    from .src.features import coach as _coach   # registers the tour-deck leftover sweep
+except Exception:
+    pass
 _bt.mark("imported features")
 from .src.user import css, glass, hud
 _bt.mark("imported css/glass/hud")
