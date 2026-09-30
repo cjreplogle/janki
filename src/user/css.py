@@ -1234,6 +1234,12 @@ def _build_css(cfg, context):
         parts.append(fade_in.replace('from{opacity:0}', 'from{opacity:.1}')
                      .replace('glassFadeIn .15s', 'glassFadeIn .3s'))
     elif isinstance(context, Reviewer) and screens.get("reviewer", True):
+        # No scrollbar on cards (Windows draws one on the right edge — very visible in
+        # fullscreen / Focus Mode). Long cards still scroll with wheel/trackpad/keys.
+        parts.append("<style>html::-webkit-scrollbar,body::-webkit-scrollbar,"
+                     "*::-webkit-scrollbar{width:0!important;height:0!important;"
+                     "background:transparent!important;display:none!important;}"
+                     "html,body{scrollbar-width:none!important;}</style>\n")
         # Fade the FIRST card in when a study session starts. The reviewer page is
         # rebuilt on every entry to review, and Anki reveals each card by setting
         # #qa's opacity to 1 in one jump; catch that first reveal and animate it in.
