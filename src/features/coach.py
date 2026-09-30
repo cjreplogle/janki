@@ -734,10 +734,35 @@ class _Tour(QWidget):
     def eventFilter(self, obj, ev):
         if obj is mw and ev.type() == QEvent.Type.Resize:
             self._cover()
-            QTimer.singleShot(0, lambda: self.go(self.i))   # re-measure targets
+            # Focus mode / fullscreen resize the window in bursts. Re-measure once it
+            # settles — WITHOUT re-running the step (that reopened the sample card and
+            # restarted the slide on every resize event).
+            rt = getattr(self, "_relocate_t", None)
+            if rt is None:
+                rt = self._relocate_t = QTimer(self)
+                rt.setSingleShot(True)
+                rt.timeout.connect(self._relocate)
+            rt.start(180)
         elif obj is mw and ev.type() == QEvent.Type.Move:
             self._cover()
         return False
+
+    def _relocate(self):
+        st = self.steps[self.i]
+        self._locate(st, lambda rect: self._reshow(st, rect))
+
+    def _reshow(self, st, rect):
+        if self.steps[self.i] is not st:
+            return
+        new = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
+        old = self.hole
+        self.hole = new
+        self._place_bubble(animate=True)
+        if old is not None and new is not None and old != new:
+            self._morph_hole(old, new)
+        else:
+            self._apply_mask()
+            self.update()
 
     def keyPressEvent(self, ev):
         k = ev.key()
