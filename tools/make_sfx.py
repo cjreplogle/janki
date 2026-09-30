@@ -84,10 +84,10 @@ def bell(f, dur, vol=0.2, decay=10.0):
 C5, E5, G5, C6, E6, A4 = 523.25, 659.25, 783.99, 1046.5, 1318.5, 440.0
 save("open",    mix((0, bell(C5, 0.25, 0.18, 12)), (0.11, bell(G5, 0.35, 0.18, 9))))
 save("reveal",  bell(E6, 0.25, 0.10, 14))
-save("again",   bell(A4, 0.28, 0.16, 11))
-save("hard",    bell(C5, 0.28, 0.16, 11))
-save("good",    bell(E5, 0.3, 0.16, 10))
-save("easy",    mix((0, bell(G5, 0.22, 0.15, 12)), (0.10, bell(C6, 0.36, 0.15, 8))))
+save("again",   bell(C5, 0.28, 0.16, 11))     # the ratings climb C – E – G – C
+save("hard",    bell(E5, 0.28, 0.16, 11))
+save("good",    bell(G5, 0.3, 0.16, 10))
+save("easy",    bell(C6, 0.36, 0.15, 8))
 save("right",   mix((0, bell(C5, 0.2, 0.16, 13)), (0.09, bell(E5, 0.2, 0.16, 13)),
                     (0.18, bell(G5, 0.42, 0.16, 7))))
 save("wrong",   bell(A4, 0.34, 0.15, 9))
