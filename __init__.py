@@ -1330,10 +1330,14 @@ def _install_tab_chord_guard():
                     k = ev.key()
                     if k == _Q.Key.Key_Tab:
                         if t == QEvent.Type.KeyPress:
-                            _TabGuard.held = True
+                            import time as _t
+                            _TabGuard.held = _t.monotonic()
                         elif t == QEvent.Type.KeyRelease and not ev.isAutoRepeat():
                             _TabGuard.held = False
                         return False
+                    import time as _t2
+                    if _TabGuard.held and _t2.monotonic() - _TabGuard.held > 4.0:
+                        _TabGuard.held = False       # a lost Tab release can't stick
                     if _TabGuard.held and _Q.Key.Key_A <= k <= _Q.Key.Key_Z \
                             and not (ev.modifiers() & (_Q.KeyboardModifier.ControlModifier
                                                        | _Q.KeyboardModifier.MetaModifier
