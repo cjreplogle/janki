@@ -2052,10 +2052,10 @@ def _open_today_dialog(day_offset=0, auto=False):
         curset = set(cur)
         rest = [x for x in queue if x not in curset]
         new_queue = cur + rest                       # current day → front
-        have = set(new_queue)
-        for s in _neighbor_frags(have):              # neighbours → back
-            new_queue.append(s); have.add(s)
-        queue[:] = new_queue
+        # (No neighbour pre-counting any more: those broad tag searches kept running
+        # after the window closed and held the collection, so Anki looked stuck
+        # "loading". Other days count when you move to them.)
+        queue[:] = [x for x in new_queue if x in curset]
 
         if cur:
             st["cur_pending"] = True
@@ -2319,6 +2319,17 @@ def _open_today_dialog(day_offset=0, auto=False):
         from aqt.operations import QueryOp
         joined = " OR ".join("(%s)" % s for s in searches_all)
 
+        prev_ids_now, _pl = _load_day_active(target)
+        cached = all(s in frag_ids for s in searches_all)
+        if cached and not prev_ids_now:
+            # Everything's already counted and nothing to re-suspend: no search needed.
+            to_u = set()
+            for s_ in searches_all:
+                to_u |= frag_ids[s_]
+            found_now = (to_u, set(to_u))
+        else:
+            found_now = None
+
         def find(col):
             if not joined:
                 return set(), set()
@@ -2361,6 +2372,9 @@ def _open_today_dialog(day_offset=0, auto=False):
 
             _run_change(to_unsusp, resuspend, applied)
 
+        if found_now is not None:
+            found(found_now)
+            return
         _busy(True, "Finding cards…")
         QueryOp(parent=dlg, op=find, success=found).run_in_background()
 
