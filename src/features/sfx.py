@@ -34,6 +34,8 @@ NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
+# Played on every card while studying — kept at half level so they don't wear.
+_IN_REVIEW_SOFT = {"reveal", "again", "hard", "good", "easy"}
 
 
 def _effect(name):
@@ -70,6 +72,8 @@ def play(name, force=False):
         return
     try:
         gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0   # per-sound level
+        if not force and name in _IN_REVIEW_SOFT:
+            gain *= 0.5                         # card-by-card sounds sit well back
         fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 30) / 100.0 * gain)))
         fx.play()
     except Exception as e:
