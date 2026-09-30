@@ -501,6 +501,12 @@ def _startup():
         _back_sc.setContext(Qt.ShortcutContext.WindowShortcut)
         _back_sc.activated.connect(lambda: _go_back())
         mw._janki_back_sc = _back_sc
+        # ⌘D / Ctrl+D: straight to the Decks list from anywhere in the main window
+        # (Anki only uses ⌘D in the Add window / Browser).
+        _decks_sc = QShortcut(QKeySequence("Ctrl+D"), mw)
+        _decks_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        _decks_sc.activated.connect(lambda: _go_decks())
+        mw._janki_decks_sc = _decks_sc
 
         # Lockdown toggle hotkey: Cmd+Ctrl+L (exit by holding Space). Also
         # create the manager now so its CGEventTap signal handlers are live —
@@ -1079,3 +1085,31 @@ def _go_back():
                 mw.deckBrowser.refresh()
     except Exception as e:
         log("go back: %s" % e)
+
+
+def _go_decks():
+    try:
+        from .src.features import practice as _pr, stats_embed as _se
+        if _se.is_open():
+            _pr._practice_view = False
+            _se.fade_close()
+            return
+        st = getattr(mw, "state", None)
+        if st == "deckBrowser":
+            if _pr._practice_view:
+                h = (getattr(mw.toolbar, "link_handlers", {}) or {}).get("decks")
+                if h:
+                    h()
+                else:
+                    _pr._practice_view = False
+                    mw.deckBrowser.refresh()
+            return
+        _pr._practice_view = False
+        if st == "review":
+            try:
+                focus._focus_restore_for_nav()
+            except Exception:
+                pass
+        mw.moveToState("deckBrowser")
+    except Exception as e:
+        log("go decks: %s" % e)
