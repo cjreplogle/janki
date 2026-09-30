@@ -431,6 +431,59 @@ def black_text_css(scopes=("",)) -> str:
 # (sessionStorage) and unfolds its subdeck rows after the redraw, while closing folds
 # them first and then sends Anki's own collapse command. Rows are found by indent (the
 # leading &nbsp; count), so it also works on the Practice page's banks.
+_DECK_KEYS_JS = r"""(function(){
+ if(window.__jkDeckKeys)return; window.__jkDeckKeys=true;
+ function rows(){return Array.prototype.filter.call(document.querySelectorAll('tr.deck'),
+   function(r){return r.querySelector('a.deck')&&r.offsetParent!==null;});}
+ function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
+   return td.textContent.match(/^\xa0*/)[0].length;}
+ function cur(){return document.querySelector('tr.deck.jk-kb-row');}
+ function sel(tr){var o=cur();if(o){o.classList.remove('jk-kb-row');
+   var a=o.querySelector('a.deck');if(a)a.classList.remove('jk-kb');}
+   if(!tr)return; tr.classList.add('jk-kb-row');
+   var a2=tr.querySelector('a.deck');if(a2)a2.classList.add('jk-kb');
+   try{sessionStorage.setItem('jkKbSel',tr.id);}catch(x){}
+   var r=tr.getBoundingClientRect();
+   if(r.top<40||r.bottom>innerHeight-40)tr.scrollIntoView({block:'nearest'});}
+ function start(){var rs=rows();if(!rs.length)return null;
+   return document.querySelector('tr.deck.current')||rs[0];}
+ document.addEventListener('keydown',function(e){
+   if(e.metaKey||e.ctrlKey||e.altKey)return;
+   var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
+   var k=e.key, rs=rows(); if(!rs.length)return;
+   var c=cur(), i=c?rs.indexOf(c):-1;
+   if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
+     if(!c){sel(start());return;}
+     var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1); sel(rs[n]); return;}
+   if(!c){ if(k==='Enter'||k===' '){e.preventDefault();sel(start());} return;}
+   var col=c.querySelector('a.collapse'), sign=col?col.textContent.trim():'';
+   if(k==='ArrowRight'){e.preventDefault(); if(sign==='+')col.click();
+     else if(i+1<rs.length&&ind(rs[i+1])>ind(c))sel(rs[i+1]); return;}
+   if(k==='ArrowLeft'){e.preventDefault();
+     if(sign==='-'||sign==='\u2212'){col.click();return;}
+     for(var j=i-1;j>=0;j--)if(ind(rs[j])<ind(c)){sel(rs[j]);return;} return;}
+   if(k==='Enter'||k===' '){e.preventDefault();
+     try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
+     var a=c.querySelector('a.deck'); if(a)a.click();}
+ },true);
+ function restore(){var id=null,on=null;
+   try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
+   if(on!=='1'||!id)return; var tr=document.getElementById(id); if(tr)sel(tr);}
+ // keep the selection across the redraw an expand/collapse causes
+ document.addEventListener('keydown',function(e){
+   if(/^Arrow/.test(e.key)){try{sessionStorage.setItem('jkKbAct','1');}catch(x){}}},true);
+ // real mouse use hands control back to the pointer (ignore the synthetic move a
+ // redraw fires under a still cursor)
+ var t0=Date.now(), last=null;
+ document.addEventListener('mousemove',function(e){
+   var p=[e.screenX,e.screenY]; if(!last){last=p;return;}
+   var moved=Math.abs(p[0]-last[0])+Math.abs(p[1]-last[1]); last=p;
+   if(Date.now()-t0<500||moved<3)return;
+   var c=cur();if(c){sel(null);try{sessionStorage.removeItem('jkKbAct');}catch(x){}}},{passive:true});
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',restore);
+ else restore();
+})();"""
+
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=260, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n function wrap(tr){return Array.prototype.map.call(tr.children,function(td){\n   var w=document.createElement('div'); w.style.overflow='hidden';\n   while(td.firstChild) w.appendChild(td.firstChild); td.appendChild(w); return w;});}\n function unwrap(ws){ws.forEach(function(w){var td=w.parentNode; if(!td) return;\n   while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();});}\n function run(rows,open,done){\n   var ws=[], fill=open?'none':'forwards', pad={paddingTop:'0px',paddingBottom:'0px'};\n   rows.forEach(function(tr){ws=ws.concat(wrap(tr));});\n   ws.forEach(function(w){var h=w.scrollHeight+'px';\n     var kf=open?[{height:'0px',opacity:0},{height:h,opacity:1}]\n                :[{height:h,opacity:1},{height:'0px',opacity:0}];\n     w.animate(kf,{duration:DUR,easing:EASE,fill:fill});});\n   rows.forEach(function(tr){Array.prototype.forEach.call(tr.children,function(td){\n     td.animate(open?[pad,{}]:[{},pad],{duration:DUR,easing:EASE,fill:fill});});});\n   // A timer, not animation.finished: that promise can stall (e.g. a backgrounded\n   // view), which would leave a fold stuck without ever sending the collapse.\n   setTimeout(function(){if(open) unwrap(ws); if(done) done();},DUR+20);}\n document.addEventListener('click',function(e){\n   var a=e.target.closest&&e.target.closest('a.collapse'); if(!a) return;\n   var tr=a.closest('tr.deck'); if(!tr) return; var did=tr.id;\n   if(a.textContent.trim()==='+'){try{sessionStorage.setItem('jkExpand',did);}catch(x){} return;}\n   var rows=kids(tr); if(!rows.length) return;\n   e.preventDefault(); e.stopImmediatePropagation();\n   run(rows,false,function(){pycmd('collapse:'+did);});\n },true);\n function onLoad(){var did=null;\n   try{did=sessionStorage.getItem('jkExpand'); sessionStorage.removeItem('jkExpand');}catch(x){}\n   if(!did) return; var tr=document.getElementById(did); if(!tr) return;\n   var rows=kids(tr); if(rows.length) run(rows,true);}\n if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',onLoad);\n else onLoad();\n})();\n"
 
 # Deck list width + columns: Anki sizes the table to its widest VISIBLE deck name, so
@@ -576,7 +629,7 @@ def _motion_css(context) -> str:
             "html body a.deck {\n"
             "  position:relative; isolation:isolate; text-decoration:none !important;\n"
             "  transition: transform .35s %(e)s, color .3s ease; }\n"
-            "html body a.deck:hover { transform: translateX(6px); }\n"
+            "html body a.deck:hover, html body a.deck.jk-kb { transform: translateX(6px); }\n"
             "html body a.deck::before {\n"
             "  content:''; position:absolute; z-index:-1; inset:-3px -8px -3px -7px;\n"
             "  border-radius:8px; background: rgba(255,255,255,0.10);\n"
@@ -584,7 +637,7 @@ def _motion_css(context) -> str:
             # away from, so the hover can't flicker off at the name's left edge.
             "  opacity:0; transform-origin:left center; transform:scaleX(.7);\n"
             "  transition: opacity .3s ease, transform .35s %(e)s, left .35s %(e)s; }\n"
-            "html body a.deck:hover::before {\n"
+            "html body a.deck:hover::before, html body a.deck.jk-kb::before {\n"
             "  opacity:1; transform:scaleX(1); left:-13px; }\n"
             "html body a.collapse, html body td.opts a, html body td.opts img {\n"
             "  transition: opacity .25s ease, color .25s ease, transform .25s %(e)s; }\n"
@@ -737,6 +790,14 @@ def _build_css(cfg, context):
         # leading &nbsp; indent — tag those, then pad every top-level row after the
         # first. Runs after all Python-side rewrites (e.g. the Practice view's banks).
         parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
+        # Keyboard-only deck navigation (↑/↓ move, →/← expand/collapse, Enter/Space
+        # open). The selection reuses the hover look; with hover motion off it's a
+        # plain background (never a layout change).
+        if not (cfg.get("ui_animations", True) and not _redesign_on()):
+            parts.append("<style>html body a.deck.jk-kb{background:rgba(255,255,255,.12);"
+                         "border-radius:6px;box-shadow:0 0 0 4px rgba(255,255,255,.12);}"
+                         "</style>\n")
+        parts.append("<script>" + _DECK_KEYS_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
         parts.append("<style>" + _DECK_STICKY_CSS + "</style>\n"
