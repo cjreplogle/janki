@@ -12,8 +12,21 @@ _JS = r"""<script>(function(){
    return Array.prototype.filter.call(document.querySelectorAll('.jp-choice'),
      function(e){return !e.classList.contains('jp-dropped')&&e.offsetParent!==null;});}
  function cur(){return document.querySelector('.jp-choice.jp-kb');}
- function sel(e){var c=cur();if(c)c.classList.remove('jp-kb');if(e){e.classList.add('jp-kb');
-   var r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)e.scrollIntoView({block:'nearest'});}}
+ // One floating outline that glides between choices (transform/size only — the
+ // card's layout never moves).
+ function ring(){var g=document.getElementById('jk-pq-sel');if(g)return g;
+   g=document.createElement('div');g.id='jk-pq-sel';document.body.appendChild(g);return g;}
+ function place(e,animate){var g=ring(),r=e.getBoundingClientRect(),p=4;
+   g.style.transition=animate?'':'none';
+   g.style.width=(r.width+2*p)+'px';g.style.height=(r.height+2*p)+'px';
+   g.style.transform='translate('+(r.left+scrollX-p)+'px,'+(r.top+scrollY-p)+'px)';
+   if(!animate){void g.offsetWidth;g.style.transition='';}}
+ function sel(e){var c=cur();if(c)c.classList.remove('jp-kb');var g=ring();
+   if(!e){g.style.opacity='0';return;}
+   var first=!c; e.classList.add('jp-kb');
+   var r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)e.scrollIntoView({block:'nearest'});
+   place(e,!first); g.style.opacity='1';}
+ addEventListener('resize',function(){var c=cur();if(c)place(c,false);});
  document.addEventListener('keydown',function(ev){
    if(ev.metaKey||ev.ctrlKey||ev.altKey)return;
    var k=ev.key; if(!/^Arrow(Up|Down|Left|Right)$/.test(k))return;
@@ -25,10 +38,12 @@ _JS = r"""<script>(function(){
  },true);
  // Python asks this on Enter/Space: pick the highlighted choice if there is one.
  window.jankiPickHighlighted=function(){var c=cur();if(!c||!vis().length)return false;
-   c.classList.remove('jp-kb');if(c.__jpPick)c.__jpPick();else c.click();return true;};
+   sel(null);if(c.__jpPick)c.__jpPick();else c.click();return true;};
 })();</script>
-<style>.jp-choice.jp-kb{outline:2px solid rgba(156,188,243,.85);outline-offset:2px;
- border-radius:8px;}</style>"""
+<style>#jk-pq-sel{position:absolute;left:0;top:0;pointer-events:none;z-index:50;
+ border:2px solid rgba(156,188,243,.85);border-radius:10px;box-sizing:border-box;opacity:0;
+ transition:transform .18s cubic-bezier(.2,.8,.2,1),width .18s cubic-bezier(.2,.8,.2,1),
+ height .18s cubic-bezier(.2,.8,.2,1),opacity .15s ease;}</style>"""
 
 
 def _is_practice(card):
