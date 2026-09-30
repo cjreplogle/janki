@@ -438,6 +438,12 @@ _DECK_KEYS_JS = r"""(function(){
  function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
    return td.textContent.match(/^\xa0*/)[0].length;}
  var hid=null, idle=null;          // remembered row while the highlight is hidden
+ var __jkSync=false;
+ // Contanki (the remote) and Tab move the browser's focus between deck links: follow
+ // it with the same pill, so there's only ever one selection.
+ document.addEventListener('focusin',function(e){if(__jkSync)return;
+   var a=e.target&&e.target.closest&&e.target.closest('a.deck'); if(!a)return;
+   var tr=a.closest('tr.deck'); if(tr&&tr!==cur()){sel(tr);poke();}},true);
  function cur(){return document.querySelector('tr.deck.jk-kb-row');}
  function poke(){clearTimeout(idle);idle=setTimeout(function(){var c=cur();
    if(c){hid=c.id;sel(null,true);}},3000);}
@@ -445,7 +451,9 @@ _DECK_KEYS_JS = r"""(function(){
    document.documentElement.classList.toggle('jk-kbnav',!!tr);if(o){o.classList.remove('jk-kb-row');
    var a=o.querySelector('a.deck');if(a)a.classList.remove('jk-kb');}
    if(!tr)return; tr.classList.add('jk-kb-row');
-   var a2=tr.querySelector('a.deck');if(a2)a2.classList.add('jk-kb');
+   var a2=tr.querySelector('a.deck');if(a2){a2.classList.add('jk-kb');
+     // keep the browser's focus (what Contanki / Tab move) on the same deck
+     if(document.activeElement!==a2){__jkSync=true;try{a2.focus({preventScroll:true});}catch(x){}__jkSync=false;}}
    try{sessionStorage.setItem('jkKbSel',tr.id);}catch(x){}
    var r=tr.getBoundingClientRect();
    if(r.top<40||r.bottom>innerHeight-40)tr.scrollIntoView({block:'nearest'});}
@@ -871,7 +879,8 @@ def _build_css(cfg, context):
             parts.append("<style>html body a.deck.jk-kb{background:rgba(255,255,255,.12);"
                          "border-radius:6px;box-shadow:0 0 0 4px rgba(255,255,255,.12);}"
                          "</style>\n")
-        parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}</style>"
+        parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}"
+                     "html body a.deck:focus,html body a.deck:focus-visible{outline:none!important;}</style>"
                      "<script>" + _DECK_KEYS_JS + "</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
