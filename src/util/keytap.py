@@ -525,6 +525,35 @@ def stop_key_tap() -> None:
 _ax_poll = None
 
 
+def _explain_accessibility() -> None:
+    """Why Janki asks for Accessibility, shown before macOS's own dialog."""
+    try:
+        from aqt.qt import QMessageBox
+        box = QMessageBox(mw)
+        box.setWindowTitle("Janki")
+        box.setText("Allow Janki's hotkeys to work in the background?")
+        box.setInformativeText(
+            "macOS will ask you to give Anki Accessibility access. Janki uses it so its "
+            "shortcuts — Tab+Z / X / C / V to rate cards, Tab+\\ for the caption, "
+            "show/hide Anki — work even while you're in another app, and so Lockdown's "
+            "hold-Space exit always works.\n\n"
+            "Janki only reacts to its own shortcut keys. Nothing you type is recorded, "
+            "stored or sent anywhere.\n\n"
+            "After you allow it in System Settings, the hotkeys turn on by themselves — "
+            "no restart needed.")
+        go = box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is go:
+            _start_key_tap()               # now shows macOS's prompt + starts watching
+        else:
+            cfg = _cfg()
+            cfg["ax_prompt_declined"] = True
+            mw.addonManager.writeConfig(__name__, cfg)
+    except Exception as exc:
+        log(f"accessibility explain: {exc}")
+
+
 def _wait_for_accessibility() -> None:
     """After the Accessibility prompt, watch for the grant and start the key tap the
     moment it lands — no Anki restart needed (macOS applies the grant to the running
@@ -586,6 +615,15 @@ def _start_key_tap() -> None:
 
         trusted = bool(AX.AXIsProcessTrusted())
         _gtap_log(f"AXTrusted={trusted}")
+
+        if not trusted and not getattr(_start_key_tap, "_explained", False):
+            # Explain first, then show macOS's own prompt (asked once; "Not now" is
+            # remembered — Settings → Hotkeys can ask again).
+            _start_key_tap._explained = True
+            if _cfg().get("ax_prompt_declined", False):
+                return
+            QTimer.singleShot(0, _explain_accessibility)
+            return
 
         if not trusted:
             # Trigger the system prompt — this adds Anki to the Accessibility list

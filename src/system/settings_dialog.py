@@ -1789,13 +1789,34 @@ class GlassSettings(QDialog):
 
         # Focus-independent controller (IOKit HID) — drives Anki from a gamepad in
         # caption mode even when another app is focused/fullscreen.
-        self._hid = QCheckBox(
-            "Controller input while unfocused (requires IOKit HID and Input "
-            "Monitoring permission; takes effect on restart)"
-        )
+        self._hid = QCheckBox("Controller input while Anki isn't focused")
+        self._hid.setToolTip(
+            "Rate cards with a game controller even when another app is in front. "
+            + ("macOS asks for Input Monitoring permission the first time."
+               if sys.platform == "darwin" else ""))
         self._hid.setChecked(bool(self.cfg.get("hid_controller", False)))
 
         def on_hid(_state):
+            if self._hid.isChecked() and sys.platform == "darwin" \
+                    and not self.cfg.get("hid_controller", False):
+                from aqt.qt import QMessageBox
+                box = QMessageBox(self)
+                box.setWindowTitle("Janki")
+                box.setText("Use your controller while Anki is in the background?")
+                box.setInformativeText(
+                    "macOS will ask you to give Anki Input Monitoring access. Janki "
+                    "uses it only to read your game controller's buttons, so it can "
+                    "rate cards while another app is in front (e.g. Caption mode over "
+                    "a video).\n\nJanki doesn't read your keyboard or mouse with it, "
+                    "and nothing is recorded or sent anywhere.")
+                ok = box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                if box.clickedButton() is not ok:
+                    self._hid.blockSignals(True)
+                    self._hid.setChecked(False)
+                    self._hid.blockSignals(False)
+                    return
             self.cfg["hid_controller"] = self._hid.isChecked()
             mw.addonManager.writeConfig(__name__, self.cfg)
             if self._hid.isChecked():
