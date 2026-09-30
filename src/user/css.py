@@ -483,12 +483,13 @@ _DECK_KEYS_JS = r"""(function(){
      for(var j=i-1;j>=0;j--)if(ind(rs[j])<ind(c)){sel(rs[j]);return;} return;}
    if(k==='Enter'||k===' '){e.preventDefault();
      try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
-     sfx('open'); var a=c.querySelector('a.deck'); if(a)a.click();}
+     sfx('open'); var a=c.querySelector('a.deck'); if(a){window.__jkKbClick=true;a.click();window.__jkKbClick=false;}}
  },true);
  // Opening a deck: the list dips to 35% at once, and the overview rises from 35% —
  // one continuous dip instead of fade-out, blank, fade-in.
  document.addEventListener('click',function(e){
    var a=e.target.closest&&e.target.closest('a.deck'); if(!a)return;
+   if(!window.__jkKbClick)sfx('move');          // mouse click on a deck/bank: the nav tick
    var b=document.body; if(!b)return;
    b.style.transition='opacity .1s ease-out'; b.style.opacity='0.35';
    setTimeout(function(){b.style.opacity='';},1500);   // safety: never stay dim
