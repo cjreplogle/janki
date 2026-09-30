@@ -5293,9 +5293,10 @@ def contanki_for_state(new_state):
         return
     try:
         if new_state in ("deckBrowser", "overview"):
-            if not _contanki_nav_paused:
-                con.suspend()
-                _contanki_nav_paused = True
+            # Always re-suspend: Contanki resumes ITSELF on profile open (after the
+            # first deck-list render), which silently undid a one-time pause.
+            con.suspend()
+            _contanki_nav_paused = True
         elif _contanki_nav_paused:
             _contanki_nav_paused = False
             if not _contanki_suspended_by_us:

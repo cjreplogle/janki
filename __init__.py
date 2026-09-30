@@ -849,6 +849,11 @@ def _startup():
                 state._remote_active = (new_state == 'review')
                 if new_state == 'review':
                     focus.engage_on_review()        # Focus Mode armed elsewhere → on now
+                    try:
+                        from .src.integrations import qbank as _qbk
+                        _qbk.contanki_for_state('review')   # Contanki back for studying
+                    except Exception:
+                        pass
                 if new_state != 'review':
                     focus._focus_restore_for_nav()
                     amboss._stop_amboss_size_watch()
@@ -1182,5 +1187,27 @@ def _go_practice():
 try:
     from .src.features import practice_keys as _practice_keys
     _practice_keys.install()
+except Exception:
+    pass
+
+
+
+# Contanki re-enables itself on profile open and could come back on while a menu is
+# up; re-assert the pause whenever a menu screen draws (and just after profile open).
+def _contanki_nav_enforce(*_a):
+    try:
+        from .src.integrations import qbank as _qb
+        st = getattr(mw, "state", None)
+        if st in ("deckBrowser", "overview"):
+            _qb.contanki_for_state(st)
+    except Exception:
+        pass
+
+
+try:
+    from aqt.qt import QTimer as _CQT
+    gui_hooks.deck_browser_did_render.append(_contanki_nav_enforce)
+    gui_hooks.overview_did_refresh.append(_contanki_nav_enforce)
+    gui_hooks.profile_did_open.append(lambda: _CQT.singleShot(500, _contanki_nav_enforce))
 except Exception:
     pass
