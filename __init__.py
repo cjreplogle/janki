@@ -1383,6 +1383,11 @@ except Exception:
 try:
     from .src.features import hotcorner as _hotcorner
     gui_hooks.profile_did_open.append(lambda: _hotcorner.reload())
+    try:                                     # tray data cached + refreshed in background
+        from .src.system import tray_nav as _tn
+        _tn.install_data_cache()
+    except Exception:
+        pass
     gui_hooks.profile_will_close.append(_hotcorner.shutdown)
 except Exception:
     pass

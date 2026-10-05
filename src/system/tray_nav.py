@@ -511,7 +511,79 @@ def _apply_glass_panel(widget, radius: int = 30, corner: int = 16) -> None:
 
 
 # --------------------------------------------------------------------------- decks
+# Tray data (deck tree, Practice deck, its banks) cached: the tray draws from this at
+# once and refreshes it in the background (after reviews / edits, on open), so opening
+# it never waits on the collection — that wait (behind any background job) was the lag.
+_DATA = {"rows": None, "pdid": None, "prac": None}
+_data_busy = [False]
+
+
 def _deck_rows():
+    if _DATA["rows"] is None:              # first ever open: read it now (once)
+        _DATA["rows"] = _deck_rows_live(mw.col)
+    return _DATA["rows"]
+
+
+def _practice_did():
+    if _DATA["pdid"] is None:
+        _DATA["pdid"] = _practice_did_live(mw.col) or 0
+    return _DATA["pdid"] or None
+
+
+def _practice_banks():
+    if _DATA["prac"] is None:
+        _DATA["prac"] = _practice_banks_live(mw.col)
+    return _DATA["prac"]
+
+
+def refresh_data_bg(*_a):
+    """Re-read the tray's data off the main thread (debounced by the busy flag)."""
+    if _data_busy[0] or getattr(mw, "col", None) is None:
+        return
+    _data_busy[0] = True
+    try:
+        from aqt.operations import QueryOp
+
+        def op(col):
+            return (_deck_rows_live(col), _practice_did_live(col) or 0,
+                    _practice_banks_live(col))
+
+        def done(r):
+            _data_busy[0] = False
+            _DATA["rows"], _DATA["pdid"], _DATA["prac"] = r
+
+        def failed(_e):
+            _data_busy[0] = False
+        QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
+    except Exception:
+        _data_busy[0] = False
+
+
+_refresh_timer = None
+
+
+def _schedule_refresh(*_a):
+    global _refresh_timer
+    try:
+        if _refresh_timer is None:
+            _refresh_timer = QTimer(mw)
+            _refresh_timer.setSingleShot(True)
+            _refresh_timer.timeout.connect(refresh_data_bg)
+        _refresh_timer.start(1500)
+    except Exception:
+        pass
+
+
+def install_data_cache():
+    try:
+        from aqt import gui_hooks
+        gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(2500, refresh_data_bg))
+        gui_hooks.operation_did_execute.append(_schedule_refresh)
+    except Exception:
+        pass
+
+
+def _deck_rows_live(col):
     """Flattened deck tree as [(name, did, due_total, depth, parent_did, has_kids)] —
     each deck followed by its subdecks, so subdecks can be shown/hidden per-parent.
     Siblings at each level are ordered most-due first. Falls back to a flat name list."""
@@ -534,12 +606,12 @@ def _deck_rows():
             _walk(c, depth + 1, cid)
 
     try:
-        _walk(mw.col.sched.deck_due_tree(), 0, None)
+        _walk(col.sched.deck_due_tree(), 0, None)
     except Exception:
         pass
     if not rows:
         try:
-            for nid in mw.col.decks.all_names_and_ids(skip_empty_default=True):
+            for nid in col.decks.all_names_and_ids(skip_empty_default=True):
                 rows.append((nid.name, int(nid.id), 0, 0, None, False))
         except Exception as exc:
             log(f"tray-nav decks: {exc}")
@@ -670,10 +742,10 @@ def _restore_main():
             pass
 
 
-def _practice_did():
+def _practice_did_live(col):
     """The 'Practice' parent deck id (the Janki question-bank deck), or None."""
     try:
-        d = mw.col.decks.by_name("Practice")
+        d = col.decks.by_name("Practice")
         return int(d["id"]) if d else None
     except Exception:
         return None
@@ -855,29 +927,33 @@ class _DayView(QWidget):
             _study_class(self.items[h]["e"])
 
 
+def _practice_banks_live(col):
+    """First-tier Practice banks, then 'all banks' — rows like _deck_rows."""
+    try:
+        due = {r[1]: r[2] for r in _deck_rows_live(col)}
+    except Exception:
+        due = {}
+    rows = []
+    try:
+        names = sorted((d.name, d.id) for d in col.decks.all_names_and_ids()
+                       if d.name.startswith("Practice::") and d.name.count("::") == 1)
+        for name, did in names:
+            rows.append((name, did, due.get(did, 0), 0, None, False))
+        pid = col.decks.id_for_name("Practice")
+        if pid:
+            rows.append(("Practice (all banks)", pid, due.get(pid, 0), 0, None, False))
+    except Exception:
+        rows = []
+    return rows
+
+
 def _build_practice_list(parent):
     """Practice tab: the Practice deck and its banks; click one to study it."""
     box = QWidget(parent)
     v = QVBoxLayout(box)
     v.setContentsMargins(0, 0, 0, 0)
     v.setSpacing(5)
-    # every bank / sub-bank (collapsed or not) first, then "all banks" at the bottom
-    try:
-        due = {r[1]: r[2] for r in _deck_rows()}
-    except Exception:
-        due = {}
-    rows = []
-    try:
-        names = sorted((d.name, d.id) for d in mw.col.decks.all_names_and_ids()
-                       if d.name.startswith("Practice::") and d.name.count("::") == 1)
-        # first tier only (each bank; studying one includes its sub-banks)
-        for name, did in names:
-            rows.append((name, did, due.get(did, 0), name.count("::") - 1, None, False))
-        pid = mw.col.decks.id_for_name("Practice")
-        if pid:
-            rows.append(("Practice (all banks)", pid, due.get(pid, 0), 0, None, False))
-    except Exception:
-        rows = []
+    rows = _practice_banks()
     if not rows:
         lbl = QLabel("No practice banks yet")
         lbl.setObjectName("cnt")
@@ -1944,6 +2020,7 @@ def show_navigator() -> None:
         _prepare_over_fullscreen(_nav)
         _nav.show()
         _animate_open(_nav, _final_pos)
+        QTimer.singleShot(400, refresh_data_bg)   # fresh counts for next time
         # Re-assert AFTER show: Qt rewrites the NSPanel's style mask / collection
         # behavior during show(), which would clobber the non-activating + all-Spaces
         # flags and let a visible Anki window pull its Space forward. No raise_()/
