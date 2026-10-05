@@ -537,6 +537,36 @@ def _practice_banks():
     return _DATA["prac"]
 
 
+_prebuilt = None
+_prebuild_timer = None
+
+
+def _prebuild():
+    """Build the next tray while nobody's looking, so opening it is just a show()."""
+    global _prebuilt
+    try:
+        if getattr(mw, "col", None) is None or (_nav is not None and _nav.isVisible()):
+            return
+        new = _build()
+        old, _prebuilt = _prebuilt, new
+        if old is not None:
+            old.deleteLater()
+    except Exception as exc:
+        log(f"tray prebuild: {exc}")
+
+
+def schedule_prebuild(ms=400):
+    global _prebuild_timer
+    try:
+        if _prebuild_timer is None:
+            _prebuild_timer = QTimer(mw)
+            _prebuild_timer.setSingleShot(True)
+            _prebuild_timer.timeout.connect(_prebuild)
+        _prebuild_timer.start(ms)
+    except Exception:
+        pass
+
+
 def refresh_data_bg(*_a):
     """Re-read the tray's data off the main thread (debounced by the busy flag)."""
     if _data_busy[0] or getattr(mw, "col", None) is None:
@@ -551,7 +581,10 @@ def refresh_data_bg(*_a):
 
         def done(r):
             _data_busy[0] = False
+            changed = r != (_DATA["rows"], _DATA["pdid"], _DATA["prac"])
             _DATA["rows"], _DATA["pdid"], _DATA["prac"] = r
+            if changed or _prebuilt is None:
+                schedule_prebuild(200)          # next open uses the fresh data
 
         def failed(_e):
             _data_busy[0] = False
@@ -579,6 +612,7 @@ def install_data_cache():
     try:
         from aqt import gui_hooks
         gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(2500, refresh_data_bg))
+        gui_hooks.profile_did_open.append(lambda: schedule_prebuild(4000))   # ready early
         gui_hooks.operation_did_execute.append(_schedule_refresh)
     except Exception:
         pass
@@ -1906,6 +1940,7 @@ def _animate_open(win, final_pos) -> None:
 def _hide() -> None:
     global _nav
     _remove_global_dismiss()
+    schedule_prebuild(500)                     # the next open is built in the background
     if _nav is not None:
         try:
             _nav.hide()
@@ -1998,13 +2033,16 @@ def show_navigator() -> None:
         # clears _keep_hidden via _restore_main).
         was_hidden = not mw.isVisible()
         _keep_hidden = was_hidden
-        if _nav is not None:
+        global _prebuilt
+        fresh = _prebuilt                      # built in the background, hidden
+        _prebuilt = None
+        if _nav is not None and _nav is not fresh:
             try:
                 _nav.close(); _nav.deleteLater()
             except Exception:
                 pass
             _nav = None
-        _nav = _build()
+        _nav = fresh if fresh is not None else _build()
         try:                                   # never taller than half the screen
             from aqt.qt import QGuiApplication
             scr = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
