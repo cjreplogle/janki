@@ -7,7 +7,7 @@ transitions, toolbar handling and keyboard focus.
   • each class is a block at its time; matched lectures are blue, fuzzy matches have an
     amber edge, unmatched events are grey
   • click a class → Study (a temporary filtered deck of that lecture's due + new
-    cards; reviews count normally), Show tags, or open it in Load Lectures
+    cards; reviews count normally), Show tags, or open it in the Lecture wizard
   • ‹ / › / Today to change week
 
 Only the user's own Janki reads their calendar, locally (lectures.events_between).
@@ -230,13 +230,13 @@ def _week_html():
     seg = "<span class='jkc-pill'></span>" + "".join(
         "<button class='jkc-seg%s' data-k='%s' onclick=\"jkcMode('%s')\">%s</button>"
         % (" on" if mode == k else "", k, k, l)
-        for k, l in (("1", "Day"), ("3", "3 Days"), ("week", "Week")))
+        for k, l in (("1", "Day"), ("3", "3-day"), ("week", "Week")))
     empty = ("" if evs else
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
                 "" if lectures._cfg().get("ics_path") else
-                " — import your calendar in Load Lectures (⌘L)"))
-    # view switch left · ‹ Today date › centred · Load Lectures right
+                " — import your calendar in the Lecture wizard (⌘L)"))
+    # view switch left · ‹ Today date › centred · Lecture wizard right
     bar = ("<div class='jkc-bar'>"
            "<div class='jkc-l'><span class='jkc-segs'>%s</span></div>"
            "<div class='jkc-c'><button onclick=\"jkcNav('prev')\">‹</button>"
@@ -244,7 +244,7 @@ def _week_html():
            "<button onclick=\"jkcNav('next')\">›</button></div>"
            "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
            "<button onclick=\"pycmd('janki:cal:loader')\">"
-           "Load Lectures…</button></div></div>" % (seg, label))
+           "Lecture wizard…</button></div></div>" % (seg, label))
     grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
             "style='height:%dpx'>%s</div>%s</div>" % (len(days), grid_h, hours, "".join(cols)))
     return bar + empty + grid
@@ -408,9 +408,9 @@ def _event_menu(i):
         a_study = menu.addAction("Study this lecture (due + new)")
         a_tags = menu.addAction("Show its tags…")
     else:
-        na = menu.addAction("No lecture matched — fix it in Load Lectures")
+        na = menu.addAction("No lecture matched — fix it in the Lecture wizard")
         na.setEnabled(False)
-    a_load = menu.addAction("Open this day in Load Lectures…")
+    a_load = menu.addAction("Open this day in the Lecture wizard…")
     chosen = menu.exec(QCursor.pos())
     if chosen is None:
         return
