@@ -351,6 +351,15 @@ def _install_global_dismiss() -> None:
                         return
             except Exception:
                 pass
+            # A click ON the panel can reach us as an "other app" click (the glass panel
+            # lets some through) — that closed the tray the moment you clicked Decks /
+            # Today. Only a click outside the panel's frame dismisses.
+            try:
+                if _nav is not None and _nav.isVisible() and \
+                        _nav.frameGeometry().adjusted(-4, -4, 4, 4).contains(QCursor.pos()):
+                    return
+            except Exception:
+                pass
             QTimer.singleShot(0, _hide)
         handler = _HANDLER_T(_on_global_click)
 
