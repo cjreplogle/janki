@@ -74,6 +74,11 @@ def _mode():
 def _set_mode(m, direction="mode"):
     global _anchor
     try:
+        from . import sfx
+        sfx.play("select")
+    except Exception:
+        pass
+    try:
         c = mw.addonManager.getConfig(__name__) or {}
         c["calendar_view"] = m
         mw.addonManager.writeConfig(__name__, c)
@@ -109,11 +114,11 @@ def _days():
     if mode == "week":
         monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=_week)
         return [monday + datetime.timedelta(days=i) for i in range(5)]
+    if mode == "3":                       # 3 Days: consecutive days, weekends included
+        start = _anchor or today
+        return [start + datetime.timedelta(days=i) for i in range(3)]
     start = _anchor or _weekday_on_or_after(today)
-    days = [start]
-    while len(days) < int(mode):
-        days.append(_step_weekdays(days[-1], 1))
-    return days
+    return [start]
 
 
 def _swap(direction):
@@ -134,11 +139,13 @@ def _go_week(delta):
     else:
         if delta is None:
             _anchor = None
+        elif _mode() == "3":
+            _anchor = _days()[0] + datetime.timedelta(days=3 * delta)
         else:
-            _anchor = _step_weekdays(_days()[0], delta * int(_mode()))
+            _anchor = _step_weekdays(_days()[0], delta)
     try:
         from . import sfx
-        sfx.play("tab")
+        sfx.play("move")
     except Exception:
         pass
     _swap("today" if delta is None else ("next" if delta > 0 else "prev"))
@@ -211,9 +218,10 @@ def _week_html():
         label = "%s %d – %s %d, %d" % (monday.strftime("%b"), monday.day,
                                         sunday.strftime("%b"), sunday.day, sunday.year)
     mode = _mode()
-    seg = "".join("<button class='jkc-seg%s' onclick=\"jkcMode('%s')\">%s</button>"
-                  % (" on" if mode == k else "", k, l)
-                  for k, l in (("1", "Day"), ("3", "3 Days"), ("week", "Week")))
+    seg = "<span class='jkc-pill'></span>" + "".join(
+        "<button class='jkc-seg%s' data-k='%s' onclick=\"jkcMode('%s')\">%s</button>"
+        % (" on" if mode == k else "", k, k, l)
+        for k, l in (("1", "Day"), ("3", "3 Days"), ("week", "Week")))
     empty = ("" if evs else
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
@@ -264,9 +272,12 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-bar button:hover{background:rgba(255,255,255,.16);}
 .jkc-lbl{font-weight:600;}
 .jkc-grid{display:grid;grid-template-columns:52px repeat(var(--jkc-n,5),1fr);gap:0 6px;position:relative;}
-.jkc-segs{display:inline-flex;background:rgba(255,255,255,.06);border-radius:9px;padding:2px;margin-right:6px;}
-.jkc-segs .jkc-seg{background:transparent;padding:3px 10px;border-radius:7px;}
-.jkc-segs .jkc-seg.on{background:rgba(156,188,243,.28);color:#cfe0ff;}
+.jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06);border-radius:9px;padding:2px;margin-right:6px;}
+.jkc-segs .jkc-seg{position:relative;z-index:1;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
+.jkc-segs .jkc-seg.on{color:#cfe0ff;}
+/* one pill behind the buttons that glides to the chosen view */
+.jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
+  background:rgba(156,188,243,.28);transition:transform .24s cubic-bezier(.2,.8,.2,1),width .24s cubic-bezier(.2,.8,.2,1);}
 .jkc-hours{position:relative;margin-top:52px;}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
@@ -307,7 +318,10 @@ _JS = """<script>(function(){
  window.jkcSwap=function(inner,dir){
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
+     var keep=root.querySelector('.jkc-l');            // the view switch keeps gliding
      root.innerHTML=inner;
+     var fresh=root.querySelector('.jkc-l');
+     if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      var g=grid(); if(!g||!g.animate)return;
      g.style.willChange='transform,opacity';
      var from=dir==='next'?'translateX(28px)':(dir==='prev'?'translateX(-28px)':
@@ -318,8 +332,21 @@ _JS = """<script>(function(){
    }
    if(outDone){var p=outDone;outDone=null;p.then(put);} else put();
  };
- // Day / 2 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
+ // The view switch's pill: placed under the active option, glides when it changes.
+ function pill(btn,anim){var p=document.querySelector('#jkc .jkc-pill');if(!p||!btn)return;
+   if(!anim)p.style.transition='none';
+   p.style.width=btn.offsetWidth+'px';p.style.transform='translateX('+(btn.offsetLeft-2)+'px)';
+   if(!anim){void p.offsetWidth;p.style.transition='';}}
+ function pillInit(){pill(document.querySelector('#jkc .jkc-seg.on'),false);}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',pillInit);
+ else pillInit();
+ // Day / 3 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
  window.jkcMode=function(k){
+   var b=document.querySelector('#jkc .jkc-seg[data-k="'+k+'"]');
+   if(b&&!b.classList.contains('on')){
+     document.querySelectorAll('#jkc .jkc-seg').forEach(function(x){x.classList.remove('on');});
+     b.classList.add('on'); pill(b,true);
+   }
    var g=grid(), n=k==='week'?5:parseInt(k,10);
    var cur=g?parseInt(getComputedStyle(g).getPropertyValue('--jkc-n'),10)||5:5;
    if(n===cur){return;}
@@ -358,6 +385,11 @@ def _event_menu(i):
         return
     e = _shown[i]
     m = lectures.match_event(e["summary"])
+    try:
+        from . import sfx
+        sfx.play("select")
+    except Exception:
+        pass
     menu = QMenu(mw)
     head = menu.addAction(e["summary"] + (("  →  " + m["display"]) if m and
                                           _norm(m["display"]) != _norm(e["summary"]) else ""))
