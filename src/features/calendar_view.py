@@ -496,7 +496,27 @@ def install_toolbar(links, toolbar):
         log("calendar toolbar: %s" % e)
 
 
+def _prewarm():
+    """Read this week's events + their lecture matches ahead of time (idle only), so
+    opening the Calendar is instant."""
+    try:
+        from ..integrations import lectures
+        for e in lectures.events_between(_days()[0], _days()[-1]):
+            lectures.match_event(e["summary"])
+    except Exception as e:
+        log("calendar prewarm: %s" % e)
+
+
+def _schedule_prewarm():
+    try:
+        from . import stats_embed
+        stats_embed._when_idle(_prewarm, 8000)       # waits while you navigate/study
+    except Exception:
+        pass
+
+
 def install():
+    gui_hooks.profile_did_open.append(_schedule_prewarm)
     gui_hooks.deck_browser_will_render_content.append(_on_render)
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
     gui_hooks.state_did_change.append(_on_state)
