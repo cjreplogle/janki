@@ -649,8 +649,7 @@ def _apply_deck_visibility(animate: bool = False) -> None:
                     lay_ = w.parentWidget().layout() if w.parentWidget() else None
                     gap = max(0, lay_.spacing()) if lay_ is not None else 0
                     break
-            n = min(5, max(1, n_visible))          # five decks, then it scrolls
-            _deck_scroll.setMaximumHeight(n * row_h + (n - 1) * gap + 6)
+            _deck_scroll.setFixedHeight(_PAGE_H)   # five decks, then it scrolls
         except Exception:
             pass
     QTimer.singleShot(0, _resize_nav)
@@ -681,6 +680,12 @@ def _practice_did():
 
 
 _tray_mode_widgets = {}
+
+
+# One size for every tray tab page: five 28px rows (Decks / Practice), the day view
+# scaled to the same height — switching tabs never changes the tray's size.
+_ROW_H, _ROW_GAP = 28, 4
+_PAGE_H = 5 * _ROW_H + 4 * _ROW_GAP + 4
 
 
 class _SegTabs(QWidget):
@@ -767,6 +772,8 @@ class _DayView(QWidget):
             ln, nl = lanes.get(i, (0, 1))
             self.items.append({"e": e, "col": col, "lane": ln, "lanes": nl})
         self.hover = None
+        # 8am–1pm fills the page exactly; a longer day scrolls at the same scale
+        self.PX_H = (_PAGE_H - 12) / 5.0
         self.setFixedHeight(int((hi - lo) / 60 * self.PX_H) + 12)
 
     def _rect(self, it):
@@ -888,9 +895,10 @@ def _build_practice_list(parent):
             c.setObjectName("cnt")
             c.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             row.addWidget(c)
-        b.setMinimumHeight(28)
+        b.setFixedHeight(_ROW_H)
         b.clicked.connect(lambda _c=False, d=did: _study_deck(d))
         v.addWidget(b)
+    v.setSpacing(_ROW_GAP)
     v.addStretch(1)
     box._jk_rows = len(rows)
     return box
@@ -1420,6 +1428,7 @@ def _build() -> "QWidget":
         mode = "decks"
     seg_keys = ["decks"] + (["practice"] if pdid is not None else []) + ["today"]
     seg = _SegTabs(root, [k.capitalize() for k in seg_keys])
+    seg.setFixedHeight(26)
     lay.addWidget(seg)
     today_box = _build_today_list(root)
     prac_box = _build_practice_list(root) if pdid is not None else None
@@ -1516,6 +1525,9 @@ def _build() -> "QWidget":
             cl.setStyleSheet("background:transparent;")
             row.addWidget(cl)
         b.setToolTip(name)
+        b.setFixedHeight(_ROW_H)
+        if toggle_btn is not None:
+            toggle_btn.setFixedHeight(_ROW_H)
         b.clicked.connect(lambda _c=False, d=did: _study_deck(d))
         crow.addWidget(b, 1)
 
@@ -1545,8 +1557,9 @@ def _build() -> "QWidget":
         return sa
     today_page = _scrolled(today_box)
     prac_page = _scrolled(prac_box) if prac_box is not None else None
-    if prac_page is not None and getattr(prac_box, "_jk_rows", 0) > 5:
-        prac_page.setMaximumHeight(5 * 28 + 4 * 5 + 2)    # five banks, then it scrolls
+    today_page.setFixedHeight(_PAGE_H)
+    if prac_page is not None:
+        prac_page.setFixedHeight(_PAGE_H)                 # five banks, then it scrolls
     stack.addWidget(scroll)
     stack.addWidget(today_page)
     if prac_page is not None:
