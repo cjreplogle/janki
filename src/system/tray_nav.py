@@ -155,7 +155,8 @@ class _SmoothPainter(QObject):
             if name == "navRoot":
                 bg, bd, r = _ROOT_BG, None, _ROOT_RADIUS
             else:
-                spec = _PAINT.get(name, _PAINT[""] if name not in ("expander",) else None)
+                spec = getattr(obj, "_jk_paint", None) or \
+                    _PAINT.get(name, _PAINT[""] if name not in ("expander",) else None)
                 if spec is None:
                     return False
                 base, hov, prs, bd, r = spec
@@ -705,18 +706,16 @@ def _build_today_list(parent):
         m = lectures.peek_match(e["summary"])
         known = bool(m and m is not lectures._PENDING)
         r, g, bl = rgb[cv._course_colour(e["summary"])] if known else (154, 160, 170)
-        b.setStyleSheet(
-            "QPushButton{background:rgba(%d,%d,%d,%.2f);border:1px solid rgba(%d,%d,%d,.6);"
-            "border-radius:8px;text-align:left;}"
-            "QPushButton:hover{background:rgba(%d,%d,%d,.34);}"
-            % (r, g, bl, .2 if known else .08, r, g, bl, r, g, bl))
+        # painted by the tray's own smooth painter (no per-button stylesheet: those
+        # fought it and made the Today list slow to show)
+        b._jk_paint = ((r, g, bl, .2 if known else .08), .34, .42, (r, g, bl, .6), 8)
         star = " <span style='color:#ff9d8a'>★</span>" if e.get("mandatory") else ""
         nm = QLabel("<b>%s</b>%s" % (e["summary"], star))
         nm.setTextFormat(Qt.TextFormat.RichText)
-        nm.setStyleSheet("background:transparent;border:none;")
+        nm.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         tm = QLabel(when)
         tm.setObjectName("cnt")
-        tm.setStyleSheet("background:transparent;border:none;")
+        tm.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         row.addWidget(nm, 1)
         row.addWidget(tm)
         b.setMinimumHeight(30)
