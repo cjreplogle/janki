@@ -1864,9 +1864,15 @@ _JS = """<script>(function(){
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      pillInit();nowLine();applyCounts();watchCounts();
-     if(dir==='wfade'){                                // Weak areas: lectures fade in
-       wfadeEls().forEach(function(el){if(el.animate)el.animate([{opacity:0},{opacity:1}],
-         {duration:200,easing:EASE});});
+     // Weak areas: the lectures fade in — after a mode switch, and when results replace
+     // the "Looking through…" state (that used to pop in abruptly)
+     if(dir==='wfade'||(dir==='refresh'&&document.querySelector('#jkc .jkw'))){
+       var fs=[];
+       wfadeEls().forEach(function(el){if(el.animate)fs.push(el.animate(
+         [{opacity:0},{opacity:1}],{duration:280,easing:'cubic-bezier(0,0,.2,1)'})
+         .finished.catch(function(){}));});
+       if(fs.length){var all=Promise.all(fs);inDone=all;
+         all.then(function(){if(inDone===all)inDone=null;});}   // updates wait for it
        return;}
      if(selAfter){var sa=selAfter;selAfter=null;
        setTimeout(function(){var n=cols().length;selDay(sa==='first'?0:n-1,selRef);},0);}
@@ -2048,7 +2054,7 @@ _JS = """<script>(function(){
    if(btn&&btn.classList.contains('on'))return;          // already showing
    var ps=[];                       // only the lectures below fade — not the header
    wfadeEls().forEach(function(el){if(el.animate)ps.push(el.animate([{opacity:1},{opacity:0}],
-     {duration:110,easing:'ease-in',fill:'forwards'}).finished.catch(function(){}));});
+     {duration:140,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'}).finished.catch(function(){}));});
    if(ps.length)outDone=Promise.all(ps);
    pycmd('janki:cal:weakmode:'+k);};
  function wfadeEls(){return Array.prototype.slice.call(document.querySelectorAll(
