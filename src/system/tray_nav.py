@@ -2049,6 +2049,10 @@ def show_navigator() -> None:
     if _nav is not None and _nav.isVisible() and _natively_on_screen(_nav):
         _hide()
         return
+    # The same icon click may have JUST closed it (an outside-click monitor saw it
+    # first) — then it's a "close" click, not a reopen.
+    if time.time() - _last_hidden < 0.35:
+        return
     try:
         from ..features import sfx
         sfx.play("tray")                         # soft wipe as the menu opens
