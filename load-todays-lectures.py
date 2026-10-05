@@ -1167,6 +1167,7 @@ def _make_switch_class():
     class Switch(QCheckBox):
         def __init__(self, text=""):
             super().__init__(text)
+            self._jk_self_painted = True     # glass painter: don't draw a box over us
             self._pos = 0.0
             self.setCursor(_Q.CursorShape.PointingHandCursor)
             self._an = QPropertyAnimation(self, b"knob", self)

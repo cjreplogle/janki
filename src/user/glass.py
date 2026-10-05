@@ -1506,8 +1506,8 @@ class _SmoothControls(QObject):
         if t != QEvent.Type.Paint and t != QEvent.Type.Polish:
             return False
         try:
-            if not hasattr(obj, "window"):
-                return False
+            if not hasattr(obj, "window") or getattr(obj, "_jk_self_painted", False):
+                return False                    # e.g. slide switches draw themselves
             if obj.window() not in _glass_dialogs and not _in_glass_host(obj):
                 return False
             from aqt.qt import (QPushButton, QComboBox, QLineEdit, QAbstractSpinBox,
