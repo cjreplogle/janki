@@ -3029,9 +3029,29 @@ def events_between(d0, d1):
     return sorted(evs, key=lambda e: (e["date"], e["start"] if e["start"] is not None else -1))
 
 
+_MATCH_CACHE = {"key": None, "map": {}}
+
+
 def match_event(title):
     """The lecture a calendar title belongs to, by the wizard's rules (aliases →
-    exact → fuzzy): {"key", "display", "searches", "fuzzy"} or None."""
+    exact → fuzzy): {"key", "display", "searches", "fuzzy"} or None. Remembered per
+    title until the tag map or aliases change (fuzzy matching is the slow part)."""
+    try:
+        akey = (_MAP_CACHE.get("key"), _src_mtime(_alias_path()))
+        if _MATCH_CACHE["key"] != akey:
+            _MATCH_CACHE["key"], _MATCH_CACHE["map"] = akey, {}
+        if title in _MATCH_CACHE["map"]:
+            return _MATCH_CACHE["map"][title]
+        res = _match_event_uncached(title)
+        _MATCH_CACHE["key"] = (_MAP_CACHE.get("key"), akey[1])   # map may have just loaded
+        _MATCH_CACHE["map"][title] = res
+        return res
+    except Exception as e:
+        _log("match_event: %s" % e)
+        return None
+
+
+def _match_event_uncached(title):
     try:
         families = _enabled_families()
         m, keys, _opts = _get_map(families)

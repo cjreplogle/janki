@@ -78,7 +78,7 @@ def _set_mode(m):
     except Exception:
         pass
     _anchor = None
-    _redraw()
+    _swap("mode")
 
 
 _anchor = None         # first day shown in Day / 2-Day view (None = today)
@@ -114,6 +114,17 @@ def _days():
     return days
 
 
+def _swap(direction):
+    """Replace the days in the open page (no reload): the page's out-slide is already
+    running; jkcSwap drops the new days in and slides them from the other side."""
+    try:
+        mw.web.eval("window.jkcSwap&&window.jkcSwap(%s,%s)"
+                    % (json.dumps(_week_html()), json.dumps(direction)))
+    except Exception as e:
+        log("calendar swap: %s" % e)
+        _redraw()
+
+
 def _go_week(delta):
     global _week, _anchor
     if _mode() == "week":
@@ -128,7 +139,7 @@ def _go_week(delta):
         sfx.play("tab")
     except Exception:
         pass
-    _redraw()
+    _swap("today" if delta is None else ("next" if delta > 0 else "prev"))
 
 
 # ------------------------------------------------------------------- render ------
@@ -217,7 +228,11 @@ def _week_html():
            "Load Lectures…</button></div></div>" % (seg, label))
     grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
             "style='height:%dpx'>%s</div>%s</div>" % (len(days), grid_h, hours, "".join(cols)))
-    return _CSS + "<div id='jkc'>" + bar + empty + grid + "</div>" + _JS
+    return bar + empty + grid
+
+
+def _page_html():
+    return _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
 
 
 def _is_allday_kind(summary):
@@ -266,27 +281,35 @@ _CSS = """<style>
 </style>"""
 
 _JS = """<script>(function(){
- // ‹ / ›: the current days slide out that way, then the new ones slide in from the
- // other side (transform + opacity only — nothing reflows).
- var EASE='cubic-bezier(.2,.8,.2,1)';
+ // ‹ / ›: the days slide out while Python builds the next ones (in parallel, no page
+ // reload); jkcSwap then drops them in and slides them in from the other side.
+ // Transform + opacity only, on its own layer, so it stays smooth.
+ var EASE='cubic-bezier(.2,.8,.2,1)', outDone=null;
+ function grid(){return document.querySelector('#jkc .jkc-grid');}
  window.jkcNav=function(dir){
-   var g=document.querySelector('.jkc-grid');
-   try{sessionStorage.setItem('jkcSlide',dir);}catch(x){}
-   if(g&&g.animate&&dir!=='today'){
-     var dx=dir==='next'?-36:36;
-     g.animate([{transform:'none',opacity:1},{transform:'translateX('+dx+'px)',opacity:0}],
-               {duration:110,easing:'ease-in',fill:'forwards'});
-     setTimeout(function(){pycmd('janki:cal:'+dir);},100);
-   } else pycmd('janki:cal:'+dir);
+   var g=grid();
+   if(g&&g.animate&&(dir==='next'||dir==='prev')){
+     g.style.willChange='transform,opacity';
+     var a=g.animate([{transform:'none',opacity:1},
+                      {transform:'translateX('+(dir==='next'?-28:28)+'px)',opacity:0}],
+                     {duration:120,easing:'ease-in',fill:'forwards'});
+     outDone=a.finished.catch(function(){});
+   } else outDone=null;
+   pycmd('janki:cal:'+dir);
  };
- function slideIn(){var d=null;try{d=sessionStorage.getItem('jkcSlide');
-   sessionStorage.removeItem('jkcSlide');}catch(x){}
-   var g=document.querySelector('.jkc-grid'); if(!d||!g||!g.animate)return;
-   var dx=d==='next'?36:(d==='prev'?-36:0);
-   g.animate([{transform:'translateX('+dx+'px)',opacity:0},{transform:'none',opacity:1}],
-             {duration:240,easing:EASE});}
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',slideIn);
- else slideIn();
+ window.jkcSwap=function(inner,dir){
+   function put(){
+     var root=document.getElementById('jkc'); if(!root)return;
+     root.innerHTML=inner;
+     var g=grid(); if(!g||!g.animate)return;
+     g.style.willChange='transform,opacity';
+     var from=dir==='next'?28:(dir==='prev'?-28:0);
+     var a=g.animate([{transform:'translateX('+from+'px)',opacity:0},
+                      {transform:'none',opacity:1}],{duration:dir==='next'||dir==='prev'?230:160,easing:EASE});
+     a.finished.then(function(){g.style.willChange='';}).catch(function(){});
+   }
+   if(outDone){var p=outDone;outDone=null;p.then(put);} else put();
+ };
  document.addEventListener('click',function(e){
    var ev=e.target.closest&&e.target.closest('.jkc-ev'); if(!ev)return;
    pycmd('janki:cal:ev:'+ev.getAttribute('data-i'));
@@ -299,7 +322,7 @@ def _on_render(deck_browser, content):
         return
     try:
         content.tree = ""
-        content.stats = _week_html()
+        content.stats = _page_html()
     except Exception as e:
         log("calendar render: %s" % e)
 
@@ -430,7 +453,7 @@ def install_toolbar(links, toolbar):
     """A 'Calendar' toolbar item (after Practice); Decks/Practice/Stats leave it."""
     try:
         link = toolbar.create_link(cmd="janki_calendar", label="Calendar",
-                                   func=open_calendar, tip="This week's classes",
+                                   func=open_calendar, tip="",
                                    id="janki_calendar")
         links.insert(0, link)                    # furthest left in the toolbar
         # Light blue (like Practice's green). Icon or the word "Calendar", per
@@ -446,11 +469,15 @@ def install_toolbar(links, toolbar):
                    "<circle cx='16' cy='14.5' r='.6' fill='black'/></svg>")
             import urllib.parse as _up
             uri = "data:image/svg+xml," + _up.quote(svg)
-            # sized to one line of toolbar text so the item isn't taller than the rest
-            style += ("#janki_calendar{font-size:0 !important;}"
-                      "#janki_calendar::before{content:'';display:inline-block;"
-                      "vertical-align:middle;width:1.15rem;height:1.15rem;margin-top:-.15rem;"
-                      "background:currentColor;-webkit-mask:url(\"%s\") center/contain "
+            # The label keeps its normal font size (so the item has exactly the same line
+            # height + baseline as Decks/Add/…), but is invisible and clipped to the
+            # icon's width; the icon is centred on top of it.
+            style += ("#janki_calendar{position:relative;display:inline-block;width:1.2em;"
+                      "white-space:nowrap;color:transparent !important;"
+                      "clip-path:inset(0);vertical-align:baseline;}"
+                      "#janki_calendar::before{content:'';position:absolute;left:50%%;top:50%%;"
+                      "width:1.15em;height:1.15em;transform:translate(-50%%,-50%%);"
+                      "background:#a8d0ff;-webkit-mask:url(\"%s\") center/contain "
                       "no-repeat;mask:url(\"%s\") center/contain no-repeat;}" % (uri, uri))
         links.append("<style>%s</style>" % style)
         lh = getattr(toolbar, "link_handlers", None)
