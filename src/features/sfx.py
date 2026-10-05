@@ -4,6 +4,7 @@ Short original sounds (assets/sounds, made by tools/make_sfx.py) for keyboard/re
 navigation and reviewing. Played with QSoundEffect (low latency, preloaded). Volume
 0 = off; navigation and review sounds can be switched off separately."""
 import os
+import sys
 
 from aqt import gui_hooks, mw
 
@@ -68,6 +69,9 @@ def play(name, force=False):
             return
         if name in REVIEW and not c.get("sfx_review", True):
             return
+    if sys.platform.startswith("win"):
+        _play_windows(name, c, vol, force)
+        return
     fx = _effect(name)
     if fx is None:
         return
@@ -84,6 +88,61 @@ def play(name, force=False):
 def loaded():
     """A file finished importing / loading successfully."""
     play("loaded")
+
+
+# Windows: Qt's QSoundEffect stayed silent on some setups (Parallels VMs, some
+# PCs) while the exit sound — played by Windows itself — worked. So Windows always
+# uses the system player (winsound, async). It has no volume control, so each sound
+# is played from a copy pre-scaled to the current level (cached per level).
+_scaled_dir = None
+
+
+def _scaled_copy(path, gain):
+    global _scaled_dir
+    import tempfile, wave, struct
+    gain = max(0.0, min(1.0, gain))
+    step = int(round(gain * 20))                 # 5 % steps → few cached files
+    if step <= 0:
+        return None
+    if _scaled_dir is None:
+        _scaled_dir = tempfile.mkdtemp(prefix="janki_sfx_")
+    out = os.path.join(_scaled_dir, "%s_%02d.wav" % (
+        os.path.splitext(os.path.basename(path))[0] + "_" + str(abs(hash(path)) % 9999), step))
+    if os.path.isfile(out):
+        return out
+    try:
+        with wave.open(path, "rb") as r:
+            params = r.getparams()
+            frames = r.readframes(r.getnframes())
+        n = len(frames) // 2
+        g = step / 20.0
+        vals = struct.unpack("<%dh" % n, frames)
+        scaled = struct.pack("<%dh" % n, *(int(v * g) for v in vals))
+        with wave.open(out, "wb") as w:
+            w.setparams(params)
+            w.writeframes(scaled)
+        return out
+    except Exception as e:
+        log("sfx scale: %s" % e)
+        return path
+
+
+def _play_windows(name, c, vol, force):
+    try:
+        import winsound
+        path = _path(name)
+        if not os.path.isfile(path):
+            return
+        gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0
+        if not force and name in _IN_REVIEW_SOFT:
+            gain *= 0.5
+        level = (vol if vol > 0 else 30) / 100.0 * gain
+        f = _scaled_copy(path, level)
+        if f:
+            winsound.PlaySound(f, winsound.SND_FILENAME | winsound.SND_ASYNC
+                               | winsound.SND_NODEFAULT)
+    except Exception as e:
+        log("sfx win: %s" % e)
 
 
 def preload():
