@@ -60,6 +60,12 @@ def close():
     _view = False
     _detail = None
     _sync_back()
+    try:                                       # never leave the bottom strip hidden
+        bw = getattr(mw, "bottomWeb", None)
+        if bw is not None and not bw.isVisible():
+            bw.setVisible(True)
+    except Exception:
+        pass
     if was:
         QTimer.singleShot(0, _redraw_bottom)     # Anki's own buttons back
 
@@ -2537,6 +2543,13 @@ def _redraw_bottom():
     try:
         if getattr(mw, "state", None) == "deckBrowser":
             mw.deckBrowser._drawButtons()
+        # Weak areas has no bottom buttons: drop the whole strip so the list reaches
+        # the window's bottom (an empty bar left a band of dead space)
+        bw = getattr(mw, "bottomWeb", None)
+        if bw is not None:
+            want = not (_view and _detail == WEAK and mw.state == "deckBrowser")
+            if bw.isVisible() != want:
+                bw.setVisible(want)
     except Exception:
         pass
 
