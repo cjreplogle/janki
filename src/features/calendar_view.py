@@ -793,7 +793,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
 #jkc .jkc-shirt{vertical-align:-1px;margin-right:5px;opacity:.85;}
-#jkc .jkc-dress{cursor:default;transform:none !important;filter:none !important;}
+#jkc .jkc-dress{color:#ff9d8a !important;border-color:rgba(255,157,138,.6) !important;background:rgba(255,157,138,.1) !important;cursor:default;transform:none !important;filter:none !important;}
 /* where you are in the day: a thin red line with a dot on today's column */
 #jkc .jkc-now{position:absolute;left:0;right:0;height:0;z-index:5;pointer-events:none;display:none;
   border-top:2px solid #ff6b6b;}
