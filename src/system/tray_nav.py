@@ -892,6 +892,7 @@ def _build_practice_list(parent):
         b.clicked.connect(lambda _c=False, d=did: _study_deck(d))
         v.addWidget(b)
     v.addStretch(1)
+    box._jk_rows = len(rows)
     return box
 
 
@@ -1544,6 +1545,8 @@ def _build() -> "QWidget":
         return sa
     today_page = _scrolled(today_box)
     prac_page = _scrolled(prac_box) if prac_box is not None else None
+    if prac_page is not None and getattr(prac_box, "_jk_rows", 0) > 5:
+        prac_page.setMaximumHeight(5 * 28 + 4 * 5 + 2)    # five banks, then it scrolls
     stack.addWidget(scroll)
     stack.addWidget(today_page)
     if prac_page is not None:
