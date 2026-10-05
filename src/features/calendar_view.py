@@ -1756,6 +1756,14 @@ _JS = """<script>(function(){
    if(x&&y&&pendA){x.textContent='Study unsuspended cards ('+pendA[0]+')';
      y.textContent='Study all cards ('+pendA[1]+')';pendA=null;}}
  window.jkcCounts=function(h,a,s){if(h!=null)pendC=h;if(a!=null)pendA=[a,s];applyCounts();};
+ // Safety net: a class page still showing "…" asks for its counts again (up to 8×)
+ var cWatch=null,cTries=0;
+ function watchCounts(){clearTimeout(cWatch);cTries=0;tick();
+   function tick(){cWatch=setTimeout(function(){
+     var c=document.getElementById('jkd-counts');
+     if(!c||!document.querySelector('#jkc .jkc-detail'))return;
+     if(c.textContent.trim().charAt(0)==='…'&&cTries++<8){
+       try{pycmd('janki:cal:recount');}catch(x){}tick();}},1200);}}
  var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
    // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
@@ -1771,7 +1779,7 @@ _JS = """<script>(function(){
      root.innerHTML=inner;
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
-     pillInit();nowLine();applyCounts();
+     pillInit();nowLine();applyCounts();watchCounts();
      if(selAfter){var sa=selAfter;selAfter=null;
        setTimeout(function(){var n=cols().length;selDay(sa==='first'?0:n-1,selRef);},0);}
      var g=grid(); if(!g||!g.animate)return;
@@ -1819,6 +1827,8 @@ _JS = """<script>(function(){
  window.addEventListener('load',function(){pillInit();});
  window.addEventListener('resize',function(){pillInit();});
  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){pillInit();});
+ document.addEventListener('DOMContentLoaded',function(){watchCounts();});
+ if(document.readyState!=='loading')setTimeout(watchCounts,0);
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){pillInit();});
  else pillInit();
  // Day / 3 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
@@ -2198,6 +2208,22 @@ def on_js_message(handled, message, context):
                     except Exception:
                         pass
                     _recount(lectures.match_event(_shown[_detail]["summary"]))
+        elif cmd == "recount":                 # the page is still showing "…"
+            if _detail is not None and 0 <= _detail < len(_shown):
+                from ..integrations import lectures
+                title = _shown[_detail]["summary"]
+                m = lectures.peek_match(title)
+                if m is lectures._PENDING:
+                    _detail_bg(title)
+                elif m:
+                    if not _fams_on:
+                        _fams_on.update({_fam(x) for x in m["searches"]} - _fams_off())
+                    c = _counts_cache.get(_count_key(m))
+                    if c:                          # known already: just show it
+                        _set_study_counts(c[3] - c[2], c[3])
+                        _set_counts(_counts_html(c))
+                    else:
+                        _recount(m)
         elif cmd == "det:lms":
             if _detail is not None and 0 <= _detail < len(_shown) and _shown[_detail].get("url"):
                 from aqt.utils import openLink
