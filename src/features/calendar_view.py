@@ -1185,6 +1185,9 @@ def _show_tags(m):
     showText("\n".join(lines), title="Tags for this lecture", minWidth=520)
 
 
+_PRACTICE_MIN = 3     # fewer related questions than this → treat as none
+
+
 def practice_event(e):
     """Practice questions related to this class (its lecture's concept tags first,
     then wording), in a temporary filtered deck — judged like the Practice deck."""
@@ -1203,7 +1206,13 @@ def practice_event(e):
         srch = [x for x in m["searches"] if _fam(x) not in off] or m["searches"]
         leaves = qbank._leaf_keys(list(qbank._leaves_from_searches(srch)))
         toks = qbank._tokens(name + " " + e["summary"])
-        return qbank.intersperse_card_ids(leaves, toks, 40)
+        if not leaves:
+            return []
+        # concept-tag matches only (wording overlap pulled in unrelated questions), and
+        # a handful at least — a stray hit or two means this lecture has no real bank
+        ids = qbank.intersperse_card_ids(leaves, toks, 40, use_text_fallback=False,
+                                         exact_only=True)
+        return ids if len(ids) >= _PRACTICE_MIN else []
 
     def done(cids):
         col = mw.col

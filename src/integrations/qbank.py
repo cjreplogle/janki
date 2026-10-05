@@ -1074,7 +1074,7 @@ def _card_cover(tokens, qtok):
 
 
 def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
-                    leaf_weights=None, relaxed=False):
+                    leaf_weights=None, relaxed=False, exact_only=False):
     """Rank complete questions across ENABLED banks by relevance to concept-leaf
     `leaves` (tag match wins decisively), then fuzzy leaf match, then IDF-weighted
     text overlap of `tokens`. Returns question dicts best-first, each annotated with
@@ -1122,7 +1122,7 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
                 if (inter or tokens) else 0.0
             if inter:
                 score = 10.0 + _w(inter) + 4.0 * rel  # exact tag/concept match wins
-            else:
+            elif not exact_only:
                 fuzz = _fuzzy_leaf_score(card_word_sets, qleaves)
                 if fuzz > 0:
                     score = 6.0 + fuzz + 2.0 * rel   # near-miss tag variant
@@ -1245,14 +1245,16 @@ def find_for_card(card, limit=5):
 
 
 def intersperse_card_ids(leaves, tokens, limit, use_text_fallback=True,
-                         exclude_cids=None, leaf_weights=None, relaxed=False):
+                         exclude_cids=None, leaf_weights=None, relaxed=False,
+                         exact_only=False):
     """Resolve the top-ranked matching questions to REAL Practice **card ids** (best
     first), for interspersing into a live review session. Skips suspended cards
     (already retired) and any in `exclude_cids`. Returns up to `limit` card ids."""
     exclude_cids = set(exclude_cids or ())
     out = []
     for q in _rank_questions(leaves, tokens, use_text_fallback=use_text_fallback,
-                             leaf_weights=leaf_weights, relaxed=relaxed):
+                             leaf_weights=leaf_weights, relaxed=relaxed,
+                             exact_only=exact_only):
         if len(out) >= limit:
             break
         qid = q.get("_qid")
