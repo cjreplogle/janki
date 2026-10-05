@@ -681,6 +681,65 @@ def _practice_did():
 _tray_mode_widgets = {}
 
 
+class _SegTabs(QWidget):
+    """Decks | Practice | Today as one segmented control (like the Calendar's
+    Day / 3-day / Week): a rounded track with a blue pill gliding to the selection."""
+
+    def __init__(self, parent, labels):
+        super().__init__(parent)
+        self.labels = labels
+        self.cur = 0
+        self.pill_x = 0.0                      # animated (in segment units)
+        self.on_pick = None
+        self._anim = None
+        self.setFixedHeight(30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def select(self, i, animate=True):
+        from aqt.qt import QVariantAnimation, QEasingCurve
+        self.cur = i
+        if not animate or not self.isVisible():
+            self.pill_x = float(i)
+            self.update()
+            return
+        if self._anim is not None:
+            self._anim.stop()
+        a = QVariantAnimation(self)
+        a.setStartValue(float(self.pill_x))
+        a.setEndValue(float(i))
+        a.setDuration(220)
+        a.setEasingCurve(QEasingCurve.Type.OutCubic)
+        a.valueChanged.connect(lambda v: (setattr(self, "pill_x", float(v)), self.update()))
+        a.start()
+        self._anim = a
+
+    def paintEvent(self, _ev):
+        from aqt.qt import QPainter, QColor, QRectF, QPen
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255, 18))            # the track
+        p.drawRoundedRect(r, 9, 9)
+        n = max(1, len(self.labels))
+        w = (r.width() - 4) / n
+        pill = QRectF(r.x() + 2 + self.pill_x * w, r.y() + 2, w, r.height() - 4)
+        p.setBrush(QColor(156, 188, 243, 72))            # the gliding pill
+        p.drawRoundedRect(pill, 7, 7)
+        for i, lab in enumerate(self.labels):
+            on = i == self.cur
+            p.setPen(QColor(207, 224, 255) if on else QColor(255, 255, 255, 190))
+            p.drawText(QRectF(r.x() + 2 + i * w, r.y(), w, r.height()),
+                       int(Qt.AlignmentFlag.AlignCenter), lab)
+        p.end()
+
+    def mousePressEvent(self, ev):
+        n = max(1, len(self.labels))
+        i = min(n - 1, max(0, int(ev.position().x() / (self.width() / n))))
+        if i != self.cur and self.on_pick:
+            self.on_pick(i)
+
+
 class _DayView(QWidget):
     """Today's classes drawn on an hour grid (painted, so it's light in the glass tray)."""
     RGB = [(120, 165, 245), (80, 195, 185), (125, 200, 120), (235, 185, 90),
@@ -1350,25 +1409,14 @@ def _build() -> "QWidget":
     hrow.addWidget(opts_btn)
     lay.addLayout(hrow)
 
-    # Decks | Practice | Today — one row of slim tabs, the selected one lit blue.
+    # Decks | Practice | Today — a segmented control like the Calendar's view switch.
     pdid = _practice_did()
     mode = str(_cfg().get("tray_mode", "decks"))
     if mode == "practice" and pdid is None:
         mode = "decks"
-    srow = QHBoxLayout()
-    srow.setContentsMargins(0, 0, 0, 0)
-    srow.setSpacing(4)
-    b_decks = QPushButton("Decks")
-    b_prac = QPushButton("Practice") if pdid is not None else None
-    b_today = QPushButton("Today")
-    tabs = [b for b in (b_decks, b_prac, b_today) if b is not None]
-    for _b in tabs:
-        _b.setCheckable(True)
-        _b.setObjectName("tgl")
-        _b.setFixedHeight(28)                  # slimmer than the other tray buttons
-        _b.setStyleSheet("padding:2px 6px;text-align:center;")   # (fill: the tray painter)
-        srow.addWidget(_b, 1)
-    lay.addLayout(srow)
+    seg_keys = ["decks"] + (["practice"] if pdid is not None else []) + ["today"]
+    seg = _SegTabs(root, [k.capitalize() for k in seg_keys])
+    lay.addWidget(seg)
     today_box = _build_today_list(root)
     prac_box = _build_practice_list(root) if pdid is not None else None
 
@@ -1393,18 +1441,11 @@ def _build() -> "QWidget":
     def _show_mode(m, save=True):
         if m == "practice" and prac_box is None:
             m = "decks"
-        b_decks.setChecked(m == "decks")
-        b_today.setChecked(m == "today")
-        if b_prac is not None:
-            b_prac.setChecked(m == "practice")
+        seg.select(seg_keys.index(m), animate=save)
         page = {"today": today_box, "practice": prac_box}.get(m) or scroll
         st = _tray_mode_widgets.get("stack")
         if st is not None:
             st.setCurrentWidget(page)
-        for _b in tabs:
-            _b.setObjectName("tglOnBlue" if _b.isChecked() else "tgl")
-            _b.style().unpolish(_b)
-            _b.style().polish(_b)
         if save:
             def _save(m=m):
                 try:
@@ -1419,10 +1460,7 @@ def _build() -> "QWidget":
                 sfx.play("tab")
             except Exception:
                 pass
-    b_decks.clicked.connect(lambda _c=False: _show_mode("decks"))
-    b_today.clicked.connect(lambda _c=False: _show_mode("today"))
-    if b_prac is not None:
-        b_prac.clicked.connect(lambda _c=False: _show_mode("practice"))
+    seg.on_pick = lambda i: _show_mode(seg_keys[i])
     QTimer.singleShot(0, lambda: _show_mode(mode, save=False))
 
     def _warm_hidden():
