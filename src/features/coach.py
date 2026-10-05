@@ -55,6 +55,11 @@ def _back_to_decks():
         from . import practice
         if getattr(practice, "_practice_view", False):
             practice._practice_view = False
+        try:
+            from . import calendar_view
+            calendar_view.close()
+        except Exception:
+            pass
         mw.moveToState("deckBrowser")
         mw.deckBrowser.refresh()
     except Exception:
@@ -315,6 +320,22 @@ def _cleanup_sample(leave=True):
 _sig = {"import_open": False, "import_done": False, "answered": False}
 
 
+def _open_calendar():
+    try:
+        from . import calendar_view
+        calendar_view.open_calendar()
+    except Exception as e:
+        log("coach calendar: %s" % e)
+
+
+def _calendar_open():
+    try:
+        from . import calendar_view
+        return bool(calendar_view._view)
+    except Exception:
+        return False
+
+
 def _practice_open():
     from . import practice
     return bool(getattr(practice, "_practice_view", False))
@@ -475,6 +496,14 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
+        dict(target=("toolbar", "Calendar"), title="Calendar",
+             try_=("Open the Calendar", _open_calendar),
+             detect=_calendar_open, done_msg="Click a class to study it — or carry on.",
+             leave=_back_to_decks,
+             text="Your week of classes from your lecture calendar: dress codes along the "
+                  "top, a ★ on mandatory sessions. Click a class to study its cards, pull "
+                  "related practice questions or open it in your LMS. <b>Identify Weak "
+                  "Areas</b> (bottom bar) ranks the lectures you've studied least."),
         dict(target=None, title="Reviewing", hands_on=True, enter=_open_sample,
              try_=("Reopen the sample card", _open_sample),
              detect=_sample_answered, done_msg="Nice — you rated it.",
