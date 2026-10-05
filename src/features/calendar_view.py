@@ -628,8 +628,12 @@ def prewarm_weak():
 
 
 def _weak_compute(mode, then=None):
-    """One card search per lecture, then everything else straight from the cards /
-    notes / revlog tables in a single pass — a QueryOp, never on the main thread."""
+    """Three steps, so the collection is only held briefly:
+      1. main thread, no collection: lectures from the in-memory matches → tag terms
+      2. a short QueryOp: read notes' tags, cards' states, 30 days of revlog (+ the few
+         non-tag terms via find_notes)
+      3. a plain worker thread (collection free): match and score everything
+    Lectures not matched yet are matched in the background and show up next time."""
     if mode in _weak_busy or getattr(mw, "col", None) is None:
         return
     from aqt.operations import QueryOp
@@ -642,15 +646,51 @@ def _weak_compute(mode, then=None):
     now_min = _now_min()
     _weak_busy.add(mode)
 
-    def op(col):
+    # 1 ------------------------------------------------------------------------
+    lecs, seen, pending = [], set(), False
+    for e in sorted(evs, key=lambda x: x["date"], reverse=True):
+        if e["start"] is None or _is_allday_kind(e["summary"]):
+            continue
+        if e["date"] == today and (e["end"] or 0) > now_min:
+            continue                             # not had it yet
+        m = lectures.peek_match(e["summary"])
+        if m is lectures._PENDING:
+            pending = True
+            continue
+        if not m or m["key"] in seen:
+            continue
+        seen.add(m["key"])
+        atoms = lectures._atoms([x for x in m["searches"] if _fam(x) not in off])
+        if atoms:
+            lecs.append((e, m, atoms))
+    if pending:
+        QTimer.singleShot(0, _prewarm)          # match the rest for next time
+    other = sorted({a for _e, _m, atoms in lecs for a in atoms if _atom_plain(a) is None})
+    _weak_progress(mode, 0.05)
+
+    # 2 ------------------------------------------------------------------------
+    def read(col):
+        import time as _t
+        data = {"notes": col.db.all("select id, tags from notes"),
+                "cards": col.db.all("select id, nid, queue, type, due from cards"),
+                "rev": col.db.all("select cid, ease, count() from revlog where id > ? and "
+                                  "type < 3 group by cid, ease",
+                                  int((_t.time() - 30 * 86400) * 1000)),
+                "today": col.sched.today, "other": {}}
+        for a in other:
+            try:
+                data["other"][a] = set(col.find_notes(a))
+            except Exception:
+                data["other"][a] = set()
+        return data
+
+    # 3 ------------------------------------------------------------------------
+    def crunch(data):
         import bisect
         import fnmatch
         import time as _t
-        # One read of each table, then every lecture is matched in memory — per-lecture
-        # tag searches over hundreds of AnKing tags were the long load.
-        tag_nids = {}
-        leech_nids = set()
-        for nid, tags in col.db.all("select id, tags from notes"):
+        tag_nids, leech_nids = {}, set()
+        for nid, tags in data["notes"]:
             for t in (tags or "").split():
                 tl = t.lower()
                 tag_nids.setdefault(tl, []).append(nid)
@@ -658,83 +698,57 @@ def _weak_compute(mode, then=None):
                     leech_nids.add(nid)
         keys = sorted(tag_nids)
         nid_cards = {}
-        for cid, nid, q, typ, d in col.db.all("select id, nid, queue, type, due from cards"):
+        for cid, nid, q, typ, d in data["cards"]:
             nid_cards.setdefault(nid, []).append((cid, q, typ, d))
-        cutoff = int((_t.time() - 30 * 86400) * 1000)
         rev = {}
-        for cid, ease, cnt in col.db.all(
-                "select cid, ease, count() from revlog where id > ? and type < 3 "
-                "group by cid, ease", cutoff):
+        for cid, ease, cnt in data["rev"]:
             g, b = rev.get(cid, (0, 0))
             rev[cid] = (g + cnt, b) if ease > 1 else (g, b + cnt) if ease == 1 else (g, b)
-        atom_cache = {}
+        data.clear()                              # drop the raw rows early
+        cache = {}
 
         def atom_nids(a):
-            """nids for one search piece; plain tag terms from memory, else Anki."""
-            if a in atom_cache:
-                return atom_cache[a]
-            t = a.strip().strip('"')
+            if a in cache:
+                return cache[a]
+            pat = _atom_plain(a)
             out = set()
-            if t.lower().startswith("tag:") and " " not in t and "(" not in t:
-                pat = t[4:].lower()
-                if "*" in pat or "?" in pat:
-                    core = pat.strip("*")
-                    if "*" not in core and "?" not in core:          # *leaf* → substring
-                        for k in keys:
-                            if core in k:
-                                out.update(tag_nids[k])
-                    else:
-                        for k in keys:
-                            if fnmatch.fnmatchcase(k, pat):
-                                out.update(tag_nids[k])
-                else:                                   # the tag and its ::children
-                    lo = bisect.bisect_left(keys, pat)
-                    for k in keys[lo:]:
-                        if k == pat or k.startswith(pat + "::"):
+            if pat is None:
+                out = other_hits.get(a, set())
+            elif "*" in pat or "?" in pat:
+                core = pat.strip("*")
+                if "*" not in core and "?" not in core:          # *leaf* → substring
+                    for k in keys:
+                        if core in k:
                             out.update(tag_nids[k])
-                        elif not k.startswith(pat):
-                            break
-            else:
-                try:
-                    out = set(col.find_notes(a))      # straight to note ids
-                except Exception:
-                    out = set()
-            atom_cache[a] = out
+                else:
+                    for k in keys:
+                        if fnmatch.fnmatchcase(k, pat):
+                            out.update(tag_nids[k])
+            else:                                   # the tag and its ::children
+                lo = bisect.bisect_left(keys, pat)
+                for k in keys[lo:]:
+                    if k == pat or k.startswith(pat + "::"):
+                        out.update(tag_nids[k])
+                    elif not k.startswith(pat):
+                        break
+            cache[a] = out
             return out
 
-        seen, rows = set(), []
-        sched_today = col.sched.today
-        todo = sorted(evs, key=lambda x: x["date"], reverse=True)
-        last = [0.0]
-
-        def progress(k):
-            now = _t.monotonic()
-            if now - last[0] > 0.12 or k == len(todo):
-                last[0] = now
-                frac = (k / len(todo)) if todo else 1.0
-                mw.taskman.run_on_main(lambda f=frac: _weak_progress(mode, f))
-        progress(0)
-        for k, e in enumerate(todo):
-            progress(k)
+        rows, last = [], 0.0
+        for idx, (e, m, atoms) in enumerate(lecs):
             if _closing:
                 return []
-            if e["start"] is None or _is_allday_kind(e["summary"]):
-                continue
-            if e["date"] == today and (e["end"] or 0) > now_min:
-                continue                         # not had it yet
-            m = lectures.match_event(e["summary"])
-            if not m or m["key"] in seen:
-                continue
-            seen.add(m["key"])
-            frags = [x for x in m["searches"] if _fam(x) not in off]
+            now = _t.monotonic()
+            if now - last > 0.1:
+                last = now
+                f = 0.45 + 0.55 * idx / max(1, len(lecs))
+                mw.taskman.run_on_main(lambda f=f: _weak_progress(mode, f))
             nids = set()
-            for a in lectures._atoms(frags):
+            for a in atoms:
                 nids |= atom_nids(a)
-            if not nids:
-                continue
             n = sus = new = due = leech = good = bad = 0
             for nid in nids:
-                is_leech = nid in leech_nids
+                lch = nid in leech_nids
                 for cid, q, typ, d in nid_cards.get(nid, ()):
                     n += 1
                     if q == -1:
@@ -743,7 +757,7 @@ def _weak_compute(mode, then=None):
                         new += 1
                     elif (q == 2 and d <= sched_today) or q in (1, 3):
                         due += 1
-                    if is_leech:
+                    if lch:
                         leech += 1
                     gb = rev.get(cid)
                     if gb:
@@ -761,22 +775,46 @@ def _weak_compute(mode, then=None):
         rows.sort(key=lambda r: -r["score"])
         return rows
 
+    other_hits = {}
+    sched_today = 0
+
     def done(rows):
         global _weak
         _weak_busy.discard(mode)
         _weak_cache[mode] = (key, rows)
-        if then and _view:
-            QTimer.singleShot(1500, then)
         if _weak_mode == mode:
             _weak = rows
             if _view and _detail == WEAK:
                 _swap("refresh")
+        if then and _view:
+            QTimer.singleShot(1500, then)
 
     def failed(err):
         _weak_busy.discard(mode)
         log("weak areas: %s" % err)
 
-    QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
+    def got(data):
+        nonlocal sched_today
+        other_hits.update(data.get("other") or {})
+        sched_today = data.get("today", 0)
+        _weak_progress(mode, 0.4)
+
+        def fin(fut):
+            try:
+                done(fut.result())
+            except Exception as ex:
+                failed(ex)
+        mw.taskman.run_in_background(lambda: crunch(data), fin, uses_collection=False)
+
+    QueryOp(parent=mw, op=read, success=got).failure(failed).run_in_background()
+
+
+def _atom_plain(a):
+    """The lower-case tag pattern of a plain 'tag:…' term, else None."""
+    t = a.strip().strip('"')
+    if t.lower().startswith("tag:") and " " not in t and "(" not in t:
+        return t[4:].lower()
+    return None
 
 
 def _weak_progress(mode, frac):
