@@ -31,6 +31,7 @@ TEMP_PREFIX = "Janki Calendar::"
 # --------------------------------------------------------------- open / close ----
 def open_calendar():
     global _view
+    QTimer.singleShot(2500, lambda: _view and prewarm_weak())   # weak areas, ready early
     # Calendar clicked while a class page is open → back to the calendar grid
     if _view and _detail is not None and getattr(mw, "state", None) == "deckBrowser":
         _close_detail()
@@ -532,37 +533,90 @@ def _open_detail(i):
 # cards — from the calendar + tag map + review history. All local.
 WEAK = -1             # _detail value for the weak-areas page
 _weak = None          # None = counting; else [row dicts] best (weakest) first
-_WEAK_DAYS = 14       # look back this far (two weeks)
+
+
+_weak_mode = "2w"      # "2w" = past two weeks · "block" = end of block (8 weeks)
+_WEAK_SPAN = {"2w": 14, "block": 56}
+_weak_cache = {}       # mode → (key, rows); key changes when the collection does
+_weak_busy = set()
 
 
 def open_weak():
     global _detail, _weak
-    _detail, _weak = WEAK, None
+    _detail = WEAK
+    _weak = _weak_cached(_weak_mode)
     try:
         from . import sfx
         sfx.play("open")
     except Exception:
         pass
     _swap("open")
-    _weak_compute()
+    if _weak is None:
+        _weak_compute(_weak_mode)
 
 
-def _weak_compute():
+def _set_weak_mode(mode):
+    global _weak_mode, _weak
+    if mode not in _WEAK_SPAN or mode == _weak_mode:
+        return
+    _weak_mode = mode
+    _weak = _weak_cached(mode)
+    try:
+        from . import sfx
+        sfx.play("select")
+    except Exception:
+        pass
+    _swap("refresh")
+    if _weak is None:
+        _weak_compute(mode)
+
+
+def _weak_key():
+    try:
+        return (mw.col.mod, datetime.date.today(), tuple(sorted(_fams_off())))
+    except Exception:
+        return None
+
+
+def _weak_cached(mode):
+    hit = _weak_cache.get(mode)
+    return hit[1] if hit and hit[0] == _weak_key() else None
+
+
+def prewarm_weak():
+    """Work out both views in the background (after the Calendar opens), so the button
+    shows results straight away."""
+    for mode in ("2w", "block"):
+        if _weak_cached(mode) is None:
+            _weak_compute(mode)
+
+
+def _weak_compute(mode):
+    """One card search per lecture, then everything else straight from the cards /
+    notes / revlog tables in a single pass — a QueryOp, never on the main thread."""
+    if mode in _weak_busy or getattr(mw, "col", None) is None:
+        return
     from aqt.operations import QueryOp
     from ..integrations import lectures
     today = datetime.date.today()
-    evs, _fresh = lectures.events_cached_between(today - datetime.timedelta(days=_WEAK_DAYS),
-                                                 today)
+    evs, _fresh = lectures.events_cached_between(
+        today - datetime.timedelta(days=_WEAK_SPAN[mode]), today)
     off = _fams_off()
+    key = _weak_key()
+    now_min = _now_min()
+    _weak_busy.add(mode)
 
     def op(col):
         import time as _t
         seen, rows = set(), []
         cutoff = int((_t.time() - 30 * 86400) * 1000)
+        sched_today = col.sched.today
         for e in sorted(evs, key=lambda x: x["date"], reverse=True):
+            if _closing:
+                return []
             if e["start"] is None or _is_allday_kind(e["summary"]):
                 continue
-            if e["date"] == today and (e["end"] or 0) > _now_min():
+            if e["date"] == today and (e["end"] or 0) > now_min:
                 continue                         # not had it yet
             m = lectures.match_event(e["summary"])
             if not m or m["key"] in seen:
@@ -573,13 +627,20 @@ def _weak_compute():
             if not ids:
                 continue
             n = len(ids)
-            sus = len(_cids(col, frags, "is:suspended"))
-            new = len(_cids(col, frags, "is:new -is:suspended"))
-            due = len(_cids(col, frags, "is:due -is:suspended"))
-            leech = len(_cids(col, frags, "tag:leech"))
-            good = bad = 0
-            for i in range(0, n, 400):
-                chunk = ",".join(str(c) for c in ids[i:i + 400])
+            sus = new = due = leech = good = bad = 0
+            for k in range(0, n, 500):
+                chunk = ",".join(str(c) for c in ids[k:k + 500])
+                for q, typ, d, tags in col.db.all(
+                        "select c.queue, c.type, c.due, n.tags from cards c join notes n "
+                        "on n.id = c.nid where c.id in (%s)" % chunk):
+                    if q == -1:
+                        sus += 1
+                    elif typ == 0:
+                        new += 1
+                    elif (q == 2 and d <= sched_today) or q in (1, 3):
+                        due += 1
+                    if " leech " in " %s " % (tags or "").lower():
+                        leech += 1
                 for ease, cnt in col.db.all(
                         "select ease, count() from revlog where cid in (%s) and id > ? "
                         "and type < 3 group by ease" % chunk, cutoff):
@@ -600,11 +661,18 @@ def _weak_compute():
 
     def done(rows):
         global _weak
-        _weak = rows
-        if _view and _detail == WEAK:
-            _swap("refresh")
+        _weak_busy.discard(mode)
+        _weak_cache[mode] = (key, rows)
+        if _weak_mode == mode:
+            _weak = rows
+            if _view and _detail == WEAK:
+                _swap("refresh")
 
-    QueryOp(parent=mw, op=op, success=done).run_in_background()
+    def failed(err):
+        _weak_busy.discard(mode)
+        log("weak areas: %s" % err)
+
+    QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
 
 
 def _now_min():
@@ -619,9 +687,13 @@ def _ago(d):
 
 
 def _weak_html():
+    seg = "".join("<button class='jkw-m%s' onclick=\"pycmd('janki:cal:weakmode:%s')\">%s</button>"
+                  % (" on" if _weak_mode == k else "", k, l)
+                  for k, l in (("2w", "Past 2 weeks"), ("block", "End of block")))
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
-            "<h2>Weak areas</h2><div class='jkd-when'>Lectures from the past %d weeks, "
-            "least-studied first</div>" % (_WEAK_DAYS // 7))
+            "<h2>Weak areas</h2><div class='jkw-seg'>%s</div>"
+            "<div class='jkd-when'>Lectures from the past %d weeks, least-studied first</div>"
+            % (seg, _WEAK_SPAN[_weak_mode] // 7))
     if _weak is None:
         return head + "<div class='jkd-counts'>Looking through your lectures…</div></div></div>"
     if not _weak:
@@ -1039,6 +1111,11 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
 .jkd-secs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
 .jkd-secs .jkd-sec{margin:0 !important;}
+#jkc .jkw-seg{display:inline-flex;gap:2px;padding:2px;margin:6px 0 4px;border-radius:9px;
+  background:rgba(255,255,255,.06) !important;}
+#jkc .jkw-m{background:transparent !important;border:none;color:inherit;font:inherit;font-size:.88em;
+  padding:3px 12px;border-radius:7px;cursor:pointer;opacity:.75;}
+#jkc .jkw-m.on{background:rgba(156,188,243,.28) !important;color:#cfe0ff;opacity:1;}
 #jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
 #jkc .jkw-row{display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
@@ -1489,6 +1566,8 @@ def on_js_message(handled, message, context):
             _swap("refresh")
         elif cmd == "weak":
             open_weak()
+        elif cmd.startswith("weakmode:"):
+            _set_weak_mode(cmd[9:])
         elif cmd.startswith("weak:") and _weak:
             _, act, i = cmd.split(":")
             i = int(i)
