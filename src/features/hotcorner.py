@@ -1,4 +1,4 @@
-"""Hot corner (Settings → General): rest the pointer in the chosen screen corner and
+"""Hot corner (Settings → Focus → Hot corner): rest the pointer in the chosen screen corner and
 Anki comes forward, like the Metabolic Map / WorkMode hot corner.
 
   • rest in the corner ~¼ s → Anki fades in (same path as ⌥⌘A / Ctrl+Alt+A)

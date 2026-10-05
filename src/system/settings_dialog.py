@@ -213,6 +213,8 @@ class GlassSettings(QDialog):
         focus_tabs.addTab(cap_page, "Caption")
         focus_tabs.addTab(pomo_page, "Pomodoro")
         focus_tabs.addTab(lock_page, "Lockdown")
+        hc_page = QWidget(); hc_lay = QVBoxLayout(hc_page)
+        focus_tabs.addTab(hc_page, "Hot corner")
         snd_page = QWidget(); snd_lay = QVBoxLayout(snd_page)
         focus_tabs.addTab(snd_page, "Sounds")
         self._build_sounds_tab(snd_lay)
@@ -2266,7 +2268,12 @@ class GlassSettings(QDialog):
         _hc.currentIndexChanged.connect(_hc_changed)
         _hc_row.addWidget(_hc)
         _hc_row.addStretch(1)
-        gen_lay.addLayout(_hc_row)
+        _hc_note = QLabel("Rest the pointer in this screen corner and Anki comes forward. "
+                          "Click in Anki to keep it; otherwise it slips away again.")
+        _hc_note.setWordWrap(True)
+        hc_lay.addWidget(_hc_note)                         # Focus → Hot corner
+        hc_lay.addLayout(_hc_row)
+        hc_lay.addStretch(1)
 
         # Calendar toolbar item: icon or the word.
         self._cal_icon = QCheckBox("Show Calendar as an icon in the toolbar")
