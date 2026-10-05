@@ -434,11 +434,21 @@ def _study_detail():
     Filtered decks can't hold suspended cards, so those are unsuspended just for the
     session and suspended again afterwards (saved to disk first, so a crash can't
     leave them unsuspended)."""
+    study_event(_shown[_detail], _fams_on)
+
+
+def study_event(e, fams=None):
+    """Study every card for a class (see _study_detail). fams=None → all its sources.
+    Used by the class page and the tray's Today list."""
     from aqt.utils import tooltip
     from ..integrations import lectures
-    e = _shown[_detail]
     m = lectures.match_event(e["summary"])
-    q = _lecture_query(m, _fams_on) if m else ""
+    if not m:
+        tooltip("No lecture matches “%s”." % e["summary"])
+        return
+    if fams is None:
+        fams = {_fam(s) for s in m["searches"]}
+    q = _lecture_query(m, fams)
     if not q:
         tooltip("Switch on at least one source first.")
         return

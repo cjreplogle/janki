@@ -668,6 +668,61 @@ def _practice_did():
         return None
 
 
+_tray_mode_widgets = {}
+
+
+def _build_today_list(parent):
+    """Today's classes from the calendar: time + title in its course colour; click one
+    to study it (every card, suspended ones restored afterwards)."""
+    import datetime
+    box = QWidget(parent)
+    v = QVBoxLayout(box)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(5)
+    try:
+        from ..integrations import lectures
+        from ..features import calendar_view as cv
+        t = datetime.date.today()
+        evs = [e for e in lectures.events_between(t, t) if not cv._is_allday_kind(e["summary"])]
+    except Exception as exc:
+        log(f"tray today: {exc}")
+        evs = []
+    if not evs:
+        lbl = QLabel("No classes today")
+        lbl.setObjectName("cnt")
+        v.addWidget(lbl)
+    colours = ["#78a5f5", "#50c3b9", "#7dc878", "#ebb95a", "#f08273", "#aa87f0", "#eb78af", "#96aac3"]
+    for e in evs:
+        b = QPushButton()
+        row = QHBoxLayout(b)
+        row.setContentsMargins(11, 0, 11, 0)
+        when = cv._hm(e["start"]) if e["start"] is not None else "All day"
+        m = lectures.peek_match(e["summary"])
+        col = colours[cv._course_colour(e["summary"])] if (m and m is not lectures._PENDING) else "#9aa0aa"
+        nm = QLabel("<span style='color:%s'>●</span>  %s" % (col, e["summary"]))
+        nm.setTextFormat(Qt.TextFormat.RichText)
+        tm = QLabel(when)
+        tm.setObjectName("cnt")
+        row.addWidget(nm, 1)
+        row.addWidget(tm)
+        b.setMinimumHeight(30)
+        b.setToolTip("Study this lecture")
+        b.clicked.connect(lambda _c=False, ev=e: _study_class(ev))
+        v.addWidget(b)
+    v.addStretch(1)
+    return box
+
+
+def _study_class(e) -> None:
+    _hide()
+    _restore_main()
+    try:
+        from ..features import calendar_view
+        calendar_view.study_event(e)
+    except Exception as exc:
+        log(f"tray-nav class study: {exc}")
+
+
 def _study_deck(did: int) -> None:
     _hide()
     _restore_main()
@@ -1152,9 +1207,20 @@ def _build() -> "QWidget":
         pb.clicked.connect(lambda _c=False, d=pdid: _study_deck(d))
         lay.addWidget(pb)
 
-    sub = QLabel("Study a deck")
-    sub.setObjectName("navSub")
-    lay.addWidget(sub)
+    # Decks | Today switch: study by deck, or by today's classes (calendar).
+    mode = str(_cfg().get("tray_mode", "decks"))
+    srow = QHBoxLayout()
+    srow.setContentsMargins(0, 0, 0, 0)
+    srow.setSpacing(4)
+    b_decks = QPushButton("Decks")
+    b_today = QPushButton("Today")
+    for _b in (b_decks, b_today):
+        _b.setCheckable(True)
+        _b.setObjectName("tgl")
+        srow.addWidget(_b, 1)
+    lay.addLayout(srow)
+    today_box = _build_today_list(root)
+    lay.addWidget(today_box)
 
     # Deck list (scrollable).
     scroll = QScrollArea(root)
@@ -1170,6 +1236,33 @@ def _build() -> "QWidget":
     rows = _deck_rows()
     # The Practice deck (and its subdecks) is pinned separately at the top.
     rows = [r for r in rows if r[0] != "Practice" and not r[0].startswith("Practice::")]
+    _tray_mode_widgets["scroll"] = scroll
+    _tray_mode_widgets["today"] = today_box
+
+    def _show_mode(m, save=True):
+        b_decks.setChecked(m != "today")
+        b_today.setChecked(m == "today")
+        scroll.setVisible(m != "today")
+        today_box.setVisible(m == "today")
+        for _b in (b_decks, b_today):
+            _b.setObjectName(_TOGGLE_ON_NAME.get("reword", "tgl") if _b.isChecked() else "tgl")
+            _b.style().unpolish(_b)
+            _b.style().polish(_b)
+        if save:
+            try:
+                c = mw.addonManager.getConfig(__name__) or {}
+                c["tray_mode"] = m
+                mw.addonManager.writeConfig(__name__, c)
+            except Exception:
+                pass
+            try:
+                from ..features import sfx
+                sfx.play("tab")
+            except Exception:
+                pass
+    b_decks.clicked.connect(lambda _c=False: _show_mode("decks"))
+    b_today.clicked.connect(lambda _c=False: _show_mode("today"))
+    QTimer.singleShot(0, lambda: _show_mode(mode, save=False))
     if not rows:
         empty = QLabel("No decks")
         empty.setObjectName("cnt")
