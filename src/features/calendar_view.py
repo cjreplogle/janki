@@ -704,11 +704,13 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ad{position:relative;margin:0 2px 3px;}
 .jkc-t{font-weight:600;}
 /* mandatory: an outlined M badge in the block's top-right corner */
-.jkc-m{position:absolute;top:4px;right:4px;width:15px;height:15px;line-height:13px;box-sizing:border-box;
-  text-align:center;font-size:10px;font-weight:700;color:#ff9d8a;border:1.5px solid #ff9d8a;border-radius:4px;}
+.jkc-m{position:absolute;top:4px;right:4px;width:15px;height:15px;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:center;line-height:1;padding-top:1px;
+  font-size:10px;font-weight:700;font-family:-apple-system,"Segoe UI",sans-serif;
+  color:#ff9d8a;border:1.5px solid #ff9d8a;border-radius:4px;}
 .jkc-ev .jkc-t{padding-right:16px;}
-.jkd-m{position:relative;top:-4px;right:auto;display:inline-block;vertical-align:middle;width:20px;height:20px;
-  line-height:17px;font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+.jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
+  font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
@@ -721,7 +723,9 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   border-radius:8px;padding:3px 8px;font:inherit;max-width:420px;cursor:pointer;
   text-align:center;text-align-last:center;}
 #jkc .jkd-pick:hover{background:rgba(255,255,255,.12) !important;}
-#jkc .jkd-pick option{background:#1c1e24;color:#eee;}
+/* the open list is the system menu (white on macOS): leave its entries to the OS,
+   or light text lands on a white menu */
+#jkc .jkd-pick option{color:initial;background:initial;}
 .jkd-when,.jkd-loc{opacity:.8;font-size:.95em;margin-top:2px;}
 .jkd-counts{margin:18px 0 12px;opacity:.9;}
 .jkd-counts .c-new{color:#7ab0ff;}.jkd-counts .c-due{color:#7fd17f;}.jkd-counts .c-sus{color:#e0b000;}
