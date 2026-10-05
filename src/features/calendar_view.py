@@ -633,16 +633,18 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd-counts .c-new{color:#7ab0ff;}.jkd-counts .c-due{color:#7fd17f;}.jkd-counts .c-sus{color:#e0b000;}
 .jkd-sws{display:flex;justify-content:center;gap:16px;margin:6px 0 18px;flex-wrap:wrap;}
 .jkd-sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
-.jkd-knob{position:relative;width:36px;height:20px;border-radius:10px;background:rgba(255,255,255,.18);
-  transition:background .18s ease;}
-.jkd-knob::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
-  background:#fff;transition:transform .18s cubic-bezier(.2,.8,.2,1);}
-.jkd-sw.on .jkd-knob{background:rgba(156,188,243,.9);}
-.jkd-sw.on .jkd-knob::after{transform:translateX(16px);}
-.jkd-study{font-size:1.12em;font-weight:600;padding:12px 34px;border:none;border-radius:14px;
-  background:#9cbcf3;color:#10213f;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.35);
+/* (ids + !important: Janki's glass styling clears backgrounds on this page) */
+#jkc .jkd-knob{position:relative;display:inline-block;width:36px;height:20px;border-radius:10px;
+  background:rgba(255,255,255,.18) !important;transition:background .18s ease;flex:none;}
+#jkc .jkd-knob::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  background:#fff !important;transition:transform .18s cubic-bezier(.2,.8,.2,1);}
+#jkc .jkd-sw.on .jkd-knob{background:rgba(156,188,243,.9) !important;}
+#jkc .jkd-sw.on .jkd-knob::after{transform:translateX(16px);}
+#jkc .jkd-study{font-size:1.12em;font-weight:600;padding:12px 34px;border:none;border-radius:14px;
+  background:#9cbcf3 !important;color:#10213f !important;text-shadow:none !important;
+  cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.35);
   transition:background .2s ease,transform .2s cubic-bezier(.2,.8,.2,1);}
-.jkd-study:hover{background:#b0cbf6;transform:translateY(-1px);}
+#jkc .jkd-study:hover{background:#b0cbf6 !important;transform:translateY(-1px);}
 .jkd-note{font-size:.82em;opacity:.6;margin:8px 0 16px;}
 .jkd-sec{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:10px;padding:7px 16px;
   cursor:pointer;transition:background .2s ease;}
