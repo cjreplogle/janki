@@ -390,6 +390,13 @@ def _page_html():
 
 
 # ------------------------------------------------------------- class page --------
+def _cfg_get(k, default=None):
+    try:
+        return (mw.addonManager.getConfig(__name__) or {}).get(k, default)
+    except Exception:
+        return default
+
+
 def _fams_off():
     """Sources (Hutch / AJ / AnKing …) you've switched off — remembered across classes
     and launches (config calendar_fams_off)."""
@@ -1746,7 +1753,11 @@ def practice_event(e):
             return []
         # the original matching (tags, near-miss tags, then wording); a stray hit or
         # two still means this lecture has no real bank
-        ids = qbank.intersperse_card_ids(leaves, toks, 40, relaxed=True)
+        if str(_cfg_get("practice_match", "lenient")) == "strict":   # exact tags only
+            ids = qbank.intersperse_card_ids(leaves, toks, 40, use_text_fallback=False,
+                                             exact_only=True)
+        else:
+            ids = qbank.intersperse_card_ids(leaves, toks, 40, relaxed=True)
         return ids if len(ids) >= _PRACTICE_MIN else []
 
     def done(cids):

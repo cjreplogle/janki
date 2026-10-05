@@ -2916,6 +2916,22 @@ class GlassSettings(QDialog):
                       "searches.")
         note.setWordWrap(True)
         lay.addWidget(note)
+        # Practice button: how closely questions must match the lecture
+        from aqt.qt import QComboBox
+        pm_row = QHBoxLayout()
+        pm_row.addWidget(QLabel("Practice questions:"))
+        pm = QComboBox()
+        pm.addItem("Lenient — related tags and wording", "lenient")
+        pm.addItem("Strict — exact tag matches only", "strict")
+        pm.setCurrentIndex(1 if self.cfg.get("practice_match", "lenient") == "strict" else 0)
+
+        def pm_changed(_i):
+            self.cfg["practice_match"] = pm.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+        pm.currentIndexChanged.connect(pm_changed)
+        pm_row.addWidget(pm)
+        pm_row.addStretch(1)
+        lay.addLayout(pm_row)
         body = QVBoxLayout()
         lay.addLayout(body)
         lay.addStretch(1)
