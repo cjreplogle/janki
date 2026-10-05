@@ -532,7 +532,7 @@ def _open_detail(i):
 # cards — from the calendar + tag map + review history. All local.
 WEAK = -1             # _detail value for the weak-areas page
 _weak = None          # None = counting; else [row dicts] best (weakest) first
-_WEAK_DAYS = 42       # look back this far
+_WEAK_DAYS = 14       # look back this far (two weeks)
 
 
 def open_weak():
@@ -620,7 +620,7 @@ def _ago(d):
 
 def _weak_html():
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
-            "<h2>Weak areas</h2><div class='jkd-when'>Lectures from the last %d weeks, "
+            "<h2>Weak areas</h2><div class='jkd-when'>Lectures from the past %d weeks, "
             "least-studied first</div>" % (_WEAK_DAYS // 7))
     if _weak is None:
         return head + "<div class='jkd-counts'>Looking through your lectures…</div></div></div>"
