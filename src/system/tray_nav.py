@@ -394,7 +394,7 @@ class _LocalDismiss(QObject):
             if ev.type() == QEvent.Type.MouseButtonPress and _nav is not None \
                     and _nav.isVisible():
                 w = obj.window() if hasattr(obj, "window") else None
-                if w is not None and w is not _nav:
+                if w is not None and w is not _nav and not getattr(w, "_jk_tray_child", False):
                     QTimer.singleShot(0, _hide)
         except Exception:
             pass
@@ -1050,6 +1050,58 @@ def _build_practice_list(parent):
     return box
 
 
+def _sound_types_popup(anchor):
+    """Small glass panel under the speaker: a slider per type of sound (0–200 %)."""
+    from aqt.qt import QSlider
+    pop = QFrame(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+    pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    pop._jk_tray_child = True                 # clicks here don't dismiss the tray
+    pop.setStyleSheet("QFrame{background:rgba(30,32,40,245);border:1px solid rgba(255,255,255,40);"
+                      "border-radius:10px;} QLabel{color:#e6e9f0;background:transparent;border:none;}")
+    v = QVBoxLayout(pop)
+    v.setContentsMargins(12, 10, 12, 10)
+    v.setSpacing(6)
+    gains = dict(_cfg().get("sfx_cat_gain") or {})
+    for key, label in (("nav", "Navigation"), ("review", "Reviews")):
+        row = QHBoxLayout()
+        lb = QLabel(label)
+        lb.setFixedWidth(78)
+        row.addWidget(lb)
+        sl = QSlider(Qt.Orientation.Horizontal)
+        sl.setRange(0, 200)
+        sl.setValue(int(gains.get(key, 100)))
+        sl.setFixedWidth(130)
+        val = QLabel()
+        val.setFixedWidth(38)
+
+        def changed(x, key=key, val=val, save=True):
+            val.setText("off" if x == 0 else "%d%%" % x)
+            if not save:
+                return
+            cc = mw.addonManager.getConfig(__name__) or {}
+            g = dict(cc.get("sfx_cat_gain") or {})
+            g[key] = int(x)
+            cc["sfx_cat_gain"] = g
+            mw.addonManager.writeConfig(__name__, cc)
+
+        def preview(key=key):
+            try:
+                from ..features import sfx
+                sfx.play("good" if key == "review" else "select", force=True)
+            except Exception:
+                pass
+        sl.valueChanged.connect(changed)
+        sl.sliderReleased.connect(preview)
+        changed(sl.value(), save=False)
+        row.addWidget(sl)
+        row.addWidget(val)
+        v.addLayout(row)
+    pop.adjustSize()
+    g = anchor.mapToGlobal(anchor.rect().bottomRight())
+    pop.move(g.x() - pop.width(), g.y() + 6)
+    pop.show()
+
+
 def _build_today_list(parent):
     """Today's classes from the calendar: time + title in its course colour; click one
     to study it (every card, suspended ones restored afterwards)."""
@@ -1544,7 +1596,7 @@ def _build() -> "QWidget":
         mute_btn.setText("\U0001F50A\uFE0E" if on else "\U0001F507\uFE0E")
         mute_btn.setToolTip("Mute Janki sounds" if on else
                             "Janki sounds are off — click to unmute" if _cfg().get("sfx_muted")
-                            else "Janki sounds are off (turn them up in Settings ▸ Focus ▸ Sounds)")
+                            else "Janki sounds are off (turn them up in Settings ▸ Appearance ▸ Sounds)")
 
     def _toggle_mute():
         try:
@@ -1562,6 +1614,9 @@ def _build() -> "QWidget":
             log(f"tray mute: {exc}")
         _sync_mute()
     mute_btn.clicked.connect(_toggle_mute)
+    # right-click: a level per type of sound (Navigation / Reviews)
+    mute_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+    mute_btn.customContextMenuRequested.connect(lambda _p, b=mute_btn: _sound_types_popup(b))
     _sync_mute()
     hrow.addWidget(mute_btn)
     hrow.addWidget(opts_btn)

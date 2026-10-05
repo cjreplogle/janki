@@ -1,4 +1,4 @@
-"""Janki UI sound effects (Settings → Focus → Sounds).
+"""Janki UI sound effects (Settings → Appearance → Sounds).
 
 Short original sounds (assets/sounds, made by tools/make_sfx.py) for keyboard/remote
 navigation and reviewing. Played with QSoundEffect (low latency, preloaded). Volume
@@ -36,6 +36,15 @@ NAV = {"move", "select", "back", "open", "fold", "unfold", "page", "settings", "
        "exit"}
 REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
+
+
+def _cat_gain(c, name):
+    """Per-type level (tray volume → right-click): 'review' sounds vs 'nav' sounds."""
+    cat = "review" if name in REVIEW else "nav"
+    try:
+        return float((c.get("sfx_cat_gain") or {}).get(cat, 100)) / 100.0
+    except Exception:
+        return 1.0
 # Played on every card while studying — kept at half level so they don't wear.
 _IN_REVIEW_SOFT = {"reveal", "again", "hard", "good", "easy"}
 
@@ -86,6 +95,7 @@ def play(name, force=False):
         return
     try:
         gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0   # per-sound level
+        gain *= _cat_gain(c, name)                                       # × its type
         if not force and name in _IN_REVIEW_SOFT:
             gain *= 0.5                         # card-by-card sounds sit well back
         fx.setVolume(max(0.0, min(1.0, (vol if vol > 0 else 30) / 100.0 * gain)))
@@ -143,6 +153,7 @@ def _play_windows(name, c, vol, force):
         if not os.path.isfile(path):
             return
         gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0
+        gain *= _cat_gain(c, name)
         if not force and name in _IN_REVIEW_SOFT:
             gain *= 0.5
         level = (vol if vol > 0 else 30) / 100.0 * gain

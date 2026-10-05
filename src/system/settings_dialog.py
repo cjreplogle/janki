@@ -216,7 +216,7 @@ class GlassSettings(QDialog):
         hc_page = QWidget(); hc_lay = QVBoxLayout(hc_page)
         focus_tabs.addTab(hc_page, "Hot corner")
         snd_page = QWidget(); snd_lay = QVBoxLayout(snd_page)
-        focus_tabs.addTab(snd_page, "Sounds")
+        app_tabs.addTab(snd_page, "Sounds")          # Appearance → Sounds
         self._build_sounds_tab(snd_lay)
 
         tabs.addTab(app_page, "Appearance")
@@ -3008,7 +3008,7 @@ class GlassSettings(QDialog):
         return page
 
     def _build_sounds_tab(self, lay):
-        """Focus ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing
+        """Appearance ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing
         (original, synthesized). Volume 0 turns them all off."""
         from ..features import sfx
         from aqt.qt import QComboBox
