@@ -749,6 +749,7 @@ def _weak_start(mode):
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
 _weak_redo = set()      # views to recompute once background matching finishes
+_weak_fails = {}
 
 
 def open_weak():
@@ -1008,6 +1009,7 @@ def _weak_compute(mode, then=None):
     def done(rows):
         global _weak
         _weak_busy.discard(mode)
+        _weak_fails.pop(mode, None)
         _busy_update()
         _weak_cache[mode] = (key, rows)
         if _weak_mode == mode:
@@ -1018,9 +1020,17 @@ def _weak_compute(mode, then=None):
             QTimer.singleShot(1500, then)
 
     def failed(err):
+        global _weak
         _weak_busy.discard(mode)
         _busy_update()
         log("weak areas: %s" % err)
+        _weak_fails[mode] = _weak_fails.get(mode, 0) + 1
+        if _weak_fails[mode] <= 1:
+            QTimer.singleShot(800, lambda: _weak_compute(mode))      # one retry
+        elif _weak_mode == mode and _view and _detail == WEAK:
+            _weak = []                              # stop spinning; say so
+            _weak_cache[mode] = (None, [])
+            _swap("refresh")
 
     def got(data):
         nonlocal sched_today
@@ -2057,6 +2067,10 @@ _JS = """<script>(function(){
    pycmd('janki:cal:tagx:'+x.getAttribute('data-t')+':'+(off?1:0));
  },true);
  // Weak areas: Biweekly ↔ End of block fades the list out, then the new one fades in
+ // Safety net: still "Looking through your lectures…" → ask again every 3 s
+ setInterval(function(){
+   if(document.querySelector('#jkc .jkw .jkw-pbar')){try{pycmd('janki:cal:weakcheck');}catch(x){}}
+ },3000);
  window.jkwMode=function(btn,k){
    if(btn&&btn.classList.contains('on'))return;          // already showing
    var ps=[];                       // only the lectures below fade — not the header
@@ -2308,6 +2322,15 @@ def on_js_message(handled, message, context):
             _swap("refresh")
         elif cmd == "weak":
             open_weak()
+        elif cmd == "weakcheck":               # the page is still on the loading state
+            global _weak
+            if _detail == WEAK and _weak is None:
+                hit = _weak_cached(_weak_mode)
+                if hit is not None:
+                    _weak = hit
+                    _swap("refresh")
+                elif _weak_mode not in _weak_busy:
+                    _weak_compute(_weak_mode)
         elif cmd.startswith("weakmode:"):
             _set_weak_mode(cmd[9:])
         elif cmd.startswith("weak:") and _weak:
