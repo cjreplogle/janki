@@ -217,20 +217,20 @@ def _week_html():
                 cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
-            title = ("<span class='jkc-m'>[M]</span> " if e.get("mandatory") else "") \
-                + html.escape(e["summary"])
+            title = html.escape(e["summary"])
+            mbadge = "<span class='jkc-m' title='Mandatory'>M</span>" if e.get("mandatory") else ""
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
-                allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s</div>"
-                              % (cls, i, tip, title))
+                allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s%s</div>"
+                              % (cls, i, tip, mbadge, title))
                 continue
             top = int((e["start"] - lo) * px_per_min)
             h = max(22, int((e["end"] - e["start"]) * px_per_min) - 2)
             blocks.append(
                 "<div class='%s' data-i='%d' title='%s' style='top:%dpx;height:%dpx'>"
-                "<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
-                % (cls, i, tip, top, h, title, _hm(e["start"]), _hm(e["end"]),
+                "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
+                % (cls, i, tip, top, h, mbadge, title, _hm(e["start"]), _hm(e["end"]),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         cols.append(
             "<div class='jkc-col%s'><div class='jkc-dh'>%s <b>%d</b></div>"
@@ -346,8 +346,9 @@ def _detail_html(e):
     return ("<div class='jkc-grid jkc-detail'>"
             "<button class='jkd-back' onclick=\"pycmd('janki:cal:det:back')\">‹ Back</button>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
-            % ("<span class='jkc-m'>[M]</span> " if e.get("mandatory") else "",
-               html.escape(e["summary"]), sub, html.escape(when), loc, body))
+            % (html.escape(e["summary"]),
+               " <span class='jkc-m jkd-m' title='Mandatory'>M</span>" if e.get("mandatory") else "",
+               sub, html.escape(when), loc, body))
 
 
 def _tag_label(frag):
@@ -702,7 +703,12 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-un{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);opacity:.75;}
 .jkc-ad{position:relative;margin:0 2px 3px;}
 .jkc-t{font-weight:600;}
-.jkc-m{color:#ff9d8a;font-weight:700;letter-spacing:.02em;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+/* mandatory: an outlined M badge in the block's top-right corner */
+.jkc-m{position:absolute;top:4px;right:4px;width:15px;height:15px;line-height:13px;box-sizing:border-box;
+  text-align:center;font-size:10px;font-weight:700;color:#ff9d8a;border:1.5px solid #ff9d8a;border-radius:4px;}
+.jkc-ev .jkc-t{padding-right:16px;}
+.jkd-m{position:relative;top:-4px;right:auto;display:inline-block;vertical-align:middle;width:20px;height:20px;
+  line-height:17px;font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
