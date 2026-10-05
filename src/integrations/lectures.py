@@ -3143,16 +3143,17 @@ def _parse_ics_events(path):
                 "location": unesc(loc), "mandatory": mand}
         if rid:                                   # one moved/edited occurrence
             moved.add((uid, _ics_dt(rid, ridtz)[0]))
-        days = [d]
-        # an all-day notice spanning several days (DTEND is exclusive) → every day
-        if smin is None and ed and ed > d + datetime.timedelta(days=1):
-            days = [d + datetime.timedelta(days=i) for i in range(min((ed - d).days, 366))]
+        # an all-day item spanning several days (an assignment window; DTEND is
+        # exclusive) shows only on its last day — the due date
+        lag = (ed - d).days - 1 if (smin is None and ed and ed > d) else 0
+        days = [d + datetime.timedelta(days=lag)]
         if rrule and not rid:
             ex = set()
             for exv in re.findall(r"(?m)^EXDATE(?:;[^:\r\n]*)?:(.*)$", block):
                 for v in exv.split(","):
                     ex.add(_ics_dt(v.strip(), None)[0])
-            days = [x for x in _expand_rrule(d, rrule, len(days)) if x not in ex]
+            days = [x + datetime.timedelta(days=lag) for x in _expand_rrule(d, rrule)
+                    if x not in ex]
             for x in days:
                 out.append(dict(base, date=x, _uid=uid, _rec=True))
             continue
@@ -3165,10 +3166,9 @@ def _parse_ics_events(path):
 _WD = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
 
-def _expand_rrule(d0, rule, span=1):
+def _expand_rrule(d0, rule):
     """Dates of a DAILY/WEEKLY repeating event (INTERVAL, BYDAY, UNTIL, COUNT), capped at
-    ~2 years. Other frequencies fall back to the first date. `span` = days per
-    occurrence (multi-day all-day notices)."""
+    ~2 years. Other frequencies fall back to the first date."""
     r = dict(kv.split("=", 1) for kv in rule.split(";") if "=" in kv)
     freq = r.get("FREQ", "")
     step = max(1, int(r.get("INTERVAL", "1") or 1))
@@ -3194,7 +3194,7 @@ def _expand_rrule(d0, rule, span=1):
             wk += datetime.timedelta(weeks=step)
     else:
         starts = [d0]
-    return [x + datetime.timedelta(days=i) for x in starts for i in range(span)]
+    return starts
 
 
 _EV_CACHE = {"key": None, "events": []}

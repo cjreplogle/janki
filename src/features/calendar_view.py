@@ -202,6 +202,13 @@ def _week_html():
     px_per_min = 0.9
     grid_h = int(span * px_per_min)
 
+    # all-day notices: slim one-line chips in a strip of the SAME height on every day
+    # (the hour labels sit beside the grid, so uneven strips misaligned the times)
+    AD_MAX, AD_H = 3, 20
+    ad_n = max([sum(1 for e in evs if e["date"] == d and
+                    (e["start"] is None or _is_allday_kind(e["summary"]))) for d in days] + [0])
+    ad_rows = min(ad_n, AD_MAX + 1) if ad_n > AD_MAX else ad_n
+    ads_h = max(8, ad_rows * AD_H + 4)
     cols = []
     pending = False
     for d in days:
@@ -235,10 +242,13 @@ def _week_html():
                 "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
                 % (cls, i, tip, top, h, mbadge, title, _hm(e["start"]), _hm(e["end"]),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
+        if len(allday) > AD_MAX:
+            rest = len(allday) - AD_MAX
+            allday = allday[:AD_MAX] + ["<div class='jkc-ad jkc-more'>+%d more</div>" % rest]
         cols.append(
             "<div class='jkc-col%s'><div class='jkc-dh'>%s <b>%d</b></div>"
-            "<div class='jkc-ads'>%s</div><div class='jkc-body' style='height:%dpx'>%s</div></div>"
-            % (" jkc-today" if d == today else "", _DAY[d.weekday()], d.day, "".join(allday),
+            "<div class='jkc-ads' style='height:%dpx'>%s</div><div class='jkc-body' style='height:%dpx'>%s</div></div>"
+            % (" jkc-today" if d == today else "", _DAY[d.weekday()], d.day, ads_h, "".join(allday),
                grid_h, "".join(blocks)))
     hours = "".join("<div class='jkc-hr' style='top:%dpx'><span>%s</span></div>"
                     % (int((t - lo) * px_per_min), _hm(t)) for t in range(lo, hi + 1, 60))
@@ -267,7 +277,8 @@ def _week_html():
            "<button onclick=\"pycmd('janki:cal:loader')\">"
            "Lecture wizard…</button></div></div>" % (seg, label))
     grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
-            "style='height:%dpx'>%s</div>%s</div>" % (len(days), grid_h, hours, "".join(cols)))
+            "style='height:%dpx;margin-top:%dpx'>%s</div>%s</div>"
+            % (len(days), grid_h, 24 + ads_h, hours, "".join(cols)))
     global _pending_tries
     if pending and _pending_tries < 2:        # match in the background, then refresh
         _pending_tries += 1
@@ -702,7 +713,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-col{min-width:0;}
 .jkc-dh{text-align:center;font-size:.86em;opacity:.8;height:24px;line-height:24px;}
 .jkc-today .jkc-dh{color:#9cbcf3;opacity:1;}
-.jkc-ads{min-height:28px;}
+.jkc-ads{overflow:hidden;}
 .jkc-body{position:relative;border-radius:10px;background:rgba(255,255,255,.025);}
 .jkc-today .jkc-body{background:rgba(156,188,243,.06);}
 .jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;
@@ -723,7 +734,10 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-c4:hover{background:rgba(240,130,115,.34);}.jkc-c5:hover{background:rgba(170,135,240,.36);}
 .jkc-c6:hover{background:rgba(235,120,175,.34);}.jkc-c7:hover{background:rgba(150,170,195,.34);}
 .jkc-un{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);opacity:.75;}
-.jkc-ad{position:relative;margin:0 2px 3px;}
+.jkc-ad{position:relative;margin:0 2px 2px;height:18px;line-height:16px;padding:0 8px !important;
+  font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.jkc-ad .jkc-m{display:none;}
+.jkc-more{opacity:.6;border:none !important;text-align:center;}
 .jkc-t{font-weight:600;}
 /* mandatory: an outlined M badge in the block's top-right corner */
 .jkc-m{position:absolute;top:4px;right:4px;width:15px;height:15px;box-sizing:border-box;
