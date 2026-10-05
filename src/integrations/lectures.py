@@ -977,8 +977,24 @@ def _notes_sig(col):
         return None
 
 
+def source_decks():
+    """{family: deck name} — each source searched only in its own deck (+ subdecks);
+    a source without one searches the whole collection."""
+    try:
+        d = _cfg().get("lecture_source_decks") or {}
+        return {k: v for k, v in d.items() if v}
+    except Exception:
+        return {}
+
+
+def _deck_clause(name):
+    n = name.replace('"', '')
+    return '(deck:"%s" OR deck:"%s::*")' % (n, n)
+
+
 def _find_base(col, searches):
-    sig = _notes_sig(col)
+    decks = source_decks()
+    sig = (_notes_sig(col), tuple(sorted(decks.items())))
     if sig is None or sig != _FIND_SIG["v"]:
         _FIND_CACHE.clear()
         _FIND_SIG["v"] = sig
@@ -987,13 +1003,17 @@ def _find_base(col, searches):
     if hit is not None:
         _FIND_CACHE.move_to_end(key)
         return hit
-    atoms = _atoms(list(searches))
+    by_fam = {}
+    for srch in searches:
+        by_fam.setdefault(family_of(srch), []).extend(_atoms([srch]))
     out = set()
-    # 40 per query: each tag term becomes several SQL nodes (child-tag matching), so
-    # 150 could still pass SQLite's depth limit of 1000 on big AnKing lectures
-    for i in range(0, len(atoms), 40):
-        q = " OR ".join("(%s)" % a for a in atoms[i:i + 40])
-        out.update(col.find_cards("(%s)" % q))
+    for fam, atoms in by_fam.items():
+        dc = (" " + _deck_clause(decks[fam])) if fam in decks else ""
+        # 40 per query: each tag term becomes several SQL nodes (child-tag matching),
+        # so 150 could still pass SQLite's depth limit of 1000 on big AnKing lectures
+        for i in range(0, len(atoms), 40):
+            q = " OR ".join("(%s)" % a for a in atoms[i:i + 40])
+            out.update(col.find_cards("(%s)%s" % (q, dc)))
     out = frozenset(out)
     _FIND_CACHE[key] = out
     while len(_FIND_CACHE) > _FIND_MAX:

@@ -233,6 +233,7 @@ class GlassSettings(QDialog):
             lec_tabs = QTabWidget(); _lec_outer.addWidget(lec_tabs)
             for _title, _widget in _pages:
                 lec_tabs.addTab(_widget, _title)
+            lec_tabs.addTab(self._build_lecture_calendar_tab(), "Calendar")
             tabs.addTab(lec_page, "Lectures")
             if _lsave:
                 self._lecture_savers.append(_lsave)
@@ -2902,6 +2903,49 @@ class GlassSettings(QDialog):
         target.setAcceptDrops(True)
         self._rp_drop_filter = _Drop(self)
         target.installEventFilter(self._rp_drop_filter)
+
+    def _build_lecture_calendar_tab(self):
+        """Lectures → Calendar: tie each source to its own deck, so its lecture searches
+        look only there (big shared tag maps like AnKing's stop scanning every deck)."""
+        from aqt.qt import QComboBox, QWidget, QGridLayout
+        from ..integrations import lectures as _lec
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        note = QLabel("Search each source only in its own deck (and its subdecks). "
+                      "\u201cAll decks\u201d searches the whole collection.")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        grid = QGridLayout()
+        try:
+            names = sorted(d.name for d in mw.col.decks.all_names_and_ids()
+                           if not d.name.startswith("Janki Calendar::"))
+        except Exception:
+            names = []
+        cur = dict(self.cfg.get("lecture_source_decks") or {})
+        for row, (fam, label) in enumerate(_lec.FAMILY_LABEL.items()):
+            grid.addWidget(QLabel(label), row, 0)
+            cb = QComboBox()
+            cb.addItem("All decks", "")
+            for n in names:
+                cb.addItem(n, n)
+            if cur.get(fam) in names:
+                cb.setCurrentIndex(names.index(cur[fam]) + 1)
+
+            def changed(_i, fam=fam, cb=cb):
+                d = dict(self.cfg.get("lecture_source_decks") or {})
+                v = cb.currentData() or ""
+                if v:
+                    d[fam] = v
+                else:
+                    d.pop(fam, None)
+                self.cfg["lecture_source_decks"] = d
+                mw.addonManager.writeConfig(__name__, self.cfg)
+            cb.currentIndexChanged.connect(changed)
+            grid.addWidget(cb, row, 1)
+        grid.setColumnStretch(1, 1)
+        lay.addLayout(grid)
+        lay.addStretch(1)
+        return page
 
     def _build_sounds_tab(self, lay):
         """Focus ▸ Sounds: soft UI sounds for keyboard/remote navigation and reviewing

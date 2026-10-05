@@ -642,7 +642,8 @@ def _weak_key():
     # anything while a background job holds it froze the window (33 s in a profile)
     from ..integrations import lectures
     lectures._excl_map()                     # a file stat; refreshes if edited
-    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())), lectures._EXCL["mt"])
+    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())), lectures._EXCL["mt"],
+            tuple(sorted(lectures.source_decks().items())))
 
 
 def _weak_cached(mode):
@@ -691,23 +692,30 @@ def _weak_compute(mode, then=None):
         if not m or m["key"] in seen:
             continue
         seen.add(m["key"])
-        atoms = lectures._atoms([x for x in m["searches"] if _fam(x) not in off])
+        atoms = [(_fam(x), a) for x in m["searches"] if _fam(x) not in off
+                 for a in lectures._atoms([x])]
         if atoms:
             lecs.append((e, m, atoms))
     if pending:
         QTimer.singleShot(0, _prewarm)          # match the rest for next time
-    other = sorted({a for _e, _m, atoms in lecs for a in atoms if _atom_plain(a) is None})
+    other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
+    src_decks = lectures.source_decks()
     _weak_progress(mode, 0.05)
 
     # 2 ------------------------------------------------------------------------
     def read(col):
         import time as _t
         data = {"notes": col.db.all("select id, tags from notes"),
-                "cards": col.db.all("select id, nid, queue, type, due from cards"),
+                "cards": col.db.all("select id, nid, queue, type, due, "
+                                    "case when odid then odid else did end from cards"),
                 "rev": col.db.all("select cid, ease, count() from revlog where id > ? and "
                                   "type < 3 group by cid, ease",
                                   int((_t.time() - 30 * 86400) * 1000)),
-                "today": col.sched.today, "other": {}}
+                "today": col.sched.today, "other": {}, "allow": {}}
+        for fam, name in src_decks.items():          # each source's deck + subdecks
+            did = col.decks.id_for_name(name)
+            if did:
+                data["allow"][fam] = set(col.decks.deck_and_child_ids(did))
         for a in other:
             try:
                 data["other"][a] = set(col.find_notes(a))
@@ -729,8 +737,9 @@ def _weak_compute(mode, then=None):
                     leech_nids.add(nid)
         keys = sorted(tag_nids)
         nid_cards = {}
-        for cid, nid, q, typ, d in data["cards"]:
-            nid_cards.setdefault(nid, []).append((cid, q, typ, d))
+        for cid, nid, q, typ, d, did in data["cards"]:
+            nid_cards.setdefault(nid, []).append((cid, q, typ, d, did))
+        allow = data.get("allow") or {}
         rev = {}
         for cid, ease, cnt in data["rev"]:
             g, b = rev.get(cid, (0, 0))
@@ -774,13 +783,17 @@ def _weak_compute(mode, then=None):
                 last = now
                 f = 0.45 + 0.55 * idx / max(1, len(lecs))
                 mw.taskman.run_on_main(lambda f=f: _weak_progress(mode, f))
-            nids = set()
-            for a in atoms:
-                nids |= atom_nids(a)
+            hits = {}                          # nid → families it was found through
+            for fam, a in atoms:
+                for nid in atom_nids(a):
+                    hits.setdefault(nid, set()).add(fam)
             n = sus = new = due = leech = good = bad = 0
-            for nid in nids:
+            for nid, fams in hits.items():
                 lch = nid in leech_nids
-                for cid, q, typ, d in nid_cards.get(nid, ()):
+                for cid, q, typ, d, did in nid_cards.get(nid, ()):
+                    # a source tied to a deck only counts cards in that deck
+                    if not any(f not in allow or did in allow[f] for f in fams):
+                        continue
                     n += 1
                     if q == -1:
                         sus += 1
