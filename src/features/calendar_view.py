@@ -238,6 +238,10 @@ def _week_html():
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
+                if e.get("_dress"):                # a notice, not a class: not clickable
+                    allday.append("<div class='jkc-ev jkc-ad jkc-dress' title='%s'>%s</div>"
+                                  % (title, title))
+                    continue
                 allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s%s</div>"
                               % (cls, i, tip, mbadge, title))
                 continue
@@ -780,6 +784,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ad{position:relative;margin:0 2px 2px;height:18px;line-height:16px;padding:0 8px !important;
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
+#jkc .jkc-dress{cursor:default;transform:none !important;filter:none !important;}
 /* where you are in the day: a thin red line with a dot on today's column */
 #jkc .jkc-now{position:absolute;left:0;right:0;height:0;z-index:5;pointer-events:none;display:none;
   border-top:2px solid #ff6b6b;}
@@ -980,7 +985,7 @@ _JS = """<script>(function(){
  function press(cls){var b=document.querySelector('#jkc .'+cls);if(!b)return;
    b.classList.add('kb','press');setTimeout(function(){b.classList.remove('press');},140);
    setTimeout(function(){b.classList.remove('kb');},420);}
- function evs(){return Array.prototype.slice.call(document.querySelectorAll('#jkc .jkc-ev'))
+ function evs(){return Array.prototype.slice.call(document.querySelectorAll('#jkc .jkc-ev:not(.jkc-dress)'))
    .sort(function(a,b){var ra=a.getBoundingClientRect(),rb=b.getBoundingClientRect();
      return (ra.left-rb.left)||(ra.top-rb.top);});}
  function sel(el){var c=document.querySelector('#jkc .jkc-ev.jk-kb');if(c)c.classList.remove('jk-kb');
@@ -1023,7 +1028,7 @@ _JS = """<script>(function(){
    var o=t.classList.toggle('open');a.textContent=o?'Hide tags ▴':'Show tags ▾';
    try{pycmd('janki:sfx:'+(o?'unfold':'fold'));}catch(x){}};
  document.addEventListener('click',function(e){
-   var ev=e.target.closest&&e.target.closest('.jkc-ev'); if(!ev)return;
+   var ev=e.target.closest&&e.target.closest('.jkc-ev:not(.jkc-dress)'); if(!ev)return;
    pycmd('janki:cal:ev:'+ev.getAttribute('data-i'));
  },true);
 })();</script>"""
