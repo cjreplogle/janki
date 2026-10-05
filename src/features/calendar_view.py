@@ -617,14 +617,72 @@ def _weak_compute(mode, then=None):
     _weak_busy.add(mode)
 
     def op(col):
+        import bisect
+        import fnmatch
         import time as _t
-        seen, rows = set(), []
+        # One read of each table, then every lecture is matched in memory — per-lecture
+        # tag searches over hundreds of AnKing tags were the long load.
+        tag_nids = {}
+        leech_nids = set()
+        for nid, tags in col.db.all("select id, tags from notes"):
+            for t in (tags or "").split():
+                tl = t.lower()
+                tag_nids.setdefault(tl, []).append(nid)
+                if tl == "leech":
+                    leech_nids.add(nid)
+        keys = sorted(tag_nids)
+        nid_cards = {}
+        for cid, nid, q, typ, d in col.db.all("select id, nid, queue, type, due from cards"):
+            nid_cards.setdefault(nid, []).append((cid, q, typ, d))
         cutoff = int((_t.time() - 30 * 86400) * 1000)
+        rev = {}
+        for cid, ease, cnt in col.db.all(
+                "select cid, ease, count() from revlog where id > ? and type < 3 "
+                "group by cid, ease", cutoff):
+            g, b = rev.get(cid, (0, 0))
+            rev[cid] = (g + cnt, b) if ease > 1 else (g, b + cnt) if ease == 1 else (g, b)
+        atom_cache = {}
+
+        def atom_nids(a):
+            """nids for one search piece; plain tag terms from memory, else Anki."""
+            if a in atom_cache:
+                return atom_cache[a]
+            t = a.strip().strip('"')
+            out = set()
+            if t.lower().startswith("tag:") and " " not in t and "(" not in t:
+                pat = t[4:].lower()
+                if "*" in pat or "?" in pat:
+                    core = pat.strip("*")
+                    if "*" not in core and "?" not in core:          # *leaf* → substring
+                        for k in keys:
+                            if core in k:
+                                out.update(tag_nids[k])
+                    else:
+                        for k in keys:
+                            if fnmatch.fnmatchcase(k, pat):
+                                out.update(tag_nids[k])
+                else:                                   # the tag and its ::children
+                    lo = bisect.bisect_left(keys, pat)
+                    for k in keys[lo:]:
+                        if k == pat or k.startswith(pat + "::"):
+                            out.update(tag_nids[k])
+                        elif not k.startswith(pat):
+                            break
+            else:
+                try:
+                    out = set(col.db.list("select distinct nid from cards where id in (%s)"
+                                          % (",".join(str(c) for c in col.find_cards(a))
+                                             or "0")))
+                except Exception:
+                    out = set()
+            atom_cache[a] = out
+            return out
+
+        seen, rows = set(), []
         sched_today = col.sched.today
         for e in sorted(evs, key=lambda x: x["date"], reverse=True):
             if _closing:
                 return []
-            time.sleep(0.004)            # breathe between lectures
             if e["start"] is None or _is_allday_kind(e["summary"]):
                 continue
             if e["date"] == today and (e["end"] or 0) > now_min:
@@ -634,31 +692,29 @@ def _weak_compute(mode, then=None):
                 continue
             seen.add(m["key"])
             frags = [x for x in m["searches"] if _fam(x) not in off]
-            ids = _cids(col, frags) if frags else []
-            if not ids:
+            nids = set()
+            for a in lectures._atoms(frags):
+                nids |= atom_nids(a)
+            if not nids:
                 continue
-            n = len(ids)
-            sus = new = due = leech = good = bad = 0
-            for k in range(0, n, 500):
-                chunk = ",".join(str(c) for c in ids[k:k + 500])
-                for q, typ, d, tags in col.db.all(
-                        "select c.queue, c.type, c.due, n.tags from cards c join notes n "
-                        "on n.id = c.nid where c.id in (%s)" % chunk):
+            n = sus = new = due = leech = good = bad = 0
+            for nid in nids:
+                is_leech = nid in leech_nids
+                for cid, q, typ, d in nid_cards.get(nid, ()):
+                    n += 1
                     if q == -1:
                         sus += 1
                     elif typ == 0:
                         new += 1
                     elif (q == 2 and d <= sched_today) or q in (1, 3):
                         due += 1
-                    if " leech " in " %s " % (tags or "").lower():
+                    if is_leech:
                         leech += 1
-                for ease, cnt in col.db.all(
-                        "select ease, count() from revlog where cid in (%s) and id > ? "
-                        "and type < 3 group by ease" % chunk, cutoff):
-                    if ease == 1:
-                        bad += cnt
-                    elif ease > 1:
-                        good += cnt
+                    gb = rev.get(cid)
+                    if gb:
+                        good += gb[0]; bad += gb[1]
+            if not n:
+                continue
             revs = good + bad
             recall = good / revs if revs else None
             unstarted = (sus + new) / n
