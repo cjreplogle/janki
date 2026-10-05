@@ -681,6 +681,111 @@ def _practice_did():
 _tray_mode_widgets = {}
 
 
+class _DayView(QWidget):
+    """Today's classes drawn on an hour grid (painted, so it's light in the glass tray)."""
+    RGB = [(120, 165, 245), (80, 195, 185), (125, 200, 120), (235, 185, 90),
+           (240, 130, 115), (170, 135, 240), (235, 120, 175), (150, 170, 195)]
+    PX_H = 30            # pixels per hour
+    GUTTER = 44          # time labels on the left
+
+    def __init__(self, parent, evs, lectures, cv):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        timed = [e for e in evs if e["start"] is not None]
+        lo = min([e["start"] for e in timed] + [8 * 60]) // 60 * 60
+        hi = -(-max([e["end"] or e["start"] + 60 for e in timed] + [17 * 60]) // 60) * 60
+        self.lo, self.hi = lo, hi
+        lanes = cv._lanes([(i, e) for i, e in enumerate(timed)])
+        self.items = []
+        for i, e in enumerate(timed):
+            m = lectures.peek_match(e["summary"])
+            known = bool(m and m is not lectures._PENDING)
+            col = self.RGB[cv._course_colour(e["summary"])] if known else (154, 160, 170)
+            ln, nl = lanes.get(i, (0, 1))
+            self.items.append({"e": e, "col": col, "lane": ln, "lanes": nl})
+        self.hover = None
+        self.setFixedHeight(int((hi - lo) / 60 * self.PX_H) + 12)
+
+    def _rect(self, it):
+        from aqt.qt import QRectF
+        e = it["e"]
+        w = self.width() - self.GUTTER - 4
+        y0 = 6 + (e["start"] - self.lo) / 60 * self.PX_H
+        y1 = 6 + ((e["end"] or e["start"] + 50) - self.lo) / 60 * self.PX_H
+        lw = w / it["lanes"]
+        return QRectF(self.GUTTER + it["lane"] * lw + 1, y0 + 1, lw - 3, max(16, y1 - y0 - 2))
+
+    def paintEvent(self, _ev):
+        from aqt.qt import QPainter, QColor, QPen, QFont, QRectF
+        import datetime
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        f = QFont(self.font())
+        f.setPointSizeF(max(8.0, f.pointSizeF() - 2))
+        p.setFont(f)
+        for t in range(self.lo, self.hi + 1, 60):          # hour lines + labels
+            y = 6 + (t - self.lo) / 60 * self.PX_H
+            p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+            p.drawLine(self.GUTTER - 4, int(y), self.width() - 4, int(y))
+            h = t // 60
+            p.setPen(QColor(255, 255, 255, 120))
+            p.drawText(QRectF(0, y - 7, self.GUTTER - 8, 14),
+                       int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                       "%d%s" % ((h + 11) % 12 + 1, "am" if h < 12 else "pm"))
+        bold = QFont(f)
+        bold.setBold(True)
+        for n, it in enumerate(self.items):                 # class blocks
+            r = self._rect(it)
+            c = it["col"]
+            p.setPen(QPen(QColor(c[0], c[1], c[2], 180), 1.2))
+            p.setBrush(QColor(c[0], c[1], c[2], 40 if n == self.hover else 0))
+            p.drawRoundedRect(r, 6, 6)
+            p.setPen(QColor(240, 242, 248))
+            p.setFont(bold)
+            star = bool(it["e"].get("mandatory"))
+            tr = r.adjusted(6, 2, -16 if star else -4, -2)
+            p.drawText(tr, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+                       p.fontMetrics().elidedText(it["e"]["summary"], Qt.TextElideMode.ElideRight,
+                                                  int(tr.width())))
+            if star:                                        # red ★, top-right like the Calendar
+                p.setPen(QColor(255, 157, 138))
+                p.drawText(r.adjusted(0, 2, -5, 0),
+                           int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop), "★")
+        now = datetime.datetime.now()                       # the red now-line
+        m = now.hour * 60 + now.minute
+        if self.lo <= m <= self.hi:
+            y = 6 + (m - self.lo) / 60 * self.PX_H
+            p.setPen(QPen(QColor(255, 107, 107), 2))
+            p.drawLine(self.GUTTER - 2, int(y), self.width() - 4, int(y))
+            p.setBrush(QColor(255, 107, 107))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QRectF(self.GUTTER - 6, y - 4, 8, 8))
+        p.end()
+
+    def _hit(self, pos):
+        for n, it in enumerate(self.items):
+            if self._rect(it).contains(pos.toPointF() if hasattr(pos, "toPointF") else pos):
+                return n
+        return None
+
+    def mouseMoveEvent(self, ev):
+        h = self._hit(ev.position())
+        if h != self.hover:
+            self.hover = h
+            self.setToolTip("Study %s" % self.items[h]["e"]["summary"] if h is not None else "")
+            self.update()
+
+    def leaveEvent(self, _ev):
+        self.hover = None
+        self.update()
+
+    def mousePressEvent(self, ev):
+        h = self._hit(ev.position())
+        if h is not None:
+            _study_class(self.items[h]["e"])
+
+
 def _build_today_list(parent):
     """Today's classes from the calendar: time + title in its course colour; click one
     to study it (every card, suspended ones restored afterwards)."""
@@ -704,33 +809,10 @@ def _build_today_list(parent):
         lbl = QLabel("No classes today")
         lbl.setObjectName("cnt")
         v.addWidget(lbl)
-    # the Calendar's course colours: a coloured outline on a faint tint, like in-app
-    rgb = [(120, 165, 245), (80, 195, 185), (125, 200, 120), (235, 185, 90),
-           (240, 130, 115), (170, 135, 240), (235, 120, 175), (150, 170, 195)]
-    for e in evs:
-        b = QPushButton()
-        row = QHBoxLayout(b)
-        row.setContentsMargins(11, 0, 11, 0)
-        when = cv._hm(e["start"]) if e["start"] is not None else "All day"
-        m = lectures.peek_match(e["summary"])
-        known = bool(m and m is not lectures._PENDING)
-        r, g, bl = rgb[cv._course_colour(e["summary"])] if known else (154, 160, 170)
-        # painted by the tray's own smooth painter (no per-button stylesheet: those
-        # fought it and made the Today list slow to show)
-        b._jk_paint = ((r, g, bl, 0.0), .12, .2, (r, g, bl, .7), 8)   # outline only
-        star = " <span style='color:#ff9d8a'>★</span>" if e.get("mandatory") else ""
-        nm = QLabel("<b>%s</b>%s" % (e["summary"], star))
-        nm.setTextFormat(Qt.TextFormat.RichText)
-        nm.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        tm = QLabel(when)
-        tm.setObjectName("cnt")
-        tm.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        row.addWidget(nm, 1)
-        row.addWidget(tm)
-        b.setMinimumHeight(30)
-        b.setToolTip("Study this lecture")
-        b.clicked.connect(lambda _c=False, ev=e: _study_class(ev))
-        v.addWidget(b)
+    # A mini day view like the Calendar: hour lines + labels, each class a block at its
+    # time in its course colour (outline only); click one to study it.
+    if evs:
+        v.addWidget(_DayView(box, evs, lectures, cv))
     v.addStretch(1)
     return box
 
