@@ -205,6 +205,8 @@ def _week_html():
                 cls = "jkc-ev"                             # neutral until matched
             else:
                 cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
+            if m:                                          # one colour per course
+                cls += " jkc-c%d" % _course_colour(e["summary"])
             title = html.escape(e["summary"])
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
@@ -266,6 +268,54 @@ def _page_html():
     return _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
 
 
+_PALETTE = 8
+
+
+def _course_key(title):
+    """The course part of a class title: before ':' / ' - ' / '–', else the first word
+    ("Pharm: Autonomics" → "pharm", "MSK – Bone" → "msk")."""
+    import re
+    t = (title or "").strip()
+    m = re.split(r"\s*(?::|\s[-–—]\s|[–—])\s*", t, maxsplit=1)
+    head = m[0] if len(m) > 1 and m[0] else (t.split()[0] if t.split() else t)
+    return re.sub(r"[^a-z0-9]+", "", head.lower()) or "x"
+
+
+_colours = None          # {course key: palette index}, remembered in user_files
+
+
+def _colours_path():
+    import os
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                        "user_files", "calendar_colours.json")
+
+
+def _course_colour(title):
+    """Palette index for a course. A new course takes the least-used colour (so
+    courses don't share one) and keeps it from then on — same colour every week."""
+    global _colours
+    import os
+    key = _course_key(title)
+    if _colours is None:
+        try:
+            with open(_colours_path(), encoding="utf-8") as f:
+                _colours = {k: int(v) for k, v in json.load(f).items()}
+        except Exception:
+            _colours = {}
+    if key not in _colours:
+        used = [0] * _PALETTE
+        for v in _colours.values():
+            used[v % _PALETTE] += 1
+        _colours[key] = used.index(min(used))
+        try:
+            os.makedirs(os.path.dirname(_colours_path()), exist_ok=True)
+            with open(_colours_path(), "w", encoding="utf-8") as f:
+                json.dump(_colours, f, indent=1)
+        except Exception:
+            pass
+    return _colours[key] % _PALETTE
+
+
 def _is_allday_kind(summary):
     """Day-wide notices that come through as timed events (e.g. a dress code) belong
     in the all-day row, not across the time grid."""
@@ -312,7 +362,19 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
   font-size:.78em;line-height:1.25;transition:background .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
 .jkc-ev:hover,.jkc-ev.jk-kb{background:rgba(156,188,243,.36);transform:translateY(-1px);}
-.jkc-fz{border-left:3px solid #e0b000;}
+.jkc-fz{border-left-width:2px !important;border-left-style:dashed !important;}
+.jkc-c0{background:rgba(120,165,245,.24);border-color:rgba(120,165,245,.55);}
+.jkc-c1{background:rgba(80,195,185,.22);border-color:rgba(80,195,185,.55);}
+.jkc-c2{background:rgba(125,200,120,.22);border-color:rgba(125,200,120,.52);}
+.jkc-c3{background:rgba(235,185,90,.22);border-color:rgba(235,185,90,.55);}
+.jkc-c4{background:rgba(240,130,115,.22);border-color:rgba(240,130,115,.55);}
+.jkc-c5{background:rgba(170,135,240,.24);border-color:rgba(170,135,240,.55);}
+.jkc-c6{background:rgba(235,120,175,.22);border-color:rgba(235,120,175,.52);}
+.jkc-c7{background:rgba(150,170,195,.22);border-color:rgba(150,170,195,.52);}
+.jkc-c0:hover{background:rgba(120,165,245,.36);}.jkc-c1:hover{background:rgba(80,195,185,.34);}
+.jkc-c2:hover{background:rgba(125,200,120,.34);}.jkc-c3:hover{background:rgba(235,185,90,.34);}
+.jkc-c4:hover{background:rgba(240,130,115,.34);}.jkc-c5:hover{background:rgba(170,135,240,.36);}
+.jkc-c6:hover{background:rgba(235,120,175,.34);}.jkc-c7:hover{background:rgba(150,170,195,.34);}
 .jkc-un{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);opacity:.75;}
 .jkc-ad{position:relative;margin:0 2px 3px;}
 .jkc-t{font-weight:600;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
