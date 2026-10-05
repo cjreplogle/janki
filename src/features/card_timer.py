@@ -823,6 +823,13 @@ def _make_card_timer():
             else:
                 phase = self._prog
             env = 0.12 + 0.88 * (0.5 - 0.5 * math.cos(2 * math.pi * phase))
+            # Another app in front (and no caption to wrap): keep the flare invisible
+            # so it can't glow over that app's windows; it reappears when you return.
+            try:
+                if not state._anki_focused and not hud._caption_visible():
+                    env = 0.0
+            except Exception:
+                pass
             try:
                 self.setWindowOpacity(env)
             except Exception:

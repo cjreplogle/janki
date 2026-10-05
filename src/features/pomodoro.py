@@ -549,7 +549,9 @@ def _make_pomodoro():
             # while Anki is minimized/hidden so it doesn't glow over the desktop where
             # the window was, and bring it back when the window returns.
             try:
-                gone = mw.isMinimized() or not mw.isVisible()
+                # also while another app is in front: the tint is an always-on-top
+                # window and would sit over that app's windows
+                gone = mw.isMinimized() or not mw.isVisible() or not state._anki_focused
                 if gone and self._tint.isVisible():
                     self._tint.hide()
                 elif (not gone and self._break_pending and not self._on_break
@@ -597,8 +599,12 @@ def _make_pomodoro():
             self._break_disp_s = -1
             self._xp.set_progress(0.0)
             state._pomo_on_break = True
-            # Wake the app so the WebEngine renderer is active
+            # Wake the app so the WebEngine renderer is active — but only when Anki is
+            # already in front: activating from the background stole focus from
+            # whatever you were doing when the break began.
             try:
+                if not state._anki_focused:
+                    raise RuntimeError("background: don't steal focus")
                 _msg, _cls = _bridge()
                 _ns = _msg(c_void_p, _cls(b"NSApplication"), b"sharedApplication")
                 _msg(c_void_p, _ns, b"activateIgnoringOtherApps:",
