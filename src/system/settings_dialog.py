@@ -2242,6 +2242,32 @@ class GlassSettings(QDialog):
         _doc_link.setOpenExternalLinks(True)
         _doc_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         _doc_link.setToolTip("Open the Janki documentation on GitHub")
+        # Hot corner: rest the pointer in a screen corner to bring Anki forward.
+        from aqt.qt import QComboBox as _HCB
+        _hc_row = QHBoxLayout()
+        _hc_row.addWidget(QLabel("Hot corner"))
+        _hc = _HCB()
+        for _k, _l in (("off", "Off"), ("top-left", "Top left"), ("top-right", "Top right"),
+                       ("bottom-left", "Bottom left"), ("bottom-right", "Bottom right")):
+            _hc.addItem(_l, _k)
+        _hc.setCurrentIndex(max(0, _hc.findData(str(self.cfg.get("hot_corner", "off")))))
+        _hc.setToolTip("Rest the pointer in this corner of the screen to bring Anki "
+                       "forward. Click into it to keep it; otherwise it slips away "
+                       "again when you move off.")
+
+        def _hc_changed(_i):
+            self.cfg["hot_corner"] = _hc.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                from ..features import hotcorner
+                hotcorner.reload()
+            except Exception:
+                pass
+        _hc.currentIndexChanged.connect(_hc_changed)
+        _hc_row.addWidget(_hc)
+        _hc_row.addStretch(1)
+        gen_lay.addLayout(_hc_row)
+
         # Documentation link and "Anki Preferences…" share one row (the button is
         # added to it further down, where it's built).
         _doc_row = QHBoxLayout()

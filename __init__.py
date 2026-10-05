@@ -1372,3 +1372,11 @@ try:
     gui_hooks.main_window_did_init.append(_install_tab_chord_guard)
 except Exception:
     pass
+
+
+
+try:
+    from .src.features import hotcorner as _hotcorner
+    gui_hooks.profile_did_open.append(lambda: _hotcorner.reload())
+except Exception:
+    pass
