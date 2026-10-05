@@ -694,18 +694,29 @@ def _build_today_list(parent):
         lbl = QLabel("No classes today")
         lbl.setObjectName("cnt")
         v.addWidget(lbl)
-    colours = ["#78a5f5", "#50c3b9", "#7dc878", "#ebb95a", "#f08273", "#aa87f0", "#eb78af", "#96aac3"]
+    # the Calendar's course colours: a coloured outline on a faint tint, like in-app
+    rgb = [(120, 165, 245), (80, 195, 185), (125, 200, 120), (235, 185, 90),
+           (240, 130, 115), (170, 135, 240), (235, 120, 175), (150, 170, 195)]
     for e in evs:
         b = QPushButton()
         row = QHBoxLayout(b)
         row.setContentsMargins(11, 0, 11, 0)
         when = cv._hm(e["start"]) if e["start"] is not None else "All day"
         m = lectures.peek_match(e["summary"])
-        col = colours[cv._course_colour(e["summary"])] if (m and m is not lectures._PENDING) else "#9aa0aa"
-        nm = QLabel("<span style='color:%s'>●</span>  %s" % (col, e["summary"]))
+        known = bool(m and m is not lectures._PENDING)
+        r, g, bl = rgb[cv._course_colour(e["summary"])] if known else (154, 160, 170)
+        b.setStyleSheet(
+            "QPushButton{background:rgba(%d,%d,%d,%.2f);border:1px solid rgba(%d,%d,%d,.6);"
+            "border-radius:8px;text-align:left;}"
+            "QPushButton:hover{background:rgba(%d,%d,%d,.34);}"
+            % (r, g, bl, .2 if known else .08, r, g, bl, r, g, bl))
+        star = " <span style='color:#ff9d8a'>★</span>" if e.get("mandatory") else ""
+        nm = QLabel("<b>%s</b>%s" % (e["summary"], star))
         nm.setTextFormat(Qt.TextFormat.RichText)
+        nm.setStyleSheet("background:transparent;border:none;")
         tm = QLabel(when)
         tm.setObjectName("cnt")
+        tm.setStyleSheet("background:transparent;border:none;")
         row.addWidget(nm, 1)
         row.addWidget(tm)
         b.setMinimumHeight(30)
