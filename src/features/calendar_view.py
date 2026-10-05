@@ -249,7 +249,12 @@ def _norm(s):
 
 
 _CSS = """<style>
-#jkc{width:min(1100px,calc(100vw - 32px));margin:4px auto 24px;text-align:left;}
+/* Calendar page only: drop the (empty) deck table, its <br> and the page's top gap */
+body center > table:first-of-type{display:none !important;}
+body center > br{display:none !important;}
+html body{padding-top:0 !important;margin-top:0 !important;justify-content:flex-start !important;}
+html body > center{margin-top:0 !important;padding-top:0 !important;}
+#jkc{width:min(1100px,calc(100vw - 32px));margin:6px auto 24px;text-align:left;}
 .jkc-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:0 0 10px;}
 .jkc-l{justify-self:start;}.jkc-r{justify-self:end;}
 .jkc-c{display:flex;align-items:center;gap:6px;}
@@ -492,6 +497,7 @@ def install_toolbar(links, toolbar):
             # icon's width; the icon is centred on top of it.
             style += ("#janki_calendar{position:relative;display:inline-block;width:1.2em;"
                       "white-space:nowrap;color:transparent !important;"
+                      "text-shadow:none !important;"
                       "clip-path:inset(0);vertical-align:baseline;}"
                       "#janki_calendar::before{content:'';position:absolute;left:50%%;top:50%%;"
                       "width:1.15em;height:1.15em;transform:translate(-50%%,-50%%);"
