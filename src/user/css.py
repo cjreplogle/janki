@@ -814,10 +814,16 @@ def _motion_css(context) -> str:
         # row and the count columns never change width — animating padding shifted the
         # other columns sideways. The pill counter-shifts so its left edge stays put.
         rules += (
+            # The NAME slides (a span inside the link), not the link: moving the link
+            # itself pulled it out from under a pointer resting at its edge, so hover
+            # flickered on/off in a loop at one exact x position.
             "html body a.deck {\n"
             "  position:relative; isolation:isolate; text-decoration:none !important;\n"
-            "  transition: transform .35s %(e)s, color .3s ease; }\n"
-            "html body a.deck:hover, html body a.deck.jk-kb { transform: translateX(6px); }\n"
+            "  transition: color .3s ease; }\n"
+            "html body a.deck .jk-dn { display:inline-block;\n"
+            "  transition: transform .35s %(e)s; }\n"
+            "html body a.deck:hover .jk-dn, html body a.deck.jk-kb .jk-dn {\n"
+            "  transform: translateX(6px); }\n"
             "html body a.deck::before {\n"
             "  content:''; position:absolute; z-index:-1; inset:-3px -8px -3px -7px;\n"
             "  border-radius:8px; background: rgba(255,255,255,0.10);\n"
@@ -1046,6 +1052,13 @@ def _build_css(cfg, context):
         parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}"
                      "html body a.deck:focus,html body a.deck:focus-visible{outline:none!important;}</style>"
                      "<script>" + _DECK_KEYS_JS + "</script>\n")
+        # wrap each deck name's text in span.jk-dn — the part that slides on hover
+        parts.append("<script>(function(){function w(){document.querySelectorAll('a.deck')"
+                     ".forEach(function(a){if(a.querySelector('.jk-dn'))return;"
+                     "var s=document.createElement('span');s.className='jk-dn';"
+                     "while(a.firstChild)s.appendChild(a.firstChild);a.appendChild(s);});}"
+                     "if(document.readyState==='loading')document.addEventListener("
+                     "'DOMContentLoaded',w);else w();})();</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
