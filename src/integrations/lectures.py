@@ -3103,8 +3103,9 @@ def _parse_ics_events(path):
         if smin is not None and (emin is None or ed != d):
             emin = smin + 60 if emin is None else 24 * 60           # clamp to the day
         def unesc(t):
-            return ((t or "").replace("\\,", ",").replace("\\;", ";")
-                    .replace("\\n", " ").strip())
+            # feeds sometimes HTML-escape titles ("P&amp;S") — show them plainly
+            return html.unescape((t or "").replace("\\,", ",").replace("\\;", ";")
+                                 .replace("\\n", " ")).strip()
         blob = " ".join(unesc(x) for x in (summ, desc, cats)).lower()
         mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
         out.append({"date": d, "start": smin, "end": emin,
