@@ -3409,10 +3409,18 @@ def _parse_ics_events(path):
         plain = html.unescape((desc or "").replace("\\n", " ").replace("\\N", " ")
                               .replace("\\,", ",").replace("\\;", ";")
                               .replace("\\\\", "\\"))
-        lm = (re.search(r"link to event\s*:?\s*(https?://[^\s<>\"']+)", plain, re.I)
-              or re.search(r"(https?://[^\s<>\"']+)", plain))
-        link = html.unescape((url_f or "").replace("\\,", ",").replace("\\;", ";")).strip() \
-            or (lm.group(1) if lm else "")
+        # the whole event (incl. X-ALT-DESC — Outlook-style feeds keep links only in
+        # the HTML copy of the notes), un-escaped the same way
+        whole = html.unescape(block.replace("\\n", " ").replace("\\N", " ")
+                              .replace("\\,", ",").replace("\\;", ";"))
+        _U = r"(https?://[^\s<>\"'\\]+)"
+        lm = (re.search(r"link to event\s*:?\s*(?:<[^>]*>\s*)*" + _U, whole, re.I)
+              or None)
+        link = (lm.group(1) if lm else "") \
+            or html.unescape((url_f or "").replace("\\,", ",").replace("\\;", ";")).strip()
+        if not link:
+            lm = re.search(_U, plain) or re.search(_U, whole)
+            link = lm.group(1) if lm else ""
         if link.startswith(("http://", "https://")):
             base["url"] = link.rstrip(".,;)")
         # "Dress Code: …" written in a class's notes → that day's dress code
