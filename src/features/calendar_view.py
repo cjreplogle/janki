@@ -1858,6 +1858,7 @@ _JS = """<script>(function(){
    }
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
+     var wasLoading=!!document.querySelector('#jkc .jkw .jkw-pbar');
      lastInner=inner;
      var keep=root.querySelector('.jkc-l');            // the view switch keeps gliding
      root.innerHTML=inner;
@@ -1866,7 +1867,13 @@ _JS = """<script>(function(){
      pillInit();nowLine();applyCounts();watchCounts();
      // Weak areas: the lectures fade in — after a mode switch, and when results replace
      // the "Looking through…" state (that used to pop in abruptly)
-     if(dir==='wfade'||(dir==='refresh'&&document.querySelector('#jkc .jkw'))){
+     var nowLoading=!!document.querySelector('#jkc .jkw .jkw-pbar');
+     // fade ONCE: results arriving (loading → list) or a switch straight to a ready
+     // list. The loading state itself, and list → list updates, change in place.
+     var wfade=document.querySelector('#jkc .jkw')&&!nowLoading&&
+               (dir==='wfade'||(dir==='refresh'&&wasLoading));
+     if(document.querySelector('#jkc .jkw')&&(dir==='wfade'||dir==='refresh')&&!wfade)return;
+     if(wfade){
        var fs=[];
        wfadeEls().forEach(function(el){if(el.animate)fs.push(el.animate(
          [{opacity:0},{opacity:1}],{duration:280,easing:'cubic-bezier(0,0,.2,1)'})
