@@ -1737,15 +1737,16 @@ def practice_event(e):
 
     def op(_col):
         from ..integrations import qbank
-        off = _fams_off()
-        srch = [x for x in m["searches"] if _fam(x) not in off] or m["searches"]
+        # concept leaves from EVERY source: the switches pick which card decks you
+        # study, not which questions are related (AnKing off left only Hutch's few)
+        srch = m.get("_raw_searches") or m["searches"]
         leaves = qbank._leaf_keys(list(qbank._leaves_from_searches(srch)))
         toks = qbank._tokens(name + " " + e["summary"])
         if not leaves:
             return []
         # the original matching (tags, near-miss tags, then wording); a stray hit or
         # two still means this lecture has no real bank
-        ids = qbank.intersperse_card_ids(leaves, toks, 40)
+        ids = qbank.intersperse_card_ids(leaves, toks, 40, relaxed=True)
         return ids if len(ids) >= _PRACTICE_MIN else []
 
     def done(cids):
