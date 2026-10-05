@@ -1438,6 +1438,37 @@ def _build_css(cfg, context):
                      "  line-height: 1.4 !important; white-space: nowrap !important;\n"
                      "  margin: 0 !important; float: none !important; }\n"
                      "</style>\n")
+        # …and keep it out of the way: pinned to the bottom of the card view (just
+        # above the answer buttons), at most `card_tags_max` tags, the rest behind a
+        # "+N more" chip. AnKing cards can carry dozens of tags.
+        _tmax = int(cfg.get("card_tags_max", 6) or 0)
+        parts.append("<style>\n"
+                     "#tags-container {\n"
+                     "  position: fixed !important; left: 12px !important; right: 12px !important;\n"
+                     "  bottom: 6px !important; top: auto !important; z-index: 3 !important;\n"
+                     "  max-height: 4.6em !important; overflow: hidden !important;\n"
+                     "  pointer-events: auto !important; transition: opacity .2s ease;\n}\n"
+                     "#tags-container:hover { opacity: .85 !important; }\n"
+                     "#tags-container.jk-tags-open { max-height: 40vh !important;\n"
+                     "  overflow-y: auto !important; opacity: .9 !important; }\n"
+                     "#tags-container > .jk-tag-hide { display: none !important; }\n"
+                     "#tags-container .jk-tag-more { cursor: pointer; text-decoration: underline;\n"
+                     "  text-underline-offset: 2px; }\n"
+                     "body { padding-bottom: 5em !important; }\n"
+                     "</style>\n"
+                     "<script>(function(){var MAX=%d;\n"
+                     "function cap(){var c=document.getElementById('tags-container');\n"
+                     " if(!c||c.dataset.jkCapped||MAX<=0)return;c.dataset.jkCapped='1';\n"
+                     " var k=[].slice.call(c.children);if(k.length<=MAX)return;\n"
+                     " k.slice(MAX).forEach(function(x){x.classList.add('jk-tag-hide');});\n"
+                     " var m=document.createElement('span');m.className='jk-tag-more';\n"
+                     " m.textContent='+'+(k.length-MAX)+' more';\n"
+                     " m.onclick=function(e){e.stopPropagation();var o=c.classList.toggle('jk-tags-open');\n"
+                     "  k.slice(MAX).forEach(function(x){x.classList.toggle('jk-tag-hide',!o);});\n"
+                     "  m.textContent=o?'show less':'+'+(k.length-MAX)+' more';};c.appendChild(m);}\n"
+                     "new MutationObserver(cap).observe(document.documentElement,{childList:true,subtree:true});\n"
+                     "document.addEventListener('DOMContentLoaded',cap);cap();})();</script>\n"
+                     % _tmax)
         # Focus Mode: while chrome is hidden, hide the card tags AND vertically
         # centre the card in the window. Re-applied on every render so it survives
         # card changes (paired with an immediate eval in _focus_set_hidden for the

@@ -960,7 +960,7 @@ class Lockdown:
         if keytap._lk_bt_held and keytap._lk_del_held:
             keytap._lk_ignore_until_release = True
         if self._hold_source == "space":
-            keytap._swallow_space_until_up = True
+            keytap.swallow_space()
         self._hold_source = None
         self.locked = False
         state._lockdown_on = False

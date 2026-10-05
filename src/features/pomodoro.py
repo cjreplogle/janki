@@ -684,7 +684,7 @@ def _make_pomodoro():
                 self._bypass_ticker.stop()
                 # Space is still held now — eat it (and its release) so it doesn't
                 # reach the reviewer and flip the revealed card.
-                keytap._swallow_space_until_up = True
+                keytap.swallow_space()
                 self._end_break()
 
     p = Pomodoro()

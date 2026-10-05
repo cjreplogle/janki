@@ -32,6 +32,22 @@ _key_tap_runloop = None
 _tab_held = False        # True while Tab is physically held down
 _tab_used_combo = False  # True if Tab was used as a modifier this press
 _swallow_space_until_up = False  # after a hold-Space break skip, eat Space until released
+_swallow_space_t = 0.0           # …set at; expires after 3 s so a missed key-up can't
+                                 # leave Space blocked everywhere
+
+
+def swallow_space():
+    global _swallow_space_until_up, _swallow_space_t
+    import time as _t
+    _swallow_space_until_up, _swallow_space_t = True, _t.monotonic()
+
+
+def _swallowing_space():
+    global _swallow_space_until_up
+    import time as _t
+    if _swallow_space_until_up and _t.monotonic() - _swallow_space_t > 3.0:
+        _swallow_space_until_up = False
+    return _swallow_space_until_up
 
 # Lockdown backtick(`)+Delete chord: engage lockdown, and (while locked) hold the
 # chord to contribute to the hold-to-exit alongside Space.
@@ -762,7 +778,7 @@ def _start_key_tap() -> None:
             # After a hold-Space break skip, the Space is often still held when the
             # break ends — eat every Space event until it's released so it doesn't
             # leak to the reviewer (which would flip the just-revealed card).
-            if kc == 49 and _swallow_space_until_up:
+            if kc == 49 and _swallowing_space():
                 if etype == 11:  # keyup — the hold is over
                     _swallow_space_until_up = False
                 return None  # consumed
@@ -775,9 +791,9 @@ def _start_key_tap() -> None:
                     _tab_used_combo = True   # so releasing Tab doesn't re-post a lone Tab
                     _key_bridge.pomo_space.emit(etype == 10)
                     return None  # consumed (override)
-                if state._anki_focused:
+                if state._anki_focused and state._mw_active:
                     _key_bridge.pomo_space.emit(etype == 10)
-                    return None  # consumed (focused)
+                    return None  # consumed (focused on the main window)
                 return event     # unfocused plain Space → let the focused app have it
             # The chord key (Tab by default) and the keys pressed with it are
             # user-adjustable (Settings → Hotkeys): translate the pressed key to the

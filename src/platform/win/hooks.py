@@ -127,7 +127,7 @@ def _handle(down, kc):
             keytap._tab_held = False
             keytap._tab_used_combo = False
         return False
-    if kc == 49 and keytap._swallow_space_until_up:
+    if kc == 49 and keytap._swallowing_space():
         if not down:
             keytap._swallow_space_until_up = False
         return True
@@ -136,7 +136,7 @@ def _handle(down, kc):
             keytap._tab_used_combo = True
             kb.pomo_space.emit(down)
             return True
-        if state._anki_focused:
+        if state._anki_focused and state._mw_active:
             kb.pomo_space.emit(down)
             return True
         return False

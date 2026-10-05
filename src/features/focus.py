@@ -129,6 +129,14 @@ def _track_app_focus():
             state._anki_focused = (app_state == Qt.ApplicationState.ApplicationActive)
         mw.app.applicationStateChanged.connect(_on_state)
         _track_app_focus._ref = _on_state   # keep the slot alive
+
+        def _on_win(win):
+            try:
+                state._mw_active = win is None or win is mw.windowHandle()
+            except Exception:
+                state._mw_active = True
+        mw.app.focusWindowChanged.connect(_on_win)
+        _track_app_focus._ref2 = _on_win
         state._anki_focused = (mw.app.applicationState() == Qt.ApplicationState.ApplicationActive)
     except Exception:
         pass

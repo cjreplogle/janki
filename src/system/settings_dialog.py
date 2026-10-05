@@ -507,6 +507,24 @@ class GlassSettings(QDialog):
         self._uniform.stateChanged.connect(on_uniform)
         app_text_lay.addWidget(self._uniform)
 
+        # Card tags (e.g. AnKing's tag list) pinned above the answer buttons: how many
+        # show before the rest fold behind "+N more".
+        _tg_row = QHBoxLayout()
+        _tg_row.addWidget(QLabel("Card tags shown"))
+        self._tags_max = QSpinBox()
+        self._tags_max.setRange(0, 50)
+        self._tags_max.setSpecialValueText("All")
+        self._tags_max.setValue(int(self.cfg.get("card_tags_max", 6) or 0))
+
+        def _tags_max_changed(v):
+            self.cfg["card_tags_max"] = int(v)
+            mw.addonManager.writeConfig(__name__, self.cfg)
+        self._tags_max.valueChanged.connect(_tags_max_changed)
+        _tg_row.addWidget(self._tags_max)
+        _tg_row.addWidget(QLabel("(the rest behind “+N more”; next card)"))
+        _tg_row.addStretch(1)
+        app_text_lay.addLayout(_tg_row)
+
         # Hover / press motion on the deck list, toolbar and buttons (stands down on its
         # own while the Anki Redesign add-on is enabled, which brings its own).
         self._ui_anim = QCheckBox("Hover animations")
