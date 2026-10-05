@@ -3144,7 +3144,14 @@ def _parse_ics_events(path):
         # "Dress Code: …" written in a class's notes → that day's dress code
         dm = re.search(r"dress\s*-?\s*code\s*[:\-–]\s*(.+?)(?:\\n|\\N|\n|$)", desc or "", re.I)
         if dm:
-            val = unesc(dm.group(1)).strip(" .;,")
+            val = unesc(dm.group(1))
+            # notes often run on: "(CONFLICT)", "Link to event: https://…"
+            val = re.split(r"\(\s*conflict\s*\)|\blink to event\b|https?://|\s{3,}", val,
+                           flags=re.I)[0]
+            val = val.strip(" .;,:-–")
+            if val.count(")") > val.count("("):        # a stray closing bracket
+                val = val.replace(")", "", val.count(")") - val.count("("))
+            val = val.strip(" .;,:-–")
             if val:
                 base["dress"] = val[:80]
         if rid:                                   # one moved/edited occurrence
