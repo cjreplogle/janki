@@ -1445,7 +1445,7 @@ def _build() -> "QWidget":
         if m == "practice" and prac_box is None:
             m = "decks"
         seg.select(seg_keys.index(m), animate=save)
-        page = {"today": today_box, "practice": prac_box}.get(m) or scroll
+        page = {"today": today_page, "practice": prac_page}.get(m) or scroll
         st = _tray_mode_widgets.get("stack")
         if st is not None:
             st.setCurrentWidget(page)
@@ -1532,10 +1532,23 @@ def _build() -> "QWidget":
     slot = QWidget(root)
     stack = QStackedLayout(slot)
     stack.setContentsMargins(0, 0, 0, 0)
+    def _scrolled(w):
+        sa = QScrollArea(root)
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        sa.viewport().setAutoFillBackground(False)
+        sa.setWidget(w)
+        w.setAutoFillBackground(False)
+        return sa
+    today_page = _scrolled(today_box)
+    prac_page = _scrolled(prac_box) if prac_box is not None else None
     stack.addWidget(scroll)
-    stack.addWidget(today_box)
-    if prac_box is not None:
-        stack.addWidget(prac_box)
+    stack.addWidget(today_page)
+    if prac_page is not None:
+        stack.addWidget(prac_page)
+    slot.setMinimumHeight(60)                  # can shrink (scrolls) under the height cap
     _tray_mode_widgets["stack"] = stack
     lay.addWidget(slot)
 
@@ -1899,6 +1912,12 @@ def show_navigator() -> None:
                 pass
             _nav = None
         _nav = _build()
+        try:                                   # never taller than half the screen
+            from aqt.qt import QGuiApplication
+            scr = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+            _nav.setMaximumHeight(int(scr.availableGeometry().height() / 2))
+        except Exception:
+            pass
         _nav.adjustSize()
         _final_pos = _anchor_point(_nav)
         # Start slightly ABOVE the anchor and transparent so it drops down + fades in.
