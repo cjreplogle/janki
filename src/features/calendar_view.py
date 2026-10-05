@@ -733,6 +733,7 @@ body center > table:first-of-type{display:none !important;}
 body center > br{display:none !important;}
 html body{padding-top:0 !important;margin-top:0 !important;justify-content:flex-start !important;}
 html body > center{margin-top:0 !important;padding-top:0 !important;}
+html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc{width:min(1100px,calc(100vw - 32px));margin:18px auto 24px;text-align:left;}
 .jkc-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:0 0 10px;}
 .jkc-l{justify-self:start;}.jkc-r{justify-self:end;}
@@ -919,6 +920,19 @@ _JS = """<script>(function(){
    n.style.display='block';n.style.top=(100*(m-lo)/(hi-lo))+'%';}
  if(!window._jkNowT)window._jkNowT=setInterval(nowLine,30000);
  window.addEventListener('load',nowLine);setTimeout(nowLine,0);
+ // Two-finger trackpad swipe ← / → : one step per swipe (the gesture's momentum tail
+ // is ignored until the wheel goes quiet), and the page never scrolls sideways.
+ var swAcc=0, swLock=false, swQuiet=null;
+ window.addEventListener('wheel',function(e){
+   if(!document.querySelector('#jkc .jkc-grid')||document.querySelector('#jkc .jkc-detail'))return;
+   if(Math.abs(e.deltaX)<=Math.abs(e.deltaY))return;  // vertical scroll stays normal
+   e.preventDefault();
+   clearTimeout(swQuiet);swQuiet=setTimeout(function(){swAcc=0;swLock=false;},220);
+   if(swLock)return;
+   swAcc+=e.deltaX;
+   if(Math.abs(swAcc)>60){var d=swAcc>0?'next':'prev';swLock=true;swAcc=0;
+     press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);}
+ },{passive:false});
  var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
    // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
