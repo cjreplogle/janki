@@ -385,6 +385,47 @@ def _install_global_dismiss() -> None:
         log(f"tray-nav dismiss monitor: {exc}")
 
 
+class _LocalDismiss(QObject):
+    """Clicks in Anki's OWN windows (the main window, dialogs) don't reach the global
+    monitor — this closes the tray on those too."""
+
+    def eventFilter(self, obj, ev):
+        try:
+            if ev.type() == QEvent.Type.MouseButtonPress and _nav is not None \
+                    and _nav.isVisible():
+                w = obj.window() if hasattr(obj, "window") else None
+                if w is not None and w is not _nav:
+                    QTimer.singleShot(0, _hide)
+        except Exception:
+            pass
+        return False
+
+
+_local_dismiss = None
+
+
+def _install_local_dismiss():
+    global _local_dismiss
+    try:
+        from aqt.qt import QApplication
+        if _local_dismiss is None:
+            _local_dismiss = _LocalDismiss(mw)
+            QApplication.instance().installEventFilter(_local_dismiss)
+    except Exception:
+        pass
+
+
+def _remove_local_dismiss():
+    global _local_dismiss
+    try:
+        from aqt.qt import QApplication
+        if _local_dismiss is not None:
+            QApplication.instance().removeEventFilter(_local_dismiss)
+            _local_dismiss = None
+    except Exception:
+        pass
+
+
 def _remove_global_dismiss() -> None:
     global _gm_monitor, _gm_refs
     if _gm_monitor is None:
@@ -1934,6 +1975,7 @@ def _animate_open(win, final_pos) -> None:
 def _hide() -> None:
     global _nav
     _remove_global_dismiss()
+    _remove_local_dismiss()
     schedule_prebuild(500)                     # the next open is built in the background
     if _nav is not None:
         try:
@@ -2059,8 +2101,10 @@ def show_navigator() -> None:
         # flags and let a visible Anki window pull its Space forward. No raise_()/
         # activateWindow() — those can force activation and switch Spaces.
         _prepare_over_fullscreen(_nav)
-        # Outside-click dismissal (Qt.Tool has none of its own).
+        # Outside-click dismissal (Qt.Tool has none of its own): other apps' windows
+        # (global monitor) and Anki's own (app event filter).
         _install_global_dismiss()
+        QTimer.singleShot(150, _install_local_dismiss)   # not the click that opened it
         # Glass must be applied AFTER the native window exists; re-assert the panel
         # flags once more on the next tick in case show() posted a late reconfigure.
         w = _nav
