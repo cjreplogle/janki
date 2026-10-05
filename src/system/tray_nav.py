@@ -1372,8 +1372,9 @@ def _build() -> "QWidget":
     _deck_rows_widgets = []
     _deck_scroll = scroll
     rows = _deck_rows()
-    # The Practice deck (and its subdecks) is pinned separately at the top.
-    rows = [r for r in rows if r[0] != "Practice" and not r[0].startswith("Practice::")]
+    # Practice has its own tab; the temporary class decks are never listed.
+    rows = [r for r in rows if r[0] != "Practice" and not r[0].startswith("Practice::")
+            and not r[0].startswith("Janki Calendar")]
     _tray_mode_widgets["scroll"] = scroll
     _tray_mode_widgets["today"] = today_box
 

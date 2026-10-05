@@ -2013,8 +2013,19 @@ _JS = """<script>(function(){
 })();</script>"""
 
 
+_HIDE_TEMP = ("<script>(function(){function h(){document.querySelectorAll('tr.deck').forEach("
+              "function(r){var a=r.querySelector('a.deck');if(a&&/^\\s*Janki Calendar/.test("
+              "a.textContent))r.style.display='none';});}h();"
+              "document.addEventListener('DOMContentLoaded',h);})();</script>")
+
+
 def _on_render(deck_browser, content):
     if not _view:
+        # the temporary class decks ("Janki Calendar · …") never show in the deck list
+        try:
+            content.tree = (content.tree or "") + _HIDE_TEMP
+        except Exception:
+            pass
         return
     QTimer.singleShot(0, _redraw_bottom)
     QTimer.singleShot(300, _busy_update)      # the page reloaded: re-show the chip if busy
