@@ -738,6 +738,7 @@ def _weak_start(mode):
     return t - datetime.timedelta(days=t.weekday() + 7 * (_WEAK_SPAN[mode] - 1))
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
+_weak_redo = set()      # views to recompute once background matching finishes
 
 
 def open_weak():
@@ -847,6 +848,8 @@ def _weak_compute(mode, then=None):
         if atoms:
             lecs.append((e, m, atoms))
     if pending:
+        # older lectures not matched yet: match them, then work this view out again
+        _weak_redo.add(mode)
         QTimer.singleShot(0, lambda: _prewarm(back=(today - _weak_start(mode)).days + 1))
     other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
     _weak_progress(mode, 0.05)
@@ -1087,6 +1090,9 @@ def _weak_html():
 
     rows = list(enumerate(_weak))
     start = _weak_start(_weak_mode)
+    if _weak_mode in _weak_redo:
+        head += ("<div class='jkw-more'><i></i>Matching older lectures — more will "
+                 "appear shortly</div>")
     if _weak_mode != "block":
         out = [row(i, r) for i, r in rows[:40]]
         return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
@@ -1545,6 +1551,9 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   background:rgba(255,255,255,.1) !important;overflow:hidden;}
 #jkc .jkw-pbar i{display:block;height:100%;width:5%;border-radius:3px;background:#9cbcf3 !important;
   transition:width .25s ease;}
+#jkc .jkw-more{display:inline-flex;align-items:center;gap:7px;opacity:.75;font-size:.85em;margin-top:6px;}
+#jkc .jkw-more i{width:10px;height:10px;border-radius:50%;border:2px solid rgba(156,188,243,.3);
+  border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
 #jkc .jkw-grp{max-width:760px;margin:10px auto 0;text-align:left;border-radius:14px;padding:4px 6px 6px;
   background:rgba(255,255,255,.035) !important;border:1px solid rgba(255,255,255,.08);}
 #jkc .jkw-grp summary{list-style:none;cursor:pointer;padding:8px 10px;display:grid;
@@ -2255,6 +2264,13 @@ def _prewarm(back=None):
         global _warming
         _warming = False
         _busy_update()
+        for mode in list(_weak_redo):           # weak areas waiting on these matches
+            _weak_redo.discard(mode)
+            _weak_cache.pop(mode, None)
+            if _view and _detail == WEAK and _weak_mode == mode:
+                _weak_compute(mode)
+            else:
+                QTimer.singleShot(0, lambda m=mode: _weak_compute(m))
         QTimer.singleShot(200, prime)
         if _view and getattr(mw, "state", None) == "deckBrowser":
             _swap("refresh")                       # colours/labels now that matches exist
