@@ -860,7 +860,8 @@ def _build_practice_list(parent):
     rows = []
     try:
         names = sorted((d.name, d.id) for d in mw.col.decks.all_names_and_ids()
-                       if d.name.startswith("Practice::"))
+                       if d.name.startswith("Practice::") and d.name.count("::") == 1)
+        # first tier only (each bank; studying one includes its sub-banks)
         for name, did in names:
             rows.append((name, did, due.get(did, 0), name.count("::") - 1, None, False))
         pid = mw.col.decks.id_for_name("Practice")
