@@ -438,11 +438,55 @@ def _fam(frag):
     return lectures.family_of(frag)
 
 
+_opts_cache = {}       # title → picker alternatives (worked out in the background)
+_detail_busy = set()
+
+
+def _detail_bg(title, opts=False):
+    """Match the class / list picker alternatives off the main thread, then refresh
+    the open class page."""
+    key = (title, opts)
+    if key in _detail_busy or _closing:
+        return
+    _detail_busy.add(key)
+    from aqt.operations import QueryOp
+    from ..integrations import lectures
+
+    def op(_col):
+        if opts:
+            return lectures.lecture_options(title)
+        return lectures.match_event(title)
+
+    def done(res):
+        global _fams_on
+        _detail_busy.discard(key)
+        if opts:
+            _opts_cache[title] = list(res or [])
+            if len(_opts_cache) > 200:
+                _opts_cache.pop(next(iter(_opts_cache)))
+        elif res and _detail is not None and 0 <= _detail < len(_shown) \
+                and _shown[_detail]["summary"] == title:
+            _fams_on = {_fam(x) for x in res["searches"]} - _fams_off()
+        if _view and _detail is not None and 0 <= _detail < len(_shown) \
+                and _shown[_detail]["summary"] == title:
+            _swap("refresh")
+
+    def failed(_e):
+        _detail_busy.discard(key)
+    QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
+
+
 def _detail_html(e):
     """A deck-overview-style page for one class: title, when/where, card counts, the
     source switches, a big Study button and Unsuspend below it."""
     from ..integrations import lectures
-    m = lectures.match_event(e["summary"])
+    # never match / list lectures here (main thread): use what's known, fill the rest
+    # in from the background — the page opens at once even on a cold start
+    m = lectures.peek_match(e["summary"])
+    pending = m is lectures._PENDING
+    if pending:
+        m = None
+        _detail_bg(e["summary"])
     when = "%s, %s %d" % (_DAY[e["date"].weekday()], e["date"].strftime("%b"), e["date"].day)
     if e["start"] is not None:
         when += " · %s–%s" % (_hm(e["start"]), _hm(e["end"]))
@@ -453,7 +497,10 @@ def _detail_html(e):
     if m:
         # the matched lecture as a picker: closest alternatives first; choosing one
         # saves it as this class's match (same correction the wizard saves)
-        _pick_opts = lectures.lecture_options(e["summary"])
+        cached = _opts_cache.get(e["summary"])
+        if cached is None:
+            _detail_bg(e["summary"], opts=True)
+        _pick_opts = list(cached or [])
         if m["display"] not in _pick_opts:
             _pick_opts.insert(0, m["display"])
         # Janki's own drop-down (the system menu came out white-on-white here)
@@ -465,7 +512,9 @@ def _detail_html(e):
                "this class belongs to'>%s</button><div class='jkd-menu'>%s</div></div></div>"
                % (html.escape(m["display"]), items))
     body = ""
-    if not m:
+    if pending:
+        body = "<div class='jkd-counts'>Finding this lecture…</div>"
+    elif not m:
         body = ("<div class='jkd-none'>No lecture in your tag map matches this class.<br>"
                 "<button onclick=\"pycmd('janki:cal:det:wizard')\">Open the Lecture wizard…</button></div>")
     else:
@@ -478,7 +527,7 @@ def _detail_html(e):
             "<label class='jkd-sw%s' onclick=\"pycmd('janki:cal:fam:%s')\"><span class='jkd-knob'>"
             "</span>%s</label>" % (" on" if f in _fams_on else "", f, lectures.FAMILY_LABEL.get(f, f))
             for f in present)
-        body = ("<div id='jkd-counts' class='jkd-counts'>Counting cards…</div>"
+        body = ("<div id='jkd-counts' class='jkd-counts'>… cards</div>"
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
@@ -621,7 +670,9 @@ def _open_detail(i):
     from ..integrations import lectures
     if not (0 <= i < len(_shown)):
         return
-    m = lectures.match_event(_shown[i]["summary"])
+    m = lectures.peek_match(_shown[i]["summary"])         # no matching on open
+    if m is lectures._PENDING:
+        m = None
     _fams_on = ({_fam(s) for s in m["searches"]} - _fams_off()) if m else set()
     _detail = i
     try:
