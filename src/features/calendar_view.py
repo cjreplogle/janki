@@ -704,7 +704,18 @@ def _weak_compute(mode, then=None):
 
         seen, rows = set(), []
         sched_today = col.sched.today
-        for e in sorted(evs, key=lambda x: x["date"], reverse=True):
+        todo = sorted(evs, key=lambda x: x["date"], reverse=True)
+        last = [0.0]
+
+        def progress(k):
+            now = _t.monotonic()
+            if now - last[0] > 0.12 or k == len(todo):
+                last[0] = now
+                frac = (k / len(todo)) if todo else 1.0
+                mw.taskman.run_on_main(lambda f=frac: _weak_progress(mode, f))
+        progress(0)
+        for k, e in enumerate(todo):
+            progress(k)
             if _closing:
                 return []
             if e["start"] is None or _is_allday_kind(e["summary"]):
@@ -768,6 +779,16 @@ def _weak_compute(mode, then=None):
     QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
 
 
+def _weak_progress(mode, frac):
+    """Fill the 'Looking through your lectures…' bar (only if that view is showing)."""
+    if _view and _detail == WEAK and _weak is None and _weak_mode == mode:
+        try:
+            mw.web.eval("(function(){var b=document.getElementById('jkw-prog');"
+                        "if(b)b.style.width='%d%%';})()" % int(5 + 95 * frac))
+        except Exception:
+            pass
+
+
 def _now_min():
     t = datetime.datetime.now()
     return t.hour * 60 + t.minute
@@ -788,7 +809,8 @@ def _weak_html():
             "<div class='jkd-when'>Lectures from the past %d weeks, least-studied first</div>"
             % (seg, _WEAK_SPAN[_weak_mode] // 7))
     if _weak is None:
-        return head + "<div class='jkd-counts'>Looking through your lectures…</div></div></div>"
+        return head + ("<div class='jkd-counts'>Looking through your lectures…</div>"
+                       "<div class='jkw-pbar'><i id='jkw-prog'></i></div></div></div>")
     if not _weak:
         return head + ("<div class='jkd-counts'>No past lectures with cards found — "
                        "nothing to flag.</div></div></div>")
@@ -1235,6 +1257,10 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-m{background:transparent !important;border:none;color:inherit;font:inherit;font-size:.88em;
   padding:3px 12px;border-radius:7px;cursor:pointer;opacity:.75;}
 #jkc .jkw-m.on{background:rgba(156,188,243,.28) !important;color:#cfe0ff;opacity:1;}
+#jkc .jkw-pbar{width:min(360px,70vw);height:5px;margin:10px auto 0;border-radius:3px;
+  background:rgba(255,255,255,.1) !important;overflow:hidden;}
+#jkc .jkw-pbar i{display:block;height:100%;width:5%;border-radius:3px;background:#9cbcf3 !important;
+  transition:width .25s ease;}
 #jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
 #jkc .jkw-row{cursor:pointer;transition:background-color .15s ease;display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
@@ -1899,13 +1925,12 @@ def _prewarm_work():
         from ..integrations import lectures
         t = datetime.date.today()
         # nearest first, so this week and its neighbours are ready soonest
-        evs = lectures.events_between(t - datetime.timedelta(days=28),
+        evs = lectures.events_between(t - datetime.timedelta(days=56),   # = End of block
                                       t + datetime.timedelta(days=56))
         for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):
             if _closing:                 # quitting: don't make Anki wait on this
                 return
             lectures.match_event(e["summary"])
-            time.sleep(0.004)            # breathe: keeps the window (and laptop) responsive
     except Exception as e:
         log("calendar prewarm: %s" % e)
 
