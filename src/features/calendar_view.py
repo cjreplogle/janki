@@ -558,7 +558,13 @@ _weak = None          # None = counting; else [row dicts] best (weakest) first
 
 
 _weak_mode = "2w"      # "2w" = past two weeks · "block" = end of block (8 weeks)
-_WEAK_SPAN = {"2w": 14, "block": 56}
+_WEAK_SPAN = {"2w": 2, "block": 8}     # weeks, counting this one, Monday-aligned
+
+
+def _weak_start(mode):
+    """First day of the window: Monday of last week (2w) / 7 weeks before this one."""
+    t = datetime.date.today()
+    return t - datetime.timedelta(days=t.weekday() + 7 * (_WEAK_SPAN[mode] - 1))
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
 
@@ -639,8 +645,7 @@ def _weak_compute(mode, then=None):
     from aqt.operations import QueryOp
     from ..integrations import lectures
     today = datetime.date.today()
-    evs, _fresh = lectures.events_cached_between(
-        today - datetime.timedelta(days=_WEAK_SPAN[mode]), today)
+    evs, _fresh = lectures.events_cached_between(_weak_start(mode), today)
     off = _fams_off()
     key = _weak_key()
     now_min = _now_min()
@@ -832,6 +837,10 @@ def _now_min():
     return t.hour * 60 + t.minute
 
 
+def _date_label(d):
+    return "%s, %s %d" % (_DAY[d.weekday()], d.strftime("%b"), d.day)
+
+
 def _ago(d):
     n = (datetime.date.today() - d).days
     return "today" if n == 0 else "yesterday" if n == 1 else (
@@ -844,8 +853,8 @@ def _weak_html():
                   for k, l in (("2w", "Past 2 weeks"), ("block", "End of block")))
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
             "<h2>Weak areas</h2><div class='jkw-seg'>%s</div>"
-            "<div class='jkd-when'>Lectures from the past %d weeks, least-studied first</div>"
-            % (seg, _WEAK_SPAN[_weak_mode] // 7))
+            "<div class='jkd-when'>Lectures since %s, least-studied first</div>"
+            % (seg, _date_label(_weak_start(_weak_mode))))
     if _weak is None:
         return head + ("<div class='jkd-counts'>Looking through your lectures…</div>"
                        "<div class='jkw-pbar'><i id='jkw-prog'></i></div></div></div>")
