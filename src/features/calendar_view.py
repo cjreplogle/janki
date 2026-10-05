@@ -719,10 +719,14 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd{max-width:520px;margin:28px auto 0;}
 .jkd h2{margin:0 0 4px;font-size:1.45em;}
 .jkd-sub{opacity:.85;margin-bottom:4px;}
-#jkc .jkd-pick{background:rgba(255,255,255,.07) !important;color:inherit;border:1px solid rgba(255,255,255,.14);
-  border-radius:8px;padding:3px 8px;font:inherit;max-width:420px;cursor:pointer;
+/* Own-drawn box: sized to the chosen lecture (not the longest one), equal padding on
+   both sides and the arrow inside the right padding — so the name is truly centred. */
+#jkc .jkd-pick{-webkit-appearance:none;appearance:none;field-sizing:content;
+  background:rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cfd3dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center !important;
+  color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;
+  padding:3px 26px;font:inherit;max-width:min(520px,90vw);cursor:pointer;
   text-align:center;text-align-last:center;}
-#jkc .jkd-pick:hover{background:rgba(255,255,255,.12) !important;}
+#jkc .jkd-pick:hover{background-color:rgba(255,255,255,.12) !important;}
 /* the open list is the system menu (white on macOS): leave its entries to the OS,
    or light text lands on a white menu */
 #jkc .jkd-pick option{color:initial;background:initial;}
