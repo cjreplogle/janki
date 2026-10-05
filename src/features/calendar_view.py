@@ -249,6 +249,9 @@ def _week_html():
                 % (cls, " jkc-narrow" if nl > 1 else "", i, tip, top, h, pos, mbadge, title,
                    _hm(e["start"]), _hm(e["end"]),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
+        if d == today:                     # "now" line, kept current by the page's timer
+            blocks.append("<div class='jkc-now' data-lo='%d' data-hi='%d' data-ppm='%s'></div>"
+                          % (lo, hi, px_per_min))
         if len(allday) > AD_MAX:
             rest = len(allday) - AD_MAX
             allday = allday[:AD_MAX] + ["<div class='jkc-ad jkc-more'>+%d more</div>" % rest]
@@ -771,6 +774,11 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ad{position:relative;margin:0 2px 2px;height:18px;line-height:16px;padding:0 8px !important;
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
+/* where you are in the day: a thin red line with a dot on today's column */
+#jkc .jkc-now{position:absolute;left:0;right:0;height:0;z-index:5;pointer-events:none;display:none;
+  border-top:2px solid #ff6b6b;}
+#jkc .jkc-now::before{content:'';position:absolute;left:-5px;top:-6px;width:10px;height:10px;
+  border-radius:50%;background:#ff6b6b !important;}
 .jkc-narrow{padding:3px 5px !important;font-size:.84em;}
 .jkc-narrow .jkc-m{transform:scale(.85);}
 .jkc-more{opacity:.6;border:none !important;text-align:center;}
@@ -874,6 +882,13 @@ _JS = """<script>(function(){
    } else outDone=null;
    pycmd('janki:cal:'+dir);
  };
+ // the now-line: placed on render/swap, nudged every 30 s
+ function nowLine(){var n=document.querySelector('#jkc .jkc-now');if(!n)return;
+   var d=new Date(),m=d.getHours()*60+d.getMinutes(),lo=+n.dataset.lo,hi=+n.dataset.hi;
+   if(m<lo||m>hi){n.style.display='none';return;}
+   n.style.display='block';n.style.top=((m-lo)*parseFloat(n.dataset.ppm))+'px';}
+ if(!window._jkNowT)window._jkNowT=setInterval(nowLine,30000);
+ window.addEventListener('load',nowLine);setTimeout(nowLine,0);
  window.jkcSwap=function(inner,dir){
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
@@ -881,7 +896,7 @@ _JS = """<script>(function(){
      root.innerHTML=inner;
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
-     pillInit();
+     pillInit();nowLine();
      var g=grid(); if(!g||!g.animate)return;
      if(step&&step.dir===dir){                         // one-day slide (3-day view)
        var st=step;step=null;var sx=dir==='next'?st.w:-st.w;
