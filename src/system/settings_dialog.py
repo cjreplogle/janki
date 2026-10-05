@@ -2280,7 +2280,7 @@ class GlassSettings(QDialog):
             except Exception:
                 pass
         self._cal_icon.stateChanged.connect(_cal_icon_changed)
-        gen_lay.addWidget(self._cal_icon)
+        app_win_lay.addWidget(self._cal_icon)             # Appearance → Window
 
         # Documentation link and "Anki Preferences…" share one row (the button is
         # added to it further down, where it's built).
