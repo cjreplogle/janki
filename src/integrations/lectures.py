@@ -3196,3 +3196,25 @@ def family_of(frag):
     if "hUtChCOM" in frag:
         return "huc"
     return "ak"
+
+
+def lecture_options(title, limit=40):
+    """[(display, …)] of tag-map lectures, best match for `title` first (for the
+    calendar class page's lecture picker)."""
+    try:
+        m, _keys, opts = _get_map(_enabled_families())
+        ranked = sorted(opts, key=lambda nk: (-_option_score(title, m[nk]["display"]),
+                                              m[nk]["display"].lower()))
+        return [m[nk]["display"] for nk in ranked[:limit]]
+    except Exception as e:
+        _log("lecture_options: %s" % e)
+        return []
+
+
+def set_alias(title, display):
+    """Remember that calendar event `title` is lecture `display` (the same correction
+    the wizard saves when you pick another lecture for a row)."""
+    raw = _load_aliases_raw()
+    raw[title] = display
+    _save_aliases(raw)
+    _MATCH_CACHE["key"] = None              # re-match with the new alias

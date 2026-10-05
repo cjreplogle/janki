@@ -172,6 +172,7 @@ def _hm(mins):
 
 
 _detail = None          # index into _shown of the class page that's open (or None)
+_pick_opts = []         # the lecture picker's options on the open class page
 _fams_on = set()        # source families switched on for that class
 
 
@@ -209,7 +210,9 @@ def _week_html():
             if m is lectures._PENDING:
                 pending = True
                 m = None
-                cls = "jkc-ev"                             # neutral until matched
+                # colour comes from the title alone → show it at once; only events that
+                # turn out unmatched go grey when matching finishes
+                cls = "jkc-ev jkc-c%d" % _course_colour(e["summary"])
             else:
                 cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
             if m:                                          # one colour per course
@@ -296,8 +299,19 @@ def _detail_html(e):
         when += " · %s–%s" % (_hm(e["start"]), _hm(e["end"]))
     loc = ("<div class='jkd-loc'>%s</div>" % html.escape(e["location"])
            if e.get("location") else "")
-    sub = ("<div class='jkd-sub'>%s</div>" % html.escape(m["display"])
-           if m and _norm(m["display"]) != _norm(e["summary"]) else "")
+    global _pick_opts
+    sub = ""
+    if m:
+        # the matched lecture as a picker: closest alternatives first; choosing one
+        # saves it as this class's match (same correction the wizard saves)
+        _pick_opts = lectures.lecture_options(e["summary"])
+        if m["display"] not in _pick_opts:
+            _pick_opts.insert(0, m["display"])
+        opts = "".join("<option%s>%s</option>" % (" selected" if o == m["display"] else "",
+                                                  html.escape(o)) for o in _pick_opts)
+        sub = ("<div class='jkd-sub'><select class='jkd-pick' title='Pick the lecture this "
+               "class belongs to' onchange=\"pycmd('janki:cal:pick:'+this.selectedIndex)\">"
+               "%s</select></div>" % opts)
     body = ""
     if not m:
         body = ("<div class='jkd-none'>No lecture in your tag map matches this class.<br>"
@@ -693,7 +707,11 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd-back:hover{background:rgba(255,255,255,.16);}
 .jkd{max-width:520px;margin:28px auto 0;}
 .jkd h2{margin:0 0 4px;font-size:1.45em;}
-.jkd-sub{opacity:.75;margin-bottom:4px;}
+.jkd-sub{opacity:.85;margin-bottom:4px;}
+#jkc .jkd-pick{background:rgba(255,255,255,.07) !important;color:inherit;border:1px solid rgba(255,255,255,.14);
+  border-radius:8px;padding:3px 8px;font:inherit;max-width:420px;cursor:pointer;}
+#jkc .jkd-pick:hover{background:rgba(255,255,255,.12) !important;}
+#jkc .jkd-pick option{background:#1c1e24;color:#eee;}
 .jkd-when,.jkd-loc{opacity:.8;font-size:.95em;margin-top:2px;}
 .jkd-counts{margin:18px 0 12px;opacity:.9;}
 .jkd-counts .c-new{color:#7ab0ff;}.jkd-counts .c-due{color:#7fd17f;}.jkd-counts .c-sus{color:#e0b000;}
@@ -957,6 +975,21 @@ def on_js_message(handled, message, context):
             lectures.run_today(interactive=True)
         elif cmd.startswith("ev:"):
             _open_detail(int(cmd[3:]))
+        elif cmd.startswith("pick:"):
+            from ..integrations import lectures
+            i = int(cmd[5:])
+            if _detail is not None and 0 <= i < len(_pick_opts):
+                lectures.set_alias(_shown[_detail]["summary"], _pick_opts[i])
+                m2 = lectures.match_event(_shown[_detail]["summary"])
+                _fams_on.clear()
+                if m2:
+                    _fams_on.update(_fam(s) for s in m2["searches"])
+                try:
+                    from . import sfx
+                    sfx.play("select")
+                except Exception:
+                    pass
+                _swap("refresh")
         elif cmd.startswith("fam:"):
             f = cmd[4:]
             _fams_on.symmetric_difference_update({f})
