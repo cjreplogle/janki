@@ -355,7 +355,37 @@ def _week_html():
     return bar + empty + grid
 
 
+_primed = {"key": None, "html": None}
+
+
+def _prime_key():
+    from ..integrations import lectures
+    return (_mode(), _week, _anchor, _detail, datetime.date.today(),
+            lectures._EV_CACHE.get("key"), len(lectures._MATCH_CACHE.get("map") or {}),
+            tuple(sorted(_fams_off())), datetime.datetime.now().hour)
+
+
+def prime():
+    """Build this week's page ahead of the first Calendar click (a few seconds after
+    launch): the events are read, matches/colours warmed, and the HTML kept ready."""
+    if _closing or _view:
+        return
+    try:
+        k = _prime_key()
+        html_ = _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
+        if _pending_tries == 0:                 # only keep a fully-matched page
+            _primed["key"], _primed["html"] = k, html_
+    except Exception as e:
+        log("calendar prime: %s" % e)
+
+
 def _page_html():
+    try:
+        if _primed["html"] and _primed["key"] == _prime_key():
+            h, _primed["html"] = _primed["html"], None   # use once
+            return h
+    except Exception:
+        pass
     return _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
 
 
@@ -2027,6 +2057,7 @@ def _prewarm(back=None):
         def done(_r):
             global _warming
             _warming = False
+            QTimer.singleShot(200, prime)
             if _view and getattr(mw, "state", None) == "deckBrowser":
                 _swap("refresh")                   # colours/labels now that matches exist
 
@@ -2058,14 +2089,15 @@ def _prewarm_work():
 
 
 def _schedule_prewarm():
-    try:                                             # read the calendar file early
+    try:                                             # read the calendar file at once
         from ..integrations import lectures
-        QTimer.singleShot(1500, lectures.load_events_bg)
+        QTimer.singleShot(0, lambda: lectures.load_events_bg(
+            lambda: QTimer.singleShot(500, prime)))
     except Exception:
         pass
     try:
         from . import stats_embed
-        stats_embed._when_idle(_prewarm, 8000)       # waits while you navigate/study
+        stats_embed._when_idle(_prewarm, 3000)       # match this fortnight early
     except Exception:
         pass
 
