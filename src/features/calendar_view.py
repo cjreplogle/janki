@@ -1016,6 +1016,76 @@ def _atom_plain(a):
     return None
 
 
+_EXAM_RE = re.compile(r"\b(bi-?weekly|exam|examination)\b", re.I)
+_NOT_EXAM = re.compile(r"\b(review|prep|preparation|practice|recap|q ?& ?a|tutorial|info)\b", re.I)
+_EXAM_NUM = re.compile(r"(?:bi-?weekly|exam(?:ination)?)\s*(?:exam\s*)?#?\s*([ivx]{1,5}|\d{1,2})\b", re.I)
+
+
+def _roman(n):
+    out = ""
+    for v, s_ in ((10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        while n >= v:
+            out += s_
+            n -= v
+    return out
+
+
+def _exam_dates():
+    """[(date, 'Biweekly III'), …] from the calendar's exam events, oldest first. Named
+    from the event's own number if it has one, else counted within the block (the count
+    restarts after a gap of over four weeks = a new block)."""
+    from ..integrations import lectures
+    seen, raw = set(), []
+    for e in lectures._EV_CACHE.get("events") or []:
+        t = e.get("summary") or ""
+        if _EXAM_RE.search(t) and not _NOT_EXAM.search(t) and e["date"] not in seen:
+            seen.add(e["date"])
+            raw.append((e["date"], t))
+    raw.sort()
+    out, n, prev = [], 0, None
+    for d, t in raw:
+        n = 1 if prev is None or (d - prev).days > 28 else n + 1
+        prev = d
+        m = _EXAM_NUM.search(t)
+        if m:
+            tok = m.group(1)
+            num = int(tok) if tok.isdigit() else _unroman(tok.upper())
+            if num:
+                n = num                     # later unnumbered exams count on from here
+            label = "Biweekly " + (_roman(num) if num else tok.upper())
+        else:
+            label = "Biweekly " + _roman(n)
+        out.append((d, label))
+    return out
+
+
+def _unroman(t):
+    vals = {"I": 1, "V": 5, "X": 10}
+    try:
+        tot, prevv = 0, 0
+        for ch in reversed(t):
+            v = vals[ch]
+            tot += -v if v < prevv else v
+            prevv = max(prevv, v)
+        return tot
+    except Exception:
+        return 0
+
+
+def _next_biweekly(exams):
+    last = exams[-1][1].split()[-1] if exams else ""
+    vals = {"I": 1, "V": 5, "X": 10}
+    try:
+        tot, prevv = 0, 0
+        for ch in reversed(last):
+            v = vals[ch]
+            tot += -v if v < prevv else v
+            prevv = max(prevv, v)
+        return "Biweekly " + _roman(tot + 1)
+    except Exception:
+        return "Next biweekly"
+
+
 def _weak_progress(mode, frac):
     """Fill the 'Looking through your lectures…' bar (only if that view is showing)."""
     if _view and _detail == WEAK and _weak is None and _weak_mode == mode and _app_active():
@@ -1092,23 +1162,41 @@ def _weak_html():
     if _weak_mode != "block":
         out = [row(i, r) for i, r in rows[:40]]
         return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
-    # End of block: one group per two-week exam period, newest first; open one to see
-    # its lectures (still least-studied first)
-    groups = {}
+    # End of block: one group per biweekly exam (the lectures each exam covers), newest
+    # first; open one to see its lectures (still least-studied first). Without exams in
+    # the calendar, plain two-week periods.
+    exams = _exam_dates()
+    groups, meta = {}, {}
     for i, r in rows:
-        groups.setdefault(max(0, (r["e"]["date"] - start).days // 14), []).append((i, r))
+        d = r["e"]["date"]
+        if exams:
+            k = next((n for n, (ed_, _lbl) in enumerate(exams) if d <= ed_), len(exams))
+        else:
+            k = max(0, (d - start).days // 14)
+        groups.setdefault(k, []).append((i, r))
     out = []
-    for p in sorted(groups, reverse=True):
-        g = groups[p]
-        a = start + datetime.timedelta(days=14 * p)
-        b = a + datetime.timedelta(days=11)                       # Mon … Fri of week 2
+    for k in sorted(groups, reverse=True):
+        g = groups[k]
+        dates = [r["e"]["date"] for _i, r in g]
+        a, b = min(dates), max(dates)
+        if exams:
+            if k < len(exams):
+                title = "%s <span class='jkw-gx'>· exam %s %d</span>" % (
+                    exams[k][1], exams[k][0].strftime("%b"), exams[k][0].day)
+            else:
+                title = "%s <span class='jkw-gx'>· in progress</span>" % _next_biweekly(exams)
+            span = "%s %d – %s %d" % (a.strftime("%b"), a.day, b.strftime("%b"), b.day)
+        else:
+            a = start + datetime.timedelta(days=14 * k)
+            b = a + datetime.timedelta(days=11)
+            title, span = "%s %d – %s %d" % (a.strftime("%b"), a.day, b.strftime("%b"), b.day), ""
         uns = sum(r["unstarted"] for _i, r in g) / len(g)
         weakest = g[0][1]["m"]["display"]
         out.append(
-            "<details class='jkw-grp'%s><summary><span class='jkw-gt'>%s %d – %s %d</span>"
-            "<span class='jkw-gs'>%d lecture%s · %d%% not started · weakest: %s</span>"
+            "<details class='jkw-grp'%s><summary><span class='jkw-gt'>%s</span>"
+            "<span class='jkw-gs'>%s%d lecture%s · %d%% not started · weakest: %s</span>"
             "<span class='jkw-bar jkw-gbar'><i style='width:%d%%'></i></span></summary>%s</details>"
-            % (" open" if p == max(groups) else "", a.strftime("%b"), a.day, b.strftime("%b"), b.day,
+            % (" open" if k == max(groups) else "", title, (span + " · ") if span else "",
                len(g), "" if len(g) == 1 else "s", round(100 * uns), html.escape(weakest),
                round(100 * (1 - uns)), "".join(row(i, r) for i, r in g[:40])))
     return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
@@ -1560,6 +1648,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   transition:transform .2s ease;display:inline-block;}
 #jkc .jkw-grp[open] summary::before{transform:rotate(90deg);}
 .jkw-gt{font-weight:700;}
+.jkw-gx{font-weight:400;opacity:.7;font-size:.9em;}
 .jkw-gs{grid-column:2;opacity:.7;font-size:.85em;}
 #jkc .jkw-gbar{grid-column:2;margin-top:4px;}
 #jkc .jkw-grp .jkw-row{margin:6px 4px;}
