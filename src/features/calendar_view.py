@@ -1020,9 +1020,13 @@ def _atom_plain(a):
     return None
 
 
-_EXAM_RE = re.compile(r"\b(bi-?weekly|exam|examination)\b", re.I)
-_NOT_EXAM = re.compile(r"\b(review|prep|preparation|practice|recap|q ?& ?a|tutorial|info)\b", re.I)
-_EXAM_NUM = re.compile(r"(?:bi-?weekly|exam(?:ination)?)\s*(?:exam\s*)?#?\s*([ivx]{1,5}|\d{1,2})\b", re.I)
+# "Biweekly Assessment" (or "… Exam"): the assessment itself — not its feedback session,
+# review, retake, etc.
+_EXAM_RE = re.compile(r"\b(assessment|exam|examination)\b", re.I)
+_NOT_EXAM = re.compile(r"\b(review|prep|preparation|practice|recap|q ?& ?a|tutorial|info|feedback|"
+                       r"debrief|retake|re-?take|make-?up|remediation|orientation|results?|"
+                       r"study|session)\b", re.I)
+_EXAM_NUM = re.compile(r"(?:assessment|exam(?:ination)?)\s*#?\s*([ivx]{1,5}|\d{1,2})\b", re.I)
 
 
 def _roman(n):
@@ -1046,6 +1050,14 @@ def _exam_dates():
             seen.add(e["date"])
             raw.append((e["date"], t))
     raw.sort()
+    # one assessment can span days (two parts, a sitting per group): within 3 days = one
+    merged = []
+    for d, t in raw:
+        if merged and (d - merged[-1][0]).days <= 3:
+            merged[-1] = (d, merged[-1][1])       # count it once, dated by its last day
+        else:
+            merged.append((d, t))
+    raw = merged
     out, n, prev = [], 0, None
     for d, t in raw:
         n = 1 if prev is None or (d - prev).days > 28 else n + 1
