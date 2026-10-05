@@ -69,7 +69,7 @@ def _mode():
     return m if m in ("week", "1", "2") else "week"
 
 
-def _set_mode(m):
+def _set_mode(m, direction="mode"):
     global _anchor
     try:
         c = mw.addonManager.getConfig(__name__) or {}
@@ -78,7 +78,7 @@ def _set_mode(m):
     except Exception:
         pass
     _anchor = None
-    _swap("mode")
+    _swap(direction)
 
 
 _anchor = None         # first day shown in Day / 2-Day view (None = today)
@@ -209,7 +209,7 @@ def _week_html():
         label = "%s %d – %s %d, %d" % (monday.strftime("%b"), monday.day,
                                         sunday.strftime("%b"), sunday.day, sunday.year)
     mode = _mode()
-    seg = "".join("<button class='jkc-seg%s' onclick=\"pycmd('janki:cal:mode:%s')\">%s</button>"
+    seg = "".join("<button class='jkc-seg%s' onclick=\"jkcMode('%s')\">%s</button>"
                   % (" on" if mode == k else "", k, l)
                   for k, l in (("1", "Day"), ("2", "2 Days"), ("week", "Week")))
     empty = ("" if evs else
@@ -303,12 +303,28 @@ _JS = """<script>(function(){
      root.innerHTML=inner;
      var g=grid(); if(!g||!g.animate)return;
      g.style.willChange='transform,opacity';
-     var from=dir==='next'?28:(dir==='prev'?-28:0);
-     var a=g.animate([{transform:'translateX('+from+'px)',opacity:0},
-                      {transform:'none',opacity:1}],{duration:dir==='next'||dir==='prev'?230:160,easing:EASE});
+     var from=dir==='next'?'translateX(28px)':(dir==='prev'?'translateX(-28px)':
+              (dir==='zin'?'scale(0.97)':(dir==='zout'?'scale(1.03)':'none')));
+     var a=g.animate([{transform:from,opacity:0},
+                      {transform:'none',opacity:1}],{duration:dir==='today'?160:240,easing:EASE});
      a.finished.then(function(){g.style.willChange='';}).catch(function(){});
    }
    if(outDone){var p=outDone;outDone=null;p.then(put);} else put();
+ };
+ // Day / 2 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
+ window.jkcMode=function(k){
+   var g=grid(), n=k==='week'?5:parseInt(k,10);
+   var cur=g?parseInt(getComputedStyle(g).getPropertyValue('--jkc-n'),10)||5:5;
+   if(n===cur){return;}
+   var dir=n<cur?'zin':'zout';
+   if(g&&g.animate){
+     g.style.willChange='transform,opacity';
+     var a=g.animate([{transform:'none',opacity:1},
+                      {transform:'scale('+(dir==='zin'?1.03:0.97)+')',opacity:0}],
+                     {duration:120,easing:'ease-in',fill:'forwards'});
+     outDone=a.finished.catch(function(){});
+   }
+   pycmd('janki:cal:mode:'+k+':'+dir);
  };
  document.addEventListener('click',function(e){
    var ev=e.target.closest&&e.target.closest('.jkc-ev'); if(!ev)return;
@@ -429,7 +445,7 @@ def on_js_message(handled, message, context):
         elif cmd == "today":
             _go_week(None)
         elif cmd.startswith("mode:"):
-            _set_mode(cmd[5:])
+            _set_mode(cmd[5:].split(":")[0], cmd[5:].split(":")[1] if ":" in cmd[5:] else "mode")
         elif cmd == "loader":
             from ..integrations import lectures
             lectures.run_today(interactive=True)
