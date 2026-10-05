@@ -1428,6 +1428,31 @@ def _lec_sfx(name):
         pass
 
 
+_LAST_RESET = {"t": 0.0, "ics_mtime": None}
+_CACHE_TTL = 600     # s
+
+
+def _maybe_reset_caches(ics_path):
+    """Opening the wizard used to drop the calendar cache AND rebuild the AnKing tag
+    index (a scan of every tag in the collection) on every open — slow, especially
+    when reopened soon after (e.g. the tour). Refresh only when it's been a while, or
+    the local calendar file changed."""
+    import time
+    now = time.monotonic()
+    mt = None
+    try:
+        if ics_path and not _is_url(ics_path):
+            mt = os.path.getmtime(_p(ics_path))
+    except Exception:
+        pass
+    stale = (now - _LAST_RESET["t"] > _CACHE_TTL) or (mt != _LAST_RESET["ics_mtime"])
+    if stale:
+        _ics_reset()
+        _ak_index_reset()
+        _LAST_RESET["t"] = now
+        _LAST_RESET["ics_mtime"] = mt
+
+
 def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -1445,8 +1470,7 @@ def _open_today_dialog(day_offset=0, auto=False):
     # let the user pick which to unsuspend (no day navigation, no fuzzy matching).
     no_cal = not (ics_path or "").strip()
 
-    _ics_reset()                       # fresh top-level open → refetch URL calendars
-    _ak_index_reset()                  # …and rebuild the AnKing tag index (once)
+    _maybe_reset_caches(ics_path)      # refresh calendar / tag index only when stale
     m, keys, opts = _get_map(families)  # cached by xlsx mtime + families
     if not m:
         # Nothing to load (configured map is missing/empty). Auto-launch just
