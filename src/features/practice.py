@@ -139,6 +139,11 @@ def open_practice_hub():
 def _open_practice_hub_now():
     global _practice_view
     _practice_view = True
+    try:
+        from . import calendar_view
+        calendar_view.close()
+    except Exception:
+        pass
     # Stats swaps into the deck list's spot; already on the deck list this is an in-place
     # re-render (no state change), so close Stats explicitly or it stays on top.
     try:

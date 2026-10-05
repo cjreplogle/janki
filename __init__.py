@@ -1186,6 +1186,11 @@ def _go_back():
 def _go_decks():
     _sfx("back")
     try:
+        from .src.features import calendar_view as _cv
+        _cv.close()
+    except Exception:
+        pass
+    try:
         from .src.features import practice as _pr, stats_embed as _se
         if _se.is_open():
             _pr._practice_view = False
@@ -1378,5 +1383,13 @@ except Exception:
 try:
     from .src.features import hotcorner as _hotcorner
     gui_hooks.profile_did_open.append(lambda: _hotcorner.reload())
+except Exception:
+    pass
+
+
+
+try:
+    from .src.features import calendar_view as _calendar_view
+    _calendar_view.install()
 except Exception:
     pass

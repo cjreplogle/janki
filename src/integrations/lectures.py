@@ -2950,3 +2950,106 @@ def _on_profile_open():
 
 gui_hooks.main_window_did_init.append(_install_menu)
 gui_hooks.profile_did_open.append(_on_profile_open)
+
+
+# ------------------------------------------------- calendar-view helpers --------
+# Used by the Calendar page (features/calendar_view.py). Same sources, same matching
+# rules as the Load Lectures wizard, but with event TIMES and a plain function API.
+
+def _ics_dt(val, tzid):
+    """An ICS DTSTART/DTEND value → (date, minutes-from-midnight or None) in LOCAL
+    time. UTC ('…Z') is converted; TZID / floating times are taken as wall time."""
+    m = re.match(r"(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?", val or "")
+    if not m:
+        return None, None
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not m.group(4):
+        return datetime.date(y, mo, d), None                    # all-day
+    hh, mm = int(m.group(4)), int(m.group(5))
+    dt = datetime.datetime(y, mo, d, hh, mm)
+    if m.group(7):                                              # UTC → local
+        dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone().replace(tzinfo=None)
+    return dt.date(), dt.hour * 60 + dt.minute
+
+
+def _parse_ics_events(path):
+    """[{date, start, end, summary, location}] for every VEVENT (times in local
+    minutes, None for all-day)."""
+    try:
+        raw = _read_source_text(path)
+    except Exception as e:
+        _log("ics read failed: %s" % e)
+        return []
+    raw = re.sub(r"\r?\n[ \t]", "", raw)
+    out = []
+    for block in raw.split("BEGIN:VEVENT")[1:]:
+        block = block.split("END:VEVENT")[0]
+
+        def field(name):
+            mm = re.search(r"(?m)^%s((?:;[^:\r\n]*)?):(.*)$" % name, block)
+            if not mm:
+                return None, None
+            params = mm.group(1) or ""
+            tz = re.search(r"TZID=([^;:]+)", params)
+            return mm.group(2).strip(), (tz.group(1) if tz else None)
+        summ, _ = field("SUMMARY")
+        st, stz = field("DTSTART")
+        en, etz = field("DTEND")
+        loc, _ = field("LOCATION")
+        if not (summ and st):
+            continue
+        d, smin = _ics_dt(st, stz)
+        if d is None:
+            continue
+        ed, emin = _ics_dt(en, etz) if en else (d, None)
+        if smin is not None and (emin is None or ed != d):
+            emin = smin + 60 if emin is None else 24 * 60           # clamp to the day
+        def unesc(t):
+            return ((t or "").replace("\\,", ",").replace("\\;", ";")
+                    .replace("\\n", " ").strip())
+        out.append({"date": d, "start": smin, "end": emin,
+                    "summary": unesc(summ), "location": unesc(loc)})
+    return out
+
+
+_EV_CACHE = {"key": None, "events": []}
+
+
+def events_between(d0, d1):
+    """Calendar events with d0 <= date <= d1, sorted by date/time (cached like the
+    wizard's day index)."""
+    path = _cfg().get("ics_path", "")
+    if not path:
+        return []
+    key = ("url", path) if _is_url(path) else (path, _src_mtime(path))
+    if _EV_CACHE["key"] != key:
+        _EV_CACHE["events"] = _parse_ics_events(path)
+        _EV_CACHE["key"] = key
+    evs = [e for e in _EV_CACHE["events"] if d0 <= e["date"] <= d1]
+    return sorted(evs, key=lambda e: (e["date"], e["start"] if e["start"] is not None else -1))
+
+
+def match_event(title):
+    """The lecture a calendar title belongs to, by the wizard's rules (aliases →
+    exact → fuzzy): {"key", "display", "searches", "fuzzy"} or None."""
+    try:
+        families = _enabled_families()
+        m, keys, _opts = _get_map(families)
+        if not m:
+            return None
+        cutoff = float(_cfg().get("fuzzy_cutoff", 0.72))
+        aliases = _load_aliases()
+        nkey = _norm(title)
+        if nkey in aliases:
+            nkey = _norm(aliases[nkey])
+        fuzzy = False
+        if nkey not in m:
+            nkey = _fuzzy_match(title, nkey, keys, m, cutoff)
+            fuzzy = True
+        if not nkey or nkey not in m:
+            return None
+        return {"key": nkey, "display": m[nkey]["display"],
+                "searches": list(m[nkey]["searches"]), "fuzzy": fuzzy}
+    except Exception as e:
+        _log("match_event: %s" % e)
+        return None
