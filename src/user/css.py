@@ -500,6 +500,11 @@ _DECK_KEYS_JS = r"""(function(){
    try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
    if(!id||!on||Date.now()-(+on||0)>2500)return;
    var tr=document.getElementById(id); if(tr){sel(tr);poke();}}
+ // right-click a deck/bank row → Janki's quick menu (unsuspend / create subdeck)
+ document.addEventListener('contextmenu',function(e){
+   var tr=e.target.closest&&e.target.closest('tr.deck'); if(!tr||!tr.id)return;
+   e.preventDefault(); pycmd('janki:deckmenu:'+tr.id);
+ },true);
  // keep the selection across the redraw an expand/collapse causes
  document.addEventListener('keydown',function(e){
    if(/^Arrow/.test(e.key)){try{sessionStorage.setItem('jkKbAct',String(Date.now()));}catch(x){}}},true);
@@ -2498,7 +2503,47 @@ def _congrats_keys(*_):
         pass
 
 
+def _deck_menu(did: int) -> None:
+    """Right-click on a deck row: Unsuspend all cards (deck + subdecks) / Create subdeck."""
+    from aqt.qt import QMenu, QCursor
+    from aqt.utils import getOnlyText, tooltip
+    col = mw.col
+    if col is None:
+        return
+    d = col.decks.get(did)
+    if not d:
+        return
+    name = d["name"]
+    menu = QMenu(mw)
+    a_uns = menu.addAction("Unsuspend all cards in “%s”" % name.split("::")[-1])
+    a_new = menu.addAction("Create subdeck…")
+    chosen = menu.exec(QCursor.pos())
+    if chosen is a_uns:
+        from aqt.operations import CollectionOp
+        q = 'deck:"%s" is:suspended' % name.replace('"', '\\"')
+
+        def op2(c):                          # remembers the count for the tooltip
+            ids = c.find_cards(q)
+            op2.n = len(ids)
+            return c.sched.unsuspend_cards(ids)
+        op2.n = 0
+        CollectionOp(parent=mw, op=op2).success(
+            lambda _c: tooltip("Unsuspended %d card(s)." % op2.n)).run_in_background()
+    elif chosen is a_new:
+        sub = getOnlyText("Name of the new subdeck under “%s”:" % name, parent=mw)
+        sub = (sub or "").strip().strip(":")
+        if sub:
+            col.decks.id("%s::%s" % (name, sub))
+            mw.deckBrowser.refresh()
+
+
 def on_js_message(handled, message, context):
+    if isinstance(message, str) and message.startswith("janki:deckmenu:"):
+        try:
+            _deck_menu(int(message.rsplit(":", 1)[1]))
+        except Exception as e:
+            log("deck menu: %s" % e)
+        return (True, None)
     if message == "janki:update":
         try:
             from ..system import updater as _upd
