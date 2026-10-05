@@ -66,7 +66,9 @@ def _redraw():
 def _mode():
     from ..util.config import _cfg
     m = str(_cfg().get("calendar_view", "week"))
-    return m if m in ("week", "1", "2") else "week"
+    if m == "2":
+        m = "3"                                   # (the old 2-day view is now 3 days)
+    return m if m in ("week", "1", "3") else "week"
 
 
 def _set_mode(m, direction="mode"):
@@ -211,7 +213,7 @@ def _week_html():
     mode = _mode()
     seg = "".join("<button class='jkc-seg%s' onclick=\"jkcMode('%s')\">%s</button>"
                   % (" on" if mode == k else "", k, l)
-                  for k, l in (("1", "Day"), ("2", "2 Days"), ("week", "Week")))
+                  for k, l in (("1", "Day"), ("3", "3 Days"), ("week", "Week")))
     empty = ("" if evs else
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
