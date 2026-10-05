@@ -448,10 +448,8 @@ def _detail_bg(title, opts=False):
     key = (title, opts)
     if key in _detail_busy or getattr(mw, "col", None) is None:
         if key not in _detail_busy:
-            _ctlog("lecture lookup skipped: no collection")
         return
     if _closing:
-        _ctlog("lecture lookup: _closing was stuck on — ignoring it")
     _detail_busy.add(key)
     _busy_update()
     from aqt.operations import QueryOp
@@ -493,7 +491,6 @@ def _detail_html(e):
     pending = m is lectures._PENDING
     if pending:
         m = None
-        _ctlog("page drawn — lecture not matched yet, matching in background")
         _detail_bg(e["summary"])
     when = "%s, %s %d" % (_DAY[e["date"].weekday()], e["date"].strftime("%b"), e["date"].day)
     if e["start"] is not None:
@@ -558,7 +555,6 @@ def _detail_html(e):
                 % (sw, ("<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:lms')\">"
                         "Open in LMS</button>") if e.get("url") else "",
                    _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
-        _ctlog("page drawn for %s — count scheduled" % (m.get("key"),))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
@@ -631,49 +627,25 @@ def _tags_html(m):
     return "".join(parts) or "<div class='jkd-tgh'>No tags</div>"
 
 
-def _ctlog(msg):   # TEMP timing probe for slow card counts
-    try:
-        import os
-        with open(os.path.join(os.path.dirname(__file__), "..", "..", "user_files",
-                               "count_timing.log"), "a") as f:
-            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
-    except Exception:
-        pass
-
-
 def _recount(m):
     """New / due / suspended counts for the class (switched-on sources), off the main
     thread, then written into the page."""
     if getattr(mw, "col", None) is None:
-        _ctlog("count skipped: no collection")
         return
     if _closing:
-        _ctlog("count: _closing was stuck on — ignoring it")
     q = _lecture_query(m, _fams_on)
     if not q:
-        _ctlog("count skipped: no sources on (fams_on=%s)" % sorted(_fams_on))
         _set_counts("No sources switched on.")
         return
     key = _count_key(m)
     try:
         from aqt.operations import QueryOp
 
-        t_req = time.time()
-        _ctlog("count requested key=%s" % (m.get("key"),))
-
         def op(col):
             # one (cached) search for the lecture's cards, then ONE pass over those
             # cards for new / due / suspended — not three more filtered searches
             from ..integrations import lectures
-            t0 = time.time()
-            _ctlog("  started after waiting %.2fs" % (t0 - t_req))
-            lectures.detect_source_decks(col)
-            t1 = time.time()
-            hit = tuple(q) in lectures._FIND_CACHE
             ids = sorted(lectures._find_base(col, q))
-            t2 = time.time()
-            _ctlog("  detect %.2fs · search %.2fs (cached=%s, %d cards, %d terms)"
-                   % (t1 - t0, t2 - t1, hit, len(ids), len(q)))
             new = due = sus = 0
             today = col.sched.today
             for i in range(0, len(ids), 900):
@@ -686,11 +658,9 @@ def _recount(m):
                         new += 1
                     elif (qu == 2 and d <= today) or qu in (1, 3):
                         due += 1
-            _ctlog("  card read %.2fs" % (time.time() - t2))
             return (new, due, sus, len(ids))
 
         def ok(r):
-            _ctlog("  shown %.2fs after request" % (time.time() - t_req))
             new, due, sus, tot = r
             _counts_cache[key] = r
             if len(_counts_cache) > 200:
@@ -719,18 +689,14 @@ def _counts_html(r):
 
 def _set_study_counts(active, sus):
     try:
-        mw.web.eval("(function(a,s){var x=document.getElementById('jkd-st-act'),"
-                    "y=document.getElementById('jkd-st-sus');"
-                    "if(x)x.textContent='Study unsuspended cards ('+a+')';"
-                    "if(y)y.textContent='Study all cards ('+s+')';})(%d,%d)" % (active, sus))
+        mw.web.eval("window.jkcCounts&&window.jkcCounts(null,%d,%d)" % (active, sus))
     except Exception:
         pass
 
 
 def _set_counts(h):
     try:
-        mw.web.eval("(function(){var c=document.getElementById('jkd-counts');if(c)c.innerHTML=%s;})()"
-                    % json.dumps(h))
+        mw.web.eval("window.jkcCounts&&window.jkcCounts(%s)" % json.dumps(h))
     except Exception:
         pass
 
@@ -1695,6 +1661,15 @@ _JS = """<script>(function(){
    if(!b){b=document.createElement('div');b.id='jkc-busy';
      b.innerHTML="<i></i><span>Updating…</span>";document.body.appendChild(b);}
    b.classList.toggle('on',!!on);};
+ // Counts can land while the class page is still sliding in (its elements don't
+ // exist yet): keep them and apply as soon as the page is in place.
+ var pendC=null,pendA=null;
+ function applyCounts(){
+   var c=document.getElementById('jkd-counts');if(c&&pendC!=null){c.innerHTML=pendC;pendC=null;}
+   var x=document.getElementById('jkd-st-act'),y=document.getElementById('jkd-st-sus');
+   if(x&&y&&pendA){x.textContent='Study unsuspended cards ('+pendA[0]+')';
+     y.textContent='Study all cards ('+pendA[1]+')';pendA=null;}}
+ window.jkcCounts=function(h,a,s){if(h!=null)pendC=h;if(a!=null)pendA=[a,s];applyCounts();};
  var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
    // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
@@ -1710,7 +1685,7 @@ _JS = """<script>(function(){
      root.innerHTML=inner;
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
-     pillInit();nowLine();
+     pillInit();nowLine();applyCounts();
      if(selAfter){var sa=selAfter;selAfter=null;
        setTimeout(function(){var n=cols().length;selDay(sa==='first'?0:n-1,selRef);},0);}
      var g=grid(); if(!g||!g.animate)return;
