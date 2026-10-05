@@ -426,13 +426,14 @@ def _detail_html(e):
                 "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
                 "Study all cards</button>"
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
-                "Unsuspend cards for this lecture</button></div>"
+                "Unsuspend cards for this lecture</button>%s</div>"
                 "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
                 "and suspends them again afterwards.</div>"
                 "<div class='jkd-links'><a onclick=\"jkdTags(this)\">Show tags ▾</a> · "
                 "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
                 "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
-                % (sw, _tags_html(m)))
+                % (sw, ("<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:lms')\">"
+                        "Open in LMS</button>") if e.get("url") else "", _tags_html(m)))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
@@ -1591,6 +1592,10 @@ def on_js_message(handled, message, context):
         elif cmd == "det:practice":
             if _detail is not None and 0 <= _detail < len(_shown):
                 practice_event(_shown[_detail])
+        elif cmd == "det:lms":
+            if _detail is not None and 0 <= _detail < len(_shown) and _shown[_detail].get("url"):
+                from aqt.utils import openLink
+                openLink(_shown[_detail]["url"])
         elif cmd == "det:back":
             _close_detail()
         elif cmd.startswith("det:study"):

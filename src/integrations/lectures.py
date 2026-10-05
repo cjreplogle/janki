@@ -3123,6 +3123,7 @@ def _parse_ics_events(path):
         desc, _ = field("DESCRIPTION")
         cats, _ = field("CATEGORIES")
         rrule, _ = field("RRULE")
+        url_f, _ = field("URL")
         uid, _ = field("UID")
         rid, ridtz = field("RECURRENCE-ID")
         if not (summ and st):
@@ -3141,6 +3142,13 @@ def _parse_ics_events(path):
         mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
         base = {"start": smin, "end": emin, "summary": unesc(summ),
                 "location": unesc(loc), "mandatory": mand}
+        # the event's page in the LMS: the URL field, else "Link to event: https://…"
+        # (or the first link) in its notes
+        lm = (re.search(r"link to event\s*:?\s*(https?://[^\s\\<>\"]+)", desc or "", re.I)
+              or re.search(r"(https?://[^\s\\<>\"]+)", desc or ""))
+        link = (url_f or "").strip() or (lm.group(1) if lm else "")
+        if link.startswith(("http://", "https://")):
+            base["url"] = link.rstrip(".,;)")
         # "Dress Code: …" written in a class's notes → that day's dress code
         dm = re.search(r"dress\s*-?\s*code\s*[:\-–]\s*(.+?)(?:\\n|\\N|\n|$)", desc or "", re.I)
         if dm:
