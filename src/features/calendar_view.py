@@ -741,7 +741,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 #jkc .jkd-study:hover{background:#b0cbf6 !important;transform:translateY(-1px);}
 .jkd-note{font-size:.82em;opacity:.6;margin:8px 0 16px;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
-#jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;}
+#jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;
+  font-size:.95em;padding:8px 22px;border-radius:12px;align-self:center;}
 #jkc .jkd-study2:hover{background:rgba(156,188,243,.34) !important;}
 .jkd-sec{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:10px;padding:7px 16px;
   cursor:pointer;transition:background .2s ease;}
