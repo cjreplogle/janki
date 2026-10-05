@@ -237,31 +237,30 @@ def _week_html():
                 allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s%s</div>"
                               % (cls, i, tip, mbadge, title))
                 continue
-            top = int((e["start"] - lo) * px_per_min)
-            h = max(22, int((e["end"] - e["start"]) * px_per_min) - 2)
+            top = 100.0 * (e["start"] - lo) / span           # % of the day: the grid
+            h = 100.0 * (e["end"] - e["start"]) / span        # stretches to the window
             ln, nl = lanes.get(i, (0, 1))
             pos = ("" if nl == 1 else
                    "left:calc(%.4f%% + 2px);right:auto;width:calc(%.4f%% - 4px);"
                    % (100.0 * ln / nl, 100.0 / nl))
             blocks.append(
-                "<div class='%s%s' data-i='%d' title='%s' style='top:%dpx;height:%dpx;%s'>"
+                "<div class='%s%s' data-i='%d' title='%s' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s'>"
                 "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
                 % (cls, " jkc-narrow" if nl > 1 else "", i, tip, top, h, pos, mbadge, title,
                    _hm(e["start"]), _hm(e["end"]),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         if d == today:                     # "now" line, kept current by the page's timer
-            blocks.append("<div class='jkc-now' data-lo='%d' data-hi='%d' data-ppm='%s'></div>"
-                          % (lo, hi, px_per_min))
+            blocks.append("<div class='jkc-now' data-lo='%d' data-hi='%d'></div>" % (lo, hi))
         if len(allday) > AD_MAX:
             rest = len(allday) - AD_MAX
             allday = allday[:AD_MAX] + ["<div class='jkc-ad jkc-more'>+%d more</div>" % rest]
         cols.append(
             "<div class='jkc-col%s'><div class='jkc-dh'>%s <b>%d</b></div>"
-            "<div class='jkc-ads' style='height:%dpx'>%s</div><div class='jkc-body' style='height:%dpx'>%s</div></div>"
+            "<div class='jkc-ads' style='height:%dpx'>%s</div><div class='jkc-body'>%s</div></div>"
             % (" jkc-today" if d == today else "", _DAY[d.weekday()], d.day, ads_h, "".join(allday),
-               grid_h, "".join(blocks)))
-    hours = "".join("<div class='jkc-hr' style='top:%dpx'><span>%s</span></div>"
-                    % (int((t - lo) * px_per_min), _hm(t)) for t in range(lo, hi + 1, 60))
+               "".join(blocks)))
+    hours = "".join("<div class='jkc-hr' style='top:%.3f%%'><span>%s</span></div>"
+                    % (100.0 * (t - lo) / span, _hm(t)) for t in range(lo, hi + 1, 60))
     if monday == sunday:
         label = "%s, %s %d" % (_DAY[monday.weekday()], monday.strftime("%b"), monday.day)
     else:
@@ -286,9 +285,11 @@ def _week_html():
            "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
            "<button onclick=\"pycmd('janki:cal:loader')\">"
            "Lecture wizard…</button></div></div>" % (seg, label))
-    grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
-            "style='height:%dpx;margin-top:%dpx'>%s</div>%s</div>"
-            % (len(days), grid_h, 24 + ads_h, hours, "".join(cols)))
+    # day height: at least the old fixed size, else whatever the window leaves below
+    # the bar, day names and all-day strip
+    grid = ("<div class='jkc-grid' style='--jkc-n:%d;--jkc-h:max(%dpx,calc(100vh - %dpx))'>"
+            "<div class='jkc-hours' style='margin-top:%dpx'>%s</div>%s</div>"
+            % (len(days), grid_h, 130 + ads_h, 24 + ads_h, hours, "".join(cols)))
     global _pending_tries
     if pending and _pending_tries < 2:        # match in the background, then refresh
         _pending_tries += 1
@@ -744,14 +745,14 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 /* one pill behind the buttons that glides to the chosen view */
 #jkc .jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
   background:rgba(156,188,243,.28) !important;transition:transform .24s cubic-bezier(.2,.8,.2,1),width .24s cubic-bezier(.2,.8,.2,1);}
-.jkc-hours{position:relative;margin-top:52px;}
+.jkc-hours{position:relative;margin-top:52px;height:var(--jkc-h);}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
 .jkc-col{min-width:0;}
 .jkc-dh{text-align:center;font-size:.86em;opacity:.8;height:24px;line-height:24px;}
 .jkc-today .jkc-dh{color:#9cbcf3;opacity:1;}
 .jkc-ads{overflow:hidden;}
-.jkc-body{position:relative;border-radius:10px;background:rgba(255,255,255,.025);}
+.jkc-body{position:relative;height:var(--jkc-h);border-radius:10px;background:rgba(255,255,255,.025);}
 .jkc-today .jkc-body{background:rgba(156,188,243,.06);}
 .jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;box-sizing:border-box;
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
@@ -886,7 +887,7 @@ _JS = """<script>(function(){
  function nowLine(){var n=document.querySelector('#jkc .jkc-now');if(!n)return;
    var d=new Date(),m=d.getHours()*60+d.getMinutes(),lo=+n.dataset.lo,hi=+n.dataset.hi;
    if(m<lo||m>hi){n.style.display='none';return;}
-   n.style.display='block';n.style.top=((m-lo)*parseFloat(n.dataset.ppm))+'px';}
+   n.style.display='block';n.style.top=(100*(m-lo)/(hi-lo))+'%';}
  if(!window._jkNowT)window._jkNowT=setInterval(nowLine,30000);
  window.addEventListener('load',nowLine);setTimeout(nowLine,0);
  var inDone=null, lastInner='';
