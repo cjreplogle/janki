@@ -1372,6 +1372,18 @@ def _build() -> "QWidget":
     b_decks.clicked.connect(lambda _c=False: _show_mode("decks"))
     b_today.clicked.connect(lambda _c=False: _show_mode("today"))
     QTimer.singleShot(0, lambda: _show_mode(mode, save=False))
+
+    def _warm_hidden():
+        # the hidden list's first show used to do its first polish / layout / font
+        # setup on the click — do it now, offscreen, so the first switch is instant
+        try:
+            other = scroll if mode == "today" else today_box
+            other.ensurePolished()
+            for w in other.findChildren(QWidget):
+                w.ensurePolished()
+        except Exception:
+            pass
+    QTimer.singleShot(400, _warm_hidden)        # after the open has settled
     if not rows:
         empty = QLabel("No decks")
         empty.setObjectName("cnt")
