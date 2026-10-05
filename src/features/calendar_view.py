@@ -30,6 +30,7 @@ TEMP_PREFIX = "Janki Calendar::"
 # --------------------------------------------------------------- open / close ----
 def open_calendar():
     global _view
+    QTimer.singleShot(700, _prewarm)           # neighbouring weeks, ready for arrows
     try:
         from . import practice, stats_embed
         practice._practice_view = False
@@ -65,28 +66,36 @@ def _redraw():
 
 def _mode():
     from ..util.config import _cfg
-    m = str(_cfg().get("calendar_view", "week"))
+    m = str(_mode_override or _cfg().get("calendar_view", "week"))
     if m == "2":
         m = "3"                                   # (the old 2-day view is now 3 days)
     return m if m in ("week", "1", "3") else "week"
 
 
+_mode_override = None   # the just-chosen view, until its config write lands
+
+
 def _set_mode(m, direction="mode"):
-    global _anchor
+    global _anchor, _mode_override
     try:
         from . import sfx
         sfx.play("select")
     except Exception:
         pass
-    try:
-        c = mw.addonManager.getConfig(__name__) or {}
-        c["calendar_view"] = m
-        mw.addonManager.writeConfig(__name__, c)
-    except Exception:
-        pass
+    _mode_override = m
     _anchor = None
-    _swap(direction)
+    _swap(direction)                    # draw first…
 
+    def _save():                        # …then persist the choice
+        global _mode_override
+        try:
+            c = mw.addonManager.getConfig(__name__) or {}
+            c["calendar_view"] = m
+            mw.addonManager.writeConfig(__name__, c)
+        except Exception:
+            pass
+        _mode_override = None
+    QTimer.singleShot(0, _save)
 
 _anchor = None         # first day shown in Day / 2-Day view (None = today)
 
@@ -555,9 +564,13 @@ def install_toolbar(links, toolbar):
 def _prewarm():
     """Read this week's events + their lecture matches ahead of time (idle only), so
     opening the Calendar is instant."""
+    # Two weeks either side: the 3-Day view and week arrows reach beyond this week, and
+    # matching events on first sight caused a hold on the first view switch / arrow.
     try:
         from ..integrations import lectures
-        for e in lectures.events_between(_days()[0], _days()[-1]):
+        t = datetime.date.today()
+        for e in lectures.events_between(t - datetime.timedelta(days=14),
+                                         t + datetime.timedelta(days=21)):
             lectures.match_event(e["summary"])
     except Exception as e:
         log("calendar prewarm: %s" % e)
