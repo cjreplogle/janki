@@ -158,7 +158,7 @@ class _Preview(QWidget):
         p.fillPath(path, QColor(22, 24, 32, 236))
         # a faint toolbar strip so it reads as "the Anki window"
         p.fillRect(QRectF(0, 0, self.width(), 46), QColor(255, 255, 255, 14))
-        ic = mw.windowIcon().pixmap(88, 88)
+        ic = _icon_pixmap(44, self.devicePixelRatioF())
         s, m = 44, (_POKE - 44) // 2             # icon centred in the part that pokes in
         x = self.width() - _POKE + m if "left" in self.corner else m
         y = self.height() - _POKE + m if "top" in self.corner else m
@@ -172,6 +172,35 @@ class _Preview(QWidget):
 
     def mousePressEvent(self, _e):
         _commit()
+
+
+_ICON = {"icon": None}
+
+
+def _icon_pixmap(size, dpr):
+    """Anki's icon at full Retina resolution: the app bundle's big icon if there is
+    one (the window icon can be a small bitmap), drawn at size × devicePixelRatio."""
+    from aqt.qt import QIcon, QSize
+    if _ICON["icon"] is None:
+        icon = None
+        import os
+        for p in ("/Applications/Anki.app/Contents/Resources/anki.icns",
+                  os.path.join(os.path.dirname(sys.executable), "..", "Resources", "anki.icns")):
+            if os.path.exists(p):
+                icon = QIcon(p)
+                if not icon.isNull():
+                    break
+        if icon is None or icon.isNull():
+            icon = mw.windowIcon()
+        _ICON["icon"] = icon
+    px = _ICON["icon"].pixmap(QSize(size, size), float(dpr or 1.0))
+    if px.width() < size * dpr:                  # only small bitmaps: scale up smoothly
+        from aqt.qt import Qt as _Qt
+        px = px.scaled(int(size * dpr), int(size * dpr),
+                       _Qt.AspectRatioMode.KeepAspectRatio,
+                       _Qt.TransformationMode.SmoothTransformation)
+        px.setDevicePixelRatio(dpr)
+    return px
 
 
 def _ensure_panel():
