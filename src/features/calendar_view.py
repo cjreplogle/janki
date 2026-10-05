@@ -456,19 +456,32 @@ def _tag_label(frag):
     return out
 
 
+_tag_list = []        # full tags behind the chips on the open class page (by index)
+
+
 def _tags_html(m):
     """The lecture's tags as chips, grouped by source (shown in the Show tags panel)."""
     from ..integrations import lectures
+    global _tag_list
     groups = {}
-    for s in m["searches"]:
+    for s in m.get("_raw_searches", m["searches"]):
         groups.setdefault(_fam(s), []).extend(_tag_label(s))
+    ex = set(m.get("excluded") or [])
+    _tag_list = []
     parts = []
+
+    def chip(full, short):
+        _tag_list.append(full)
+        off = full.strip("*").lower() in ex
+        return ("<span class='jkd-chip%s' title='%s'>%s<b class='jkd-x' data-t='%d' "
+                "title='%s'>%s</b></span>"
+                % (" off" if off else "", html.escape(full), html.escape(short),
+                   len(_tag_list) - 1, "Use this tag again" if off else
+                   "Leave this tag out for this lecture", "+" if off else "−"))
     for f in ("ak", "huc", "aj"):
         if f not in groups:
             continue
-        chips = "".join("<span class='jkd-chip' title='%s'>%s</span>"
-                        % (html.escape(full), html.escape(short))
-                        for full, short in groups[f][:60])
+        chips = "".join(chip(full, short) for full, short in groups[f][:60])
         more = len(groups[f]) - 60
         parts.append("<div class='jkd-tg'><div class='jkd-tgh'>%s</div>%s%s</div>"
                      % (lectures.FAMILY_LABEL.get(f, f), chips,
@@ -595,7 +608,9 @@ def _weak_dirty(changes=None, handler=None):
 def _weak_key():
     # NO collection access here: this runs on the main thread, and asking the collection
     # anything while a background job holds it froze the window (33 s in a profile)
-    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())))
+    from ..integrations import lectures
+    lectures._excl_map()                     # a file stat; refreshes if edited
+    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())), lectures._EXCL["mt"])
 
 
 def _weak_cached(mode):
@@ -1251,6 +1266,13 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkd-tags-in{overflow:hidden;}
 .jkd-tg{margin:12px auto 0;max-width:620px;text-align:center;}
 .jkd-tgh{font-size:.78em;letter-spacing:.04em;text-transform:uppercase;opacity:.55;margin:0 0 6px 2px;}
+#jkc .jkd-chip .jkd-x{display:inline-block;margin-left:6px;width:15px;height:15px;line-height:14px;
+  text-align:center;border-radius:50%;font-weight:700;cursor:pointer;opacity:.55;
+  background:rgba(255,255,255,.1) !important;transition:opacity .15s ease,background-color .15s ease;}
+#jkc .jkd-chip .jkd-x:hover{opacity:1;background:rgba(255,157,138,.3) !important;}
+#jkc .jkd-chip.off{opacity:.45;text-decoration:line-through;}
+#jkc .jkd-chip.off .jkd-x{text-decoration:none;}
+#jkc .jkd-chip.off .jkd-x:hover{background:rgba(144,238,144,.3) !important;}
 #jkc .jkd-chip{display:inline-block;margin:0 6px 6px 0;padding:3px 9px;border-radius:999px;font-size:.82em;
   background:rgba(255,255,255,.07) !important;border:1px solid rgba(255,255,255,.12);}
 #jkc .jkd-more{opacity:.6;}
@@ -1452,6 +1474,12 @@ _JS = """<script>(function(){
  document.addEventListener('keydown',function(e){
    var dd=document.querySelector('#jkc .jkd-dd.open');
    if(dd&&e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();dd.classList.remove('open');}
+ },true);
+ document.addEventListener('click',function(e){
+   var x=e.target.closest&&e.target.closest('#jkc .jkd-x');if(!x)return;
+   e.stopPropagation();var c=x.parentNode,off=c.classList.toggle('off');
+   x.textContent=off?'+':'\u2212';x.title=off?'Use this tag again':'Leave this tag out for this lecture';
+   pycmd('janki:cal:tagx:'+x.getAttribute('data-t')+':'+(off?1:0));
  },true);
  window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
    var o=t.classList.toggle('open');a.textContent=o?'Hide tags ▴':'Show tags ▾';
@@ -1686,6 +1714,20 @@ def on_js_message(handled, message, context):
         elif cmd == "det:practice":
             if _detail is not None and 0 <= _detail < len(_shown):
                 practice_event(_shown[_detail])
+        elif cmd.startswith("tagx:"):
+            _, idx, off = cmd.split(":")
+            idx = int(idx)
+            if _detail is not None and 0 <= _detail < len(_shown) and 0 <= idx < len(_tag_list):
+                from ..integrations import lectures
+                m = lectures.match_event(_shown[_detail]["summary"])
+                if m:
+                    lectures.set_excluded(m["key"], _tag_list[idx], off == "1")
+                    try:
+                        from . import sfx
+                        sfx.play("move")
+                    except Exception:
+                        pass
+                    _recount(lectures.match_event(_shown[_detail]["summary"]))
         elif cmd == "det:lms":
             if _detail is not None and 0 <= _detail < len(_shown) and _shown[_detail].get("url"):
                 from aqt.utils import openLink

@@ -3344,7 +3344,69 @@ def load_events_bg(done=None):
 _MATCH_CACHE = {"key": None, "map": {}}
 
 
-def match_event(title):
+# Per-lecture tag opt-outs (calendar class page "−" on a tag chip): {lecture key: [tag]}.
+# Applied to every match handed out, so counts / study / practice / weak areas skip them.
+_EXCL = {"mt": None, "map": {}}
+
+
+def _excl_path():
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "user_files", "lecture_excluded.json")
+
+
+def _excl_map():
+    p = _excl_path()
+    mt = _src_mtime(p) if os.path.exists(p) else None
+    if mt != _EXCL["mt"]:
+        try:
+            _EXCL["map"] = json.load(open(p)) if mt else {}
+        except Exception:
+            _EXCL["map"] = {}
+        _EXCL["mt"] = mt
+    return _EXCL["map"]
+
+
+def set_excluded(key, tag, off):
+    m = dict(_excl_map())
+    cur = set(m.get(key) or [])
+    (cur.add if off else cur.discard)(tag.lower())
+    if cur:
+        m[key] = sorted(cur)
+    else:
+        m.pop(key, None)
+    try:
+        with open(_excl_path(), "w") as f:
+            json.dump(m, f, indent=1)
+    except Exception as e:
+        _log("excluded save: %s" % e)
+    _EXCL["mt"] = None
+
+
+def _atom_tag(a):
+    mm = re.match(r'^"?tag:([^"\s]+)"?$', a.strip())
+    return mm.group(1).strip("*").lower() if mm else None
+
+
+def _with_exclusions(m):
+    if not m or m is _PENDING:
+        return m
+    ex = set(_excl_map().get(m.get("key")) or [])
+    out = dict(m, _raw_searches=m["searches"], excluded=sorted(ex))
+    if not ex:
+        return out
+    kept = []
+    for s in m["searches"]:
+        atoms = _atoms([s])
+        keep = [a for a in atoms if _atom_tag(a) not in ex]
+        if len(keep) == len(atoms):
+            kept.append(s)
+        elif keep:
+            kept.append("(" + " OR ".join(keep) + ")")
+    out["searches"] = kept
+    return out
+
+
+def _match_event_raw(title):
     """The lecture a calendar title belongs to, by the wizard's rules (aliases →
     exact → fuzzy): {"key", "display", "searches", "fuzzy"} or None. Remembered per
     title until the tag map or aliases change (fuzzy matching is the slow part)."""
@@ -3366,7 +3428,7 @@ def match_event(title):
 _PENDING = object()
 
 
-def peek_match(title):
+def _peek_match_raw(title):
     """Cached match for `title` without computing it: the match/None if known,
     _PENDING if it hasn't been matched yet (so a view can draw first, match later)."""
     try:
@@ -3376,6 +3438,15 @@ def peek_match(title):
         return _MATCH_CACHE["map"].get(title, _PENDING)
     except Exception:
         return _PENDING
+
+
+def match_event(title):
+    """The lecture a calendar title belongs to (cached), minus tags opted out."""
+    return _with_exclusions(_match_event_raw(title))
+
+
+def peek_match(title):
+    return _with_exclusions(_peek_match_raw(title))
 
 
 def _match_event_uncached(title):
