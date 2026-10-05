@@ -897,8 +897,15 @@ class _Tour(QWidget):
         b, W, H = self.bubble, self.width(), self.height()
         bw = b.width()
         cur = b.geometry()
-        b.adjustSize()                 # measure the new text's height (no paint between)
-        bh = b.height()
+        # Exact height for the box's real width (margins included). adjustSize()
+        # over-measured rich text with symbols/bullets and the surplus showed up as
+        # gaps around the title and body.
+        lay = b.layout()
+        lay.activate()
+        bh = lay.totalHeightForWidth(bw) if lay.hasHeightForWidth() else -1
+        if bh <= 0:
+            b.adjustSize()
+            bh = b.height()
         b.setGeometry(cur)             # …then animate from where it was
         if self.steps[self.i].get("hands_on"):
             ct = getattr(self, "_card_rect", None)   # the card, in our coordinates
