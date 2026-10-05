@@ -31,6 +31,10 @@ TEMP_PREFIX = "Janki Calendar::"
 # --------------------------------------------------------------- open / close ----
 def open_calendar():
     global _view
+    # Calendar clicked while a class page is open → back to the calendar grid
+    if _view and _detail is not None and getattr(mw, "state", None) == "deckBrowser":
+        _close_detail()
+        return
     QTimer.singleShot(700, _prewarm)           # neighbouring weeks, ready for arrows
     try:
         from . import practice, stats_embed
