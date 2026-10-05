@@ -151,7 +151,7 @@ def _go_week(delta):
         if delta is None:
             _anchor = None
         elif _mode() == "3":
-            _anchor = _days()[0] + datetime.timedelta(days=3 * delta)
+            _anchor = _days()[0] + datetime.timedelta(days=delta)   # slide one day at a time
         else:
             _anchor = _step_weekdays(_days()[0], delta)
     try:
