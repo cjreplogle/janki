@@ -751,6 +751,33 @@ class _Tour(QWidget):
         except Exception:
             done(None)
 
+    def _measure_card(self, st, tries=0):
+        """Hands-on steps: find the card (#qa) on screen so the guide lines up with
+        its top. Re-tried while the sample card is still loading."""
+        if self.steps[self.i] is not st or not st.get("hands_on"):
+            return
+        web = getattr(mw, "web", None)
+        if web is None:
+            return
+
+        def _cb(r):
+            try:
+                if self.steps[self.i] is not st:
+                    return
+                if not r or r[3] < 4:
+                    if tries < 6:
+                        QTimer.singleShot(250, lambda: self._measure_card(st, tries + 1))
+                    return
+                z = web.zoomFactor() if hasattr(web, "zoomFactor") else 1.0
+                tl = web.mapTo(mw, QPoint(int(r[0] * z), int(r[1] * z)))
+                self._card_rect = QRect(tl.x(), tl.y(), int(r[2] * z), int(r[3] * z))
+                self._place_bubble(animate=True)
+            except Exception:
+                pass
+        web.evalWithCallback(
+            "(function(){var e=document.getElementById('qa');if(!e)return null;"
+            "var b=e.getBoundingClientRect();return [b.left,b.top,b.width,b.height];})()", _cb)
+
     def _show_step(self, st, rect):
         new = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
         old = self.hole
@@ -774,6 +801,9 @@ class _Tour(QWidget):
             self.fade(1.0)
         if st.get("effect") == "flare":
             QTimer.singleShot(350, _demo_flare)
+        if st.get("hands_on"):
+            self._card_rect = None
+            QTimer.singleShot(450, lambda: self._measure_card(st))
 
     def _apply_mask(self):
         """The lit hole is a real hole: clicks there reach Anki, so the highlighted
@@ -853,7 +883,14 @@ class _Tour(QWidget):
         bh = b.height()
         b.setGeometry(cur)             # …then animate from where it was
         if self.steps[self.i].get("hands_on"):
-            x, y = W - bw - 16, H - bh - 70          # out of the card's way
+            ct = getattr(self, "_card_rect", None)   # the card, in our coordinates
+            if ct is not None:
+                # top-aligned with the card: beside it when there's room, else at the
+                # right edge (still level with the card's top)
+                x = ct.right() + 24 if ct.right() + 24 + bw <= W - 12 else W - bw - 16
+                y = ct.top()
+            else:
+                x, y = W - bw - 16, H - bh - 70      # until the card is measured
         elif self.hole is None:
             x, y = (W - bw) // 2, (H - bh) // 2
         else:
