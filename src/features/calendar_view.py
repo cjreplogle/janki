@@ -654,10 +654,10 @@ def _weak_cached(mode):
 def prewarm_weak():
     """Work out both views in the background (after the Calendar opens), one after the
     other, so the button shows results straight away without a burst of work."""
-    for mode in ("2w", "block"):
-        if _weak_cached(mode) is None:
-            _weak_compute(mode, then=prewarm_weak)
-            return
+    # only the 2-week view: End of block (8 weeks of AnKing-heavy lectures) runs
+    # when you actually open it
+    if _weak_cached("2w") is None:
+        _weak_compute("2w")
 
 
 def _weak_compute(mode, then=None):
@@ -697,7 +697,7 @@ def _weak_compute(mode, then=None):
         if atoms:
             lecs.append((e, m, atoms))
     if pending:
-        QTimer.singleShot(0, _prewarm)          # match the rest for next time
+        QTimer.singleShot(0, lambda: _prewarm(back=(today - _weak_start(mode)).days + 1))
     other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
     src_decks = lectures.source_decks()
     _weak_progress(mode, 0.05)
@@ -1977,11 +1977,16 @@ _warming = False
 _pending_tries = 0      # caps background-match → refresh rounds per opening
 
 
-def _prewarm():
+_prewarm_back = [14]   # days back the background matching covers (End of block → 56)
+
+
+def _prewarm(back=None):
     """Match ±2 weeks of events to lectures OFF the main thread (Anki's QueryOp, which
     also serialises collection access), so neither opening the Calendar nor the first
     arrow / view switch holds the window."""
     global _warming
+    if back:
+        _prewarm_back[0] = max(_prewarm_back[0], back)
     if _warming or getattr(mw, "col", None) is None:
         return
     _warming = True
@@ -2011,8 +2016,8 @@ def _prewarm_work():
         from ..integrations import lectures
         t = datetime.date.today()
         # nearest first, so this week and its neighbours are ready soonest
-        evs = lectures.events_between(t - datetime.timedelta(days=56),   # = End of block
-                                      t + datetime.timedelta(days=56))
+        evs = lectures.events_between(t - datetime.timedelta(days=_prewarm_back[0]),
+                                      t + datetime.timedelta(days=14))
         for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):
             if _closing:                 # quitting: don't make Anki wait on this
                 return

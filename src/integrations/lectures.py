@@ -1622,9 +1622,19 @@ def _maybe_reset_caches(ics_path):
     stale = (now - _LAST_RESET["t"] > _CACHE_TTL) or (mt != _LAST_RESET["ics_mtime"])
     if stale:
         _ics_reset()
-        _ak_index_reset()
         _LAST_RESET["t"] = now
         _LAST_RESET["ics_mtime"] = mt
+    # The AnKing tag index (tens of thousands of tags) is rebuilt only when the
+    # collection's tags actually changed — not on a timer: a rebuild also throws away
+    # every lecture match, so all of that matching was being redone every 10 minutes.
+    try:
+        sig = mw.col.db.scalar("select count() from tags")
+    except Exception:
+        sig = None
+    if sig != _LAST_RESET.get("tag_sig"):
+        if _LAST_RESET.get("tag_sig") is not None:
+            _ak_index_reset()
+        _LAST_RESET["tag_sig"] = sig
 
 
 def _source_icon(kind):
