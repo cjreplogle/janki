@@ -294,7 +294,7 @@ def _detail_html(e):
     when = "%s, %s %d" % (_DAY[e["date"].weekday()], e["date"].strftime("%b"), e["date"].day)
     if e["start"] is not None:
         when += " · %s–%s" % (_hm(e["start"]), _hm(e["end"]))
-    loc = ("<div class='jkd-loc'>\U0001F4CD %s</div>" % html.escape(e["location"])
+    loc = ("<div class='jkd-loc'>%s</div>" % html.escape(e["location"])
            if e.get("location") else "")
     sub = ("<div class='jkd-sub'>%s</div>" % html.escape(m["display"])
            if m and _norm(m["display"]) != _norm(e["summary"]) else "")
@@ -314,19 +314,57 @@ def _detail_html(e):
             for f in present)
         body = ("<div id='jkd-counts' class='jkd-counts'>Counting cards…</div>"
                 "<div class='jkd-sws'>%s</div>"
-                "<button class='jkd-study' onclick=\"pycmd('janki:cal:det:study')\">Study this lecture</button>"
-                "<div class='jkd-note'>Every card for it — suspended ones too; what's suspended "
-                "stays suspended afterwards.</div>"
+                "<div class='jkd-studies'>"
+                "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
+                "Study unsuspended cards</button>"
+                "<button id='jkd-st-sus' class='jkd-study jkd-study2' onclick=\"pycmd('janki:cal:det:study:suspended')\">"
+                "Study suspended cards</button></div>"
+                "<div class='jkd-note'>Suspended cards are unsuspended just for the session "
+                "and suspended again afterwards.</div>"
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
                 "Unsuspend cards for this lecture</button>"
-                "<div class='jkd-links'><a onclick=\"pycmd('janki:cal:det:tags')\">Show tags</a> · "
+                "<div class='jkd-links'><a onclick=\"jkdTags(this)\">Show tags ▾</a> · "
                 "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
-                % sw)
+                "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
+                % (sw, _tags_html(m)))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<button class='jkd-back' onclick=\"pycmd('janki:cal:det:back')\">‹ Back</button>"
             "<div class='jkd'><h2>%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
             % (html.escape(e["summary"]), sub, html.escape(when), loc, body))
+
+
+def _tag_label(frag):
+    """Readable label for a tag search: the tag path, last segments emphasised."""
+    import re
+    tags = re.findall(r'tag:"?([^"\s)]+)', frag) or [frag]
+    out = []
+    for t in tags:
+        t = t.strip('*"')
+        segs = [x for x in t.split("::") if x]
+        tail = "::".join(segs[-2:]) if len(segs) > 1 else t
+        out.append((t, tail.replace("_", " ")))
+    return out
+
+
+def _tags_html(m):
+    """The lecture's tags as chips, grouped by source (shown in the Show tags panel)."""
+    from ..integrations import lectures
+    groups = {}
+    for s in m["searches"]:
+        groups.setdefault(_fam(s), []).extend(_tag_label(s))
+    parts = []
+    for f in ("ak", "huc", "aj"):
+        if f not in groups:
+            continue
+        chips = "".join("<span class='jkd-chip' title='%s'>%s</span>"
+                        % (html.escape(full), html.escape(short))
+                        for full, short in groups[f][:60])
+        more = len(groups[f]) - 60
+        parts.append("<div class='jkd-tg'><div class='jkd-tgh'>%s</div>%s%s</div>"
+                     % (lectures.FAMILY_LABEL.get(f, f), chips,
+                        ("<span class='jkd-chip jkd-more'>+%d more</span>" % more) if more > 0 else ""))
+    return "".join(parts) or "<div class='jkd-tgh'>No tags</div>"
 
 
 def _recount(m):
@@ -346,12 +384,23 @@ def _recount(m):
 
         def ok(r):
             new, due, sus, tot = r
+            _set_study_counts(tot - sus, sus)
             _set_counts("<b>%d</b> cards · <span class=c-new>%d new</span> · "
                         "<span class=c-due>%d due</span> · <span class=c-sus>%d suspended</span>"
                         % (tot, new, due, sus))
         QueryOp(parent=mw, op=op, success=ok).run_in_background()
     except Exception as e:
         log("calendar recount: %s" % e)
+
+
+def _set_study_counts(active, sus):
+    try:
+        mw.web.eval("(function(a,s){var x=document.getElementById('jkd-st-act'),"
+                    "y=document.getElementById('jkd-st-sus');"
+                    "if(x)x.textContent='Study unsuspended cards ('+a+')';"
+                    "if(y)y.textContent='Study suspended cards ('+s+')';})(%d,%d)" % (active, sus))
+    except Exception:
+        pass
 
 
 def _set_counts(h):
@@ -437,9 +486,10 @@ def _study_detail():
     study_event(_shown[_detail], _fams_on)
 
 
-def study_event(e, fams=None):
-    """Study every card for a class (see _study_detail). fams=None → all its sources.
-    Used by the class page and the tray's Today list."""
+def study_event(e, fams=None, which="all"):
+    """Study a class's cards (see _study_detail). which: "active" (unsuspended only),
+    "suspended" (only suspended — unsuspended for the session, restored after) or "all".
+    fams=None → all its sources. Used by the class page and the tray's Today list."""
     from aqt.utils import tooltip
     from ..integrations import lectures
     m = lectures.match_event(e["summary"])
@@ -456,13 +506,19 @@ def study_event(e, fams=None):
     try:
         _restore_suspended()
         _cleanup_temp()
-        sus = list(col.find_cards("(%s) is:suspended" % q))
+        sus = list(col.find_cards("(%s) is:suspended" % q)) if which != "active" else []
         if sus:
             _save_resuspend(sus)
             col.sched.unsuspend_cards(sus)
         did = col.decks.new_filtered(TEMP_PREFIX + m["display"][:60])
         d = col.decks.get(did)
-        d["terms"] = [["(%s) -is:buried" % q, 99999, 0]]
+        if which == "suspended":
+            term = "cid:%s" % ",".join(str(c) for c in sus) if sus else "cid:0"
+        elif which == "active":
+            term = "(%s) -is:suspended -is:buried" % q
+        else:
+            term = "(%s) -is:buried" % q
+        d["terms"] = [[term, 99999, 0]]
         d["resched"] = True
         col.decks.save(d)
         col.sched.rebuild_filtered_deck(did)
@@ -656,11 +712,23 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   transition:background .2s ease,transform .2s cubic-bezier(.2,.8,.2,1);}
 #jkc .jkd-study:hover{background:#b0cbf6 !important;transform:translateY(-1px);}
 .jkd-note{font-size:.82em;opacity:.6;margin:8px 0 16px;}
+.jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
+#jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;}
+#jkc .jkd-study2:hover{background:rgba(156,188,243,.34) !important;}
 .jkd-sec{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:10px;padding:7px 16px;
   cursor:pointer;transition:background .2s ease;}
 .jkd-sec:hover{background:rgba(255,255,255,.16);}
 .jkd-links{margin-top:14px;font-size:.88em;opacity:.7;}.jkd-links a{cursor:pointer;text-decoration:underline;}
 .jkd-none{margin-top:20px;opacity:.85;}.jkd-none button{margin-top:10px;}
+/* Show tags: an inline panel that unfolds below the links */
+.jkd-tags{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .26s cubic-bezier(.2,.8,.2,1),opacity .2s ease;}
+.jkd-tags.open{grid-template-rows:1fr;opacity:1;}
+.jkd-tags-in{overflow:hidden;}
+.jkd-tg{margin:12px auto 0;max-width:620px;text-align:center;}
+.jkd-tgh{font-size:.78em;letter-spacing:.04em;text-transform:uppercase;opacity:.55;margin:0 0 6px 2px;}
+#jkc .jkd-chip{display:inline-block;margin:0 6px 6px 0;padding:3px 9px;border-radius:999px;font-size:.82em;
+  background:rgba(255,255,255,.07) !important;border:1px solid rgba(255,255,255,.12);}
+#jkc .jkd-more{opacity:.6;}
 </style>"""
 
 _JS = """<script>(function(){
@@ -744,7 +812,7 @@ _JS = """<script>(function(){
    var k=e.key, det=document.querySelector('#jkc .jkc-detail');
    if(det){
      if(k==='ArrowLeft'||k==='Escape'||k==='Backspace'){e.preventDefault();pycmd('janki:cal:det:back');}
-     else if(k==='Enter'||k===' '){e.preventDefault();pycmd('janki:cal:det:study');}
+     else if(k==='Enter'||k===' '){e.preventDefault();pycmd('janki:cal:det:study:active');}
      else if(k==='ArrowUp'){e.preventDefault();pycmd('janki:toolbar');}
      return;}
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
@@ -756,6 +824,9 @@ _JS = """<script>(function(){
      pycmd('janki:cal:ev:'+c.getAttribute('data-i'));}
  },true);
  document.addEventListener('mousemove',function(){sel(null);},{passive:true,once:false});
+ window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
+   var o=t.classList.toggle('open');a.textContent=o?'Hide tags ▴':'Show tags ▾';
+   try{pycmd('janki:sfx:'+(o?'unfold':'fold'));}catch(x){}};
  document.addEventListener('click',function(e){
    var ev=e.target.closest&&e.target.closest('.jkc-ev'); if(!ev)return;
    pycmd('janki:cal:ev:'+ev.getAttribute('data-i'));
@@ -897,8 +968,9 @@ def on_js_message(handled, message, context):
             _swap("refresh")
         elif cmd == "det:back":
             _close_detail()
-        elif cmd == "det:study":
-            _study_detail()
+        elif cmd.startswith("det:study"):
+            which = cmd.split(":")[2] if cmd.count(":") >= 2 else "all"
+            study_event(_shown[_detail], _fams_on, which)
         elif cmd == "det:unsuspend":
             _unsuspend_detail()
         elif cmd == "det:tags":
