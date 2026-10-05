@@ -522,11 +522,27 @@ def _detail_html(e):
                         for n, o in enumerate(_pick_opts))
         sub = ("<div class='jkd-sub'><div class='jkd-dd'>"
                "<button class='jkd-pick' onclick='jkdPick(event)' title='Pick the lecture "
-               "this class belongs to'>%s</button><div class='jkd-menu'>%s</div></div></div>"
+               "this class belongs to'>%s</button><div class='jkd-menu'>%s</div></div>"
+               "<button class='jkd-unassign' title='Unassign: this class has no lecture' "
+               "onclick=\"pycmd('janki:cal:unassign')\">−</button></div>"
                % (html.escape(m["display"]), items))
+    elif not pending and lectures.is_unassigned(e["summary"]):
+        # unassigned on purpose: keep the picker so it can be put back
+        cached = _opts_cache.get(e["summary"])
+        if cached is None:
+            _detail_bg(e["summary"], opts=True)
+        _pick_opts = list(cached or [])
+        items = "".join("<div class='jkd-opt' data-i='%d'>%s</div>" % (n, html.escape(o))
+                        for n, o in enumerate(_pick_opts))
+        sub = ("<div class='jkd-sub'><div class='jkd-dd'>"
+               "<button class='jkd-pick' onclick='jkdPick(event)'>Choose a lecture</button>"
+               "<div class='jkd-menu'>%s</div></div></div>" % items)
     body = ""
     if pending:
         body = "<div class='jkd-counts'>Finding this lecture…</div>"
+    elif not m and lectures.is_unassigned(e["summary"]):
+        body = ("<div class='jkd-none'>Unassigned — choose a lecture above to link it "
+                "again.</div>")
     elif not m:
         body = ("<div class='jkd-none'>No lecture in your tag map matches this class.<br>"
                 "<button onclick=\"pycmd('janki:cal:det:wizard')\">Open the Lecture wizard…</button></div>")
@@ -1686,6 +1702,11 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 30px 3px 14px;
   font:inherit;cursor:pointer;max-width:min(520px,90vw);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;transition:background-color .18s ease;}
+#jkc .jkd-sub{display:flex;align-items:center;justify-content:center;gap:6px;}
+#jkc .jkd-unassign{width:26px;height:26px;border-radius:50%;border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.07) !important;color:inherit;font:inherit;font-weight:700;cursor:pointer;
+  line-height:1;padding:0;opacity:.7;transition:opacity .15s ease,background-color .15s ease;}
+#jkc .jkd-unassign:hover{opacity:1;background:rgba(255,157,138,.25) !important;}
 #jkc .jkd-pick:hover,#jkc .jkd-dd.open .jkd-pick{background-color:rgba(255,255,255,.13) !important;}
 #jkc .jkd-menu{position:absolute;left:50%;top:calc(100% + 6px);z-index:60;min-width:100%;
   width:max-content;max-width:min(640px,92vw);
@@ -2376,6 +2397,17 @@ def on_js_message(handled, message, context):
                         _set_counts(_counts_html(c))
                     else:
                         _recount(m)
+        elif cmd == "unassign":                # class page −: this class has no lecture
+            if _detail is not None and 0 <= _detail < len(_shown):
+                from ..integrations import lectures
+                lectures.set_alias(_shown[_detail]["summary"], lectures.UNASSIGNED)
+                _fams_on.clear()
+                try:
+                    from . import sfx
+                    sfx.play("back")
+                except Exception:
+                    pass
+                _swap("refresh")
         elif cmd == "det:lms":
             if _detail is not None and 0 <= _detail < len(_shown) and _shown[_detail].get("url"):
                 from aqt.utils import openLink

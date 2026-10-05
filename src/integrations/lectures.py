@@ -3678,6 +3678,8 @@ def _match_event_uncached(title):
         aliases = _load_aliases()
         nkey = _norm(title)
         if nkey in aliases:
+            if aliases[nkey] == UNASSIGNED:      # explicitly "no lecture" (class page −)
+                return None
             nkey = _norm(aliases[nkey])
         fuzzy = False
         if nkey not in m:
@@ -3715,6 +3717,16 @@ def lecture_options(title, limit=40):
     except Exception as e:
         _log("lecture_options: %s" % e)
         return []
+
+
+UNASSIGNED = "__janki_none__"
+
+
+def is_unassigned(title):
+    try:
+        return _load_aliases().get(_norm(title)) == UNASSIGNED
+    except Exception:
+        return False
 
 
 def set_alias(title, display):
