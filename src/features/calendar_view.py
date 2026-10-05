@@ -26,7 +26,11 @@ from ..util.config import log
 _view = False          # Calendar page showing (consumed like practice._practice_view)
 _week = 0              # weeks from this one
 _shown = []            # events on the current render (index → event)
-TEMP_PREFIX = "Janki Calendar::"
+# Temporary study decks: no "::" in the name, or Anki creates a visible parent deck
+# "Janki Calendar" to hold them (that's the stray deck older versions left behind)
+TEMP_PREFIX = "Janki Calendar · "
+_OLD_PREFIX = "Janki Calendar::"
+_OLD_PARENT = "Janki Calendar"
 
 
 # --------------------------------------------------------------- open / close ----
@@ -2169,8 +2173,15 @@ def _cleanup_temp(keep=None):
         return
     try:
         for nid in col.decks.all_names_and_ids():
-            if nid.name.startswith(TEMP_PREFIX) and nid.id != keep:
+            if (nid.name.startswith(TEMP_PREFIX) or nid.name.startswith(_OLD_PREFIX)) \
+                    and nid.id != keep:
                 col.decks.remove([nid.id])
+        # the empty parent older versions created — only if it really holds nothing
+        # (removing a normal deck would delete its cards)
+        pid = col.decks.id_for_name(_OLD_PARENT)
+        if pid and not col.decks.children(pid) and \
+                not col.db.scalar("select count() from cards where did = ? or odid = ?", pid, pid):
+            col.decks.remove([pid])
     except Exception as e:
         log("calendar cleanup: %s" % e)
 
@@ -2609,6 +2620,7 @@ def install():
         pass
     gui_hooks.profile_did_open.append(_schedule_prewarm)
     gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1500, _restore_suspended))
+    gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1800, _cleanup_temp))
     gui_hooks.deck_browser_will_render_content.append(_on_render)
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
     gui_hooks.state_did_change.append(_on_state)

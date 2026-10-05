@@ -787,6 +787,40 @@ class _DayView(QWidget):
             _study_class(self.items[h]["e"])
 
 
+def _build_practice_list(parent):
+    """Practice tab: the Practice deck and its banks; click one to study it."""
+    box = QWidget(parent)
+    v = QVBoxLayout(box)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(5)
+    try:
+        rows = [r for r in _deck_rows() if r[0] == "Practice" or r[0].startswith("Practice::")]
+    except Exception:
+        rows = []
+    if not rows:
+        lbl = QLabel("No practice banks yet")
+        lbl.setObjectName("cnt")
+        v.addWidget(lbl)
+    for name, did, due, depth, _parent, _kids in rows:
+        b = QPushButton()
+        b.setObjectName("practice")
+        row = QHBoxLayout(b)
+        row.setContentsMargins(11 + depth * 12, 0, 11, 0)
+        nm = QLabel(name.split("::")[-1])
+        nm.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        row.addWidget(nm, 1)
+        if due:
+            c = QLabel(str(due))
+            c.setObjectName("cnt")
+            c.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            row.addWidget(c)
+        b.setMinimumHeight(28)
+        b.clicked.connect(lambda _c=False, d=did: _study_deck(d))
+        v.addWidget(b)
+    v.addStretch(1)
+    return box
+
+
 def _build_today_list(parent):
     """Today's classes from the calendar: time + title in its course colour; click one
     to study it (every card, suspended ones restored afterwards)."""
@@ -1304,27 +1338,27 @@ def _build() -> "QWidget":
     hrow.addWidget(opts_btn)
     lay.addLayout(hrow)
 
-    # Practice pinned at the very top with a green tint (the Janki question banks).
+    # Decks | Practice | Today — one row of slim tabs, the selected one lit blue.
     pdid = _practice_did()
-    if pdid is not None:
-        pb = QPushButton("Practice")
-        pb.setObjectName("practice")
-        pb.clicked.connect(lambda _c=False, d=pdid: _study_deck(d))
-        lay.addWidget(pb)
-
-    # Decks | Today switch: study by deck, or by today's classes (calendar).
     mode = str(_cfg().get("tray_mode", "decks"))
+    if mode == "practice" and pdid is None:
+        mode = "decks"
     srow = QHBoxLayout()
     srow.setContentsMargins(0, 0, 0, 0)
     srow.setSpacing(4)
     b_decks = QPushButton("Decks")
+    b_prac = QPushButton("Practice") if pdid is not None else None
     b_today = QPushButton("Today")
-    for _b in (b_decks, b_today):
+    tabs = [b for b in (b_decks, b_prac, b_today) if b is not None]
+    for _b in tabs:
         _b.setCheckable(True)
         _b.setObjectName("tgl")
+        _b.setFixedHeight(28)                  # slimmer than the other tray buttons
+        _b.setStyleSheet("padding:2px 6px;")   # (fill is painted by the tray painter)
         srow.addWidget(_b, 1)
     lay.addLayout(srow)
     today_box = _build_today_list(root)
+    prac_box = _build_practice_list(root) if pdid is not None else None
 
     # Deck list (scrollable).
     scroll = QScrollArea(root)
@@ -1344,16 +1378,18 @@ def _build() -> "QWidget":
     _tray_mode_widgets["today"] = today_box
 
     def _show_mode(m, save=True):
-        b_decks.setChecked(m != "today")
+        if m == "practice" and prac_box is None:
+            m = "decks"
+        b_decks.setChecked(m == "decks")
         b_today.setChecked(m == "today")
+        if b_prac is not None:
+            b_prac.setChecked(m == "practice")
+        page = {"today": today_box, "practice": prac_box}.get(m) or scroll
         st = _tray_mode_widgets.get("stack")
         if st is not None:
-            st.setCurrentWidget(today_box if m == "today" else scroll)
-        else:
-            scroll.setVisible(m != "today")
-            today_box.setVisible(m == "today")
-        for _b in (b_decks, b_today):
-            _b.setObjectName(_TOGGLE_ON_NAME.get("reword", "tgl") if _b.isChecked() else "tgl")
+            st.setCurrentWidget(page)
+        for _b in tabs:
+            _b.setObjectName("tglOnBlue" if _b.isChecked() else "tgl")
             _b.style().unpolish(_b)
             _b.style().polish(_b)
         if save:
@@ -1372,13 +1408,15 @@ def _build() -> "QWidget":
                 pass
     b_decks.clicked.connect(lambda _c=False: _show_mode("decks"))
     b_today.clicked.connect(lambda _c=False: _show_mode("today"))
+    if b_prac is not None:
+        b_prac.clicked.connect(lambda _c=False: _show_mode("practice"))
     QTimer.singleShot(0, lambda: _show_mode(mode, save=False))
 
     def _warm_hidden():
         # the hidden list's first show used to do its first polish / layout / font
         # setup on the click — do it now, offscreen, so the first switch is instant
         try:
-            other = scroll if mode == "today" else today_box
+            other = today_box if mode != "today" else scroll
             other.ensurePolished()
             for w in other.findChildren(QWidget):
                 w.ensurePolished()
@@ -1442,6 +1480,8 @@ def _build() -> "QWidget":
     stack.setContentsMargins(0, 0, 0, 0)
     stack.addWidget(scroll)
     stack.addWidget(today_box)
+    if prac_box is not None:
+        stack.addWidget(prac_box)
     _tray_mode_widgets["stack"] = stack
     lay.addWidget(slot)
 
