@@ -974,10 +974,12 @@ def _weak_compute(mode, then=None):
                 continue
             revs = good + bad
             recall = good / revs if revs else None
-            unstarted = (sus + new) / n
+            active = n - sus                    # suspended cards aren't "not started"
+            unstarted = new / active if active else 0.0
             score = (0.55 * unstarted + 0.3 * (1 - recall if recall is not None else 0.5)
                      + 0.15 * min(1.0, due / n * 3) + min(0.15, leech * 0.02))
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
+                         "active": active,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
         rows.sort(key=lambda r: -r["score"])
@@ -1159,7 +1161,9 @@ def _weak_html():
                        "nothing to flag.</div></div></div>")
     def row(i, r):
         chips = []
-        if r["unstarted"] >= 0.05:
+        if not r.get("active", r["n"]):
+            chips.append("<span class='jkw-c'>all suspended</span>")
+        elif r["unstarted"] >= 0.05:
             chips.append("<span class='jkw-c jkw-bad'>%d%% not started</span>"
                          % round(100 * r["unstarted"]))
         if r["recall"] is not None:
@@ -1172,18 +1176,20 @@ def _weak_html():
         if r["leech"]:
             chips.append("<span class='jkw-c jkw-bad'>%d leech%s</span>"
                          % (r["leech"], "es" if r["leech"] != 1 else ""))
-        done_pct = round(100 * (1 - r["unstarted"]))
+        act = r.get("active", r["n"])
+        done_pct = round(100 * (1 - r["unstarted"])) if act else 0
+        cards = ("%d cards" % r["n"]) if act == r["n"] else ("%d cards · %d active" % (r["n"], act))
         return (
             "<div class='jkw-row' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
             "<div class='jkw-main'><div class='jkw-t'>%s</div>"
-            "<div class='jkw-sub'>%s · %d cards</div>"
+            "<div class='jkw-sub'>%s · %s</div>"
             "<div class='jkw-bar'><i style='width:%d%%'></i></div>"
             "<div class='jkw-chips'>%s</div></div>"
             "<div class='jkw-btns'>"
             "<button class='jkd-sec' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
             "<button class='jkd-sec jkw-prac' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:prac:%d')\">"
             "Practice</button></div></div>"
-            % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), r["n"], done_pct,
+            % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
                "".join(chips), i, i))
 
     rows = list(enumerate(_weak))
