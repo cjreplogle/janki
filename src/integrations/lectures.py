@@ -161,6 +161,41 @@ def _url_cache_paths():
     return os.path.join(base, "calendar_cache.ics"), os.path.join(base, "calendar_cache.json")
 
 
+def refresh_calendar_now(on_done=None, path=None):
+    """Settings → Refresh now: forget today's downloaded copy and fetch the calendar
+    again in the background; the Calendar page redraws when it lands."""
+    _, meta_p = _url_cache_paths()
+    try:
+        os.remove(meta_p)
+    except Exception:
+        pass
+    _ics_reset()
+    _EV_CACHE["key"] = None
+
+    def work():
+        try:
+            src = (path or _cfg().get("ics_path", "")).strip()
+            evs = _parse_ics_events(src) if src else []
+            ok = True
+        except Exception as e:
+            _log("calendar refresh: %s" % e)
+            evs, ok = None, False
+
+        def back():
+            if evs is not None:
+                _EV_CACHE["events"], _EV_CACHE["key"] = evs, _ev_key()[1]
+            try:
+                from ..features import calendar_view
+                if calendar_view._view:
+                    calendar_view._swap("refresh")
+            except Exception:
+                pass
+            if on_done:
+                on_done(ok)
+        mw.taskman.run_on_main(back)
+    mw.taskman.run_in_background(work)
+
+
 def _read_url_cached(url):
     """A URL calendar is downloaded at most once a day (or when the URL changes); the
     copy lives in user_files. If a download fails (offline…), the last copy is used."""
@@ -3017,9 +3052,28 @@ def build_settings_pages():
         else:
             ics_note.setText("Local file — fully offline.")
 
+    refresh_btn = QPushButton("Refresh now")
+    refresh_btn.setToolTip("Download the calendar again now (it's otherwise fetched once a day)")
+
+    def _refresh_now():
+        refresh_btn.setEnabled(False)
+        refresh_btn.setText("Refreshing…")
+
+        def done(ok):
+            refresh_btn.setEnabled(True)
+            refresh_btn.setText("Refreshed ✓" if ok else "Couldn't download")
+            QTimer.singleShot(2500, lambda: refresh_btn.setText("Refresh now"))
+        refresh_calendar_now(done, path=ics_edit.text())
+    refresh_btn.clicked.connect(_refresh_now)
+
+    def _update_refresh_btn():
+        refresh_btn.setVisible(_is_url(ics_edit.text()))
     ics_edit.textChanged.connect(_update_ics_note)
+    ics_edit.textChanged.connect(_update_refresh_btn)
     _update_ics_note()
-    g.addWidget(ics_note, 6, 1, 1, 2)
+    _update_refresh_btn()
+    g.addWidget(ics_note, 6, 1)
+    g.addWidget(refresh_btn, 6, 2)
 
     # Jump straight to the unsuspend window to add/remove today's lectures.
     today_btn = QPushButton("Open today's lecture window…")
