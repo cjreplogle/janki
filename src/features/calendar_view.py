@@ -449,6 +449,7 @@ def _detail_bg(title, opts=False):
     if key in _detail_busy or _closing:
         return
     _detail_busy.add(key)
+    _busy_update()
     from aqt.operations import QueryOp
     from ..integrations import lectures
 
@@ -460,6 +461,7 @@ def _detail_bg(title, opts=False):
     def done(res):
         global _fams_on
         _detail_busy.discard(key)
+        _busy_update()
         if opts:
             _opts_cache[title] = list(res or [])
             if len(_opts_cache) > 200:
@@ -473,6 +475,7 @@ def _detail_bg(title, opts=False):
 
     def failed(_e):
         _detail_busy.discard(key)
+        _busy_update()
     QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
 
 
@@ -636,9 +639,23 @@ def _recount(m):
         from aqt.operations import QueryOp
 
         def op(col):
-            n = lambda extra: len(_cids(col, q, extra))
-            return (n("is:new -is:suspended"), n("is:due -is:suspended"), n("is:suspended"),
-                    n(""))
+            # one (cached) search for the lecture's cards, then ONE pass over those
+            # cards for new / due / suspended — not three more filtered searches
+            from ..integrations import lectures
+            ids = sorted(lectures._find_base(col, q))
+            new = due = sus = 0
+            today = col.sched.today
+            for i in range(0, len(ids), 900):
+                for qu, typ, d in col.db.all(
+                        "select queue, type, due from cards where id in (%s)"
+                        % ",".join(map(str, ids[i:i + 900]))):
+                    if qu == -1:
+                        sus += 1
+                    elif typ == 0:
+                        new += 1
+                    elif (qu == 2 and d <= today) or qu in (1, 3):
+                        due += 1
+            return (new, due, sus, len(ids))
 
         def ok(r):
             new, due, sus, tot = r
@@ -809,6 +826,7 @@ def _weak_compute(mode, then=None):
     key = _weak_key()
     now_min = _now_min()
     _weak_busy.add(mode)
+    _busy_update()
 
     # 1 ------------------------------------------------------------------------
     lecs, seen, pending = [], set(), False
@@ -961,6 +979,7 @@ def _weak_compute(mode, then=None):
     def done(rows):
         global _weak
         _weak_busy.discard(mode)
+        _busy_update()
         _weak_cache[mode] = (key, rows)
         if _weak_mode == mode:
             _weak = rows
@@ -971,6 +990,7 @@ def _weak_compute(mode, then=None):
 
     def failed(err):
         _weak_busy.discard(mode)
+        _busy_update()
         log("weak areas: %s" % err)
 
     def got(data):
@@ -1451,6 +1471,14 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev:has(> .jkc-m) .jkc-t{padding-right:13px;}  /* room for the star */
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+#jkc-busy{position:fixed;right:14px;bottom:12px;z-index:50;display:flex;align-items:center;gap:7px;
+  padding:4px 11px 4px 8px;border-radius:999px;font-size:.78em;color:#cfd6e4;pointer-events:none;
+  background:rgba(20,22,30,.72) !important;border:1px solid rgba(255,255,255,.1);
+  opacity:0;transform:translateY(6px);transition:opacity .25s ease,transform .25s ease;}
+#jkc-busy.on{opacity:.9;transform:none;}
+#jkc-busy i{width:10px;height:10px;border-radius:50%;border:2px solid rgba(156,188,243,.3);
+  border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
+@keyframes jkcSpin{to{transform:rotate(360deg);}}
 .jkc-tc{opacity:.75;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
@@ -1610,6 +1638,11 @@ _JS = """<script>(function(){
    if(Math.abs(swAcc)>60){var d=swAcc>0?'next':'prev';swLock=true;swAcc=0;
      press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);}
  },{passive:false});
+ // bottom-right "Updating…" chip while background calendar work runs
+ window.jkcBusy=function(on){var b=document.getElementById('jkc-busy');
+   if(!b){b=document.createElement('div');b.id='jkc-busy';
+     b.innerHTML="<i></i><span>Updating…</span>";document.body.appendChild(b);}
+   b.classList.toggle('on',!!on);};
  var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
    // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
@@ -1781,6 +1814,7 @@ def _on_render(deck_browser, content):
     if not _view:
         return
     QTimer.singleShot(0, _redraw_bottom)
+    QTimer.singleShot(300, _busy_update)      # the page reloaded: re-show the chip if busy
     try:
         content.tree = ""
         content.stats = _page_html()
@@ -2159,9 +2193,9 @@ _prewarm_back = [14]   # days back the background matching covers (End of block 
 
 
 def _prewarm(back=None):
-    """Match ±2 weeks of events to lectures OFF the main thread (Anki's QueryOp, which
-    also serialises collection access), so neither opening the Calendar nor the first
-    arrow / view switch holds the window."""
+    """Match the nearby fortnight's classes to lectures in the background, a few at a
+    time: each batch is its own short collection job, so a class page's card count (or
+    anything else) can slot in between instead of waiting for the whole run."""
     if _closing:
         return
     global _warming
@@ -2169,42 +2203,62 @@ def _prewarm(back=None):
         _prewarm_back[0] = max(_prewarm_back[0], back)
     if _warming or getattr(mw, "col", None) is None:
         return
+    from ..integrations import lectures
+    t = datetime.date.today()
+    evs, fresh = lectures.events_cached_between(
+        t - datetime.timedelta(days=_prewarm_back[0]), t + datetime.timedelta(days=14))
+    if not fresh:
+        lectures.load_events_bg(lambda: QTimer.singleShot(0, _prewarm))
+        return
+    seen, todo = set(), []
+    for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):   # nearest first
+        title = e["summary"]
+        if title not in seen and lectures.peek_match(title) is lectures._PENDING:
+            seen.add(title)
+            todo.append(title)
+    if not todo:
+        return
     _warming = True
-    try:
-        from aqt.operations import QueryOp
+    _busy_update()
+    from aqt.operations import QueryOp
 
-        def done(_r):
-            global _warming
-            _warming = False
-            QTimer.singleShot(200, prime)
-            if _view and getattr(mw, "state", None) == "deckBrowser":
-                _swap("refresh")                   # colours/labels now that matches exist
+    def step(k):
+        if _closing or k >= len(todo):
+            finish()
+            return
+        batch = todo[k:k + 4]
 
-        def failed(_e):
-            global _warming
-            _warming = False
-        QueryOp(parent=mw, op=lambda _col: _prewarm_work(), success=done) \
-            .failure(failed).run_in_background()
-    except Exception as e:
+        def op(_col):
+            for title in batch:
+                lectures.match_event(title)
+
+        def ok(_r):
+            QTimer.singleShot(0, lambda: step(k + len(batch)))
+
+        def bad(_e):
+            finish()
+        QueryOp(parent=mw, op=op, success=ok).failure(bad).run_in_background()
+
+    def finish():
+        global _warming
         _warming = False
-        log("calendar prewarm: %s" % e)
+        _busy_update()
+        QTimer.singleShot(200, prime)
+        if _view and getattr(mw, "state", None) == "deckBrowser":
+            _swap("refresh")                       # colours/labels now that matches exist
+    step(0)
 
 
-def _prewarm_work():
-    # Two weeks either side: the 3-Day view and week arrows reach beyond this week, and
-    # matching events on first sight caused a hold on the first view switch / arrow.
+def _busy_update():
+    """The little 'Updating…' chip in the page's bottom-right: on while background
+    calendar work runs (matching, weak areas, class page lookups, calendar download)."""
     try:
         from ..integrations import lectures
-        t = datetime.date.today()
-        # nearest first, so this week and its neighbours are ready soonest
-        evs = lectures.events_between(t - datetime.timedelta(days=_prewarm_back[0]),
-                                      t + datetime.timedelta(days=14))
-        for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):
-            if _closing:                 # quitting: don't make Anki wait on this
-                return
-            lectures.match_event(e["summary"])
-    except Exception as e:
-        log("calendar prewarm: %s" % e)
+        on = bool(_warming or _weak_busy or _detail_busy or lectures._EV_LOADING["on"])
+        if _view:
+            mw.web.eval("window.jkcBusy&&window.jkcBusy(%s)" % ("true" if on else "false"))
+    except Exception:
+        pass
 
 
 def _schedule_prewarm():
