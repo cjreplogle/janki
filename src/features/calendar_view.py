@@ -96,7 +96,7 @@ def _week_html():
         log("calendar events: %s" % e)
         evs = []
     _shown = evs
-    timed = [e for e in evs if e["start"] is not None]
+    timed = [e for e in evs if e["start"] is not None and not _is_allday_kind(e["summary"])]
     lo = min([e["start"] for e in timed] + [8 * 60])
     hi = max([e["end"] for e in timed] + [17 * 60])
     lo = (lo // 60) * 60
@@ -117,7 +117,7 @@ def _week_html():
             title = html.escape(e["summary"])
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
-            if e["start"] is None:
+            if e["start"] is None or _is_allday_kind(e["summary"]):
                 allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s</div>"
                               % (cls, i, tip, title))
                 continue
@@ -150,6 +150,13 @@ def _week_html():
             "%s<div class='jkc-grid'><div class='jkc-hours' style='height:%dpx'>%s</div>%s</div>"
             "</div>" % (label, empty, grid_h, hours, "".join(cols))
             + _JS)
+
+
+def _is_allday_kind(summary):
+    """Day-wide notices that come through as timed events (e.g. a dress code) belong
+    in the all-day row, not across the time grid."""
+    s = (summary or "").lower()
+    return "dress code" in s or "dresscode" in s or "dress-code" in s
 
 
 def _norm(s):
