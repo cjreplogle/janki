@@ -1674,6 +1674,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
 .jkd-secs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
 .jkd-secs .jkd-sec{margin:0 !important;}
+#jkc .jkc-grid.jkw{padding-top:0 !important;margin-top:-10px;}
+#jkc .jkw h2{margin-top:0 !important;}
 #jkc .jkw-seg{display:inline-flex;gap:2px;padding:2px;margin:6px 0 4px;border-radius:9px;
   background:rgba(255,255,255,.06) !important;}
 #jkc .jkw-m{background:transparent !important;border:none;color:inherit;font:inherit;font-size:.88em;
