@@ -1158,6 +1158,92 @@ def _prompt_and_load_tag_map(day_offset=0):
         _import_dlg_open = False
 
 
+def _make_switch_class():
+    """A slide switch (pill + knob that glides) that is still a QCheckBox, so every
+    existing isChecked / toggled / setChecked call keeps working."""
+    from aqt.qt import (QCheckBox, QPainter, QColor, QRectF, QPropertyAnimation,
+                        QEasingCurve, pyqtProperty, Qt as _Q, QSize)
+
+    class Switch(QCheckBox):
+        def __init__(self, text=""):
+            super().__init__(text)
+            self._pos = 0.0
+            self.setCursor(_Q.CursorShape.PointingHandCursor)
+            self._an = QPropertyAnimation(self, b"knob", self)
+            self._an.setDuration(160)
+            self._an.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self.toggled.connect(self._slide)
+
+        def _get(self):
+            return self._pos
+
+        def _set(self, v):
+            self._pos = float(v)
+            self.update()
+        knob = pyqtProperty(float, _get, _set)
+
+        def _slide(self, on):
+            self._an.stop()
+            self._an.setStartValue(self._pos)
+            self._an.setEndValue(1.0 if on else 0.0)
+            self._an.start()
+
+        def setChecked(self, on):
+            super().setChecked(on)
+            self._an.stop()
+            self._pos = 1.0 if on else 0.0
+            self.update()
+
+        def sizeHint(self):
+            fm = self.fontMetrics()
+            return QSize(40 + 8 + fm.horizontalAdvance(self.text()) + 4,
+                         max(22, fm.height() + 6))
+
+        def hitButton(self, pos):
+            return self.rect().contains(pos)
+
+        def paintEvent(self, _ev):
+            try:
+                p = QPainter(self)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                h = 20.0
+                y = (self.height() - h) / 2.0
+                track = QRectF(1, y, 38, h)
+                off, on = QColor(255, 255, 255, 45), QColor(156, 188, 243, 230)
+                t = self._pos
+                col = QColor(int(off.red() + (on.red() - off.red()) * t),
+                             int(off.green() + (on.green() - off.green()) * t),
+                             int(off.blue() + (on.blue() - off.blue()) * t),
+                             int(off.alpha() + (on.alpha() - off.alpha()) * t))
+                p.setPen(_Q.PenStyle.NoPen)
+                p.setBrush(col)
+                p.drawRoundedRect(track, h / 2, h / 2)
+                d = h - 4
+                x = track.x() + 2 + (track.width() - d - 4) * t
+                p.setBrush(QColor(255, 255, 255))
+                p.drawEllipse(QRectF(x, y + 2, d, d))
+                p.setPen(self.palette().color(self.foregroundRole()))
+                p.drawText(QRectF(46, 0, self.width() - 46, self.height()),
+                           int(_Q.AlignmentFlag.AlignVCenter | _Q.AlignmentFlag.AlignLeft),
+                           self.text())
+                p.end()
+            except Exception:
+                pass
+    return Switch
+
+
+class _SwitchProxy:
+    _cls = None
+
+    def __call__(self, *a, **k):
+        if _SwitchProxy._cls is None:
+            _SwitchProxy._cls = _make_switch_class()
+        return _SwitchProxy._cls(*a, **k)
+
+
+_Switch = _SwitchProxy()
+
+
 def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -1436,8 +1522,8 @@ def _open_today_dialog(day_offset=0, auto=False):
             continue
         if suffix not in present_fams:          # only families present in the map
             continue
-        cb = QCheckBox(_FAM_SHORT_UI.get(suffix, label))
-        cb.setChecked(False)          # every source starts off — tick the ones you want
+        cb = _Switch(_FAM_SHORT_UI.get(suffix, label))
+        cb.setChecked(False)          # every source starts off — switch on the ones you want
         src_cbs[suffix] = cb
         src_row.addWidget(cb)
     src_row.addStretch(1)
