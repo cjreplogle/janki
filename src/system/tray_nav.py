@@ -708,7 +708,7 @@ def _build_today_list(parent):
         r, g, bl = rgb[cv._course_colour(e["summary"])] if known else (154, 160, 170)
         # painted by the tray's own smooth painter (no per-button stylesheet: those
         # fought it and made the Today list slow to show)
-        b._jk_paint = ((r, g, bl, .2 if known else .08), .34, .42, (r, g, bl, .6), 8)
+        b._jk_paint = ((r, g, bl, 0.0), .12, .2, (r, g, bl, .7), 8)   # outline only
         star = " <span style='color:#ff9d8a'>★</span>" if e.get("mandatory") else ""
         nm = QLabel("<b>%s</b>%s" % (e["summary"], star))
         nm.setTextFormat(Qt.TextFormat.RichText)
