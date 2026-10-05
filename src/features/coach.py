@@ -647,9 +647,22 @@ class _Tour(QWidget):
             return
         self._go(i)
 
+    def _lift(self):
+        """Keep the tour above the main window. On Windows the main window's native
+        handle is recreated when its frameless/glass flags change, which silently
+        drops the owner link set on the first step — so re-own and raise each time."""
+        try:
+            if sys.platform.startswith("win"):
+                self.attach()
+            self.raise_()
+        except Exception:
+            pass
+
     def _go(self, i):
         if i >= len(self.steps):
             return self.finish()
+        QTimer.singleShot(0, self._lift)
+        QTimer.singleShot(600, self._lift)       # after the step's page change settles
         self.i = max(0, i)
         st = self.steps[self.i]
         _sig.update(import_done=False, answered=False)
@@ -819,7 +832,12 @@ class _Tour(QWidget):
                     end = QRect(end, self.bubble.size())
                 reg = reg.united(QRegion(end))
             self.setMask(reg)
-            QTimer.singleShot(0, lambda: (mw.activateWindow(), mw.setFocus()))
+
+            def _focus_card_keep_tour_on_top():
+                mw.activateWindow()
+                mw.setFocus()
+                self._lift()                     # the activation mustn't bury the tour
+            QTimer.singleShot(0, _focus_card_keep_tour_on_top)
             return
         reg = QRegion(self.rect())
         if self.hole is not None and self.hole.height() < self.height() * 0.5:

@@ -1371,6 +1371,8 @@ def _glass_dialog_qss(light: bool) -> str:
         " QCheckBox::indicator:checked, QCheckBox::indicator:checked:hover,"
         " QAbstractItemView::indicator:checked {"
         " width: 14px; height: 14px; border: 1px solid transparent; background: transparent; }"
+        # standalone checkboxes: the tick is painted by Janki — no second image on top
+        "QCheckBox::indicator:checked, QCheckBox::indicator:checked:hover { image: none; }"
         "QTableView, QTableWidget { gridline-color: rgba(%(ink)s,0.08); }"
         "QProgressBar { background: rgba(%(ink)s,0.06); color: %(fg)s; text-align: center;"
         " border: 1px solid rgba(%(ink)s,0.14); border-radius: 4px; min-height: 8px; }"
@@ -1435,6 +1437,22 @@ def _paint_control(w) -> None:
             on = w.isChecked()
             _rr(p, box, 4, 0.16 if on else (0.10 if hover else 0.06),
                 0.55 if on else 0.40, ink)
+            if on:
+                # Draw the tick ourselves: it used to come from Anki's stylesheet image,
+                # which some Anki/macOS builds don't supply — checked boxes then looked
+                # empty (seen on an older MacBook Pro).
+                from aqt.qt import QPainterPath, QPen, QColor, QPointF, Qt as _Qt
+                b = box
+                path = QPainterPath()
+                path.moveTo(QPointF(b.left() + b.width() * 0.24, b.top() + b.height() * 0.52))
+                path.lineTo(QPointF(b.left() + b.width() * 0.43, b.top() + b.height() * 0.72))
+                path.lineTo(QPointF(b.left() + b.width() * 0.78, b.top() + b.height() * 0.30))
+                pen = QPen(QColor(ink[0], ink[1], ink[2], 235), max(1.6, b.width() * 0.13))
+                pen.setCapStyle(_Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(_Qt.PenJoinStyle.RoundJoin)
+                p.setPen(pen)
+                p.setBrush(_Qt.BrushStyle.NoBrush)
+                p.drawPath(path)
         elif isinstance(w, QTabBar):
             pos = w.mapFromGlobal(QCursor.pos())
             for i in range(w.count()):
