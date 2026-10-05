@@ -152,7 +152,7 @@ def _read_source_text(path):
     p = (path or "").strip()
     if _is_url(p):
         import urllib.request
-        with urllib.request.urlopen(p, timeout=20) as resp:  # noqa: S310 (user-supplied own calendar)
+        with urllib.request.urlopen(p, timeout=8) as resp:  # noqa: S310 (user-supplied own calendar)
             return resp.read().decode("utf-8", "ignore")
     return open(_p(p), encoding="utf-8", errors="ignore").read()
 
@@ -3440,12 +3440,13 @@ def events_cached_between(d0, d1):
 
 
 _EV_LOADING = {"on": False}
+CLOSING = {"on": False}    # Anki is shutting down: start no more background work
 
 
 def load_events_bg(done=None):
     """Parse (or download) the calendar off the main thread, then call done()."""
     path, key = _ev_key()
-    if not path or _EV_CACHE["key"] == key or _EV_LOADING["on"]:
+    if not path or _EV_CACHE["key"] == key or _EV_LOADING["on"] or CLOSING["on"]:
         return
     _EV_LOADING["on"] = True
 

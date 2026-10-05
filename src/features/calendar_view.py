@@ -536,6 +536,8 @@ def _tags_html(m):
 def _recount(m):
     """New / due / suspended counts for the class (switched-on sources), off the main
     thread, then written into the page."""
+    if _closing:
+        return
     q = _lecture_query(m, _fams_on)
     if not q:
         _set_counts("No sources switched on.")
@@ -672,6 +674,8 @@ def _weak_cached(mode):
 def prewarm_weak():
     """Work out both views in the background (after the Calendar opens), one after the
     other, so the button shows results straight away without a burst of work."""
+    if _closing:
+        return
     # only the 2-week view: End of block (8 weeks of AnKing-heavy lectures) runs
     # when you actually open it
     if _weak_cached("2w") is None:
@@ -685,6 +689,8 @@ def _weak_compute(mode, then=None):
          non-tag terms via find_notes)
       3. a plain worker thread (collection free): match and score everything
     Lectures not matched yet are matched in the background and show up next time."""
+    if _closing:
+        return
     if mode in _weak_busy or getattr(mw, "col", None) is None:
         return
     from aqt.operations import QueryOp
@@ -2007,6 +2013,8 @@ def _prewarm(back=None):
     """Match ±2 weeks of events to lectures OFF the main thread (Anki's QueryOp, which
     also serialises collection access), so neither opening the Calendar nor the first
     arrow / view switch holds the window."""
+    if _closing:
+        return
     global _warming
     if back:
         _prewarm_back[0] = max(_prewarm_back[0], back)
@@ -2068,11 +2076,21 @@ _closing = False
 def _on_close():
     global _closing
     _closing = True
+    try:
+        from ..integrations import lectures
+        lectures.CLOSING["on"] = True
+    except Exception:
+        pass
 
 
 def _on_open():
     global _closing
     _closing = False
+    try:
+        from ..integrations import lectures
+        lectures.CLOSING["on"] = False
+    except Exception:
+        pass
 
 
 def _patch_bottom():
