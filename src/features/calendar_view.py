@@ -447,9 +447,7 @@ def _detail_bg(title, opts=False):
     the open class page."""
     key = (title, opts)
     if key in _detail_busy or getattr(mw, "col", None) is None:
-        if key not in _detail_busy:
         return
-    if _closing:
     _detail_busy.add(key)
     _busy_update()
     from aqt.operations import QueryOp
@@ -632,7 +630,6 @@ def _recount(m):
     thread, then written into the page."""
     if getattr(mw, "col", None) is None:
         return
-    if _closing:
     q = _lecture_query(m, _fams_on)
     if not q:
         _set_counts("No sources switched on.")
