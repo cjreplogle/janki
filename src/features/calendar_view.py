@@ -258,9 +258,9 @@ def _week_html():
     # view switch left · ‹ Today date › centred · Lecture wizard right
     bar = ("<div class='jkc-bar'>"
            "<div class='jkc-l'><span class='jkc-segs'>%s</span></div>"
-           "<div class='jkc-c'><button class='jkc-arr jkc-prev' onclick=\"jkcNav('prev')\">‹</button>"
+           "<div class='jkc-c'><button class='jkc-arr jkc-prev' onclick=\"jkcNav('prev')\"><svg width='9' height='14' viewBox='0 0 9 14'><path d='M7 1L2 7l5 6' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg></button>"
            "<span class='jkc-lbl'>%s</span>"
-           "<button class='jkc-arr jkc-next' onclick=\"jkcNav('next')\">›</button></div>"
+           "<button class='jkc-arr jkc-next' onclick=\"jkcNav('next')\"><svg width='9' height='14' viewBox='0 0 9 14'><path d='M2 1l5 6-5 6' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg></button></div>"
            "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
            "<button onclick=\"pycmd('janki:cal:loader')\">"
            "Lecture wizard…</button></div></div>" % (seg, label))
@@ -657,7 +657,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:0 0 10px;}
 .jkc-l{justify-self:start;}.jkc-r{justify-self:end;}
 /* ‹ / ›: no background; slide outward on hover, press in on click */
-.jkc-bar .jkc-arr{background:transparent !important;font-size:1.25em;padding:2px 10px;
+.jkc-bar .jkc-arr{background:transparent !important;padding:6px 10px;align-self:center;
+  /* drawn chevrons: text ‹ › sat below the date's middle */
   transition:transform .22s cubic-bezier(.2,.8,.2,1),opacity .2s ease;opacity:.8;}
 .jkc-bar .jkc-prev:hover,.jkc-bar .jkc-prev.kb{transform:translateX(-4px);opacity:1;}
 .jkc-bar .jkc-next:hover,.jkc-bar .jkc-next.kb{transform:translateX(4px);opacity:1;}
