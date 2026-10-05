@@ -1772,6 +1772,14 @@ def _open_today_dialog(day_offset=0, auto=False):
     warn_lbl.setWordWrap(True)
     warn_lbl.setStyleSheet("color:#e0b000;")   # amber warning
     warn_lbl.setVisible(False)
+    warn_lbl.setCursor(_Qt.CursorShape.PointingHandCursor)
+    warn_lbl.setToolTip("Click to show / hide the full list")
+
+    def _warn_click(_ev, lbl=warn_lbl):
+        lbl._jk_open = not getattr(lbl, "_jk_open", False)
+        if hasattr(lbl, "_jk_full"):
+            lbl.setText(lbl._jk_full if lbl._jk_open else lbl._jk_short)
+    warn_lbl.mousePressEvent = _warn_click
     exact_cb = QCheckBox("Exact matches only")
     exact_cb.setChecked(bool(cfg.get("ak_exact_only", False)))
     exact_cb.setToolTip(
@@ -1789,11 +1797,17 @@ def _open_today_dialog(day_offset=0, auto=False):
             ex = sorted(_AK_LOOSE.values(), key=str.lower)
             shown = ", ".join(ex[:12])
             more = ("  (+%d more)" % (len(ex) - 12)) if len(ex) > 12 else ""
-            warn_lbl.setText(
+            # One line by default; click it to expand the full list (and again to fold).
+            warn_lbl._jk_full = (
                 "⚠ %d #AK concept tag(s) had no exact match in this collection, "
                 "so they're matched loosely by name (<code>tag:*concept*</code>) — "
-                "double-check these unsuspend the right cards: %s%s"
+                "double-check these unsuspend the right cards: %s%s  "
+                "<span style='opacity:.7'>▾ hide</span>"
                 % (len(ex), shown, more))
+            warn_lbl._jk_short = ("⚠ %d #AK concept tag(s) matched loosely by name — "
+                                  "<span style='opacity:.7'>show details ▸</span>" % len(ex))
+            warn_lbl.setText(warn_lbl._jk_full if getattr(warn_lbl, "_jk_open", False)
+                             else warn_lbl._jk_short)
             warn_lbl.setVisible(True)
         else:
             warn_lbl.setVisible(False)
