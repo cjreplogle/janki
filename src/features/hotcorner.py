@@ -40,9 +40,16 @@ _anim_t = None       # watchdog: animations must finish
 
 
 # ------------------------------------------------------------------ geometry --
-def _corner():
+_corner_v = None      # the setting, read on reload() — not from disk 20 times a second
+
+
+def _read_corner():
     c = str(_cfg().get("hot_corner", "off")).lower()
     return c if c in ("top-left", "top-right", "bottom-left", "bottom-right") else None
+
+
+def _corner():
+    return _corner_v
 
 
 def _screen():
@@ -397,8 +404,9 @@ def shutdown():
 
 def reload():
     """Start/stop polling to match the setting."""
-    global _timer, _watch, _quitting
+    global _timer, _watch, _quitting, _corner_v
     _quitting = False
+    _corner_v = _read_corner()
     try:
         if _corner() is None:
             if _timer is not None:

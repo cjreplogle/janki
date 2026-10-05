@@ -580,11 +580,22 @@ def _set_weak_mode(mode):
         _weak_compute(mode)
 
 
-def _weak_key():
+_weak_gen = 0          # bumped whenever an operation changes cards/notes
+
+
+def _weak_dirty(changes=None, handler=None):
+    global _weak_gen
     try:
-        return (mw.col.mod, datetime.date.today(), tuple(sorted(_fams_off())))
+        if changes is None or getattr(changes, "card", True) or getattr(changes, "note", True):
+            _weak_gen += 1
     except Exception:
-        return None
+        _weak_gen += 1
+
+
+def _weak_key():
+    # NO collection access here: this runs on the main thread, and asking the collection
+    # anything while a background job holds it froze the window (33 s in a profile)
+    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())))
 
 
 def _weak_cached(mode):
@@ -670,9 +681,7 @@ def _weak_compute(mode, then=None):
                             break
             else:
                 try:
-                    out = set(col.db.list("select distinct nid from cards where id in (%s)"
-                                          % (",".join(str(c) for c in col.find_cards(a))
-                                             or "0")))
+                    out = set(col.find_notes(a))      # straight to note ids
                 except Exception:
                     out = set()
             atom_cache[a] = out
@@ -1917,6 +1926,10 @@ def _redraw_bottom():
 
 def install():
     _patch_bottom()
+    try:
+        gui_hooks.operation_did_execute.append(_weak_dirty)
+    except Exception:
+        pass
     gui_hooks.profile_did_open.append(_on_open)
     gui_hooks.profile_will_close.append(_on_close)
     gui_hooks.profile_did_open.append(_schedule_prewarm)
