@@ -57,7 +57,16 @@ def _effect(name):
     return fx or None
 
 
+_last = {"name": None, "t": 0.0}
+
+
 def play(name, force=False):
+    # the same sound twice within 80 ms is one event reaching us twice — play it once
+    import time as _t
+    now = _t.monotonic()
+    if name == _last["name"] and now - _last["t"] < 0.08:
+        return
+    _last["name"], _last["t"] = name, now
     c = _cfg()
     vol = int(c.get("sfx_volume", 0))          # off unless turned up
     if (vol <= 0 or c.get("sfx_muted", False)) and not force:

@@ -339,8 +339,8 @@ def _week_html():
            "<span class='jkc-lbl'>%s</span>"
            "<button class='jkc-arr jkc-next' onclick=\"jkcNav('next')\"><svg width='9' height='14' viewBox='0 0 9 14'><path d='M2 1l5 6-5 6' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg></button></div>"
            "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
-           "<button onclick=\"pycmd('janki:cal:loader')\">"
-           "Lecture wizard…</button></div></div>" % (seg, label))
+           "<button class='jkc-wand' title='Lecture wizard' aria-label='Lecture wizard' "
+           "onclick=\"pycmd('janki:cal:loader')\">%s</button></div></div>" % (seg, label, _WAND))
     # day height: at least the old fixed size, else whatever the window leaves below
     # the bar, day names and all-day strip
     grid = ("<div class='jkc-grid' style='--jkc-n:%d;--jkc-h:max(%dpx,calc(100vh - %dpx))'>"
@@ -1328,6 +1328,11 @@ def _course_colour(title):
 
 
 # mandatory: a small filled star (Janki's own mark)
+# lecture wizard: a little magic wand (stick + sparkle)
+_WAND = ("<svg width='15' height='15' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 20L14.5 9.5' "
+         "stroke='currentColor' stroke-width='2.2' stroke-linecap='round'/><path d='M17 2.5l.9 2.3 "
+         "2.3.9-2.3.9-.9 2.3-.9-2.3-2.3-.9 2.3-.9zM20.5 11l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 "
+         "1.2-.5zM10 3l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z' fill='currentColor'/></svg>")
 _STAR = ("<svg width='11' height='11' viewBox='0 0 24 24'><path d='M12 2.5l2.9 6.1 6.6.8-4.9 4.6"
          " 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z' fill='currentColor'/></svg>")
 _SHIRT = ("<svg class='jkc-shirt' width='13' height='11' viewBox='0 0 26 22'><path d='M9 1"
@@ -1471,6 +1476,10 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev:has(> .jkc-m) .jkc-t{padding-right:13px;}  /* room for the star */
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+#jkc .jkc-r{display:flex;align-items:center;gap:6px;}
+#jkc .jkc-r button{height:2em;box-sizing:border-box;}
+#jkc .jkc-wand{padding:0 10px !important;}
+#jkc .jkc-wand svg{display:block;}
 #jkc-busy{position:fixed;right:14px;bottom:12px;z-index:50;display:flex;align-items:center;gap:7px;
   padding:4px 11px 4px 8px;border-radius:999px;font-size:.78em;color:#cfd6e4;pointer-events:none;
   background:rgba(20,22,30,.72) !important;border:1px solid rgba(255,255,255,.1);
