@@ -793,8 +793,20 @@ def _build_practice_list(parent):
     v = QVBoxLayout(box)
     v.setContentsMargins(0, 0, 0, 0)
     v.setSpacing(5)
+    # every bank / sub-bank (collapsed or not) first, then "all banks" at the bottom
     try:
-        rows = [r for r in _deck_rows() if r[0] == "Practice" or r[0].startswith("Practice::")]
+        due = {r[1]: r[2] for r in _deck_rows()}
+    except Exception:
+        due = {}
+    rows = []
+    try:
+        names = sorted((d.name, d.id) for d in mw.col.decks.all_names_and_ids()
+                       if d.name.startswith("Practice::"))
+        for name, did in names:
+            rows.append((name, did, due.get(did, 0), name.count("::") - 1, None, False))
+        pid = mw.col.decks.id_for_name("Practice")
+        if pid:
+            rows.append(("Practice (all banks)", pid, due.get(pid, 0), 0, None, False))
     except Exception:
         rows = []
     if not rows:
