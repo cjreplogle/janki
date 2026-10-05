@@ -383,13 +383,14 @@ def _detail_html(e):
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
-                "Study unsuspended cards</button>"
-                "<button id='jkd-st-sus' class='jkd-study jkd-study2' onclick=\"pycmd('janki:cal:det:study:all')\">"
-                "Study all cards</button></div>"
-                "<div class='jkd-note'>Suspended cards are unsuspended just for the session "
-                "and suspended again afterwards.</div>"
+                "Study unsuspended cards</button></div>"
+                "<div class='jkd-secs'>"
+                "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
+                "Study all cards</button>"
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
-                "Unsuspend cards for this lecture</button>"
+                "Unsuspend cards for this lecture</button></div>"
+                "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
+                "and suspends them again afterwards.</div>"
                 "<div class='jkd-links'><a onclick=\"jkdTags(this)\">Show tags ▾</a> · "
                 "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
                 "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
@@ -874,6 +875,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkd-study:hover{background:#b0cbf6 !important;transform:translateY(-1px);}
 .jkd-note{font-size:.82em;opacity:.6;margin:8px 0 16px;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
+.jkd-secs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
+.jkd-secs .jkd-sec{margin:0 !important;}
 #jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;
   font-size:.95em;padding:8px 22px;border-radius:12px;align-self:center;}
 #jkc .jkd-study2:hover{background:rgba(156,188,243,.34) !important;}
