@@ -2268,6 +2268,20 @@ class GlassSettings(QDialog):
         _hc_row.addStretch(1)
         gen_lay.addLayout(_hc_row)
 
+        # Calendar toolbar item: icon or the word.
+        self._cal_icon = QCheckBox("Show Calendar as an icon in the toolbar")
+        self._cal_icon.setChecked(bool(self.cfg.get("calendar_toolbar_icon", True)))
+
+        def _cal_icon_changed(_s):
+            self.cfg["calendar_toolbar_icon"] = bool(self._cal_icon.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                mw.toolbar.draw()                # redraw the toolbar right away
+            except Exception:
+                pass
+        self._cal_icon.stateChanged.connect(_cal_icon_changed)
+        gen_lay.addWidget(self._cal_icon)
+
         # Documentation link and "Anki Preferences…" share one row (the button is
         # added to it further down, where it's built).
         _doc_row = QHBoxLayout()

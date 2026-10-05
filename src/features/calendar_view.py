@@ -63,9 +63,66 @@ def _redraw():
         log("calendar redraw: %s" % e)
 
 
+def _mode():
+    from ..util.config import _cfg
+    m = str(_cfg().get("calendar_view", "week"))
+    return m if m in ("week", "1", "2") else "week"
+
+
+def _set_mode(m):
+    global _anchor
+    try:
+        c = mw.addonManager.getConfig(__name__) or {}
+        c["calendar_view"] = m
+        mw.addonManager.writeConfig(__name__, c)
+    except Exception:
+        pass
+    _anchor = None
+    _redraw()
+
+
+_anchor = None         # first day shown in Day / 2-Day view (None = today)
+
+
+def _weekday_on_or_after(d):
+    while d.weekday() >= 5:
+        d += datetime.timedelta(days=1)
+    return d
+
+
+def _step_weekdays(d, n):
+    """d moved n weekdays (skipping Sat/Sun); n may be negative."""
+    step = 1 if n >= 0 else -1
+    for _ in range(abs(n)):
+        d += datetime.timedelta(days=step)
+        while d.weekday() >= 5:
+            d += datetime.timedelta(days=step)
+    return d
+
+
+def _days():
+    """The dates on screen for the current view."""
+    today = datetime.date.today()
+    mode = _mode()
+    if mode == "week":
+        monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=_week)
+        return [monday + datetime.timedelta(days=i) for i in range(5)]
+    start = _anchor or _weekday_on_or_after(today)
+    days = [start]
+    while len(days) < int(mode):
+        days.append(_step_weekdays(days[-1], 1))
+    return days
+
+
 def _go_week(delta):
-    global _week
-    _week = 0 if delta is None else _week + delta
+    global _week, _anchor
+    if _mode() == "week":
+        _week = 0 if delta is None else _week + delta
+    else:
+        if delta is None:
+            _anchor = None
+        else:
+            _anchor = _step_weekdays(_days()[0], delta * int(_mode()))
     try:
         from . import sfx
         sfx.play("tab")
@@ -88,8 +145,8 @@ def _week_html():
     global _shown
     from ..integrations import lectures
     today = datetime.date.today()
-    monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=_week)
-    sunday = monday + datetime.timedelta(days=4)        # weekdays only: Mon–Fri
+    days = _days()                                      # weekdays only
+    monday, sunday = days[0], days[-1]
     try:
         evs = lectures.events_between(monday, sunday)
     except Exception as e:
@@ -106,8 +163,7 @@ def _week_html():
     grid_h = int(span * px_per_min)
 
     cols = []
-    for di in range(5):
-        d = monday + datetime.timedelta(days=di)
+    for d in days:
         blocks, allday = [], []
         for i, e in enumerate(evs):
             if e["date"] != d:
@@ -131,25 +187,37 @@ def _week_html():
         cols.append(
             "<div class='jkc-col%s'><div class='jkc-dh'>%s <b>%d</b></div>"
             "<div class='jkc-ads'>%s</div><div class='jkc-body' style='height:%dpx'>%s</div></div>"
-            % (" jkc-today" if d == today else "", _DAY[di], d.day, "".join(allday),
+            % (" jkc-today" if d == today else "", _DAY[d.weekday()], d.day, "".join(allday),
                grid_h, "".join(blocks)))
     hours = "".join("<div class='jkc-hr' style='top:%dpx'><span>%s</span></div>"
                     % (int((t - lo) * px_per_min), _hm(t)) for t in range(lo, hi + 1, 60))
-    label = "%s %d – %s %d, %d" % (monday.strftime("%b"), monday.day,
-                                    sunday.strftime("%b"), sunday.day, sunday.year)
+    if monday == sunday:
+        label = "%s, %s %d, %d" % (_DAY[monday.weekday()], monday.strftime("%b"),
+                                   monday.day, monday.year)
+    else:
+        label = "%s %d – %s %d, %d" % (monday.strftime("%b"), monday.day,
+                                        sunday.strftime("%b"), sunday.day, sunday.year)
+    mode = _mode()
+    seg = "".join("<button class='jkc-seg%s' onclick=\"pycmd('janki:cal:mode:%s')\">%s</button>"
+                  % (" on" if mode == k else "", k, l)
+                  for k, l in (("1", "Day"), ("2", "2 Days"), ("week", "Week")))
     empty = ("" if evs else
-             "<div class='jkc-empty'>No classes this week%s.</div>"
-             % ("" if lectures._cfg().get("ics_path") else
+             "<div class='jkc-empty'>No classes %s%s.</div>"
+             % ("this week" if mode == "week" else "on these days",
+                "" if lectures._cfg().get("ics_path") else
                 " — import your calendar in Load Lectures (⌘L)"))
-    return (_CSS + "<div id='jkc'>"
-            "<div class='jkc-bar'><button onclick=\"pycmd('janki:cal:prev')\">‹</button>"
-            "<button onclick=\"pycmd('janki:cal:today')\">Today</button>"
-            "<button onclick=\"pycmd('janki:cal:next')\">›</button>"
-            "<span class='jkc-lbl'>%s</span><span class='jkc-sp'></span>"
-            "<button onclick=\"pycmd('janki:cal:loader')\">Load Lectures…</button></div>"
-            "%s<div class='jkc-grid'><div class='jkc-hours' style='height:%dpx'>%s</div>%s</div>"
-            "</div>" % (label, empty, grid_h, hours, "".join(cols))
-            + _JS)
+    # view switch left · ‹ Today date › centred · Load Lectures right
+    bar = ("<div class='jkc-bar'>"
+           "<div class='jkc-l'><span class='jkc-segs'>%s</span></div>"
+           "<div class='jkc-c'><button onclick=\"jkcNav('prev')\">‹</button>"
+           "<span class='jkc-lbl'>%s</span>"
+           "<button onclick=\"jkcNav('next')\">›</button></div>"
+           "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
+           "<button onclick=\"pycmd('janki:cal:loader')\">"
+           "Load Lectures…</button></div></div>" % (seg, label))
+    grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
+            "style='height:%dpx'>%s</div>%s</div>" % (len(days), grid_h, hours, "".join(cols)))
+    return _CSS + "<div id='jkc'>" + bar + empty + grid + "</div>" + _JS
 
 
 def _is_allday_kind(summary):
@@ -165,12 +233,18 @@ def _norm(s):
 
 _CSS = """<style>
 #jkc{width:min(1100px,calc(100vw - 32px));margin:4px auto 24px;text-align:left;}
-.jkc-bar{display:flex;align-items:center;gap:6px;margin:0 0 10px;}
+.jkc-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:0 0 10px;}
+.jkc-l{justify-self:start;}.jkc-r{justify-self:end;}
+.jkc-c{display:flex;align-items:center;gap:6px;}
+.jkc-c .jkc-lbl{margin:0 6px;min-width:12em;text-align:center;}
 .jkc-bar button{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:8px;
   padding:4px 11px;cursor:pointer;transition:background .2s ease;}
 .jkc-bar button:hover{background:rgba(255,255,255,.16);}
-.jkc-lbl{font-weight:600;margin-left:6px;}.jkc-sp{flex:1;}
-.jkc-grid{display:grid;grid-template-columns:52px repeat(5,1fr);gap:0 6px;position:relative;}
+.jkc-lbl{font-weight:600;}
+.jkc-grid{display:grid;grid-template-columns:52px repeat(var(--jkc-n,5),1fr);gap:0 6px;position:relative;}
+.jkc-segs{display:inline-flex;background:rgba(255,255,255,.06);border-radius:9px;padding:2px;margin-right:6px;}
+.jkc-segs .jkc-seg{background:transparent;padding:3px 10px;border-radius:7px;}
+.jkc-segs .jkc-seg.on{background:rgba(156,188,243,.28);color:#cfe0ff;}
 .jkc-hours{position:relative;margin-top:52px;}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
@@ -192,6 +266,27 @@ _CSS = """<style>
 </style>"""
 
 _JS = """<script>(function(){
+ // ‹ / ›: the current days slide out that way, then the new ones slide in from the
+ // other side (transform + opacity only — nothing reflows).
+ var EASE='cubic-bezier(.2,.8,.2,1)';
+ window.jkcNav=function(dir){
+   var g=document.querySelector('.jkc-grid');
+   try{sessionStorage.setItem('jkcSlide',dir);}catch(x){}
+   if(g&&g.animate&&dir!=='today'){
+     var dx=dir==='next'?-36:36;
+     g.animate([{transform:'none',opacity:1},{transform:'translateX('+dx+'px)',opacity:0}],
+               {duration:110,easing:'ease-in',fill:'forwards'});
+     setTimeout(function(){pycmd('janki:cal:'+dir);},100);
+   } else pycmd('janki:cal:'+dir);
+ };
+ function slideIn(){var d=null;try{d=sessionStorage.getItem('jkcSlide');
+   sessionStorage.removeItem('jkcSlide');}catch(x){}
+   var g=document.querySelector('.jkc-grid'); if(!d||!g||!g.animate)return;
+   var dx=d==='next'?36:(d==='prev'?-36:0);
+   g.animate([{transform:'translateX('+dx+'px)',opacity:0},{transform:'none',opacity:1}],
+             {duration:240,easing:EASE});}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',slideIn);
+ else slideIn();
  document.addEventListener('click',function(e){
    var ev=e.target.closest&&e.target.closest('.jkc-ev'); if(!ev)return;
    pycmd('janki:cal:ev:'+ev.getAttribute('data-i'));
@@ -310,6 +405,8 @@ def on_js_message(handled, message, context):
             _go_week(1)
         elif cmd == "today":
             _go_week(None)
+        elif cmd.startswith("mode:"):
+            _set_mode(cmd[5:])
         elif cmd == "loader":
             from ..integrations import lectures
             lectures.run_today(interactive=True)
@@ -335,23 +432,27 @@ def install_toolbar(links, toolbar):
         link = toolbar.create_link(cmd="janki_calendar", label="Calendar",
                                    func=open_calendar, tip="This week's classes",
                                    id="janki_calendar")
-        idx = next((i for i, l in enumerate(links) if "sync" in l), len(links))
-        links.insert(idx, link)
-        # Icon instead of the word: the label stays for the tooltip/accessibility, the
-        # text is hidden and a small calendar glyph (in the toolbar's text colour) shows.
-        svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
-               "stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-               "<rect x='3' y='5' width='18' height='16' rx='3'/><path d='M3 10h18M8 3v4M16 3v4'/>"
-               "<circle cx='8' cy='14.5' r='.6' fill='black'/><circle cx='12' cy='14.5' r='.6' "
-               "fill='black'/><circle cx='16' cy='14.5' r='.6' fill='black'/></svg>")
-        import urllib.parse as _up
-        uri = "data:image/svg+xml," + _up.quote(svg)
-        links.append(
-            "<style>#janki_calendar{font-size:0 !important;display:inline-flex;"
-            "align-items:center;justify-content:center;min-width:1.6rem;}"
-            "#janki_calendar::before{content:'';width:22px;height:22px;"
-            "background:currentColor;-webkit-mask:url(\"%s\") center/contain no-repeat;"
-            "mask:url(\"%s\") center/contain no-repeat;}</style>" % (uri, uri))
+        links.insert(0, link)                    # furthest left in the toolbar
+        # Light blue (like Practice's green). Icon or the word "Calendar", per
+        # Settings → General; with the icon the label stays for tooltip/accessibility.
+        from ..util.config import _cfg
+        style = "#janki_calendar{color:#a8d0ff !important;}"
+        if _cfg().get("calendar_toolbar_icon", True):
+            svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
+                   "stroke='black' stroke-width='2' stroke-linecap='round' "
+                   "stroke-linejoin='round'><rect x='3' y='5' width='18' height='16' rx='3'/>"
+                   "<path d='M3 10h18M8 3v4M16 3v4'/><circle cx='8' cy='14.5' r='.6' "
+                   "fill='black'/><circle cx='12' cy='14.5' r='.6' fill='black'/>"
+                   "<circle cx='16' cy='14.5' r='.6' fill='black'/></svg>")
+            import urllib.parse as _up
+            uri = "data:image/svg+xml," + _up.quote(svg)
+            # sized to one line of toolbar text so the item isn't taller than the rest
+            style += ("#janki_calendar{font-size:0 !important;}"
+                      "#janki_calendar::before{content:'';display:inline-block;"
+                      "vertical-align:middle;width:1.15rem;height:1.15rem;margin-top:-.15rem;"
+                      "background:currentColor;-webkit-mask:url(\"%s\") center/contain "
+                      "no-repeat;mask:url(\"%s\") center/contain no-repeat;}" % (uri, uri))
+        links.append("<style>%s</style>" % style)
         lh = getattr(toolbar, "link_handlers", None)
         if isinstance(lh, dict):
             for key in ("decks", "janki_practice", "stats"):

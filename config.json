@@ -175,6 +175,8 @@
   "first_card_fade": true,
   "remote_zoom": true,
   "hot_corner": "off",
+  "calendar_toolbar_icon": true,
+  "calendar_view": "week",
   "sfx_volume": 0,
   "sfx_bank": "mallet",
   "sfx_nav": true,
