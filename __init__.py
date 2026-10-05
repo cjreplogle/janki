@@ -1422,7 +1422,11 @@ def _note_main_page(*_a):
             from aqt.qt import QTimer as _RT
             if want == "calendar":
                 from .src.features import calendar_view as _cv
-                _RT.singleShot(0, _cv.open_calendar)
+                # already in the Calendar (e.g. you went there while the launch sync
+                # ran — profile_did_open only fires after it): leave it alone; calling
+                # open_calendar from a class page would close that page
+                if not _cv._view:
+                    _RT.singleShot(0, lambda: _cv._view or _cv.open_calendar())
             elif want == "practice":
                 from .src.features import practice as _pr
                 _RT.singleShot(0, _pr.open_practice_hub)
