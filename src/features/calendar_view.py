@@ -250,7 +250,7 @@ def _week_html():
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
                 "" if lectures._cfg().get("ics_path") else
-                " — import your calendar in the Lecture wizard (⌘L)"))
+                " — import your calendar in lecture wizard (⌘L)"))
     # view switch left · ‹ Today date › centred · Lecture wizard right
     bar = ("<div class='jkc-bar'>"
            "<div class='jkc-l'><span class='jkc-segs'>%s</span></div>"
@@ -795,7 +795,7 @@ def _event_menu(i):
         a_study = menu.addAction("Study this lecture (due + new)")
         a_tags = menu.addAction("Show its tags…")
     else:
-        na = menu.addAction("No lecture matched — fix it in the Lecture wizard")
+        na = menu.addAction("No lecture matched — fix it in lecture wizard")
         na.setEnabled(False)
     a_load = menu.addAction("Open this day in lecture wizard…")
     chosen = menu.exec(QCursor.pos())

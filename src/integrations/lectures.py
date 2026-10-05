@@ -1540,6 +1540,90 @@ def _maybe_reset_caches(ics_path):
         _LAST_RESET["ics_mtime"] = mt
 
 
+def _source_icon(kind):
+    """Small hand-drawn icon (calendar / spreadsheet grid) in the window text colour."""
+    from aqt.qt import QPixmap, QPainter, QPen, QColor, QIcon, QRectF, Qt as _Q
+    pm = QPixmap(36, 36)
+    pm.fill(_Q.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(230, 232, 238), 2.6)
+    pen.setCapStyle(_Q.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(_Q.BrushStyle.NoBrush)
+    if kind == "ics":
+        p.drawRoundedRect(QRectF(5, 8, 26, 23), 4, 4)
+        p.drawLine(5, 15, 31, 15)
+        p.drawLine(12, 4, 12, 10)
+        p.drawLine(24, 4, 24, 10)
+        dot = QPen(QColor(230, 232, 238), 3.2)
+        dot.setCapStyle(_Q.PenCapStyle.RoundCap)
+        p.setPen(dot)
+        for x in (12, 18, 24):
+            p.drawPoint(x, 22)
+    else:
+        p.drawRoundedRect(QRectF(5, 6, 26, 24), 3, 3)
+        p.drawLine(5, 14, 31, 14)
+        p.drawLine(5, 22, 31, 22)
+        p.drawLine(14, 6, 14, 30)
+    p.end()
+    return QIcon(pm)
+
+
+def _edit_source(kind, parent, on_saved):
+    """One text box for the calendar (.ics file or URL) or the main .xlsx map, with
+    Browse… — Save writes it and reloads the wizard."""
+    from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                        QPushButton, QFileDialog)
+    key = "ics_path" if kind == "ics" else "xlsx_path"
+    d = QDialog(parent)
+    d.setWindowTitle("Calendar location" if kind == "ics" else "Lecture map location")
+    lay = QVBoxLayout(d)
+    lay.addWidget(QLabel("Calendar (.ics file or calendar URL):" if kind == "ics"
+                         else "Main lecture → tag map (.xlsx):"))
+    row = QHBoxLayout()
+    edit = QLineEdit(str(_cfg().get(key, "") or ""))
+    edit.setMinimumWidth(420)
+    browse = QPushButton("Browse…")
+    row.addWidget(edit, 1)
+    row.addWidget(browse)
+    lay.addLayout(row)
+
+    def _browse():
+        filt = "Calendar (*.ics)" if kind == "ics" else "Spreadsheet (*.xlsx)"
+        fn, _ = QFileDialog.getOpenFileName(d, d.windowTitle(), "", filt)
+        if fn:
+            edit.setText(fn)
+    browse.clicked.connect(_browse)
+    btns = QHBoxLayout()
+    btns.addStretch(1)
+    cancel = QPushButton("Cancel")
+    save = QPushButton("Save")
+    save.setDefault(True)
+    btns.addWidget(cancel)
+    btns.addWidget(save)
+    lay.addLayout(btns)
+    cancel.clicked.connect(d.reject)
+
+    def _save():
+        c = mw.addonManager.getConfig(__name__) or {}
+        c[key] = edit.text().strip()
+        mw.addonManager.writeConfig(__name__, c)
+        _ics_reset()
+        _MAP_CACHE["key"] = None
+        _EV_CACHE["key"] = None
+        d.accept()
+        on_saved()
+    save.clicked.connect(_save)
+    edit.returnPressed.connect(_save)
+    try:
+        from ..user import css as _css
+        _css.apply_widget_ui_font(d)
+    except Exception:
+        pass
+    d.exec()
+
+
 def _open_today_dialog(day_offset=0, auto=False):
     from aqt.qt import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
@@ -1665,6 +1749,18 @@ def _open_today_dialog(day_offset=0, auto=False):
     day_hdr = QLabel("")
     nav.addWidget(btn_prev); nav.addWidget(btn_today); nav.addWidget(btn_next)
     nav.addSpacing(12); nav.addWidget(day_hdr); nav.addStretch(1)
+    # Top-right: quick edits for the two sources — the calendar (.ics file or URL) and
+    # the main lecture → tag map (.xlsx). Saving reopens the wizard on the same day.
+    for _kind, _tip in (("ics", "Calendar (.ics) location"), ("xlsx", "Lecture map (.xlsx) location")):
+        _tb = QToolButton()
+        _tb.setIcon(_source_icon(_kind))
+        _tb.setToolTip(_tip)
+        _tb.setAutoRaise(True)
+        _tb.setFixedSize(30, 28)
+        _tb.clicked.connect(lambda _c=False, k=_kind: _edit_source(
+            k, dlg, lambda: (dlg.close(), QTimer.singleShot(
+                120, lambda: _open_today_dialog(day_offset=st.get("offset", day_offset))))))
+        nav.addWidget(_tb)
     v.addLayout(nav)
     if no_cal:                       # no calendar → no day navigation
         for _w in (btn_prev, btn_today, btn_next):
