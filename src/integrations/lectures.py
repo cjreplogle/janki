@@ -2972,7 +2972,7 @@ def build_settings_pages():
 
     ics_note = QLabel("")
     ics_note.setWordWrap(True)
-    ics_note.setStyleSheet("color: palette(mid);")
+    ics_note.setStyleSheet("color: #9cbcf3;")   # light blue (palette(mid) read near-black on the glass)
 
     def _update_ics_note():
         if _is_url(ics_edit.text()):
