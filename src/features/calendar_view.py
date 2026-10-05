@@ -1026,7 +1026,9 @@ _EXAM_RE = re.compile(r"\b(assessment|exam|examination)\b", re.I)
 _NOT_EXAM = re.compile(r"\b(reviews?|prep|preparation|practices?|recaps?|q ?& ?a|tutorials?|"
                        r"info|feedback|debrief(?:ing)?s?|retakes?|re-?takes?|make-?ups?|"
                        r"remediation|orientation|results?|study|sessions?|walk-?through|"
-                       r"overview|go-?over)\b", re.I)
+                       r"overview|go-?over|osce|comp\.? ?hx|history|hx|physical|p\.? ?e\.?|"
+                       r"standardi[sz]ed|sp|clinical|skills?)\b", re.I)
+_BIWEEKLY = re.compile(r"\bbi-?weekly\b", re.I)
 _EXAM_NUM = re.compile(r"(?:assessment|exam(?:ination)?)\s*#?\s*([ivx]{1,5}|\d{1,2})\b", re.I)
 
 
@@ -1045,8 +1047,14 @@ def _exam_dates():
     restarts after a gap of over four weeks = a new block)."""
     from ..integrations import lectures
     seen, raw = set(), []
-    for e in lectures._EV_CACHE.get("events") or []:
+    evs = lectures._EV_CACHE.get("events") or []
+    # a calendar that names them "Biweekly …" → only those are the exams (an OSCE such as
+    # "Comp. Hx Assessment" or a physical exam then can't sneak in)
+    need_bw = any(_BIWEEKLY.search(e.get("summary") or "") for e in evs)
+    for e in evs:
         t = e.get("summary") or ""
+        if need_bw and not _BIWEEKLY.search(t):
+            continue
         if _EXAM_RE.search(t) and not _NOT_EXAM.search(t) and e["date"] not in seen:
             seen.add(e["date"])
             raw.append((e["date"], t))
