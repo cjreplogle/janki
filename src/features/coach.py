@@ -434,6 +434,18 @@ def _k(aid):
         return ""
 
 
+_ORDER = ["Practice question banks", "Try a practice question", "Stats", "Janki Settings",
+          "Import File", "Today's lectures", "Calendar",
+          # everything that happens on a card, back to back
+          "On the card", "Focus & Caption", "Reviewing", "Card timer & flares",
+          "Getting around by keyboard", "You're all set"]
+
+
+def _ordered(steps):
+    rank = {t: i for i, t in enumerate(_ORDER)}
+    return sorted(steps, key=lambda st: rank.get(st["title"], len(_ORDER) - 2))
+
+
 def _steps():
     key = _k("toggle_window") or ("⌥⌘A" if _MAC else "Ctrl+Alt+A")
     return [
@@ -540,7 +552,7 @@ class _Tour(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.steps = _steps()
+        self.steps = _ordered(_steps())
         self.i = 0
         self.hole = None                     # QRect in our coords, or None
         self.opacity = 0.0
@@ -738,6 +750,15 @@ class _Tour(QWidget):
         an.setEndValue(float(to))
         an.setEasingCurve(QEasingCurve.Type.OutCubic if to else QEasingCurve.Type.InCubic)
         an.valueChanged.connect(lambda v: [e.setOpacity(v) for e in effs])
+        if to >= 1.0:
+            # faded in: drop the opacity effects — on macOS a translucent, INACTIVE
+            # window (hands-on steps hand focus to the card) can paint them blank,
+            # which left the bubble with buttons but no words
+            def _plain():
+                if getattr(self, "_text_anim", None) is an:
+                    for w in self._text_widgets():
+                        w.setGraphicsEffect(None)
+            an.finished.connect(_plain)
         if done:
             an.finished.connect(done)
         self._text_anim = an
