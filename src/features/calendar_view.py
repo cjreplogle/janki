@@ -777,7 +777,7 @@ def _set_weak_mode(mode):
         sfx.play("select")
     except Exception:
         pass
-    _swap("fade")                           # the list faded out on click; fade back in
+    _swap("wfade")                          # the lectures faded out on click; fade back in
     if _weak is None:
         _weak_compute(mode)
 
@@ -1864,6 +1864,10 @@ _JS = """<script>(function(){
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      pillInit();nowLine();applyCounts();watchCounts();
+     if(dir==='wfade'){                                // Weak areas: lectures fade in
+       wfadeEls().forEach(function(el){if(el.animate)el.animate([{opacity:0},{opacity:1}],
+         {duration:200,easing:EASE});});
+       return;}
      if(selAfter){var sa=selAfter;selAfter=null;
        setTimeout(function(){var n=cols().length;selDay(sa==='first'?0:n-1,selRef);},0);}
      var g=grid(); if(!g||!g.animate)return;
@@ -2042,10 +2046,13 @@ _JS = """<script>(function(){
  // Weak areas: Biweekly ↔ End of block fades the list out, then the new one fades in
  window.jkwMode=function(btn,k){
    if(btn&&btn.classList.contains('on'))return;          // already showing
-   var g=grid();
-   if(g&&g.animate){var a=g.animate([{opacity:1},{opacity:0}],
-     {duration:110,easing:'ease-in',fill:'forwards'});outDone=a.finished.catch(function(){});}
+   var ps=[];                       // only the lectures below fade — not the header
+   wfadeEls().forEach(function(el){if(el.animate)ps.push(el.animate([{opacity:1},{opacity:0}],
+     {duration:110,easing:'ease-in',fill:'forwards'}).finished.catch(function(){}));});
+   if(ps.length)outDone=Promise.all(ps);
    pycmd('janki:cal:weakmode:'+k);};
+ function wfadeEls(){return Array.prototype.slice.call(document.querySelectorAll(
+   '#jkc .jkw .jkw-list, #jkc .jkw .jkw-grp, #jkc .jkw .jkd-counts, #jkc .jkw .jkw-pbar, #jkc .jkw .jkw-more'));}
  window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
    var o=t.classList.toggle('open'),n=+a.getAttribute('data-n'),w=n===1?'1 tag':n+' tags';
    a.textContent=o?'Hide '+w+' ▴':'Show '+w+' ▾';
