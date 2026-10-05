@@ -989,8 +989,10 @@ def _find_base(col, searches):
         return hit
     atoms = _atoms(list(searches))
     out = set()
-    for i in range(0, len(atoms), 150):
-        q = " OR ".join("(%s)" % a for a in atoms[i:i + 150])
+    # 40 per query: each tag term becomes several SQL nodes (child-tag matching), so
+    # 150 could still pass SQLite's depth limit of 1000 on big AnKing lectures
+    for i in range(0, len(atoms), 40):
+        q = " OR ".join("(%s)" % a for a in atoms[i:i + 40])
         out.update(col.find_cards("(%s)" % q))
     out = frozenset(out)
     _FIND_CACHE[key] = out
