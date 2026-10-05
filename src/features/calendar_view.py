@@ -332,8 +332,8 @@ def _detail_html(e):
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
                 "Study unsuspended cards</button>"
-                "<button id='jkd-st-sus' class='jkd-study jkd-study2' onclick=\"pycmd('janki:cal:det:study:suspended')\">"
-                "Study suspended cards</button></div>"
+                "<button id='jkd-st-sus' class='jkd-study jkd-study2' onclick=\"pycmd('janki:cal:det:study:all')\">"
+                "Study all cards</button></div>"
                 "<div class='jkd-note'>Suspended cards are unsuspended just for the session "
                 "and suspended again afterwards.</div>"
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
@@ -401,7 +401,7 @@ def _recount(m):
 
         def ok(r):
             new, due, sus, tot = r
-            _set_study_counts(tot - sus, sus)
+            _set_study_counts(tot - sus, tot)
             _set_counts("<b>%d</b> cards · <span class=c-new>%d new</span> · "
                         "<span class=c-due>%d due</span> · <span class=c-sus>%d suspended</span>"
                         % (tot, new, due, sus))
@@ -415,7 +415,7 @@ def _set_study_counts(active, sus):
         mw.web.eval("(function(a,s){var x=document.getElementById('jkd-st-act'),"
                     "y=document.getElementById('jkd-st-sus');"
                     "if(x)x.textContent='Study unsuspended cards ('+a+')';"
-                    "if(y)y.textContent='Study suspended cards ('+s+')';})(%d,%d)" % (active, sus))
+                    "if(y)y.textContent='Study all cards ('+s+')';})(%d,%d)" % (active, sus))
     except Exception:
         pass
 
