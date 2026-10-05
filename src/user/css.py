@@ -2221,7 +2221,7 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
                             r"<button[^>]*pycmd\(\"%s\"\)[^>]*>.*?</button>" % _cmd,
                             "", body, flags=_re.DOTALL)
                     web_content.body = body
-                else:
+                elif not _calendar_showing():          # the Calendar has its own wand
                     # Normal Decks screen: add a "Load Lectures" button that opens the
                     # Load today's lectures wizard (click handled in _on_js_message).
                     web_content.body += (
@@ -2579,6 +2579,14 @@ def _deck_menu(did: int) -> None:
         if sub:
             col.decks.id("%s::%s" % (name, sub))
             mw.deckBrowser.refresh()
+
+
+def _calendar_showing():
+    try:
+        from ..features import calendar_view
+        return bool(calendar_view._view)
+    except Exception:
+        return False
 
 
 def on_js_message(handled, message, context):

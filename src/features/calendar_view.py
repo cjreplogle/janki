@@ -751,6 +751,7 @@ def open_weak():
     except Exception:
         pass
     _swap("open")
+    QTimer.singleShot(0, _redraw_bottom)
     if _weak is None:
         _weak_compute(_weak_mode)
 
@@ -1257,7 +1258,10 @@ def _close_detail():
         _swap("back")
         return True
     _from_weak = False
+    was_weak = _detail == WEAK
     _detail = None
+    if was_weak:
+        QTimer.singleShot(0, _redraw_bottom)
     try:
         from . import sfx
         sfx.play("back")
@@ -2516,8 +2520,11 @@ def _patch_bottom():
         def draw(self):
             if not _view:
                 return orig(self)
+            # inside Weak areas the bar stays empty (no Identify / Load buttons)
+            buf = "" if _detail == WEAK else \
+                "<button onclick='pycmd(\"janki:cal:weak\");'>Identify Weak Areas</button>"
             self.bottom.draw(
-                buf="<button onclick='pycmd(\"janki:cal:weak\");'>Identify Weak Areas</button>",
+                buf=buf,
                 link_handler=self._linkHandler,
                 web_context=DeckBrowserBottomBar(self))
         draw._jk_cal = True
