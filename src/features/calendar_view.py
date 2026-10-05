@@ -786,24 +786,50 @@ def _weak_html():
                          % (r["leech"], "es" if r["leech"] != 1 else ""))
         done_pct = round(100 * (1 - r["unstarted"]))
         out.append(
-            "<div class='jkw-row'>"
+            "<div class='jkw-row' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
             "<div class='jkw-main'><div class='jkw-t'>%s</div>"
             "<div class='jkw-sub'>%s · %d cards</div>"
             "<div class='jkw-bar'><i style='width:%d%%'></i></div>"
             "<div class='jkw-chips'>%s</div></div>"
             "<div class='jkw-btns'>"
-            "<button class='jkd-sec' onclick=\"pycmd('janki:cal:weak:study:%d')\">Study</button>"
-            "<button class='jkd-sec jkw-prac' onclick=\"pycmd('janki:cal:weak:prac:%d')\">"
+            "<button class='jkd-sec' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
+            "<button class='jkd-sec jkw-prac' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:prac:%d')\">"
             "Practice</button></div></div>"
-            % (html.escape(r["m"]["display"]), _ago(r["e"]["date"]), r["n"], done_pct,
+            % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), r["n"], done_pct,
                "".join(chips), i, i))
     return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
 
 
+_from_weak = False     # the open class page came from the weak-areas list
+
+
+def _open_weak_lecture(i):
+    """A weak-areas row → that lecture's class page (Back returns to the list)."""
+    global _from_weak
+    if not _weak or not (0 <= i < len(_weak)):
+        return
+    e = _weak[i]["e"]
+    if e not in _shown:
+        _shown.append(e)
+    _from_weak = True
+    _open_detail(_shown.index(e))
+
+
 def _close_detail():
-    global _detail
+    global _detail, _from_weak
     if _detail is None:
         return False
+    if _from_weak and _detail != WEAK:      # back to the weak-areas list
+        _from_weak = False
+        _detail = WEAK
+        try:
+            from . import sfx
+            sfx.play("back")
+        except Exception:
+            pass
+        _swap("back")
+        return True
+    _from_weak = False
     _detail = None
     try:
         from . import sfx
@@ -1186,8 +1212,9 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   padding:3px 12px;border-radius:7px;cursor:pointer;opacity:.75;}
 #jkc .jkw-m.on{background:rgba(156,188,243,.28) !important;color:#cfe0ff;opacity:1;}
 #jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
-#jkc .jkw-row{display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
+#jkc .jkw-row{cursor:pointer;transition:background-color .15s ease;display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
+#jkc .jkw-row:hover{background:rgba(255,255,255,.09) !important;}
 .jkw-main{flex:1;min-width:0;}
 .jkw-t{font-weight:700;}
 .jkw-sub{opacity:.7;font-size:.86em;margin:1px 0 5px;}
@@ -1641,7 +1668,9 @@ def on_js_message(handled, message, context):
             _, act, i = cmd.split(":")
             i = int(i)
             if 0 <= i < len(_weak):
-                if act == "study":
+                if act == "open":
+                    _open_weak_lecture(i)
+                elif act == "study":
                     study_event(_weak[i]["e"], None, "all")
                 else:
                     practice_event(_weak[i]["e"])
