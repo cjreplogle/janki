@@ -672,6 +672,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-bar button:hover{background:rgba(255,255,255,.16);}
 .jkc-lbl{font-weight:600;}
 .jkc-grid{display:grid;grid-template-columns:52px repeat(var(--jkc-n,5),1fr);gap:0 6px;position:relative;padding-right:58px;  /* mirrors the hour column so the days sit centred */
+  clip-path:inset(-40px 55px -40px -40px);  /* hour lines end with the last day, not in the margin */
   will-change:transform,opacity;}  /* layer made up front: first Day/3-day/Week zoom doesn't stall */
 #jkc .jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06) !important;border-radius:9px;padding:2px;margin-right:6px;}
 .jkc-segs .jkc-seg{position:relative;z-index:1;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
