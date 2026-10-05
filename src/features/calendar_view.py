@@ -213,6 +213,8 @@ def _week_html():
     pending = False
     for d in days:
         blocks, allday = [], []
+        lanes = _lanes([(i, e) for i, e in enumerate(evs) if e["date"] == d and
+                        e["start"] is not None and not _is_allday_kind(e["summary"])])
         for i, e in enumerate(evs):
             if e["date"] != d:
                 continue
@@ -237,10 +239,15 @@ def _week_html():
                 continue
             top = int((e["start"] - lo) * px_per_min)
             h = max(22, int((e["end"] - e["start"]) * px_per_min) - 2)
+            ln, nl = lanes.get(i, (0, 1))
+            pos = ("" if nl == 1 else
+                   "left:calc(%.4f%% + 2px);right:auto;width:calc(%.4f%% - 4px);"
+                   % (100.0 * ln / nl, 100.0 / nl))
             blocks.append(
-                "<div class='%s' data-i='%d' title='%s' style='top:%dpx;height:%dpx'>"
+                "<div class='%s%s' data-i='%d' title='%s' style='top:%dpx;height:%dpx;%s'>"
                 "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
-                % (cls, i, tip, top, h, mbadge, title, _hm(e["start"]), _hm(e["end"]),
+                % (cls, " jkc-narrow" if nl > 1 else "", i, tip, top, h, pos, mbadge, title,
+                   _hm(e["start"]), _hm(e["end"]),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         if len(allday) > AD_MAX:
             rest = len(allday) - AD_MAX
@@ -657,6 +664,33 @@ def _course_colour(title):
     return _colours[key] % _PALETTE
 
 
+def _lanes(items):
+    """Side-by-side lanes for overlapping classes: {index: (lane, lanes in its cluster)}.
+    Events that overlap (directly or through a chain) share a cluster; each takes the
+    first free lane."""
+    out = {}
+    items = sorted(items, key=lambda ie: (ie[1]["start"], -(ie[1]["end"] or 0)))
+    cluster, ends, c_end = [], [], -1
+
+    def flush():
+        for idx, ln in cluster:
+            out[idx] = (ln, len(ends))
+    for idx, e in items:
+        st, en = e["start"], max(e["end"] or 0, e["start"] + 1)
+        if cluster and st >= c_end:
+            flush(); cluster, ends = [], []
+        for ln, end in enumerate(ends):
+            if end <= st:
+                ends[ln] = en; break
+        else:
+            ln = len(ends); ends.append(en)
+        cluster.append((idx, ln))
+        c_end = max(c_end, en) if len(cluster) > 1 else en
+    if cluster:
+        flush()
+    return out
+
+
 def _is_allday_kind(summary):
     """Day-wide notices that come through as timed events (e.g. a dress code) belong
     in the all-day row, not across the time grid."""
@@ -737,6 +771,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ad{position:relative;margin:0 2px 2px;height:18px;line-height:16px;padding:0 8px !important;
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
+.jkc-narrow{padding:3px 5px !important;font-size:.84em;}
+.jkc-narrow .jkc-m{transform:scale(.85);}
 .jkc-more{opacity:.6;border:none !important;text-align:center;}
 .jkc-t{font-weight:600;}
 /* mandatory: an outlined M badge in the block's top-right corner */
