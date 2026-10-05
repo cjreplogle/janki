@@ -718,7 +718,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd h2{margin:0 0 4px;font-size:1.45em;}
 .jkd-sub{opacity:.85;margin-bottom:4px;}
 #jkc .jkd-pick{background:rgba(255,255,255,.07) !important;color:inherit;border:1px solid rgba(255,255,255,.14);
-  border-radius:8px;padding:3px 8px;font:inherit;max-width:420px;cursor:pointer;}
+  border-radius:8px;padding:3px 8px;font:inherit;max-width:420px;cursor:pointer;
+  text-align:center;text-align-last:center;}
 #jkc .jkd-pick:hover{background:rgba(255,255,255,.12) !important;}
 #jkc .jkd-pick option{background:#1c1e24;color:#eee;}
 .jkd-when,.jkd-loc{opacity:.8;font-size:.95em;margin-top:2px;}
