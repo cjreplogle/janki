@@ -875,6 +875,12 @@ def _weak_compute(mode, then=None):
                                   "type < 3 group by cid, ease",
                                   int((_t.time() - 30 * 86400) * 1000)),
                 "today": col.sched.today, "other": {}, "allow": {}}
+        # reviews per card per day, last 14 days (day 0 = 13 days ago … 13 = today)
+        _mid = datetime.datetime.combine(datetime.date.today(), datetime.time())
+        _start = int((_mid - datetime.timedelta(days=13)).timestamp())
+        data["daily"] = col.db.all(
+            "select cid, cast((id / 1000 - ?) / 86400 as int), count() from revlog "
+            "where id >= ? group by 1, 2", _start, _start * 1000)
         lectures.detect_source_decks(col)
         for fam, names in lectures.source_decks().items():   # source's decks + subdecks
             ids = set()
@@ -908,6 +914,10 @@ def _weak_compute(mode, then=None):
         for cid, nid, q, typ, d, did in data["cards"]:
             nid_cards.setdefault(nid, []).append((cid, q, typ, d, did))
         allow = data.get("allow") or {}
+        daily = {}
+        for cid, day, cnt in data.get("daily") or []:
+            if 0 <= day < 14:
+                daily.setdefault(cid, []).append((day, cnt))
         rev = {}
         for cid, ease, cnt in data["rev"]:
             g, b = rev.get(cid, (0, 0))
@@ -956,6 +966,7 @@ def _weak_compute(mode, then=None):
                 for nid in atom_nids(a):
                     hits.setdefault(nid, set()).add(fam)
             n = sus = new = due = leech = good = bad = 0
+            spark = [0] * 14
             for nid, fams in hits.items():
                 lch = nid in leech_nids
                 for cid, q, typ, d, did in nid_cards.get(nid, ()):
@@ -974,6 +985,8 @@ def _weak_compute(mode, then=None):
                     gb = rev.get(cid)
                     if gb:
                         good += gb[0]; bad += gb[1]
+                    for day, cnt in daily.get(cid, ()):
+                        spark[day] += cnt
             if not n:
                 continue
             revs = good + bad
@@ -983,7 +996,7 @@ def _weak_compute(mode, then=None):
             score = (0.55 * unstarted + 0.3 * (1 - recall if recall is not None else 0.5)
                      + 0.15 * min(1.0, due / n * 3) + min(0.15, leech * 0.02))
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
-                         "active": active,
+                         "active": active, "spark": spark,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
         rows.sort(key=lambda r: -r["score"])
@@ -1139,6 +1152,27 @@ def _now_min():
     return t.hour * 60 + t.minute
 
 
+def _spark_svg(vals, w=96, h=30):
+    """A tiny smoothed line of daily reviews (last 14 days) — plain SVG, no script."""
+    if not vals:
+        return ""
+    top = max(vals) or 1
+    n = len(vals)
+    pts = [(2 + i * (w - 4) / (n - 1), h - 3 - (v / top) * (h - 8)) for i, v in enumerate(vals)]
+    d = "M%.1f,%.1f" % pts[0]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):            # smooth: midpoint curves
+        mx = (x0 + x1) / 2
+        d += " C%.1f,%.1f %.1f,%.1f %.1f,%.1f" % (mx, y0, mx, y1, x1, y1)
+    area = d + " L%.1f,%d L%.1f,%d Z" % (pts[-1][0], h - 1, pts[0][0], h - 1)
+    tot = sum(vals)
+    return ("<svg class='jkw-spark' width='%d' height='%d' viewBox='0 0 %d %d'>"
+            "<title>%d review%s in the last 14 days</title>"
+            "<path d='%s' fill='rgba(156,188,243,.14)' stroke='none'/>"
+            "<path d='%s' fill='none' stroke='%s' stroke-width='1.6' stroke-linecap='round'/>"
+            "</svg>" % (w, h, w, h, tot, "" if tot == 1 else "s", area, d,
+                        "#9cbcf3" if tot else "rgba(255,255,255,.25)"))
+
+
 def _date_label(d):
     return "%s, %s %d" % (_DAY[d.weekday()], d.strftime("%b"), d.day)
 
@@ -1189,12 +1223,12 @@ def _weak_html():
             "<div class='jkw-sub'>%s · %s</div>"
             "<div class='jkw-bar'><i style='width:%d%%'></i></div>"
             "<div class='jkw-chips'>%s</div></div>"
-            "<div class='jkw-btns'>"
+            "%s<div class='jkw-btns'>"
             "<button class='jkd-sec' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
             "<button class='jkd-sec jkw-prac' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:prac:%d')\">"
             "Practice</button></div></div>"
             % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
-               "".join(chips), i, i))
+               "".join(chips), _spark_svg(r.get("spark") or []), i, i))
 
     rows = list(enumerate(_weak))
     start = _weak_start(_weak_mode)
@@ -1714,6 +1748,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-c{font-size:.78em;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.08) !important;}
 #jkc .jkw-c.jkw-bad{color:#ff9d8a;background:rgba(255,157,138,.12) !important;}
 .jkw-btns{display:flex;gap:6px;flex:none;}
+.jkw-spark{flex:none;opacity:.95;}
 .jkw-btns .jkd-sec{margin:0 !important;}
 #jkc .jkw-prac{color:#c9f7c9 !important;}
 #jkc .jkd-prac{background:#9fe0a3 !important;color:#0f2e16 !important;margin-left:8px;}

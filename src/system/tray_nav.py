@@ -1640,7 +1640,7 @@ def _build() -> "QWidget":
     stack.addWidget(today_page)
     if prac_page is not None:
         stack.addWidget(prac_page)
-    slot.setMinimumHeight(60)                  # can shrink (scrolls) under the height cap
+    slot.setFixedHeight(_PAGE_H)               # exactly one page: no slack to soak up
     _tray_mode_widgets["stack"] = stack
     lay.addWidget(slot)
 
