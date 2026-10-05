@@ -1233,7 +1233,6 @@ def _build() -> "QWidget":
         srow.addWidget(_b, 1)
     lay.addLayout(srow)
     today_box = _build_today_list(root)
-    lay.addWidget(today_box)
 
     # Deck list (scrollable).
     scroll = QScrollArea(root)
@@ -1255,8 +1254,12 @@ def _build() -> "QWidget":
     def _show_mode(m, save=True):
         b_decks.setChecked(m != "today")
         b_today.setChecked(m == "today")
-        scroll.setVisible(m != "today")
-        today_box.setVisible(m == "today")
+        st = _tray_mode_widgets.get("stack")
+        if st is not None:
+            st.setCurrentWidget(today_box if m == "today" else scroll)
+        else:
+            scroll.setVisible(m != "today")
+            today_box.setVisible(m == "today")
         for _b in (b_decks, b_today):
             _b.setObjectName(_TOGGLE_ON_NAME.get("reword", "tgl") if _b.isChecked() else "tgl")
             _b.style().unpolish(_b)
@@ -1326,7 +1329,17 @@ def _build() -> "QWidget":
     scroll.setWidget(inner)
     # Collapsed by default: apply visibility (hides all subdecks) + set the height cap.
     _apply_deck_visibility()
-    lay.addWidget(scroll)
+    # Decks and Today share ONE stacked slot sized to the larger list: switching just
+    # flips which is shown — the panel never resizes (a resize made macOS order the
+    # glass panel out and back in at a corner)
+    from aqt.qt import QStackedLayout
+    slot = QWidget(root)
+    stack = QStackedLayout(slot)
+    stack.setContentsMargins(0, 0, 0, 0)
+    stack.addWidget(scroll)
+    stack.addWidget(today_box)
+    _tray_mode_widgets["stack"] = stack
+    lay.addWidget(slot)
 
     sep1 = QFrame(); sep1.setObjectName("sep"); lay.addWidget(sep1)
 

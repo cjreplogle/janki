@@ -1023,9 +1023,10 @@ def _atom_plain(a):
 # "Biweekly Assessment" (or "… Exam"): the assessment itself — not its feedback session,
 # review, retake, etc.
 _EXAM_RE = re.compile(r"\b(assessment|exam|examination)\b", re.I)
-_NOT_EXAM = re.compile(r"\b(review|prep|preparation|practice|recap|q ?& ?a|tutorial|info|feedback|"
-                       r"debrief|retake|re-?take|make-?up|remediation|orientation|results?|"
-                       r"study|session)\b", re.I)
+_NOT_EXAM = re.compile(r"\b(reviews?|prep|preparation|practices?|recaps?|q ?& ?a|tutorials?|"
+                       r"info|feedback|debrief(?:ing)?s?|retakes?|re-?takes?|make-?ups?|"
+                       r"remediation|orientation|results?|study|sessions?|walk-?through|"
+                       r"overview|go-?over)\b", re.I)
 _EXAM_NUM = re.compile(r"(?:assessment|exam(?:ination)?)\s*#?\s*([ivx]{1,5}|\d{1,2})\b", re.I)
 
 
