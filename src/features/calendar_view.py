@@ -2036,8 +2036,9 @@ _JS = """<script>(function(){
        var cur=document.querySelector('#jkc .jk-kbf');
        if(!cur){var f=kbItems()[0];if(f)kbPick(f);return;}       // first press: highlight
        var nx=kbNext(cur,k);
+       // ← never leaves the page (stray arrow events — a controller / remote — closed
+       // the class page on their own); Esc / Backspace / the Back button do
        if(nx)kbPick(nx);
-       else if(k==='ArrowLeft'){kbPick(null);pycmd('janki:cal:det:back');}
        else if(k==='ArrowUp'){kbPick(null);pycmd('janki:toolbar');}
        return;}
      if(k==='Enter'||k===' '){e.preventDefault();
