@@ -37,11 +37,11 @@ def open_calendar():
         practice._practice_view = False
         _view = True
         if stats_embed.is_open():
-            stats_embed.close_soon(sound="page")
+            stats_embed.close_soon(sound="calendar")
             _redraw()
         else:
             stats_embed.animate_next_deck_render()
-            stats_embed.fade_then(_redraw, sound="page")
+            stats_embed.fade_then(_redraw, sound="calendar")
     except Exception as e:
         log("calendar open: %s" % e)
         _view = True
@@ -283,8 +283,17 @@ def _page_html():
 
 # ------------------------------------------------------------- class page --------
 def _lecture_query(m, fams):
-    frags = [s for s in m["searches"] if _fam(s) in fams]
-    return " OR ".join("(%s)" % s for s in frags) if frags else ""
+    """The lecture's tag searches for the switched-on sources (a list; empty = none)."""
+    return [s for s in m["searches"] if _fam(s) in fams]
+
+
+def _cids(col, frags, extra=""):
+    from ..integrations import lectures
+    return list(lectures.find_ids(col, frags, extra))
+
+
+def _cid_term(ids):
+    return "cid:%s" % ",".join(str(c) for c in ids) if ids else "cid:0"
 
 
 def _fam(frag):
@@ -399,7 +408,7 @@ def _recount(m):
         from aqt.operations import QueryOp
 
         def op(col):
-            n = lambda extra: len(col.find_cards("(%s) %s" % (q, extra)))
+            n = lambda extra: len(_cids(col, q, extra))
             return (n("is:new -is:suspended"), n("is:due -is:suspended"), n("is:suspended"),
                     n(""))
 
@@ -527,18 +536,18 @@ def study_event(e, fams=None, which="all"):
     try:
         _restore_suspended()
         _cleanup_temp()
-        sus = list(col.find_cards("(%s) is:suspended" % q)) if which != "active" else []
+        sus = _cids(col, q, "is:suspended") if which != "active" else []
         if sus:
             _save_resuspend(sus)
             col.sched.unsuspend_cards(sus)
         did = col.decks.new_filtered(TEMP_PREFIX + m["display"][:60])
         d = col.decks.get(did)
         if which == "suspended":
-            term = "cid:%s" % ",".join(str(c) for c in sus) if sus else "cid:0"
+            term = _cid_term(sus)
         elif which == "active":
-            term = "(%s) -is:suspended -is:buried" % q
+            term = _cid_term(_cids(col, q, "-is:suspended -is:buried"))
         else:
-            term = "(%s) -is:buried" % q
+            term = _cid_term(_cids(col, q, "-is:buried"))
         d["terms"] = [[term, 99999, 0]]
         d["resched"] = True
         col.decks.save(d)
@@ -574,7 +583,7 @@ def _unsuspend_detail():
     box = {"n": 0}
 
     def op(col):
-        ids = col.find_cards("(%s) is:suspended" % q)
+        ids = _cids(col, q, "is:suspended")
         box["n"] = len(ids)
         return col.sched.unsuspend_cards(ids)
 
@@ -654,7 +663,7 @@ body center > table:first-of-type{display:none !important;}
 body center > br{display:none !important;}
 html body{padding-top:0 !important;margin-top:0 !important;justify-content:flex-start !important;}
 html body > center{margin-top:0 !important;padding-top:0 !important;}
-#jkc{width:min(1100px,calc(100vw - 32px));margin:6px auto 24px;text-align:left;}
+#jkc{width:min(1100px,calc(100vw - 32px));margin:18px auto 24px;text-align:left;}
 .jkc-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin:0 0 10px;}
 .jkc-l{justify-self:start;}.jkc-r{justify-self:end;}
 /* ‹ / ›: no background; slide outward on hover, press in on click */
@@ -1000,8 +1009,8 @@ def study_lecture(m):
     col = mw.col
     if col is None or not m or not m["searches"]:
         return
-    search = "(%s) (is:due OR is:new) -is:suspended -is:buried" % " OR ".join(
-        "(%s)" % s for s in m["searches"])
+    search = _cid_term(_cids(col, list(m["searches"]),
+                             "(is:due OR is:new) -is:suspended -is:buried"))
     name = TEMP_PREFIX + m["display"][:60]
     try:
         _cleanup_temp(keep=None)
@@ -1193,8 +1202,20 @@ def install_toolbar(links, toolbar):
                 if cur is None or getattr(cur, "_jk_cal_wrapped", False):
                     continue
 
-                def wrapped(*a, _cur=cur, **k):
+                def wrapped(*a, _cur=cur, _key=key, **k):
+                    was = _view
                     close()
+                    if was and _key == "decks" and getattr(mw, "state", None) == "deckBrowser":
+                        try:                       # Calendar → Decks: fade out, list rises in
+                            from . import stats_embed
+                            if not stats_embed.is_open():
+                                stats_embed.animate_next_deck_render()
+                                stats_embed.fade_then(
+                                    lambda: stats_embed.fast_deck_redraw() or _cur(*a, **k),
+                                    sound="page")
+                                return None
+                        except Exception:
+                            pass
                     return _cur(*a, **k)
                 wrapped._jk_cal_wrapped = True
                 lh[key] = wrapped

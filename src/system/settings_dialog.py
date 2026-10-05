@@ -2960,7 +2960,7 @@ class GlassSettings(QDialog):
         _pl.setWordWrap(True)
         lay.addWidget(_pl)
         prev = _QGL()
-        names = ("move", "select", "back", "open", "settings", "stats", "practice", "fold",
+        names = ("move", "select", "back", "open", "settings", "stats", "practice", "calendar", "fold",
                  "unfold", "page",
                  "reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup",
                  "sync", "tray", "lectures", "loaded", "close", "caption_in",

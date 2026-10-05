@@ -946,12 +946,36 @@ def match_today(families=None):
     return matched, unmatched
 
 
+def _atoms(searches):
+    """Each search split to its single-tag pieces where it's a plain OR of tags
+    ("(tag:a OR tag:b …)"), so huge lectures can be asked in small chunks."""
+    out = []
+    for s in searches:
+        inner = s[1:-1] if s.startswith("(") and s.endswith(")") else None
+        parts = inner.split(" OR ") if inner else None
+        if parts and all(p.startswith(('"tag:', "tag:")) and "(" not in p for p in parts):
+            out.extend(parts)
+        else:
+            out.append(s)
+    return out
+
+
+def find_ids(col, searches, extra=""):
+    """Card ids matching any of `searches` (+ `extra`). One giant OR overflows SQLite's
+    expression depth (1000) on lectures with hundreds of tags — ask 150 at a time."""
+    atoms = _atoms(list(searches))
+    out = set()
+    for i in range(0, len(atoms), 150):
+        q = " OR ".join("(%s)" % a for a in atoms[i:i + 150])
+        out.update(col.find_cards("(%s) %s" % (q, extra) if extra else "(%s)" % q))
+    return out
+
+
 def _suspended_ids(searches):
     if not searches:
         return set()
-    joined = " OR ".join("(%s)" % s for s in searches)
     try:
-        return set(mw.col.find_cards("(%s) is:suspended" % joined))
+        return find_ids(mw.col, searches, "is:suspended")
     except Exception as e:
         _log("find_cards failed: %s" % e)
         return set()
@@ -962,9 +986,8 @@ def _match_ids(searches):
     know which lecture a card belongs to when reconciling re-suspends."""
     if not searches:
         return set()
-    joined = " OR ".join("(%s)" % s for s in searches)
     try:
-        return set(mw.col.find_cards("(%s)" % joined))
+        return find_ids(mw.col, searches)
     except Exception as e:
         _log("find_cards (all) failed: %s" % e)
         return set()
@@ -2555,8 +2578,8 @@ def _open_today_dialog(day_offset=0, auto=False):
             if not joined:
                 return set(), set()
             try:
-                return (set(col.find_cards("(%s) is:suspended" % joined)),   # → unsuspend
-                        set(col.find_cards("(%s)" % joined)))                # all (re-suspend calc)
+                return (find_ids(col, searches_all, "is:suspended"),   # → unsuspend
+                        find_ids(col, searches_all))                   # all (re-suspend calc)
             except Exception as e:
                 _log("find_cards failed: %s" % e)
                 return set(), set()
@@ -2988,7 +3011,7 @@ def run_today(interactive=True, auto=False):
         box = {}
 
         def op(col):
-            ids = list(col.find_cards("(%s) is:suspended" % joined))
+            ids = list(find_ids(col, searches, "is:suspended"))
             box["n"] = len(ids)
             return col.sched.unsuspend_cards(ids)
 
@@ -3077,7 +3100,7 @@ def _parse_ics_events(path):
         _log("ics read failed: %s" % e)
         return []
     raw = re.sub(r"\r?\n[ \t]", "", raw)
-    out = []
+    out, moved = [], set()
     for block in raw.split("BEGIN:VEVENT")[1:]:
         block = block.split("END:VEVENT")[0]
 
@@ -3094,6 +3117,9 @@ def _parse_ics_events(path):
         loc, _ = field("LOCATION")
         desc, _ = field("DESCRIPTION")
         cats, _ = field("CATEGORIES")
+        rrule, _ = field("RRULE")
+        uid, _ = field("UID")
+        rid, ridtz = field("RECURRENCE-ID")
         if not (summ and st):
             continue
         d, smin = _ics_dt(st, stz)
@@ -3108,9 +3134,62 @@ def _parse_ics_events(path):
                                  .replace("\\n", " ")).strip()
         blob = " ".join(unesc(x) for x in (summ, desc, cats)).lower()
         mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
-        out.append({"date": d, "start": smin, "end": emin,
-                    "summary": unesc(summ), "location": unesc(loc), "mandatory": mand})
-    return out
+        base = {"start": smin, "end": emin, "summary": unesc(summ),
+                "location": unesc(loc), "mandatory": mand}
+        if rid:                                   # one moved/edited occurrence
+            moved.add((uid, _ics_dt(rid, ridtz)[0]))
+        days = [d]
+        # an all-day notice spanning several days (DTEND is exclusive) → every day
+        if smin is None and ed and ed > d + datetime.timedelta(days=1):
+            days = [d + datetime.timedelta(days=i) for i in range(min((ed - d).days, 366))]
+        if rrule and not rid:
+            ex = set()
+            for exv in re.findall(r"(?m)^EXDATE(?:;[^:\r\n]*)?:(.*)$", block):
+                for v in exv.split(","):
+                    ex.add(_ics_dt(v.strip(), None)[0])
+            days = [x for x in _expand_rrule(d, rrule, len(days)) if x not in ex]
+            for x in days:
+                out.append(dict(base, date=x, _uid=uid, _rec=True))
+            continue
+        for x in days:
+            out.append(dict(base, date=x, _uid=uid))
+    # an edited occurrence replaces the generated one for that day
+    return [e for e in out if not (e.get("_rec") and (e.get("_uid"), e["date"]) in moved)]
+
+
+_WD = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+
+
+def _expand_rrule(d0, rule, span=1):
+    """Dates of a DAILY/WEEKLY repeating event (INTERVAL, BYDAY, UNTIL, COUNT), capped at
+    ~2 years. Other frequencies fall back to the first date. `span` = days per
+    occurrence (multi-day all-day notices)."""
+    r = dict(kv.split("=", 1) for kv in rule.split(";") if "=" in kv)
+    freq = r.get("FREQ", "")
+    step = max(1, int(r.get("INTERVAL", "1") or 1))
+    until = _ics_dt(r["UNTIL"], None)[0] if "UNTIL" in r else None
+    count = int(r["COUNT"]) if r.get("COUNT", "").isdigit() else None
+    stop = d0 + datetime.timedelta(days=730)
+    if until:
+        stop = min(stop, until)
+    starts = []
+    if freq == "DAILY":
+        x = d0
+        while x <= stop and (count is None or len(starts) < count):
+            starts.append(x); x += datetime.timedelta(days=step)
+    elif freq == "WEEKLY":
+        wds = sorted(_WD[w[-2:]] for w in r.get("BYDAY", "").split(",") if w[-2:] in _WD) \
+            or [d0.weekday()]
+        wk = d0 - datetime.timedelta(days=d0.weekday())
+        while wk <= stop and (count is None or len(starts) < count):
+            for wd in wds:
+                x = wk + datetime.timedelta(days=wd)
+                if d0 <= x <= stop and (count is None or len(starts) < count):
+                    starts.append(x)
+            wk += datetime.timedelta(weeks=step)
+    else:
+        starts = [d0]
+    return [x + datetime.timedelta(days=i) for x in starts for i in range(span)]
 
 
 _EV_CACHE = {"key": None, "events": []}

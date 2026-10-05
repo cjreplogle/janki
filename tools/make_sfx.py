@@ -204,6 +204,11 @@ def bank(name, voice, move, wet_scale=1.0):
     # lectures wizard open: a soft papery flick with two warm notes (opening a notebook)
     save("lectures", mix((0, sweep(0.08, 0.035, 0.3, 0.12, 71, 1.6)),
                          (0.03, voice(440, 0.07, 0.15, 42)), (0.09, voice(587, 0.12, 0.15, 30))))
+    # calendar open: a light page-flip under three quick "day" ticks stepping up a
+    # fourth and landing softly (a planner falling open on this week)
+    save("calendar", mix((0, sweep(0.1, 0.03, 0.2, 0.45, 111, 1.5)),
+                         (0.02, voice(523, 0.04, 0.12, 70)), (0.065, voice(587, 0.04, 0.12, 70)),
+                         (0.11, voice(659, 0.04, 0.12, 70)), (0.16, voice(880, 0.13, 0.14, 30))))
     # loaded (files imported OK): a bright little "done" — quick G–C–E–G roll
     save("loaded", mix((0, voice(784, 0.05, 0.15, 60)), (0.035, voice(1047, 0.05, 0.15, 60)),
                        (0.07, voice(1319, 0.05, 0.15, 60)), (0.105, voice(1568, 0.14, 0.15, 26))))
