@@ -3139,10 +3139,8 @@ def _parse_ics_events(path):
                                  .replace("\\n", " ")).strip()
         blob = " ".join(unesc(x) for x in (summ, desc, cats)).lower()
         mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
-        assign = bool(re.search(r"\bassignments?\b|\bhomework\b|\bworksheets?\b|\bpre-?work\b",
-                                blob))
         base = {"start": smin, "end": emin, "summary": unesc(summ),
-                "location": unesc(loc), "mandatory": mand, "assignment": assign}
+                "location": unesc(loc), "mandatory": mand}
         # "Dress Code: …" written in a class's notes → that day's dress code
         dm = re.search(r"dress\s*-?\s*code\s*[:\-–]\s*(.+?)(?:\\n|\\N|\n|$)", desc or "", re.I)
         if dm:

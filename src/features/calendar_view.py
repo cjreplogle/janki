@@ -234,9 +234,7 @@ def _week_html():
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
             title = html.escape(e["summary"])
-            mbadge = ("<span class='jkc-m' title='Mandatory'>M</span>" if e.get("mandatory") else "") + \
-                     ("<span class='jkc-m jkc-a%s' title='Has an assignment'>A</span>"
-                      % (" jkc-a2" if e.get("mandatory") else "") if e.get("assignment") else "")
+            mbadge = "<span class='jkc-m' title='Mandatory'>%s</span>" % _STAR if e.get("mandatory") else ""
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
@@ -269,7 +267,7 @@ def _week_html():
             allday = allday[:AD_MAX] + ["<div class='jkc-ad jkc-more'>+%d more</div>" % rest]
         cols.append(
             "<div class='jkc-col%s'><div class='jkc-dh'>%s <b>%d</b></div>"
-            "<div class='jkc-ads' style='height:%dpx'>%s</div><div class='jkc-body'>%s</div></div>"
+            "<div class='jkc-ads' style='min-height:%dpx'>%s</div><div class='jkc-body'>%s</div></div>"
             % (" jkc-today" if d == today else "", _DAY[d.weekday()], d.day, ads_h, "".join(allday),
                "".join(blocks)))
     hours = "".join("<div class='jkc-hr' style='top:%.3f%%'><span>%s</span></div>"
@@ -302,8 +300,8 @@ def _week_html():
     # day height: at least the old fixed size, else whatever the window leaves below
     # the bar, day names and all-day strip
     grid = ("<div class='jkc-grid' style='--jkc-n:%d;--jkc-h:max(%dpx,calc(100vh - %dpx))'>"
-            "<div class='jkc-hours' style='margin-top:%dpx'>%s</div>%s</div>"
-            % (len(days), grid_h, 130 + ads_h, 24 + ads_h, hours, "".join(cols)))
+            "<div class='jkc-hours'>%s</div>%s</div>"
+            % (len(days), grid_h, 130 + ads_h, hours, "".join(cols)))
     global _pending_tries
     if pending and _pending_tries < 2:        # match in the background, then refresh
         _pending_tries += 1
@@ -396,9 +394,8 @@ def _detail_html(e):
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
             % (html.escape(e["summary"]),
-               (" <span class='jkc-m jkd-m' title='Mandatory'>M</span>" if e.get("mandatory") else "") +
-               (" <span class='jkc-m jkd-m jkc-a' title='Has an assignment'>A</span>"
-                if e.get("assignment") else ""),
+               (" <span class='jkc-m jkd-m' title='Mandatory'>%s</span>" % _STAR
+                if e.get("mandatory") else ""),
                sub, html.escape(when), loc, body))
 
 
@@ -684,6 +681,9 @@ def _course_colour(title):
     return _colours[key] % _PALETTE
 
 
+# mandatory: a small filled star (Janki's own mark)
+_STAR = ("<svg width='11' height='11' viewBox='0 0 24 24'><path d='M12 2.5l2.9 6.1 6.6.8-4.9 4.6"
+         " 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z' fill='currentColor'/></svg>")
 _SHIRT = ("<svg class='jkc-shirt' width='13' height='11' viewBox='0 0 26 22'><path d='M9 1"
           "L1 5l3 6 3-1.5V21h12V9.5l3 1.5 3-6-8-4c-.6 2-2.4 3.2-4 3.2S9.6 3 9 1z' fill='none'"
           " stroke='currentColor' stroke-width='2' stroke-linejoin='round'/></svg>")
@@ -766,13 +766,16 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 /* one pill behind the buttons that glides to the chosen view */
 #jkc .jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
   background:rgba(156,188,243,.28) !important;transition:transform .24s cubic-bezier(.2,.8,.2,1),width .24s cubic-bezier(.2,.8,.2,1);}
-.jkc-hours{position:relative;margin-top:52px;height:var(--jkc-h);}
+/* hours hug the bottom, level with the day bodies — so a taller all-day strip (a
+   wrapped dress code) can never put the times out of line */
+.jkc-hours{position:relative;align-self:end;height:var(--jkc-h);}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
-.jkc-col{min-width:0;}
+.jkc-col{min-width:0;display:flex;flex-direction:column;}
+.jkc-col .jkc-body{flex:none;}
 .jkc-dh{text-align:center;font-size:.86em;opacity:.8;height:24px;line-height:24px;}
 .jkc-today .jkc-dh{color:#9cbcf3;opacity:1;}
-.jkc-ads{overflow:hidden;}
+.jkc-ads{overflow:hidden;flex:1;}
 .jkc-body{position:relative;height:var(--jkc-h);border-radius:10px;background:rgba(255,255,255,.025);}
 .jkc-today .jkc-body{background:rgba(156,188,243,.06);}
 .jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;box-sizing:border-box;
@@ -797,7 +800,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
 #jkc .jkc-shirt{vertical-align:-1px;margin-right:5px;opacity:.85;}
-#jkc .jkc-dress{color:#ff9d8a !important;border-color:rgba(255,157,138,.6) !important;background:rgba(255,157,138,.1) !important;cursor:default;transform:none !important;filter:none !important;}
+#jkc .jkc-dress{white-space:normal;height:auto;min-height:18px;line-height:1.25;padding:1px 8px !important;
+  overflow:visible;text-overflow:clip;color:#ff9d8a !important;border-color:rgba(255,157,138,.6) !important;background:rgba(255,157,138,.1) !important;cursor:default;transform:none !important;filter:none !important;}
 /* where you are in the day: a thin red line with a dot on today's column */
 #jkc .jkc-now{position:absolute;left:0;right:0;height:0;z-index:5;pointer-events:none;display:none;
   border-top:2px solid #ff6b6b;}
@@ -811,10 +815,10 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-m{position:absolute;top:4px;right:4px;width:15px;height:15px;box-sizing:border-box;
   display:flex;align-items:center;justify-content:center;line-height:1;padding-top:1px;
   font-size:10px;font-weight:700;font-family:-apple-system,"Segoe UI",sans-serif;
-  color:#ff9d8a;border:1.5px solid #ff9d8a;border-radius:4px;}
-#jkc .jkc-m.jkc-a{color:#ffd27a;border-color:#ffd27a;}   /* assignment: amber, M's twin */
-#jkc .jkc-m.jkc-a2{right:22px;}                          /* sits left of an M */
+  color:#ff9d8a;border:none;border-radius:0;}
 .jkc-ev .jkc-t{padding-right:16px;}
+.jkd-m svg{width:16px;height:16px;}
+.jkc-ev:has(> .jkc-m) .jkc-t{padding-right:13px;}  /* room for the star */
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
