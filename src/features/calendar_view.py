@@ -156,12 +156,12 @@ def _go_week(delta):
             _anchor = _days()[0] + datetime.timedelta(days=delta)   # slide one day at a time
         else:
             _anchor = _step_weekdays(_days()[0], delta)
-    try:
+    _swap("today" if delta is None else ("next" if delta > 0 else "prev"))
+    try:                                # after the swap: the sound can take ~40 ms
         from . import sfx
         sfx.play("move")
     except Exception:
         pass
-    _swap("today" if delta is None else ("next" if delta > 0 else "prev"))
 
 
 # ------------------------------------------------------------------- render ------
@@ -753,7 +753,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ads{overflow:hidden;}
 .jkc-body{position:relative;border-radius:10px;background:rgba(255,255,255,.025);}
 .jkc-today .jkc-body{background:rgba(156,188,243,.06);}
-.jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;
+.jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;box-sizing:border-box;
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
   font-size:.78em;line-height:1.25;transition:background .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
 .jkc-ev:hover,.jkc-ev.jk-kb{background:rgba(156,188,243,.36);transform:translateY(-1px);}
@@ -889,9 +889,17 @@ _JS = """<script>(function(){
    n.style.display='block';n.style.top=((m-lo)*parseFloat(n.dataset.ppm))+'px';}
  if(!window._jkNowT)window._jkNowT=setInterval(nowLine,30000);
  window.addEventListener('load',nowLine);setTimeout(nowLine,0);
+ var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
+   // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
+   // nothing changed — replacing the page mid-slide read as a hitch.
+   if(dir==='refresh'){
+     if(inner===lastInner)return;
+     if(outDone||inDone){var w=outDone||inDone;w.then(function(){jkcSwap(inner,'refresh');});return;}
+   }
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
+     lastInner=inner;
      var keep=root.querySelector('.jkc-l');            // the view switch keeps gliding
      root.innerHTML=inner;
      var fresh=root.querySelector('.jkc-l');
@@ -911,6 +919,8 @@ _JS = """<script>(function(){
        var ga=gh.animate([{transform:'none',opacity:1},{transform:'translateX('+(-sx)+'px)',opacity:0}],
                          {duration:260,easing:EASE,fill:'forwards'});
        ga.finished.then(function(){gh.remove();}).catch(function(){gh.remove();});
+       var f1=ga.finished.catch(function(){});inDone=f1;
+       f1.then(function(){if(inDone===f1)inDone=null;});
        return;
      }
      g.style.willChange='transform,opacity';
@@ -920,6 +930,8 @@ _JS = """<script>(function(){
      var a=g.animate([{transform:from,opacity:0},
                       {transform:'none',opacity:1}],{duration:dir==='today'?160:240,easing:EASE});
      a.finished.then(function(){g.style.willChange='';}).catch(function(){});
+     var f2=a.finished.catch(function(){});inDone=f2;
+     f2.then(function(){if(inDone===f2)inDone=null;});
    }
    if(outDone){var p=outDone;outDone=null;p.then(put);} else put();
  };
@@ -1325,8 +1337,10 @@ def _prewarm_work():
     try:
         from ..integrations import lectures
         t = datetime.date.today()
-        for e in lectures.events_between(t - datetime.timedelta(days=14),
-                                         t + datetime.timedelta(days=21)):
+        # nearest first, so this week and its neighbours are ready soonest
+        evs = lectures.events_between(t - datetime.timedelta(days=28),
+                                      t + datetime.timedelta(days=56))
+        for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):
             lectures.match_event(e["summary"])
     except Exception as e:
         log("calendar prewarm: %s" % e)
