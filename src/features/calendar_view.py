@@ -13,6 +13,7 @@ transitions, toolbar handling and keyboard focus.
 Only the user's own Janki reads their calendar, locally (lectures.events_between).
 """
 import datetime
+import time
 import html
 import re
 import json
@@ -31,7 +32,7 @@ TEMP_PREFIX = "Janki Calendar::"
 # --------------------------------------------------------------- open / close ----
 def open_calendar():
     global _view
-    QTimer.singleShot(2500, lambda: _view and prewarm_weak())   # weak areas, ready early
+    QTimer.singleShot(6000, lambda: _view and not _weak_busy and prewarm_weak())   # weak areas, ready early
     # Calendar clicked while a class page is open → back to the calendar grid
     if _view and _detail is not None and getattr(mw, "state", None) == "deckBrowser":
         _close_detail()
@@ -68,9 +69,16 @@ def _redraw():
         if getattr(mw, "state", None) != "deckBrowser":
             mw.moveToState("deckBrowser")
         else:
-            from . import stats_embed
-            if not stats_embed.fast_deck_redraw():
-                mw.deckBrowser.refresh()
+            # The Calendar never shows the deck tree, so never wait on fetching it:
+            # re-use what Anki has (a fresh fetch queues behind any background work —
+            # the first-open hold). Decks still refreshes properly when you go back.
+            db = mw.deckBrowser
+            if getattr(db, "_render_data", None) is not None:
+                db._renderPage(reuse=True)
+            else:
+                from . import stats_embed
+                if not stats_embed.fast_deck_redraw():
+                    db.refresh()
     except Exception as e:
         log("calendar redraw: %s" % e)
 
@@ -584,14 +592,15 @@ def _weak_cached(mode):
 
 
 def prewarm_weak():
-    """Work out both views in the background (after the Calendar opens), so the button
-    shows results straight away."""
+    """Work out both views in the background (after the Calendar opens), one after the
+    other, so the button shows results straight away without a burst of work."""
     for mode in ("2w", "block"):
         if _weak_cached(mode) is None:
-            _weak_compute(mode)
+            _weak_compute(mode, then=prewarm_weak)
+            return
 
 
-def _weak_compute(mode):
+def _weak_compute(mode, then=None):
     """One card search per lecture, then everything else straight from the cards /
     notes / revlog tables in a single pass — a QueryOp, never on the main thread."""
     if mode in _weak_busy or getattr(mw, "col", None) is None:
@@ -614,6 +623,7 @@ def _weak_compute(mode):
         for e in sorted(evs, key=lambda x: x["date"], reverse=True):
             if _closing:
                 return []
+            time.sleep(0.004)            # breathe between lectures
             if e["start"] is None or _is_allday_kind(e["summary"]):
                 continue
             if e["date"] == today and (e["end"] or 0) > now_min:
@@ -663,6 +673,8 @@ def _weak_compute(mode):
         global _weak
         _weak_busy.discard(mode)
         _weak_cache[mode] = (key, rows)
+        if then and _view:
+            QTimer.singleShot(1500, then)
         if _weak_mode == mode:
             _weak = rows
             if _view and _detail == WEAK:
@@ -1752,6 +1764,7 @@ def _prewarm_work():
             if _closing:                 # quitting: don't make Anki wait on this
                 return
             lectures.match_event(e["summary"])
+            time.sleep(0.004)            # breathe: keeps the window (and laptop) responsive
     except Exception as e:
         log("calendar prewarm: %s" % e)
 
