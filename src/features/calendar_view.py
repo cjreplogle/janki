@@ -217,7 +217,8 @@ def _week_html():
                 cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
-            title = html.escape(e["summary"])
+            title = ("<span class='jkc-m'>[M]</span> " if e.get("mandatory") else "") \
+                + html.escape(e["summary"])
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
@@ -344,8 +345,9 @@ def _detail_html(e):
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<button class='jkd-back' onclick=\"pycmd('janki:cal:det:back')\">‹ Back</button>"
-            "<div class='jkd'><h2>%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
-            % (html.escape(e["summary"]), sub, html.escape(when), loc, body))
+            "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
+            % ("<span class='jkc-m'>[M]</span> " if e.get("mandatory") else "",
+               html.escape(e["summary"]), sub, html.escape(when), loc, body))
 
 
 def _tag_label(frag):
@@ -699,7 +701,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-c6:hover{background:rgba(235,120,175,.34);}.jkc-c7:hover{background:rgba(150,170,195,.34);}
 .jkc-un{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);opacity:.75;}
 .jkc-ad{position:relative;margin:0 2px 3px;}
-.jkc-t{font-weight:600;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+.jkc-t{font-weight:600;}
+.jkc-m{color:#ff9d8a;font-weight:700;letter-spacing:.02em;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;

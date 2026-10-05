@@ -3092,6 +3092,8 @@ def _parse_ics_events(path):
         st, stz = field("DTSTART")
         en, etz = field("DTEND")
         loc, _ = field("LOCATION")
+        desc, _ = field("DESCRIPTION")
+        cats, _ = field("CATEGORIES")
         if not (summ and st):
             continue
         d, smin = _ics_dt(st, stz)
@@ -3103,8 +3105,10 @@ def _parse_ics_events(path):
         def unesc(t):
             return ((t or "").replace("\\,", ",").replace("\\;", ";")
                     .replace("\\n", " ").strip())
+        blob = " ".join(unesc(x) for x in (summ, desc, cats)).lower()
+        mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
         out.append({"date": d, "start": smin, "end": emin,
-                    "summary": unesc(summ), "location": unesc(loc)})
+                    "summary": unesc(summ), "location": unesc(loc), "mandatory": mand})
     return out
 
 
