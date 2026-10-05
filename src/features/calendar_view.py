@@ -54,9 +54,12 @@ def open_calendar():
 
 def close():
     global _view, _detail
+    was = _view
     _view = False
     _detail = None
     _sync_back()
+    if was:
+        QTimer.singleShot(0, _redraw_bottom)     # Anki's own buttons back
 
 
 def _redraw():
@@ -185,6 +188,8 @@ _fams_on = set()        # source families switched on for that class
 
 def _week_html():
     global _shown
+    if _detail == WEAK:
+        return _weak_html()
     if _detail is not None and 0 <= _detail < len(_shown):
         return _detail_html(_shown[_detail])
     from ..integrations import lectures
@@ -519,6 +524,139 @@ def _open_detail(i):
     except Exception:
         pass
     _swap("open")
+
+
+# ------------------------------------------------------------ weak areas ------
+# "Identify Weak Areas": lectures you've already had, ranked by how under-studied they
+# look — cards never started (suspended / new), recent recall, leeches and overdue
+# cards — from the calendar + tag map + review history. All local.
+WEAK = -1             # _detail value for the weak-areas page
+_weak = None          # None = counting; else [row dicts] best (weakest) first
+_WEAK_DAYS = 42       # look back this far
+
+
+def open_weak():
+    global _detail, _weak
+    _detail, _weak = WEAK, None
+    try:
+        from . import sfx
+        sfx.play("open")
+    except Exception:
+        pass
+    _swap("open")
+    _weak_compute()
+
+
+def _weak_compute():
+    from aqt.operations import QueryOp
+    from ..integrations import lectures
+    today = datetime.date.today()
+    evs, _fresh = lectures.events_cached_between(today - datetime.timedelta(days=_WEAK_DAYS),
+                                                 today)
+    off = _fams_off()
+
+    def op(col):
+        import time as _t
+        seen, rows = set(), []
+        cutoff = int((_t.time() - 30 * 86400) * 1000)
+        for e in sorted(evs, key=lambda x: x["date"], reverse=True):
+            if e["start"] is None or _is_allday_kind(e["summary"]):
+                continue
+            if e["date"] == today and (e["end"] or 0) > _now_min():
+                continue                         # not had it yet
+            m = lectures.match_event(e["summary"])
+            if not m or m["key"] in seen:
+                continue
+            seen.add(m["key"])
+            frags = [x for x in m["searches"] if _fam(x) not in off]
+            ids = _cids(col, frags) if frags else []
+            if not ids:
+                continue
+            n = len(ids)
+            sus = len(_cids(col, frags, "is:suspended"))
+            new = len(_cids(col, frags, "is:new -is:suspended"))
+            due = len(_cids(col, frags, "is:due -is:suspended"))
+            leech = len(_cids(col, frags, "tag:leech"))
+            good = bad = 0
+            for i in range(0, n, 400):
+                chunk = ",".join(str(c) for c in ids[i:i + 400])
+                for ease, cnt in col.db.all(
+                        "select ease, count() from revlog where cid in (%s) and id > ? "
+                        "and type < 3 group by ease" % chunk, cutoff):
+                    if ease == 1:
+                        bad += cnt
+                    elif ease > 1:
+                        good += cnt
+            revs = good + bad
+            recall = good / revs if revs else None
+            unstarted = (sus + new) / n
+            score = (0.55 * unstarted + 0.3 * (1 - recall if recall is not None else 0.5)
+                     + 0.15 * min(1.0, due / n * 3) + min(0.15, leech * 0.02))
+            rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
+                         "leech": leech, "recall": recall, "revs": revs,
+                         "unstarted": unstarted, "score": score})
+        rows.sort(key=lambda r: -r["score"])
+        return rows
+
+    def done(rows):
+        global _weak
+        _weak = rows
+        if _view and _detail == WEAK:
+            _swap("refresh")
+
+    QueryOp(parent=mw, op=op, success=done).run_in_background()
+
+
+def _now_min():
+    t = datetime.datetime.now()
+    return t.hour * 60 + t.minute
+
+
+def _ago(d):
+    n = (datetime.date.today() - d).days
+    return "today" if n == 0 else "yesterday" if n == 1 else (
+        "%d days ago" % n if n < 14 else "%d weeks ago" % (n // 7))
+
+
+def _weak_html():
+    head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
+            "<h2>Weak areas</h2><div class='jkd-when'>Lectures from the last %d weeks, "
+            "least-studied first</div>" % (_WEAK_DAYS // 7))
+    if _weak is None:
+        return head + "<div class='jkd-counts'>Looking through your lectures…</div></div></div>"
+    if not _weak:
+        return head + ("<div class='jkd-counts'>No past lectures with cards found — "
+                       "nothing to flag.</div></div></div>")
+    out = []
+    for i, r in enumerate(_weak[:25]):
+        chips = []
+        if r["unstarted"] >= 0.05:
+            chips.append("<span class='jkw-c jkw-bad'>%d%% not started</span>"
+                         % round(100 * r["unstarted"]))
+        if r["recall"] is not None:
+            chips.append("<span class='jkw-c%s'>%d%% recall</span>"
+                         % (" jkw-bad" if r["recall"] < 0.8 else "", round(100 * r["recall"])))
+        else:
+            chips.append("<span class='jkw-c'>no reviews in 30 days</span>")
+        if r["due"]:
+            chips.append("<span class='jkw-c'>%d due</span>" % r["due"])
+        if r["leech"]:
+            chips.append("<span class='jkw-c jkw-bad'>%d leech%s</span>"
+                         % (r["leech"], "es" if r["leech"] != 1 else ""))
+        done_pct = round(100 * (1 - r["unstarted"]))
+        out.append(
+            "<div class='jkw-row'>"
+            "<div class='jkw-main'><div class='jkw-t'>%s</div>"
+            "<div class='jkw-sub'>%s · %d cards</div>"
+            "<div class='jkw-bar'><i style='width:%d%%'></i></div>"
+            "<div class='jkw-chips'>%s</div></div>"
+            "<div class='jkw-btns'>"
+            "<button class='jkd-sec' onclick=\"pycmd('janki:cal:weak:study:%d')\">Study</button>"
+            "<button class='jkd-sec jkw-prac' onclick=\"pycmd('janki:cal:weak:prac:%d')\">"
+            "Practice</button></div></div>"
+            % (html.escape(r["m"]["display"]), _ago(r["e"]["date"]), r["n"], done_pct,
+               "".join(chips), i, i))
+    return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
 
 
 def _close_detail():
@@ -901,6 +1039,20 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
 .jkd-secs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
 .jkd-secs .jkd-sec{margin:0 !important;}
+#jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
+#jkc .jkw-row{display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
+  background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
+.jkw-main{flex:1;min-width:0;}
+.jkw-t{font-weight:700;}
+.jkw-sub{opacity:.7;font-size:.86em;margin:1px 0 5px;}
+#jkc .jkw-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.1) !important;overflow:hidden;}
+#jkc .jkw-bar i{display:block;height:100%;background:#9cbcf3 !important;border-radius:2px;}
+.jkw-chips{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;}
+#jkc .jkw-c{font-size:.78em;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.08) !important;}
+#jkc .jkw-c.jkw-bad{color:#ff9d8a;background:rgba(255,157,138,.12) !important;}
+.jkw-btns{display:flex;gap:6px;flex:none;}
+.jkw-btns .jkd-sec{margin:0 !important;}
+#jkc .jkw-prac{color:#c9f7c9 !important;}
 #jkc .jkd-prac{background:#9fe0a3 !important;color:#0f2e16 !important;margin-left:8px;}
 #jkc .jkd-prac:hover{background:#b3ebb6 !important;}
 #jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;
@@ -1132,6 +1284,7 @@ _JS = """<script>(function(){
 def _on_render(deck_browser, content):
     if not _view:
         return
+    QTimer.singleShot(0, _redraw_bottom)
     try:
         content.tree = ""
         content.stats = _page_html()
@@ -1334,6 +1487,16 @@ def on_js_message(handled, message, context):
             except Exception:
                 pass
             _swap("refresh")
+        elif cmd == "weak":
+            open_weak()
+        elif cmd.startswith("weak:") and _weak:
+            _, act, i = cmd.split(":")
+            i = int(i)
+            if 0 <= i < len(_weak):
+                if act == "study":
+                    study_event(_weak[i]["e"], None, "all")
+                else:
+                    practice_event(_weak[i]["e"])
         elif cmd == "det:practice":
             if _detail is not None and 0 <= _detail < len(_shown):
                 practice_event(_shown[_detail])
@@ -1540,7 +1703,38 @@ def _on_open():
     _closing = False
 
 
+def _patch_bottom():
+    """On the Calendar the deck list's bottom bar (Get Shared / Create Deck / Import)
+    becomes one 'Identify Weak Areas' button; everywhere else it's Anki's own."""
+    try:
+        from aqt.deckbrowser import DeckBrowser, DeckBrowserBottomBar
+        if getattr(DeckBrowser._drawButtons, "_jk_cal", False):
+            return
+        orig = DeckBrowser._drawButtons
+
+        def draw(self):
+            if not _view:
+                return orig(self)
+            self.bottom.draw(
+                buf="<button onclick='pycmd(\"janki:cal:weak\");'>Identify Weak Areas</button>",
+                link_handler=self._linkHandler,
+                web_context=DeckBrowserBottomBar(self))
+        draw._jk_cal = True
+        DeckBrowser._drawButtons = draw
+    except Exception as e:
+        log("calendar bottom bar: %s" % e)
+
+
+def _redraw_bottom():
+    try:
+        if getattr(mw, "state", None) == "deckBrowser":
+            mw.deckBrowser._drawButtons()
+    except Exception:
+        pass
+
+
 def install():
+    _patch_bottom()
     gui_hooks.profile_did_open.append(_on_open)
     gui_hooks.profile_will_close.append(_on_close)
     gui_hooks.profile_did_open.append(_schedule_prewarm)
