@@ -44,6 +44,7 @@ QPushButton#tglOnBlue   { background: rgba(96,156,246,0.22); border-color: rgba(
 QPushButton#tglOnGreen  { background: rgba(52,199,89,0.20); border-color: rgba(90,214,124,0.45); color:#ffffff; }
 QPushButton#tglOnRed    { background: rgba(235,87,87,0.22); border-color: rgba(245,125,125,0.48); color:#ffffff; }
 QPushButton#tglOnOrange { background: rgba(255,159,10,0.20); border-color: rgba(255,186,90,0.46); color:#ffffff; }
+QPushButton#tglOnPale   { background: rgba(255,150,150,0.16); border-color: rgba(255,175,175,0.42); color:#ffffff; }
 QPushButton#foot       { color:#cdd7ea; }
 QPushButton#quit:hover { background: rgba(230,90,90,0.30); border-color: rgba(240,120,120,0.6); }
 QPushButton#practice {
@@ -117,6 +118,7 @@ _PAINT = {
     "tglOnGreen":  ((52, 199, 89, .20), None, None, (90, 214, 124, .45), 9),
     "tglOnRed":    ((235, 87, 87, .22), None, None, (245, 125, 125, .48), 9),
     "tglOnOrange": ((255, 159, 10, .20), None, None, (255, 186, 90, .46), 9),
+    "tglOnPale":   ((255, 150, 150, .16), None, None, (255, 175, 175, .42), 9),   # rephrase
     "practice":   ((74, 200, 130, .11), .20, .30, (108, 222, 160, .30), 9),
     "posCell":    ((*_W, .06), .15, None, (*_W, .10), 7),
     "posCellOn":  ((96, 156, 246, .38), None, None, (130, 178, 252, .65), 7),
@@ -1201,7 +1203,7 @@ def _build_pos_section() -> "QWidget":
 
 # Each mode lights in its own colour when on.
 _TOGGLE_ON_NAME = {"caption": "tglOnBlue", "focus": "tglOnGreen",
-                   "lockdown": "tglOnRed", "reword": "tglOnOrange"}
+                   "lockdown": "tglOnRed", "reword": "tglOnPale"}
 
 
 def _install_mode_watch(win) -> None:
