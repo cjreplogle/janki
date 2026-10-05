@@ -234,7 +234,9 @@ def _week_html():
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
             title = html.escape(e["summary"])
-            mbadge = "<span class='jkc-m' title='Mandatory'>M</span>" if e.get("mandatory") else ""
+            mbadge = ("<span class='jkc-m' title='Mandatory'>M</span>" if e.get("mandatory") else "") + \
+                     ("<span class='jkc-m jkc-a%s' title='Has an assignment'>A</span>"
+                      % (" jkc-a2" if e.get("mandatory") else "") if e.get("assignment") else "")
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
@@ -394,7 +396,9 @@ def _detail_html(e):
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
             % (html.escape(e["summary"]),
-               " <span class='jkc-m jkd-m' title='Mandatory'>M</span>" if e.get("mandatory") else "",
+               (" <span class='jkc-m jkd-m' title='Mandatory'>M</span>" if e.get("mandatory") else "") +
+               (" <span class='jkc-m jkd-m jkc-a' title='Has an assignment'>A</span>"
+                if e.get("assignment") else ""),
                sub, html.escape(when), loc, body))
 
 
@@ -808,6 +812,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   display:flex;align-items:center;justify-content:center;line-height:1;padding-top:1px;
   font-size:10px;font-weight:700;font-family:-apple-system,"Segoe UI",sans-serif;
   color:#ff9d8a;border:1.5px solid #ff9d8a;border-radius:4px;}
+#jkc .jkc-m.jkc-a{color:#ffd27a;border-color:#ffd27a;}   /* assignment: amber, M's twin */
+#jkc .jkc-m.jkc-a2{right:22px;}                          /* sits left of an M */
 .jkc-ev .jkc-t{padding-right:16px;}
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
