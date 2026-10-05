@@ -984,27 +984,57 @@ _SRC_PREFIX = {"ak": "#AK", "huc": "hUtChCOM", "aj": "AJ_UCCOM_keep"}
 _DETECTED = {"sig": None, "map": {}}
 
 
+def _detect_path():
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "user_files", "source_decks.json")
+
+
+def _detect_key(col):
+    try:
+        return "%s|%s" % (col.db.scalar("select count() from notes"), datetime.date.today())
+    except Exception:
+        return None
+
+
 def detect_source_decks(col, force=False):
     """{family: [(top-level deck, cards), …]} biggest first; decks holding under 2% of a
-    source's cards are dropped as strays. Cached until the notes change."""
-    sig = _notes_sig(col)
-    if not force and _DETECTED["sig"] == sig and _DETECTED["sig"] is not None:
+    source's cards are dropped as strays. ONE pass over the cards for every source,
+    kept on disk and re-checked once a day or when the note count changes."""
+    key = _detect_key(col)
+    if not force and key and _DETECTED["sig"] == key:
         return _DETECTED["map"]
+    if not force and key:
+        try:
+            saved = json.load(open(_detect_path()))
+            if saved.get("key") == key:
+                _DETECTED["sig"] = key
+                _DETECTED["map"] = {f: [tuple(x) for x in v] for f, v in saved["map"].items()}
+                return _DETECTED["map"]
+        except Exception:
+            pass
     names = {d.id: d.name.split("::")[0] for d in col.decks.all_names_and_ids()}
+    cond = " or ".join("n.tags like ?" for _ in _SRC_PREFIX)
+    case = " ".join("when n.tags like ? then '%s'" % f for f in _SRC_PREFIX)
+    pats = ["%% %s%%" % p for p in _SRC_PREFIX.values()]
+    tot = {f: {} for f in _SRC_PREFIX}
+    for fam, did, n in col.db.all(
+            "select case %s end, case when c.odid then c.odid else c.did end, count() "
+            "from cards c join notes n on n.id = c.nid where %s group by 1, 2"
+            % (case, cond), *(pats + pats)):
+        top = names.get(did)
+        if fam in tot and top and not top.startswith("Janki Calendar"):
+            tot[fam][top] = tot[fam].get(top, 0) + n
     out = {}
-    for fam, pre in _SRC_PREFIX.items():
-        tot = {}
-        for did, n in col.db.all(
-                "select case when c.odid then c.odid else c.did end, count() from cards c "
-                "join notes n on n.id = c.nid where n.tags like ? group by 1",
-                "%% %s%%" % pre):
-            top = names.get(did)
-            if top and not top.startswith("Janki Calendar"):
-                tot[top] = tot.get(top, 0) + n
-        allc = sum(tot.values())
-        out[fam] = sorted(((d, n) for d, n in tot.items() if allc and n / allc >= 0.02),
+    for fam, t in tot.items():
+        allc = sum(t.values())
+        out[fam] = sorted(((d, n) for d, n in t.items() if allc and n / allc >= 0.02),
                           key=lambda x: -x[1])
-    _DETECTED["sig"], _DETECTED["map"] = sig, out
+    _DETECTED["sig"], _DETECTED["map"] = key, out
+    try:
+        with open(_detect_path(), "w") as f:
+            json.dump({"key": key, "map": out}, f)
+    except Exception:
+        pass
     return out
 
 

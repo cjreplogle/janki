@@ -2970,13 +2970,25 @@ class GlassSettings(QDialog):
                         b.setEnabled(on)
                 src.toggled.connect(src_toggled)
 
-        try:
-            from aqt.operations import QueryOp
-            QueryOp(parent=self, op=lambda col: _lec.detect_source_decks(col),
-                    success=fill).failure(lambda e: wait.setText("Couldn't read decks.")) \
-                .run_in_background()
-        except Exception:
-            wait.setText("Couldn't read decks.")
+        def start():
+            if getattr(page, "_jk_started", False):
+                return
+            page._jk_started = True
+            try:
+                from aqt.operations import QueryOp
+                QueryOp(parent=self, op=lambda col: _lec.detect_source_decks(col),
+                        success=fill).failure(lambda e: wait.setText("Couldn't read decks.")) \
+                    .run_in_background()
+            except Exception:
+                wait.setText("Couldn't read decks.")
+
+        # only when the tab is actually opened — not as Settings opens
+        _orig_show = page.showEvent
+
+        def show_ev(ev):
+            start()
+            _orig_show(ev)
+        page.showEvent = show_ev
         return page
 
     def _build_sounds_tab(self, lay):

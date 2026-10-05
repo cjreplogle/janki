@@ -300,9 +300,9 @@ def _week_html():
                    % (100.0 * ln / nl, 100.0 / nl))
             blocks.append(
                 "<div class='%s%s' data-i='%d' title='%s' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s'>"
-                "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s</div>%s</div>"
+                "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s%s</div>%s</div>"
                 % (cls, " jkc-narrow" if nl > 1 else "", i, tip, top, h, pos, mbadge, title,
-                   _hm(e["start"]), _hm(e["end"]),
+                   _hm(e["start"]), _hm(e["end"]), _tag_count_html(m),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         if d == today:                     # "now" line, kept current by the page's timer
             blocks.append("<div class='jkc-now' data-lo='%d' data-hi='%d'></div>" % (lo, hi))
@@ -455,11 +455,12 @@ def _detail_html(e):
                 "Unsuspend cards for this lecture</button>%s</div>"
                 "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
                 "and suspends them again afterwards.</div>"
-                "<div class='jkd-links'><a onclick=\"jkdTags(this)\">Show tags ▾</a> · "
+                "<div class='jkd-links'><a data-n='%d' onclick=\"jkdTags(this)\">Show %s ▾</a> · "
                 "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
                 "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
                 % (sw, ("<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:lms')\">"
-                        "Open in LMS</button>") if e.get("url") else "", _tags_html(m)))
+                        "Open in LMS</button>") if e.get("url") else "",
+                   _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
@@ -483,6 +484,23 @@ def _tag_label(frag):
 
 
 _tag_list = []        # full tags behind the chips on the open class page (by index)
+
+
+def _tag_count(m):
+    """Tags a class searches (switched-on sources, opt-outs left out)."""
+    if not m:
+        return 0
+    off = _fams_off()
+    return sum(len(_tag_label(s)) for s in m["searches"] if _fam(s) not in off)
+
+
+def _tags_word(n):
+    return "1 tag" if n == 1 else "%d tags" % n
+
+
+def _tag_count_html(m):
+    n = _tag_count(m)
+    return ("<span class='jkc-tc'> · %s</span>" % _tags_word(n)) if n else ""
 
 
 def _tags_html(m):
@@ -1295,6 +1313,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev:has(> .jkc-m) .jkc-t{padding-right:13px;}  /* room for the star */
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
+.jkc-tc{opacity:.75;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
@@ -1598,7 +1617,8 @@ _JS = """<script>(function(){
    pycmd('janki:cal:tagx:'+x.getAttribute('data-t')+':'+(off?1:0));
  },true);
  window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
-   var o=t.classList.toggle('open');a.textContent=o?'Hide tags ▴':'Show tags ▾';
+   var o=t.classList.toggle('open'),n=+a.getAttribute('data-n'),w=n===1?'1 tag':n+' tags';
+   a.textContent=o?'Hide '+w+' ▴':'Show '+w+' ▾';
    try{pycmd('janki:sfx:'+(o?'unfold':'fold'));}catch(x){}};
  document.addEventListener('click',function(e){
    var ev=e.target.closest&&e.target.closest('.jkc-ev:not(.jkc-dress)'); if(!ev)return;
