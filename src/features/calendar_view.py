@@ -659,6 +659,11 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 /* ‹ / ›: no background; slide outward on hover, press in on click */
 .jkc-bar .jkc-arr{background:transparent !important;padding:6px 10px;align-self:center;
   /* drawn chevrons: text ‹ › sat below the date's middle */
+  position:relative;}
+/* invisible, generous hit area around each arrow (no layout change) */
+.jkc-bar .jkc-arr::before{content:'';position:absolute;inset:-14px -26px;}
+.jkc-bar .jkc-prev::before{right:-4px;}.jkc-bar .jkc-next::before{left:-4px;}
+.jkc-bar .jkc-arr{
   transition:transform .22s cubic-bezier(.2,.8,.2,1),opacity .2s ease;opacity:.8;}
 .jkc-bar .jkc-prev:hover,.jkc-bar .jkc-prev.kb{transform:translateX(-4px);opacity:1;}
 .jkc-bar .jkc-next:hover,.jkc-bar .jkc-next.kb{transform:translateX(4px);opacity:1;}
