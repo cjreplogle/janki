@@ -2155,8 +2155,38 @@ def _redraw_bottom():
         pass
 
 
+_sync_had_view = False
+
+
+def _on_sync_start():
+    global _sync_had_view
+    _sync_had_view = bool(_view)
+
+
+def _on_sync_done():
+    """A sync shouldn't drop you out of the Calendar: if it did, put it straight back
+    (re-using the page data — no wait for the post-sync refresh)."""
+    global _view, _sync_had_view
+    was, _sync_had_view = _sync_had_view, False
+    if not was:
+        return
+
+    def back():
+        global _view
+        if not _view and getattr(mw, "state", None) == "deckBrowser":
+            _view = True
+            _redraw()
+    QTimer.singleShot(0, back)
+    QTimer.singleShot(400, back)
+
+
 def install():
     _patch_bottom()
+    try:
+        gui_hooks.sync_will_start.append(_on_sync_start)
+        gui_hooks.sync_did_finish.append(_on_sync_done)
+    except Exception:
+        pass
     try:
         mw.app.applicationStateChanged.connect(_on_app_state)
     except Exception:
