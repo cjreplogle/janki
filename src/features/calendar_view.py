@@ -776,6 +776,9 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-col .jkc-body{flex:none;}
 .jkc-dh{text-align:center;font-size:.86em;opacity:.8;height:24px;line-height:24px;}
 .jkc-today .jkc-dh{color:#9cbcf3;opacity:1;}
+/* keyboard-chosen day: header lifts, body gets a soft ring */
+#jkc .jkc-col.jk-kbday .jkc-dh{opacity:1;color:#fff;}
+#jkc .jkc-col.jk-kbday .jkc-body{box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.28);}
 .jkc-ads{overflow:hidden;flex:1;}
 .jkc-body{position:relative;height:var(--jkc-h);border-radius:10px;background:rgba(255,255,255,.025);}
 .jkc-today .jkc-body{background:rgba(156,188,243,.06);}
@@ -949,6 +952,8 @@ _JS = """<script>(function(){
      var fresh=root.querySelector('.jkc-l');
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      pillInit();nowLine();
+     if(selAfter){var sa=selAfter;selAfter=null;
+       setTimeout(function(){var n=cols().length;selDay(sa==='first'?0:n-1,selRef);},0);}
      var g=grid(); if(!g||!g.animate)return;
      if(step&&step.dir===dir){                         // one-day slide (3-day view)
        var st=step;step=null;var sx=dir==='next'?st.w:-st.w;
@@ -1021,8 +1026,20 @@ _JS = """<script>(function(){
  function evs(){return Array.prototype.slice.call(document.querySelectorAll('#jkc .jkc-ev:not(.jkc-dress)'))
    .sort(function(a,b){var ra=a.getBoundingClientRect(),rb=b.getBoundingClientRect();
      return (ra.left-rb.left)||(ra.top-rb.top);});}
+ function cols(){return Array.prototype.slice.call(
+   document.querySelectorAll('#jkc .jkc-grid:not(.jkc-detail) .jkc-col'));}
+ function markDay(col){var o=document.querySelector('#jkc .jkc-col.jk-kbday');
+   if(o&&o!==col)o.classList.remove('jk-kbday');if(col)col.classList.add('jk-kbday');}
+ // ←/→ walk the days; past the first/last the view moves on and lands on the new day
+ var selAfter=null, selRef=null;
+ function selDay(i,ref){var cs=cols(),col=cs[i];if(!col)return;markDay(col);
+   var best=null,bd=1e9;
+   col.querySelectorAll('.jkc-body .jkc-ev').forEach(function(ev){
+     var d=ref==null?ev.offsetTop:Math.abs(ev.offsetTop-ref);if(d<bd){bd=d;best=ev;}});
+   if(best)sel(best);else{sel(null);markDay(col);try{pycmd('janki:sfx:move');}catch(x){}}}
  function sel(el){var c=document.querySelector('#jkc .jkc-ev.jk-kb');if(c)c.classList.remove('jk-kb');
-   if(el){el.classList.add('jk-kb');try{pycmd('janki:sfx:move');}catch(x){}
+   if(!el)markDay(null);
+   if(el){el.classList.add('jk-kb');markDay(el.closest('.jkc-col'));try{pycmd('janki:sfx:move');}catch(x){}
      var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}}
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
@@ -1034,7 +1051,19 @@ _JS = """<script>(function(){
      else if(k==='ArrowUp'){e.preventDefault();pycmd('janki:toolbar');}
      return;}
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
-     var d=k==='ArrowRight'?'next':'prev';press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);return;}
+     var right=k==='ArrowRight',cs=cols(),cur=document.querySelector('#jkc .jkc-col.jk-kbday'),
+         ci=cur?cs.indexOf(cur):-1,sv=document.querySelector('#jkc .jkc-ev.jk-kb'),
+         ref=sv?sv.offsetTop:null;
+     if(ci<0){var td=document.querySelector('#jkc .jkc-col.jkc-today');
+       selDay(td?cs.indexOf(td):(right?0:cs.length-1),null);return;}
+     var ti=ci+(right?1:-1);
+     if(ti>=0&&ti<cs.length){selDay(ti,ref);return;}
+     // off the edge: 3-day slides by one day (new day enters at that edge);
+     // week/day views jump, landing on the near edge of the new days
+     var three=(document.querySelector('#jkc .jkc-seg.on')||{}).getAttribute&&
+               document.querySelector('#jkc .jkc-seg.on').getAttribute('data-k')==='3';
+     selAfter=three?(right?'last':'first'):(right?'first':'last');selRef=ref;
+     var d=right?'next':'prev';press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);return;}
    var all=evs(), c=document.querySelector('#jkc .jkc-ev.jk-kb'), i=c?all.indexOf(c):-1;
    if(k==='ArrowDown'){e.preventDefault();if(all.length)sel(all[Math.min(all.length-1,i+1)]);return;}
    if(k==='ArrowUp'){e.preventDefault();if(i<=0){sel(null);pycmd('janki:toolbar');}else sel(all[i-1]);return;}
