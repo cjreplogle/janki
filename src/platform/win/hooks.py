@@ -89,6 +89,11 @@ def _tap(vk):
     user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, _MAGIC)
 
 
+def _leader_vk():
+    from .keymap import KC_TO_VK
+    return KC_TO_VK.get(_hk.leader_kc, 0x09)      # Tab by default
+
+
 def _handle(down, kc):
     """Mirror of keytap's CGEventTap callback. Returns True to swallow the key."""
     kb = keytap._key_bridge
@@ -118,6 +123,9 @@ def _handle(down, kc):
             return True
         return False
     if not keytap._key_tap_enabled:
+        if not down and kc == _hk.leader_kc:     # a Tab release still clears the state
+            keytap._tab_held = False
+            keytap._tab_used_combo = False
         return False
     if kc == 49 and keytap._swallow_space_until_up:
         if not down:
@@ -137,6 +145,12 @@ def _handle(down, kc):
             keytap._tab_held = True
             keytap._tab_used_combo = False
             return True
+        # A missed Tab release (e.g. the tap was paused when it came) left _tab_held
+        # stuck — then every arrow press was swallowed as a Tab+arrow chord and arrow
+        # navigation stopped working everywhere. Trust only the physical key state.
+        if keytap._tab_held and not _down(_leader_vk()):
+            keytap._tab_held = False
+            keytap._tab_used_combo = False
         canon = _hk.tab_map.get(kc) if keytap._tab_held else None
         if canon in _hk.shift_kcs:
             if _down(VK_SHIFT):
