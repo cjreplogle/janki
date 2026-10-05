@@ -320,7 +320,7 @@ def _detail_html(e):
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
                 "Unsuspend cards for this lecture</button>"
                 "<div class='jkd-links'><a onclick=\"pycmd('janki:cal:det:tags')\">Show tags</a> · "
-                "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in the Lecture wizard</a></div>"
+                "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
                 % sw)
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
@@ -797,7 +797,7 @@ def _event_menu(i):
     else:
         na = menu.addAction("No lecture matched — fix it in the Lecture wizard")
         na.setEnabled(False)
-    a_load = menu.addAction("Open this day in the Lecture wizard…")
+    a_load = menu.addAction("Open this day in lecture wizard…")
     chosen = menu.exec(QCursor.pos())
     if chosen is None:
         return
