@@ -3088,3 +3088,15 @@ def _match_event_uncached(title):
     except Exception as e:
         _log("match_event: %s" % e)
         return None
+
+
+FAMILY_LABEL = {"ak": "AnKing", "huc": "Hutch", "aj": "AJ"}
+
+
+def family_of(frag):
+    """Which source a lecture's search fragment belongs to (same rule as the wizard)."""
+    if "AJ_UCCOM_keep" in frag:
+        return "aj"
+    if "hUtChCOM" in frag:
+        return "huc"
+    return "ak"

@@ -1393,3 +1393,54 @@ try:
     _calendar_view.install()
 except Exception:
     pass
+
+
+# Reopen the main page you were on (Decks / Practice / Calendar) at launch. The page is
+# noted on every deck-list render; the first render after the profile opens restores it
+# instead (and isn't recorded, so it can't overwrite the saved page with "decks").
+_page_restore = {"pending": False}
+
+
+def _current_main_page():
+    try:
+        from .src.features import calendar_view as _cv, practice as _pr
+        if _cv._view:
+            return "calendar"
+        if _pr._practice_view:
+            return "practice"
+    except Exception:
+        pass
+    return "decks"
+
+
+def _note_main_page(*_a):
+    try:
+        if _page_restore["pending"]:
+            _page_restore["pending"] = False
+            want = str(_cfg().get("last_main_page", "decks"))
+            from aqt.qt import QTimer as _RT
+            if want == "calendar":
+                from .src.features import calendar_view as _cv
+                _RT.singleShot(0, _cv.open_calendar)
+            elif want == "practice":
+                from .src.features import practice as _pr
+                _RT.singleShot(0, _pr.open_practice_hub)
+            return
+        page = _current_main_page()
+        if page != _cfg().get("last_main_page", "decks"):
+            c = _cfg_raw()
+            c["last_main_page"] = page
+            mw.addonManager.writeConfig(__name__, c)
+    except Exception as e:
+        log("main page memory: %s" % e)
+
+
+def _arm_page_restore():
+    _page_restore["pending"] = True
+
+
+try:
+    gui_hooks.profile_did_open.append(_arm_page_restore)
+    gui_hooks.deck_browser_did_render.append(_note_main_page)
+except Exception:
+    pass
