@@ -977,24 +977,65 @@ def _notes_sig(col):
         return None
 
 
+# Where each source's cards actually live, found from the collection: cards whose note
+# carries the source's tag prefix, grouped by TOP-LEVEL deck. Searches default to those
+# decks (e.g. Hutch → CRanki); Settings → Lectures → Calendar can leave one out.
+_SRC_PREFIX = {"ak": "#AK", "huc": "hUtChCOM", "aj": "AJ_UCCOM_keep"}
+_DETECTED = {"sig": None, "map": {}}
+
+
+def detect_source_decks(col, force=False):
+    """{family: [(top-level deck, cards), …]} biggest first; decks holding under 2% of a
+    source's cards are dropped as strays. Cached until the notes change."""
+    sig = _notes_sig(col)
+    if not force and _DETECTED["sig"] == sig and _DETECTED["sig"] is not None:
+        return _DETECTED["map"]
+    names = {d.id: d.name.split("::")[0] for d in col.decks.all_names_and_ids()}
+    out = {}
+    for fam, pre in _SRC_PREFIX.items():
+        tot = {}
+        for did, n in col.db.all(
+                "select case when c.odid then c.odid else c.did end, count() from cards c "
+                "join notes n on n.id = c.nid where n.tags like ? group by 1",
+                "%% %s%%" % pre):
+            top = names.get(did)
+            if top and not top.startswith("Janki Calendar"):
+                tot[top] = tot.get(top, 0) + n
+        allc = sum(tot.values())
+        out[fam] = sorted(((d, n) for d, n in tot.items() if allc and n / allc >= 0.02),
+                          key=lambda x: -x[1])
+    _DETECTED["sig"], _DETECTED["map"] = sig, out
+    return out
+
+
 def source_decks():
-    """{family: deck name} — each source searched only in its own deck (+ subdecks);
-    a source without one searches the whole collection."""
+    """{family: [deck names]} each source is searched in (its decks + subdecks): the
+    detected decks minus any you've unticked. A source with nothing detected (or the
+    detection not run yet) searches the whole collection."""
     try:
-        d = _cfg().get("lecture_source_decks") or {}
-        return {k: v for k, v in d.items() if v}
+        skip = _cfg().get("lecture_source_skip") or {}
+        out = {}
+        for fam, decks in (_DETECTED["map"] or {}).items():
+            keep = [d for d, _n in decks if d not in (skip.get(fam) or [])]
+            if keep:
+                out[fam] = keep
+        return out
     except Exception:
         return {}
 
 
-def _deck_clause(name):
-    n = name.replace('"', '')
-    return '(deck:"%s" OR deck:"%s::*")' % (n, n)
+def _deck_clause(names):
+    parts = []
+    for name in names:
+        n = name.replace('"', '')
+        parts += ['deck:"%s"' % n, 'deck:"%s::*"' % n]
+    return "(" + " OR ".join(parts) + ")"
 
 
 def _find_base(col, searches):
+    detect_source_decks(col)                    # cheap when cached
     decks = source_decks()
-    sig = (_notes_sig(col), tuple(sorted(decks.items())))
+    sig = (_notes_sig(col), tuple(sorted((k, tuple(v)) for k, v in decks.items())))
     if sig is None or sig != _FIND_SIG["v"]:
         _FIND_CACHE.clear()
         _FIND_SIG["v"] = sig

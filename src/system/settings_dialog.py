@@ -2905,51 +2905,78 @@ class GlassSettings(QDialog):
         target.installEventFilter(self._rp_drop_filter)
 
     def _build_lecture_calendar_tab(self):
-        """Lectures → Calendar: tie each source to its own deck, so its lecture searches
-        look only there (big shared tag maps like AnKing's stop scanning every deck)."""
-        from aqt.qt import QComboBox, QWidget, QGridLayout
+        """Lectures → Calendar: which sources the Calendar uses, and which of the decks
+        each source's cards were found in get searched (found automatically)."""
+        from aqt.qt import QWidget
         from ..integrations import lectures as _lec
         page = QWidget()
         lay = QVBoxLayout(page)
-        note = QLabel("Search each source only in its own deck (and its subdecks). "
-                      "\u201cAll decks\u201d searches the whole collection.")
+        note = QLabel("Sources the Calendar uses, and the decks their cards were found in. "
+                      "Untick a source to ignore it; untick a deck to leave it out of "
+                      "searches.")
         note.setWordWrap(True)
         lay.addWidget(note)
-        grid = QGridLayout()
-        try:
-            names = sorted(d.name for d in mw.col.decks.all_names_and_ids()
-                           if not d.name.startswith("Janki Calendar::"))
-        except Exception:
-            names = []
-        cur = dict(self.cfg.get("lecture_source_decks") or {})
-        for row, (fam, label) in enumerate(_lec.FAMILY_LABEL.items()):
-            grid.addWidget(QLabel(label), row, 0)
-            cb = QComboBox()
-            # size to ~22 characters, not the longest deck name (that widened the
-            # whole Settings window); the open list still shows names in full
-            cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            cb.setMinimumContentsLength(22)
-            cb.view().setTextElideMode(Qt.TextElideMode.ElideMiddle)
-            cb.addItem("All decks", "")
-            for n in names:
-                cb.addItem(n, n)
-            if cur.get(fam) in names:
-                cb.setCurrentIndex(names.index(cur[fam]) + 1)
-
-            def changed(_i, fam=fam, cb=cb):
-                d = dict(self.cfg.get("lecture_source_decks") or {})
-                v = cb.currentData() or ""
-                if v:
-                    d[fam] = v
-                else:
-                    d.pop(fam, None)
-                self.cfg["lecture_source_decks"] = d
-                mw.addonManager.writeConfig(__name__, self.cfg)
-            cb.currentIndexChanged.connect(changed)
-            grid.addWidget(cb, row, 1)
-        grid.setColumnStretch(1, 1)
-        lay.addLayout(grid)
+        body = QVBoxLayout()
+        lay.addLayout(body)
         lay.addStretch(1)
+        wait = QLabel("Finding where your cards live…")
+        body.addWidget(wait)
+
+        def save_off(fam, on):
+            off = set(self.cfg.get("calendar_fams_off") or [])
+            (off.discard if on else off.add)(fam)
+            self.cfg["calendar_fams_off"] = sorted(off)
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        def save_skip(fam, deck, on):
+            sk = dict(self.cfg.get("lecture_source_skip") or {})
+            cur = set(sk.get(fam) or [])
+            (cur.discard if on else cur.add)(deck)
+            if cur:
+                sk[fam] = sorted(cur)
+            else:
+                sk.pop(fam, None)
+            self.cfg["lecture_source_skip"] = sk
+            mw.addonManager.writeConfig(__name__, self.cfg)
+
+        def fill(found):
+            wait.hide()
+            off = set(self.cfg.get("calendar_fams_off") or [])
+            skip = self.cfg.get("lecture_source_skip") or {}
+            for fam, label in _lec.FAMILY_LABEL.items():
+                src = QCheckBox(label)
+                src.setChecked(fam not in off)
+                f = src.font(); f.setBold(True); src.setFont(f)
+                body.addWidget(src)
+                decks = found.get(fam) or []
+                boxes = []
+                if not decks:
+                    lb = QLabel("      no cards found for this source")
+                    lb.setEnabled(False)
+                    body.addWidget(lb)
+                for d, n in decks:
+                    cb = QCheckBox("%s  (%s cards)" % (d, format(n, ",")))
+                    cb.setChecked(d not in (skip.get(fam) or []))
+                    cb.setContentsMargins(22, 0, 0, 0)
+                    cb.setStyleSheet("margin-left:22px;")
+                    cb.toggled.connect(lambda on, fam=fam, d=d: save_skip(fam, d, on))
+                    cb.setEnabled(src.isChecked())
+                    body.addWidget(cb)
+                    boxes.append(cb)
+
+                def src_toggled(on, fam=fam, boxes=boxes):
+                    save_off(fam, on)
+                    for b in boxes:
+                        b.setEnabled(on)
+                src.toggled.connect(src_toggled)
+
+        try:
+            from aqt.operations import QueryOp
+            QueryOp(parent=self, op=lambda col: _lec.detect_source_decks(col),
+                    success=fill).failure(lambda e: wait.setText("Couldn't read decks.")) \
+                .run_in_background()
+        except Exception:
+            wait.setText("Couldn't read decks.")
         return page
 
     def _build_sounds_tab(self, lay):

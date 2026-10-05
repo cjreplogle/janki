@@ -643,7 +643,7 @@ def _weak_key():
     from ..integrations import lectures
     lectures._excl_map()                     # a file stat; refreshes if edited
     return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())), lectures._EXCL["mt"],
-            tuple(sorted(lectures.source_decks().items())))
+            tuple(sorted((k, tuple(v)) for k, v in lectures.source_decks().items())))
 
 
 def _weak_cached(mode):
@@ -699,7 +699,6 @@ def _weak_compute(mode, then=None):
     if pending:
         QTimer.singleShot(0, lambda: _prewarm(back=(today - _weak_start(mode)).days + 1))
     other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
-    src_decks = lectures.source_decks()
     _weak_progress(mode, 0.05)
 
     # 2 ------------------------------------------------------------------------
@@ -712,10 +711,15 @@ def _weak_compute(mode, then=None):
                                   "type < 3 group by cid, ease",
                                   int((_t.time() - 30 * 86400) * 1000)),
                 "today": col.sched.today, "other": {}, "allow": {}}
-        for fam, name in src_decks.items():          # each source's deck + subdecks
-            did = col.decks.id_for_name(name)
-            if did:
-                data["allow"][fam] = set(col.decks.deck_and_child_ids(did))
+        lectures.detect_source_decks(col)
+        for fam, names in lectures.source_decks().items():   # source's decks + subdecks
+            ids = set()
+            for name in names:
+                did = col.decks.id_for_name(name)
+                if did:
+                    ids.update(col.decks.deck_and_child_ids(did))
+            if ids:
+                data["allow"][fam] = ids
         for a in other:
             try:
                 data["other"][a] = set(col.find_notes(a))
