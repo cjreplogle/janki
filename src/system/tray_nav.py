@@ -1366,7 +1366,7 @@ def _build() -> "QWidget":
         _b.setCheckable(True)
         _b.setObjectName("tgl")
         _b.setFixedHeight(28)                  # slimmer than the other tray buttons
-        _b.setStyleSheet("padding:2px 6px;")   # (fill is painted by the tray painter)
+        _b.setStyleSheet("padding:2px 6px;text-align:center;")   # (fill: the tray painter)
         srow.addWidget(_b, 1)
     lay.addLayout(srow)
     today_box = _build_today_list(root)
