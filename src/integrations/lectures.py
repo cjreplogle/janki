@@ -2686,8 +2686,13 @@ def _open_today_dialog(day_offset=0, auto=False):
     _lectures_dlg = dlg
     try:
         from ..user import glass as _glass
+        dlg.setWindowOpacity(0.0)                # fade in (no sudden pop)
         _glass.bring_dialog_to_front(dlg)
         _glass.hide_titlebar_extras(dlg)
+        try:
+            _glass._fade_window(dlg, 0.0, 1.0, 220, drop=10)
+        except Exception:
+            dlg.setWindowOpacity(1.0)
         # Re-assert once the opening click / main-window activation has settled, so the
         # main window can't end up on top of it.
         QTimer.singleShot(150, lambda: (_glass.bring_dialog_to_front(dlg)
