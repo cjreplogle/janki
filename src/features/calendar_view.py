@@ -241,11 +241,10 @@ def _week_html():
     hours = "".join("<div class='jkc-hr' style='top:%dpx'><span>%s</span></div>"
                     % (int((t - lo) * px_per_min), _hm(t)) for t in range(lo, hi + 1, 60))
     if monday == sunday:
-        label = "%s, %s %d, %d" % (_DAY[monday.weekday()], monday.strftime("%b"),
-                                   monday.day, monday.year)
+        label = "%s, %s %d" % (_DAY[monday.weekday()], monday.strftime("%b"), monday.day)
     else:
-        label = "%s %d – %s %d, %d" % (monday.strftime("%b"), monday.day,
-                                        sunday.strftime("%b"), sunday.day, sunday.year)
+        label = "%s %d – %s %d" % (monday.strftime("%b"), monday.day,
+                                    sunday.strftime("%b"), sunday.day)
     mode = _mode()
     seg = "<span class='jkc-pill'></span>" + "".join(
         "<button class='jkc-seg%s' data-k='%s' onclick=\"jkcMode('%s')\">%s</button>"
@@ -666,13 +665,13 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-bar .jkc-next:active,.jkc-bar .jkc-next.press{transform:translateX(4px) scale(.86);}
 .jkc-ev.jk-kb{outline:2px solid rgba(255,255,255,.75);outline-offset:1px;}
 .jkc-c{display:flex;align-items:center;gap:6px;}
-.jkc-c .jkc-lbl{margin:0 6px;min-width:12em;text-align:center;}
+.jkc-c .jkc-lbl{margin:0 6px;min-width:9em;text-align:center;}
 .jkc-bar button{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:8px;
   padding:4px 11px;cursor:pointer;transition:background .2s ease;}
 .jkc-bar button:hover{background:rgba(255,255,255,.16);}
 .jkc-lbl{font-weight:600;}
 .jkc-grid{display:grid;grid-template-columns:52px repeat(var(--jkc-n,5),1fr);gap:0 6px;position:relative;}
-.jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06);border-radius:9px;padding:2px;margin-right:6px;}
+#jkc .jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06) !important;border-radius:9px;padding:2px;margin-right:6px;}
 .jkc-segs .jkc-seg{position:relative;z-index:1;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
 .jkc-segs .jkc-seg.on{color:#cfe0ff;}
 /* one pill behind the buttons that glides to the chosen view */
@@ -818,8 +817,13 @@ _JS = """<script>(function(){
    if(!anim)p.style.transition='none';
    p.style.width=btn.offsetWidth+'px';p.style.transform='translateX('+(btn.offsetLeft-2)+'px)';
    if(!anim){void p.offsetWidth;p.style.transition='';}}
- function pillInit(){pill(document.querySelector('#jkc .jkc-seg.on'),false);}
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',pillInit);
+ // Fonts/glass can still be settling at first paint (0 width) — retry until measured.
+ function pillInit(n){var b=document.querySelector('#jkc .jkc-seg.on');pill(b,false);
+   n=n||0;if(b&&!b.offsetWidth&&n<40)requestAnimationFrame(function(){pillInit(n+1);});}
+ window.addEventListener('load',function(){pillInit();});
+ window.addEventListener('resize',function(){pillInit();});
+ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){pillInit();});
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){pillInit();});
  else pillInit();
  // Day / 3 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
  window.jkcMode=function(k){
