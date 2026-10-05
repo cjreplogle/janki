@@ -2925,6 +2925,11 @@ class GlassSettings(QDialog):
         for row, (fam, label) in enumerate(_lec.FAMILY_LABEL.items()):
             grid.addWidget(QLabel(label), row, 0)
             cb = QComboBox()
+            # size to ~22 characters, not the longest deck name (that widened the
+            # whole Settings window); the open list still shows names in full
+            cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(22)
+            cb.view().setTextElideMode(Qt.TextElideMode.ElideMiddle)
             cb.addItem("All decks", "")
             for n in names:
                 cb.addItem(n, n)
