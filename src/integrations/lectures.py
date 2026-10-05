@@ -960,14 +960,56 @@ def _atoms(searches):
     return out
 
 
-def find_ids(col, searches, extra=""):
-    """Card ids matching any of `searches` (+ `extra`). One giant OR overflows SQLite's
-    expression depth (1000) on lectures with hundreds of tags — ask 150 at a time."""
+# Lecture membership (which cards carry a lecture's tags) only changes when notes are
+# added / edited / retagged — never on reviews — so it's cached: up to _FIND_MAX
+# lectures (LRU, a few KB each), dropped wholesale when the notes signature changes.
+# Filters like "is:suspended" then run against just those card ids (fast).
+from collections import OrderedDict as _OD
+_FIND_CACHE = _OD()
+_FIND_SIG = {"v": None}
+_FIND_MAX = 64
+
+
+def _notes_sig(col):
+    try:
+        return tuple(col.db.first("select count(), max(mod) from notes") or ())
+    except Exception:
+        return None
+
+
+def _find_base(col, searches):
+    sig = _notes_sig(col)
+    if sig is None or sig != _FIND_SIG["v"]:
+        _FIND_CACHE.clear()
+        _FIND_SIG["v"] = sig
+    key = tuple(searches)
+    hit = _FIND_CACHE.get(key)
+    if hit is not None:
+        _FIND_CACHE.move_to_end(key)
+        return hit
     atoms = _atoms(list(searches))
     out = set()
     for i in range(0, len(atoms), 150):
         q = " OR ".join("(%s)" % a for a in atoms[i:i + 150])
-        out.update(col.find_cards("(%s) %s" % (q, extra) if extra else "(%s)" % q))
+        out.update(col.find_cards("(%s)" % q))
+    out = frozenset(out)
+    _FIND_CACHE[key] = out
+    while len(_FIND_CACHE) > _FIND_MAX:
+        _FIND_CACHE.popitem(last=False)
+    return out
+
+
+def find_ids(col, searches, extra=""):
+    """Card ids matching any of `searches` (+ `extra`). One giant OR overflows SQLite's
+    expression depth (1000) on lectures with hundreds of tags, so the tag part is asked
+    150 at a time — and remembered (see _find_base)."""
+    base = _find_base(col, searches)
+    if not extra or not base:
+        return set(base)
+    out = set()
+    ids = sorted(base)
+    for i in range(0, len(ids), 2000):
+        out.update(col.find_cards("cid:%s %s" % (",".join(map(str, ids[i:i + 2000])), extra)))
     return out
 
 
