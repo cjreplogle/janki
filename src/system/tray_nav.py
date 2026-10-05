@@ -694,7 +694,8 @@ class _DayView(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         timed = [e for e in evs if e["start"] is not None]
         lo = min([e["start"] for e in timed] + [8 * 60]) // 60 * 60
-        hi = -(-max([e["end"] or e["start"] + 60 for e in timed] + [17 * 60]) // 60) * 60
+        # to 1pm by default (mornings are what matter here); later classes still extend it
+        hi = -(-max([e["end"] or e["start"] + 60 for e in timed] + [13 * 60]) // 60) * 60
         self.lo, self.hi = lo, hi
         lanes = cv._lanes([(i, e) for i, e in enumerate(timed)])
         self.items = []
