@@ -731,7 +731,7 @@ def _open_detail(i):
 
 
 # ------------------------------------------------------------ weak areas ------
-# "Identify Weak Areas": lectures you've already had, ranked by how under-studied they
+# "Study Progress" (weak areas): lectures you've already had, ranked by how under-studied they
 # look — cards never started (suspended / new), recent recall, leeches and overdue
 # cards — from the calendar + tag map + review history. All local.
 WEAK = -1             # _detail value for the weak-areas page
@@ -2544,7 +2544,7 @@ def _on_open():
 
 def _patch_bottom():
     """On the Calendar the deck list's bottom bar (Get Shared / Create Deck / Import)
-    becomes one 'Identify Weak Areas' button; everywhere else it's Anki's own."""
+    becomes one 'Study Progress' button; everywhere else it's Anki's own."""
     try:
         from aqt.deckbrowser import DeckBrowser, DeckBrowserBottomBar
         if getattr(DeckBrowser._drawButtons, "_jk_cal", False):
@@ -2556,7 +2556,7 @@ def _patch_bottom():
                 return orig(self)
             # inside Weak areas the bar stays empty (no Identify / Load buttons)
             buf = "" if _detail == WEAK else \
-                "<button onclick='pycmd(\"janki:cal:weak\");'>Identify Weak Areas</button>"
+                "<button onclick='pycmd(\"janki:cal:weak\");'>Study Progress</button>"
             self.bottom.draw(
                 buf=buf,
                 link_handler=self._linkHandler,

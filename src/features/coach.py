@@ -502,8 +502,8 @@ def _steps():
              leave=_back_to_decks,
              text="Your week of classes from your lecture calendar: dress codes along the "
                   "top, a ★ on mandatory sessions. Click a class to study its cards, pull "
-                  "related practice questions or open it in your LMS. <b>Identify Weak "
-                  "Areas</b> (bottom bar) ranks the lectures you've studied least."),
+                  "related practice questions or open it in your LMS. <b>Study Progress</b> "
+                  "(bottom bar) ranks the lectures you've studied least."),
         dict(target=None, title="Reviewing", hands_on=True, enter=_open_sample,
              try_=("Reopen the sample card", _open_sample),
              detect=_sample_answered, done_msg="Nice — you rated it.",
