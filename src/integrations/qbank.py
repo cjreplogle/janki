@@ -2769,12 +2769,22 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
     if not path:
         return
     tmp = tempfile.mkdtemp(prefix="janki_pptx_")
+    _fname = os.path.basename(path)
+    # Status from the moment the file lands — unpacking a big deck took a few silent
+    # seconds before the slide-reading progress appeared.
+    try:
+        mw.progress.start(label="Opening “%s”…" % _fname, immediate=True)
+        mw.app.processEvents()
+    except Exception:
+        pass
     try:
         imgs = _pptx_content_images(path, tmp)   # [(temp_path, category, sid), …]
     except Exception as e:
+        mw.progress.finish()
         shutil.rmtree(tmp, ignore_errors=True)
         showWarning("Could not read .pptx:\n\n%s" % e)
         return
+    mw.progress.finish()
     if not imgs:
         shutil.rmtree(tmp, ignore_errors=True)
         showWarning("No slide images found in this .pptx.")
@@ -2790,7 +2800,7 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
             pct = int(100 * done / total) if total else 0
             mw.taskman.run_on_main(
                 lambda d=done, t=total, p=pct: mw.progress.update(
-                    label="Reading slides… %d of %d  (%d%%)" % (d, t, p),
+                    label="Reading slides from “%s”… %d of %d  (%d%%)" % (_fname, d, t, p),
                     value=d, max=t))
         return _ocr_images(uniq, progress=prog)
 
@@ -2881,7 +2891,7 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    mw.progress.start(label="Preparing text recognition…", immediate=True)
+    mw.progress.start(label="Preparing text recognition for “%s”…" % _fname, immediate=True)
     mw.taskman.run_in_background(_bg, _after)
 
 
