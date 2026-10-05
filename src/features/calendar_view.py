@@ -1418,7 +1418,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-hours{position:relative;align-self:end;height:var(--jkc-h);}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
-.jkc-col{min-width:0;display:flex;flex-direction:column;}
+.jkc-col,.jkc-ghost{min-width:0;display:flex;flex-direction:column;}
 .jkc-col .jkc-body{flex:none;}
 .jkc-dh{text-align:center;font-size:.86em;opacity:.8;height:24px;line-height:24px;}
 .jkc-today .jkc-dh{color:#9cbcf3;opacity:1;}
@@ -1669,7 +1669,10 @@ _JS = """<script>(function(){
          c.animate(enter?[{transform:'translateX('+sx+'px)',opacity:0},{transform:'none',opacity:1}]
                         :[{transform:'translateX('+sx+'px)'},{transform:'none'}],
                    {duration:260,easing:EASE});});
-       var gh=st.ghost;gh.style.cssText+=';position:absolute;margin:0;pointer-events:none;left:'+
+       var gh=st.ghost;
+       // the leaving day's copy is NOT a day: keyboard selection must never land on it
+       gh.classList.remove('jkc-col','jk-kbday');gh.classList.add('jkc-ghost');
+       gh.style.cssText+=';position:absolute;margin:0;pointer-events:none;left:'+
          st.left+'px;top:'+st.top+'px;width:'+st.width+'px;';
        g.appendChild(gh);
        var ga=gh.animate([{transform:'none',opacity:1},{transform:'translateX('+(-sx)+'px)',opacity:0}],
