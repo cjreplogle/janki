@@ -14,6 +14,7 @@ Only the user's own Janki reads their calendar, locally (lectures.events_between
 """
 import datetime
 import html
+import re
 import json
 
 from aqt import gui_hooks, mw
@@ -308,11 +309,14 @@ def _detail_html(e):
         _pick_opts = lectures.lecture_options(e["summary"])
         if m["display"] not in _pick_opts:
             _pick_opts.insert(0, m["display"])
-        opts = "".join("<option%s>%s</option>" % (" selected" if o == m["display"] else "",
-                                                  html.escape(o)) for o in _pick_opts)
-        sub = ("<div class='jkd-sub'><select class='jkd-pick' title='Pick the lecture this "
-               "class belongs to' onchange=\"pycmd('janki:cal:pick:'+this.selectedIndex)\">"
-               "%s</select></div>" % opts)
+        # Janki's own drop-down (the system menu came out white-on-white here)
+        items = "".join("<div class='jkd-opt%s' data-i='%d'>%s</div>"
+                        % (" on" if o == m["display"] else "", n, html.escape(o))
+                        for n, o in enumerate(_pick_opts))
+        sub = ("<div class='jkd-sub'><div class='jkd-dd'>"
+               "<button class='jkd-pick' onclick='jkdPick(event)' title='Pick the lecture "
+               "this class belongs to'>%s</button><div class='jkd-menu'>%s</div></div></div>"
+               % (html.escape(m["display"]), items))
     body = ""
     if not m:
         body = ("<div class='jkd-none'>No lecture in your tag map matches this class.<br>"
@@ -636,8 +640,8 @@ def _course_colour(title):
 def _is_allday_kind(summary):
     """Day-wide notices that come through as timed events (e.g. a dress code) belong
     in the all-day row, not across the time grid."""
-    s = (summary or "").lower()
-    return "dress code" in s or "dresscode" in s or "dress-code" in s
+    s = re.sub(r"[^a-z]", "", (summary or "").lower())   # "Dress: Code", "dress-code"…
+    return "dresscode" in s
 
 
 def _norm(s):
@@ -672,8 +676,8 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-segs .jkc-seg{position:relative;z-index:1;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
 .jkc-segs .jkc-seg.on{color:#cfe0ff;}
 /* one pill behind the buttons that glides to the chosen view */
-.jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
-  background:rgba(156,188,243,.28);transition:transform .24s cubic-bezier(.2,.8,.2,1),width .24s cubic-bezier(.2,.8,.2,1);}
+#jkc .jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
+  background:rgba(156,188,243,.28) !important;transition:transform .24s cubic-bezier(.2,.8,.2,1),width .24s cubic-bezier(.2,.8,.2,1);}
 .jkc-hours{position:relative;margin-top:52px;}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
@@ -718,18 +722,23 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd-back:hover{background:rgba(255,255,255,.16);}
 .jkd{max-width:520px;margin:28px auto 0;}
 .jkd h2{margin:0 0 4px;font-size:1.45em;}
-.jkd-sub{opacity:.85;margin-bottom:4px;}
-/* Own-drawn box: sized to the chosen lecture (not the longest one), equal padding on
-   both sides and the arrow inside the right padding — so the name is truly centred. */
-#jkc .jkd-pick{-webkit-appearance:none;appearance:none;field-sizing:content;
-  background:rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cfd3dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center !important;
-  color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;
-  padding:3px 26px;font:inherit;max-width:min(520px,90vw);cursor:pointer;
-  text-align:center;text-align-last:center;}
-#jkc .jkd-pick:hover{background-color:rgba(255,255,255,.12) !important;}
-/* the open list is the system menu (white on macOS): leave its entries to the OS,
-   or light text lands on a white menu */
-#jkc .jkd-pick option{color:initial;background:initial;}
+.jkd-sub{margin-bottom:4px;}
+/* lecture picker: a button (name centred, inset chevron) + Janki's own glass menu */
+.jkd-dd{position:relative;display:inline-block;}
+#jkc .jkd-pick{background:rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cfd3dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center !important;
+  color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 26px;
+  font:inherit;cursor:pointer;max-width:min(520px,90vw);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;transition:background-color .18s ease;}
+#jkc .jkd-pick:hover,#jkc .jkd-dd.open .jkd-pick{background-color:rgba(255,255,255,.13) !important;}
+#jkc .jkd-menu{position:absolute;left:50%;top:calc(100% + 6px);z-index:60;min-width:100%;
+  max-height:320px;overflow-y:auto;padding:5px;border-radius:12px;text-align:center;
+  background:rgba(28,30,38,.97) !important;border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;pointer-events:none;
+  transform:translate(-50%,-6px);transition:opacity .16s ease,transform .2s cubic-bezier(.2,.8,.2,1);}
+#jkc .jkd-dd.open .jkd-menu{opacity:1;pointer-events:auto;transform:translate(-50%,0);}
+.jkd-opt{padding:5px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;font-size:.95em;}
+#jkc .jkd-opt:hover{background:rgba(255,255,255,.1) !important;}
+#jkc .jkd-opt.on{color:#cfe0ff;background:rgba(156,188,243,.2) !important;}
 .jkd-when,.jkd-loc{opacity:.8;font-size:.95em;margin-top:2px;}
 .jkd-counts{margin:18px 0 12px;opacity:.9;}
 .jkd-counts .c-new{color:#7ab0ff;}.jkd-counts .c-due{color:#7fd17f;}.jkd-counts .c-sus{color:#e0b000;}
@@ -861,6 +870,21 @@ _JS = """<script>(function(){
      pycmd('janki:cal:ev:'+c.getAttribute('data-i'));}
  },true);
  document.addEventListener('mousemove',function(){sel(null);},{passive:true,once:false});
+ window.jkdPick=function(ev){ev.stopPropagation();
+   var dd=ev.target.closest('.jkd-dd');if(!dd)return;
+   var o=dd.classList.toggle('open');
+   if(o){var on=dd.querySelector('.jkd-opt.on');if(on)on.scrollIntoView({block:'center'});}
+   try{pycmd('janki:sfx:'+(o?'unfold':'fold'));}catch(x){}};
+ document.addEventListener('click',function(e){
+   var opt=e.target.closest&&e.target.closest('.jkd-opt');
+   var dd=document.querySelector('#jkc .jkd-dd.open');
+   if(opt){dd&&dd.classList.remove('open');pycmd('janki:cal:pick:'+opt.getAttribute('data-i'));return;}
+   if(dd&&!e.target.closest('.jkd-dd'))dd.classList.remove('open');
+ },true);
+ document.addEventListener('keydown',function(e){
+   var dd=document.querySelector('#jkc .jkd-dd.open');
+   if(dd&&e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();dd.classList.remove('open');}
+ },true);
  window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
    var o=t.classList.toggle('open');a.textContent=o?'Hide tags ▴':'Show tags ▾';
    try{pycmd('janki:sfx:'+(o?'unfold':'fold'));}catch(x){}};
