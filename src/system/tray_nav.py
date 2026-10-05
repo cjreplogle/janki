@@ -1581,11 +1581,7 @@ def _build() -> "QWidget":
     rwrow.addWidget(cyc)
     lay.addLayout(rwrow)
 
-    # Load from Lectures → the Load today's lectures wizard (with the mode controls).
-    lb = QPushButton("Load from Lectures")
-    lb.setObjectName("tgl")                   # same size/look as the mode buttons
-    lb.clicked.connect(lambda _c=False: _open_lectures())
-    lay.addWidget(lb)
+    # (no "Load from Lectures" here any more: the Today tab + the Calendar cover it)
 
     # Caption position grid — only relevant/visible while caption mode is on. Set the
     # initial state statically (no animation on first open); toggling animates it.
