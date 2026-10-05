@@ -337,6 +337,21 @@ def install_toolbar(links, toolbar):
                                    id="janki_calendar")
         idx = next((i for i, l in enumerate(links) if "sync" in l), len(links))
         links.insert(idx, link)
+        # Icon instead of the word: the label stays for the tooltip/accessibility, the
+        # text is hidden and a small calendar glyph (in the toolbar's text colour) shows.
+        svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
+               "stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+               "<rect x='3' y='5' width='18' height='16' rx='3'/><path d='M3 10h18M8 3v4M16 3v4'/>"
+               "<circle cx='8' cy='14.5' r='.6' fill='black'/><circle cx='12' cy='14.5' r='.6' "
+               "fill='black'/><circle cx='16' cy='14.5' r='.6' fill='black'/></svg>")
+        import urllib.parse as _up
+        uri = "data:image/svg+xml," + _up.quote(svg)
+        links.append(
+            "<style>#janki_calendar{font-size:0 !important;display:inline-flex;"
+            "align-items:center;justify-content:center;min-width:1.6rem;}"
+            "#janki_calendar::before{content:'';width:22px;height:22px;"
+            "background:currentColor;-webkit-mask:url(\"%s\") center/contain no-repeat;"
+            "mask:url(\"%s\") center/contain no-repeat;}</style>" % (uri, uri))
         lh = getattr(toolbar, "link_handlers", None)
         if isinstance(lh, dict):
             for key in ("decks", "janki_practice", "stats"):
