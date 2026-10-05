@@ -151,10 +151,46 @@ def _read_source_text(path):
     """
     p = (path or "").strip()
     if _is_url(p):
-        import urllib.request
-        with urllib.request.urlopen(p, timeout=8) as resp:  # noqa: S310 (user-supplied own calendar)
-            return resp.read().decode("utf-8", "ignore")
+        return _read_url_cached(p)
     return open(_p(p), encoding="utf-8", errors="ignore").read()
+
+
+def _url_cache_paths():
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "user_files")
+    return os.path.join(base, "calendar_cache.ics"), os.path.join(base, "calendar_cache.json")
+
+
+def _read_url_cached(url):
+    """A URL calendar is downloaded at most once a day (or when the URL changes); the
+    copy lives in user_files. If a download fails (offline…), the last copy is used."""
+    import urllib.request
+    body_p, meta_p = _url_cache_paths()
+    today = datetime.date.today().isoformat()
+    meta = {}
+    try:
+        meta = json.load(open(meta_p))
+    except Exception:
+        pass
+    have = os.path.exists(body_p) and meta.get("url") == url
+    if have and meta.get("date") == today:
+        return open(body_p, encoding="utf-8", errors="ignore").read()
+    try:
+        with urllib.request.urlopen(url, timeout=8) as resp:  # noqa: S310 (user's own calendar)
+            text = resp.read().decode("utf-8", "ignore")
+    except Exception:
+        if have:
+            return open(body_p, encoding="utf-8", errors="ignore").read()
+        raise
+    try:
+        os.makedirs(os.path.dirname(body_p), exist_ok=True)
+        with open(body_p, "w", encoding="utf-8") as f:
+            f.write(text)
+        with open(meta_p, "w") as f:
+            json.dump({"url": url, "date": today}, f)
+    except Exception as e:
+        _log("calendar cache write: %s" % e)
+    return text
 
 
 def _parse_ics_all(path):
