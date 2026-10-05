@@ -72,7 +72,7 @@ TAG_FAMILIES = [
 # On by default = decks actually imported into this collection. The rest ship
 # off (their tags exist in the sheet but the decks aren't installed, so they'd
 # match nothing) — flip them on here if you import that deck later.
-_DEFAULT_ON = {"aj", "ak", "huc"}
+_DEFAULT_ON = {"huc"}   # AnKing/AJ opt-in: AnKing's tag map is huge
 
 
 def _log(msg):

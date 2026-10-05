@@ -68,7 +68,9 @@ TAG_FAMILIES = [
 # On by default = decks actually imported into this collection. The rest ship
 # off (their tags exist in the sheet but the decks aren't installed, so they'd
 # match nothing) — flip them on here if you import that deck later.
-_DEFAULT_ON = {"aj", "ak", "huc"}
+# Only Hutch ships on: AnKing's tag map is enormous (tens of thousands of tags), and
+# auto-loading it on every launch could grind a laptop to a halt. Opt in deliberately.
+_DEFAULT_ON = {"huc"}
 
 
 def _log(msg):
@@ -3022,6 +3024,22 @@ def build_settings_pages():
         fam_cbs[suffix] = cb
     row += (len(TAG_FAMILIES) + 1) // 2
 
+    ak_warn = QLabel("⚠ AnKing auto-load is on. AnKing's tag map is huge, so loading it "
+                     "every launch can take minutes and slow your whole computer. "
+                     "Consider leaving AnKing off here and loading it by hand.")
+    ak_warn.setWordWrap(True)
+    ak_warn.setStyleSheet("color:#ff9d8a;")
+    bg.addWidget(ak_warn, row, 0, 1, 2)
+    row += 1
+
+    def _ak_warn_update(*_a):
+        ak = fam_cbs.get("ak")
+        ak_warn.setVisible(bool(auto_cb.isChecked() and ak is not None and ak.isChecked()))
+    auto_cb.toggled.connect(_ak_warn_update)
+    if "ak" in fam_cbs:
+        fam_cbs["ak"].toggled.connect(_ak_warn_update)
+    _ak_warn_update()
+
     bg.addWidget(QLabel("Fuzzy match cutoff:"), row, 0)
     fuzzy = QDoubleSpinBox()
     fuzzy.setRange(0.30, 1.00)
@@ -3213,6 +3231,13 @@ def _on_profile_open():
     if st.get("last_auto_date") == today:
         return
     st["last_auto_date"] = today
+    if _cfg().get("unsuspend_ak", "ak" in _DEFAULT_ON):
+        try:
+            from aqt.utils import tooltip
+            tooltip("Auto-loading today's lectures with AnKing on — this can be slow. "
+                    "Settings → Lectures to turn AnKing off.", period=7000)
+        except Exception:
+            pass
     _save_state(st)
     QTimer.singleShot(1500, lambda: run_today(interactive=True, auto=True))
 

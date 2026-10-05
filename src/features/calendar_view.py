@@ -1707,10 +1707,9 @@ def practice_event(e):
         toks = qbank._tokens(name + " " + e["summary"])
         if not leaves:
             return []
-        # concept-tag matches only (wording overlap pulled in unrelated questions), and
-        # a handful at least — a stray hit or two means this lecture has no real bank
-        ids = qbank.intersperse_card_ids(leaves, toks, 40, use_text_fallback=False,
-                                         exact_only=True)
+        # the original matching (tags, near-miss tags, then wording); a stray hit or
+        # two still means this lecture has no real bank
+        ids = qbank.intersperse_card_ids(leaves, toks, 40)
         return ids if len(ids) >= _PRACTICE_MIN else []
 
     def done(cids):
