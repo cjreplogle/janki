@@ -1045,7 +1045,7 @@ def _ago(d):
 def _weak_html():
     seg = "".join("<button class='jkw-m%s' onclick=\"pycmd('janki:cal:weakmode:%s')\">%s</button>"
                   % (" on" if _weak_mode == k else "", k, l)
-                  for k, l in (("2w", "Past 2 weeks"), ("block", "End of block")))
+                  for k, l in (("2w", "Biweekly"), ("block", "End of block")))
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
             "<h2>Weak areas</h2><div class='jkw-seg'>%s</div>"
             "<div class='jkd-when'>Lectures since %s, least-studied first</div>"
