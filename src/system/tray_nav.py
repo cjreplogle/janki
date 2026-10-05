@@ -552,6 +552,11 @@ def _prebuild():
             schedule_prebuild(600)                # still fading out / open: retry
             return
         new = _build()
+        try:
+            new.winId()                           # make the native window now, not on
+            _prepare_over_fullscreen(new)          # first show (that was the slow part)
+        except Exception:
+            pass
         old, _prebuilt = _prebuilt, new
         if old is not None:
             old.deleteLater()
@@ -2031,10 +2036,7 @@ def show_navigator() -> None:
             except Exception:
                 pass
             _nav = None
-        import time as _tt
-        _t0 = _tt.time()
         _nav = fresh if fresh is not None else _build()
-        _t1 = _tt.time()
         try:                                   # never taller than half the screen
             from aqt.qt import QGuiApplication
             scr = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -2049,19 +2051,8 @@ def show_navigator() -> None:
         # Set Space/level behavior BEFORE showing so the popup lands on the active
         # Space (even another app's fullscreen) rather than switching to Anki's.
         _prepare_over_fullscreen(_nav)
-        _t2 = _tt.time()
         _nav.show()
-        _t3 = _tt.time()
         _animate_open(_nav, _final_pos)
-        try:                                   # TEMP timing probe
-            import os
-            with open(os.path.join(os.path.dirname(__file__), "..", "..", "user_files",
-                                   "tray_open.log"), "a") as f:
-                f.write("%s prebuilt=%s build %.0fms · size/place %.0fms · show %.0fms\n"
-                        % (_tt.strftime("%H:%M:%S"), fresh is not None, (_t1 - _t0) * 1000,
-                           (_t2 - _t1) * 1000, (_t3 - _t2) * 1000))
-        except Exception:
-            pass
         QTimer.singleShot(400, refresh_data_bg)   # fresh counts for next time
         # Re-assert AFTER show: Qt rewrites the NSPanel's style mask / collection
         # behavior during show(), which would clobber the non-activating + all-Spaces

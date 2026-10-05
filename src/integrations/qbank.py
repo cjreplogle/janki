@@ -687,6 +687,14 @@ def clean_stored_tags():
     searches: clean every stored tag and drop bare generic leaves. Rewrites only banks
     that change, then refreshes those banks' Practice notes (their tags come from the
     bank) and forgets the broken tag names. Returns the bank ids repaired."""
+    # once a scan finds nothing to fix, skip the (startup-time) rescan for a week
+    import time as _t
+    flag = os.path.join(os.path.dirname(_registry_path()), ".tags_clean")
+    try:
+        if _t.time() - os.path.getmtime(flag) < 7 * 86400:
+            return []
+    except Exception:
+        pass
     fixed, junk = [], set()
     for bid, meta in list_banks().items():
         dir_name = meta.get("dir", "")
@@ -729,6 +737,11 @@ def clean_stored_tags():
             log("tag repair cleanup: %s" % e)
     if fixed:
         log("qbank: repaired tags in %s" % ", ".join(fixed))
+    if not fixed:
+        try:
+            open(flag, "w").close()               # clean: don't rescan for a week
+        except Exception:
+            pass
     return fixed
 
 
