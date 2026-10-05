@@ -1507,6 +1507,8 @@ def _prewarm_work():
         evs = lectures.events_between(t - datetime.timedelta(days=28),
                                       t + datetime.timedelta(days=56))
         for e in sorted(evs, key=lambda e: abs((e["date"] - t).days)):
+            if _closing:                 # quitting: don't make Anki wait on this
+                return
             lectures.match_event(e["summary"])
     except Exception as e:
         log("calendar prewarm: %s" % e)
@@ -1525,7 +1527,22 @@ def _schedule_prewarm():
         pass
 
 
+_closing = False
+
+
+def _on_close():
+    global _closing
+    _closing = True
+
+
+def _on_open():
+    global _closing
+    _closing = False
+
+
 def install():
+    gui_hooks.profile_did_open.append(_on_open)
+    gui_hooks.profile_will_close.append(_on_close)
     gui_hooks.profile_did_open.append(_schedule_prewarm)
     gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1500, _restore_suspended))
     gui_hooks.deck_browser_will_render_content.append(_on_render)

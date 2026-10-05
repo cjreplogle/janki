@@ -317,6 +317,8 @@ def _set(s):
 
 def _tick():
     global _since, _armed, _away, _st
+    if _quitting:
+        return
     corner = _corner()
     if corner is None or getattr(state, "_lockdown_on", False):
         return
@@ -367,17 +369,36 @@ class _Watch(QObject):
 
 def _app_state(s):
     # leaving Anki while the window is still provisional → back into the corner
+    if _quitting:
+        return
     if s != Qt.ApplicationState.ApplicationActive:
         if _st == OPEN:
             QTimer.singleShot(0, _put_away)
 
 
 _watch = None
+_quitting = False
+
+
+def shutdown():
+    """Anki is closing: stop polling, drop the preview, ignore app-state changes."""
+    global _quitting, _st
+    _quitting = True
+    _st = IDLE
+    try:
+        if _timer is not None:
+            _timer.stop()
+        if _panel is not None:
+            _panel.hide()
+            _panel.deleteLater()
+    except Exception:
+        pass
 
 
 def reload():
     """Start/stop polling to match the setting."""
-    global _timer, _watch
+    global _timer, _watch, _quitting
+    _quitting = False
     try:
         if _corner() is None:
             if _timer is not None:
