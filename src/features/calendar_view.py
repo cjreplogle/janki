@@ -149,9 +149,35 @@ def _days():
     return [start]
 
 
+_deferred_refresh = False
+
+
+def _app_active():
+    try:
+        from aqt.qt import Qt
+        return mw.app.applicationState() == Qt.ApplicationState.ApplicationActive
+    except Exception:
+        return True
+
+
+def _on_app_state(st):
+    """Back in Anki: apply a quiet refresh that arrived while you were elsewhere."""
+    global _deferred_refresh
+    if _deferred_refresh and _app_active():
+        _deferred_refresh = False
+        if _view:
+            _swap("refresh")
+
+
 def _swap(direction):
     """Replace the days in the open page (no reload): the page's out-slide is already
     running; jkcSwap drops the new days in and slides them from the other side."""
+    global _deferred_refresh
+    # A background result landing while you're in another app waits for your return:
+    # re-rendering the page then could pull keyboard focus from the app you're in.
+    if direction == "refresh" and not _app_active():
+        _deferred_refresh = True
+        return
     try:
         mw.web.eval("window.jkcSwap&&window.jkcSwap(%s,%s)"
                     % (json.dumps(_week_html()), json.dumps(direction)))
@@ -824,7 +850,7 @@ def _atom_plain(a):
 
 def _weak_progress(mode, frac):
     """Fill the 'Looking through your lectures…' bar (only if that view is showing)."""
-    if _view and _detail == WEAK and _weak is None and _weak_mode == mode:
+    if _view and _detail == WEAK and _weak is None and _weak_mode == mode and _app_active():
         try:
             mw.web.eval("(function(){var b=document.getElementById('jkw-prog');"
                         "if(b)b.style.width='%d%%';})()" % int(5 + 95 * frac))
@@ -2040,6 +2066,10 @@ def _redraw_bottom():
 
 def install():
     _patch_bottom()
+    try:
+        mw.app.applicationStateChanged.connect(_on_app_state)
+    except Exception:
+        pass
     try:
         gui_hooks.operation_did_execute.append(_weak_dirty)
     except Exception:

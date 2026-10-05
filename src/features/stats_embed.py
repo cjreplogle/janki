@@ -1114,6 +1114,12 @@ def _when_idle(fn, ms) -> None:
             # renderer with the card, and its load stalled the first card's typing.
             if getattr(mw, "state", None) in ("overview", "review"):
                 return                        # the next return to the deck list re-queues
+            # Not while you're in another app: building/loading the hidden stats page
+            # then could take keyboard focus from it. Retry once you're back.
+            from aqt.qt import Qt as _Qt
+            if mw.app.applicationState() != _Qt.ApplicationState.ApplicationActive:
+                t.start(3000)
+                return
             jobs, _idle["jobs"] = _idle["jobs"], []
             for j in jobs:
                 try:
