@@ -52,6 +52,7 @@ def close():
     global _view, _detail
     _view = False
     _detail = None
+    _sync_back()
 
 
 def _redraw():
@@ -79,14 +80,14 @@ _mode_override = None   # the just-chosen view, until its config write lands
 
 def _set_mode(m, direction="mode"):
     global _anchor, _mode_override
-    try:
+    _mode_override = m
+    _anchor = None
+    _swap(direction)                    # draw first…
+    try:                                # (the sound can take ~40 ms to start)
         from . import sfx
         sfx.play("select")
     except Exception:
         pass
-    _mode_override = m
-    _anchor = None
-    _swap(direction)                    # draw first…
 
     def _save():                        # …then persist the choice
         global _mode_override
@@ -138,6 +139,7 @@ def _swap(direction):
     try:
         mw.web.eval("window.jkcSwap&&window.jkcSwap(%s,%s)"
                     % (json.dumps(_week_html()), json.dumps(direction)))
+        _sync_back()
     except Exception as e:
         log("calendar swap: %s" % e)
         _redraw()
@@ -347,7 +349,6 @@ def _detail_html(e):
                 % (sw, _tags_html(m)))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
-            "<button class='jkd-back' onclick=\"pycmd('janki:cal:det:back')\">‹ Back</button>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
             % (html.escape(e["summary"]),
                " <span class='jkc-m jkd-m' title='Mandatory'>M</span>" if e.get("mandatory") else "",
@@ -681,7 +682,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
   clip-path:inset(-40px 55px -40px -40px);  /* hour lines end with the last day, not in the margin */
   will-change:transform,opacity;}  /* layer made up front: first Day/3-day/Week zoom doesn't stall */
 #jkc .jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06) !important;border-radius:9px;padding:2px;margin-right:6px;}
-.jkc-segs .jkc-seg{position:relative;z-index:1;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
+.jkc-segs .jkc-seg{position:relative;z-index:1;white-space:nowrap;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
 .jkc-segs .jkc-seg.on{color:#cfe0ff;}
 /* one pill behind the buttons that glides to the chosen view */
 #jkc .jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
@@ -732,13 +733,15 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkd h2{margin:0 0 4px;font-size:1.45em;}
 .jkd-sub{margin-bottom:4px;}
 /* lecture picker: a button (name centred, inset chevron) + Janki's own glass menu */
-.jkd-dd{position:relative;display:inline-block;}
+#jkc .jkc-grid.jkc-detail{clip-path:none;padding-right:0;}  /* no hour column here */
+#jkc .jkd-dd{position:relative !important;display:inline-block;}
 #jkc .jkd-pick{background:rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cfd3dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center !important;
-  color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 26px;
+  color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 30px 3px 14px;
   font:inherit;cursor:pointer;max-width:min(520px,90vw);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;transition:background-color .18s ease;}
 #jkc .jkd-pick:hover,#jkc .jkd-dd.open .jkd-pick{background-color:rgba(255,255,255,.13) !important;}
 #jkc .jkd-menu{position:absolute;left:50%;top:calc(100% + 6px);z-index:60;min-width:100%;
+  width:max-content;max-width:min(640px,92vw);
   max-height:320px;overflow-y:auto;padding:5px;border-radius:12px;text-align:center;
   background:rgba(28,30,38,.97) !important;border:1px solid rgba(255,255,255,.12);
   box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;pointer-events:none;
@@ -789,11 +792,21 @@ _JS = """<script>(function(){
  // ‹ / ›: the days slide out while Python builds the next ones (in parallel, no page
  // reload); jkcSwap then drops them in and slides them in from the other side.
  // Transform + opacity only, on its own layer, so it stays smooth.
- var EASE='cubic-bezier(.2,.8,.2,1)', outDone=null;
+ var EASE='cubic-bezier(.2,.8,.2,1)', outDone=null, step=null;
  function grid(){return document.querySelector('#jkc .jkc-grid');}
  window.jkcNav=function(dir){
    var g=grid();
-   if(g&&g.animate&&(dir==='next'||dir==='prev')){
+   step=null;
+   // 3-day moves one day: keep the grid and slide the days over by one column.
+   var on=document.querySelector('#jkc .jkc-seg.on');
+   if(g&&g.animate&&(dir==='next'||dir==='prev')&&on&&on.getAttribute('data-k')==='3'){
+     var cs=g.querySelectorAll('.jkc-col');
+     if(cs.length){var leave=cs[dir==='next'?0:cs.length-1];
+       step={dir:dir,w:(cs.length>1?cs[1].offsetLeft-cs[0].offsetLeft:leave.offsetWidth+6),
+             ghost:leave.cloneNode(true),left:leave.offsetLeft,top:leave.offsetTop,
+             width:leave.offsetWidth};}
+     outDone=null;
+   } else if(g&&g.animate&&(dir==='next'||dir==='prev')){
      g.style.willChange='transform,opacity';
      var a=g.animate([{transform:'none',opacity:1},
                       {transform:'translateX('+(dir==='next'?-28:28)+'px)',opacity:0}],
@@ -811,6 +824,21 @@ _JS = """<script>(function(){
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      pillInit();
      var g=grid(); if(!g||!g.animate)return;
+     if(step&&step.dir===dir){                         // one-day slide (3-day view)
+       var st=step;step=null;var sx=dir==='next'?st.w:-st.w;
+       g.querySelectorAll('.jkc-col').forEach(function(c,i,all){
+         var enter=(dir==='next'?i===all.length-1:i===0);
+         c.animate(enter?[{transform:'translateX('+sx+'px)',opacity:0},{transform:'none',opacity:1}]
+                        :[{transform:'translateX('+sx+'px)'},{transform:'none'}],
+                   {duration:260,easing:EASE});});
+       var gh=st.ghost;gh.style.cssText+=';position:absolute;margin:0;pointer-events:none;left:'+
+         st.left+'px;top:'+st.top+'px;width:'+st.width+'px;';
+       g.appendChild(gh);
+       var ga=gh.animate([{transform:'none',opacity:1},{transform:'translateX('+(-sx)+'px)',opacity:0}],
+                         {duration:260,easing:EASE,fill:'forwards'});
+       ga.finished.then(function(){gh.remove();}).catch(function(){gh.remove();});
+       return;
+     }
      g.style.willChange='transform,opacity';
      if(dir==='refresh')return;                       // quiet in-place update
      var from=dir==='next'?'translateX(28px)':(dir==='prev'?'translateX(-28px)':
@@ -824,7 +852,8 @@ _JS = """<script>(function(){
  // The view switch's pill: placed under the active option, glides when it changes.
  function pill(btn,anim){var p=document.querySelector('#jkc .jkc-pill');if(!p||!btn)return;
    if(!anim)p.style.transition='none';
-   p.style.width=btn.offsetWidth+'px';p.style.transform='translateX('+(btn.offsetLeft-2)+'px)';
+   p.style.width=btn.offsetWidth+'px';p.style.top=btn.offsetTop+'px';p.style.height=btn.offsetHeight+'px';
+   p.style.bottom='auto';p.style.transform='translateX('+btn.offsetLeft+'px)';
    if(!anim){void p.offsetWidth;p.style.transition='';}}
  // Fonts/glass can still be settling at first paint (0 width) — retry until measured.
  function pillInit(n){var b=document.querySelector('#jkc .jkc-seg.on');pill(b,false);
@@ -1025,7 +1054,8 @@ def on_js_message(handled, message, context):
         elif cmd == "today":
             _go_week(None)
         elif cmd.startswith("mode:"):
-            _set_mode(cmd[5:].split(":")[0], cmd[5:].split(":")[1] if ":" in cmd[5:] else "mode")
+            parts = cmd[5:].split(":")
+            _set_mode(parts[0], parts[1] if len(parts) > 1 else "mode")
         elif cmd == "loader":
             from ..integrations import lectures
             lectures.run_today(interactive=True)
@@ -1074,9 +1104,49 @@ def on_js_message(handled, message, context):
     return (True, None)
 
 
+# "‹ Back" for a class page lives in the toolbar strip's top-left corner (the toolbar
+# is its own webview), sized and centred on the nav pill so it reads as part of the bar.
+_BACK_JS = r"""(function(on){var b=document.getElementById('jk-cal-back');
+if(!on){if(b){b.classList.remove('in');setTimeout(function(){b&&b.remove();},220);}return;}
+var t=document.querySelector('div.toolbar');if(!t)return;var r=t.getBoundingClientRect();
+if(!b){b=document.createElement('button');b.id='jk-cal-back';
+ b.innerHTML="<svg width='8' height='13' viewBox='0 0 9 14'><path d='M7 1L2 7l5 6' fill='none' "+
+  "stroke='currentColor' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/></svg>"+
+  "<span>Back</span>";
+ b.onclick=function(){pycmd('janki:cal:det:back');};
+ var st=document.getElementById('jk-cal-back-css');
+ if(!st){st=document.createElement('style');st.id='jk-cal-back-css';st.textContent=
+  "#jk-cal-back{position:fixed;left:16px;z-index:50;display:inline-flex;align-items:center;"+
+  "justify-content:center;gap:7px;padding:0 16px;border:none;border-radius:999px;cursor:pointer;"+
+  "background:rgba(0,0,0,.52) !important;color:inherit;font:inherit;font-weight:600;"+
+  "box-shadow:0 1px 3px rgba(0,0,0,.25);opacity:0;transform:translateX(-8px);"+
+  "transition:opacity .2s ease,transform .25s cubic-bezier(.2,.8,.2,1),background-color .18s ease;}"+
+  "#jk-cal-back.in{opacity:1;transform:none;}"+
+  "#jk-cal-back:hover{background:rgba(255,255,255,.14) !important;}"+
+  "#jk-cal-back:hover svg{transform:translateX(-3px);}"+
+  "#jk-cal-back svg{transition:transform .22s cubic-bezier(.2,.8,.2,1);}";
+  document.head.appendChild(st);}
+ document.body.appendChild(b);requestAnimationFrame(function(){b.classList.add('in');});}
+b.style.top=r.top+'px';b.style.height=r.height+'px';})(%s);"""
+
+
+def _sync_back():
+    on = bool(_view and _detail is not None and getattr(mw, "state", None) == "deckBrowser")
+    try:
+        mw.toolbar.web.eval(_BACK_JS % ("true" if on else "false"))
+    except Exception:
+        pass
+
+
+def _on_toolbar_redraw(*_a):
+    if _view and _detail is not None:
+        QTimer.singleShot(80, _sync_back)
+
+
 def _on_state(new_state, old_state):
     if new_state != "deckBrowser":
         close()
+    _sync_back()
     # Back on the deck list after studying a class: tidy the temporary deck away
     # (its cards return to their own decks; the reviews already counted).
     if new_state == "deckBrowser" and old_state in ("overview", "review"):
@@ -1190,4 +1260,8 @@ def install():
     gui_hooks.deck_browser_will_render_content.append(_on_render)
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
     gui_hooks.state_did_change.append(_on_state)
+    try:
+        gui_hooks.top_toolbar_did_redraw.append(_on_toolbar_redraw)
+    except Exception:
+        pass
     gui_hooks.top_toolbar_did_init_links.append(install_toolbar)
