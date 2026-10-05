@@ -257,8 +257,9 @@ def _start_glass_keeper(w) -> None:
         if _nav is not w or not w.isVisible():
             t.stop()
             return
-        if state["n"] <= 16:                  # burst: re-assert unconditionally
-            _apply_glass_panel(w)
+        if state["n"] <= 16:                  # burst: re-assert only if it was lost
+            if state["n"] <= 2 or _glass_lost(w):  # (unconditional re-applies made the
+                _apply_glass_panel(w)              #  first tab switches hitch)
             return
         # After the burst, keep WATCHING while the popup is open: over another app's
         # fullscreen Space the opaque/square reconfigure can land much later (or more
