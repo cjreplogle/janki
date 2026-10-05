@@ -1255,6 +1255,11 @@ def _build() -> "QWidget":
     def _show_mode(m, save=True):
         b_decks.setChecked(m != "today")
         b_today.setChecked(m == "today")
+        # same footprint for both lists: switching then never resizes the (glass) tray
+        # window — that resize was the lag
+        h = max(scroll.height(), today_box.sizeHint().height())
+        if m == "today":
+            today_box.setMinimumHeight(h)
         scroll.setVisible(m != "today")
         today_box.setVisible(m == "today")
         for _b in (b_decks, b_today):
@@ -1262,12 +1267,14 @@ def _build() -> "QWidget":
             _b.style().unpolish(_b)
             _b.style().polish(_b)
         if save:
-            try:
-                c = mw.addonManager.getConfig(__name__) or {}
-                c["tray_mode"] = m
-                mw.addonManager.writeConfig(__name__, c)
-            except Exception:
-                pass
+            def _save(m=m):
+                try:
+                    c = mw.addonManager.getConfig(__name__) or {}
+                    c["tray_mode"] = m
+                    mw.addonManager.writeConfig(__name__, c)
+                except Exception:
+                    pass
+            QTimer.singleShot(250, _save)          # after the switch has drawn
             try:
                 from ..features import sfx
                 sfx.play("tab")
