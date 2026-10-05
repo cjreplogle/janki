@@ -320,6 +320,28 @@ def _page_html():
 
 
 # ------------------------------------------------------------- class page --------
+def _fams_off():
+    """Sources (Hutch / AJ / AnKing …) you've switched off — remembered across classes
+    and launches (config calendar_fams_off)."""
+    try:
+        return set((mw.addonManager.getConfig(__name__) or {}).get("calendar_fams_off") or [])
+    except Exception:
+        return set()
+
+
+def _save_fam(f, on):
+    def w():
+        try:
+            c = mw.addonManager.getConfig(__name__) or {}
+            off = set(c.get("calendar_fams_off") or [])
+            (off.discard if on else off.add)(f)
+            c["calendar_fams_off"] = sorted(off)
+            mw.addonManager.writeConfig(__name__, c)
+        except Exception as e:
+            log("calendar fams save: %s" % e)
+    QTimer.singleShot(0, w)
+
+
 def _lecture_query(m, fams):
     """The lecture's tag searches for the switched-on sources (a list; empty = none)."""
     return [s for s in m["searches"] if _fam(s) in fams]
@@ -383,7 +405,9 @@ def _detail_html(e):
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
-                "Study unsuspended cards</button></div>"
+                "Study unsuspended cards</button>"
+                "<button class='jkd-study jkd-prac' onclick=\"pycmd('janki:cal:det:practice')\">"
+                "Practice</button></div>"
                 "<div class='jkd-secs'>"
                 "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
                 "Study all cards</button>"
@@ -487,7 +511,7 @@ def _open_detail(i):
     if not (0 <= i < len(_shown)):
         return
     m = lectures.match_event(_shown[i]["summary"])
-    _fams_on = {_fam(s) for s in m["searches"]} if m else set()
+    _fams_on = ({_fam(s) for s in m["searches"]} - _fams_off()) if m else set()
     _detail = i
     try:
         from . import sfx
@@ -567,7 +591,7 @@ def study_event(e, fams=None, which="all"):
         tooltip("No lecture matches “%s”." % e["summary"])
         return
     if fams is None:
-        fams = {_fam(s) for s in m["searches"]}
+        fams = {_fam(s) for s in m["searches"]} - _fams_off()
     q = _lecture_query(m, fams)
     if not q:
         tooltip("Switch on at least one source first.")
@@ -877,6 +901,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkd-studies{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;}
 .jkd-secs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
 .jkd-secs .jkd-sec{margin:0 !important;}
+#jkc .jkd-prac{background:#9fe0a3 !important;color:#0f2e16 !important;margin-left:8px;}
+#jkc .jkd-prac:hover{background:#b3ebb6 !important;}
 #jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;
   font-size:.95em;padding:8px 22px;border-radius:12px;align-self:center;}
 #jkc .jkd-study2:hover{background:rgba(156,188,243,.34) !important;}
@@ -1159,6 +1185,53 @@ def _show_tags(m):
     showText("\n".join(lines), title="Tags for this lecture", minWidth=520)
 
 
+def practice_event(e):
+    """Practice questions related to this class (its lecture's concept tags first,
+    then wording), in a temporary filtered deck — judged like the Practice deck."""
+    from aqt.utils import tooltip
+    from aqt.operations import QueryOp
+    from ..integrations import lectures
+    m = lectures.match_event(e["summary"]) if e else None
+    if not m:
+        tooltip("No lecture matched for this class.")
+        return
+    name = m["display"]
+
+    def op(_col):
+        from ..integrations import qbank
+        off = _fams_off()
+        srch = [x for x in m["searches"] if _fam(x) not in off] or m["searches"]
+        leaves = qbank._leaf_keys(list(qbank._leaves_from_searches(srch)))
+        toks = qbank._tokens(name + " " + e["summary"])
+        return qbank.intersperse_card_ids(leaves, toks, 40)
+
+    def done(cids):
+        col = mw.col
+        if not cids:
+            tooltip("No related practice questions for “%s”." % name)
+            return
+        try:
+            _cleanup_temp()
+            did = col.decks.new_filtered(TEMP_PREFIX + "Practice · " + name[:50])
+            d = col.decks.get(did)
+            d["terms"] = [[_cid_term(cids), 99999, 0]]
+            d["resched"] = True
+            col.decks.save(d)
+            col.sched.rebuild_filtered_deck(did)
+            col.decks.select(did)
+            try:
+                from . import sfx
+                sfx.play("practice")
+            except Exception:
+                pass
+            close()
+            mw.moveToState("review")
+        except Exception as ex:
+            log("calendar practice: %s" % ex)
+            tooltip("Couldn't start practice: %s" % ex)
+    QueryOp(parent=mw, op=op, success=done).run_in_background()
+
+
 def study_lecture(m):
     """A temporary filtered deck with the lecture's due + new cards (suspended stay
     suspended). Filtered decks reschedule normally, so this counts like any review."""
@@ -1235,7 +1308,7 @@ def on_js_message(handled, message, context):
                 m2 = lectures.match_event(_shown[_detail]["summary"])
                 _fams_on.clear()
                 if m2:
-                    _fams_on.update(_fam(s) for s in m2["searches"])
+                    _fams_on.update({_fam(s) for s in m2["searches"]} - _fams_off())
                 try:
                     from . import sfx
                     sfx.play("select")
@@ -1245,12 +1318,16 @@ def on_js_message(handled, message, context):
         elif cmd.startswith("fam:"):
             f = cmd[4:]
             _fams_on.symmetric_difference_update({f})
+            _save_fam(f, f in _fams_on)
             try:
                 from . import sfx
                 sfx.play("move")
             except Exception:
                 pass
             _swap("refresh")
+        elif cmd == "det:practice":
+            if _detail is not None and 0 <= _detail < len(_shown):
+                practice_event(_shown[_detail])
         elif cmd == "det:back":
             _close_detail()
         elif cmd.startswith("det:study"):
