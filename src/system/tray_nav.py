@@ -545,7 +545,11 @@ def _prebuild():
     """Build the next tray while nobody's looking, so opening it is just a show()."""
     global _prebuilt
     try:
-        if getattr(mw, "col", None) is None or (_nav is not None and _nav.isVisible()):
+        if getattr(mw, "col", None) is None:
+            schedule_prebuild(2000)               # profile still loading: try again
+            return
+        if _nav is not None and _nav.isVisible():
+            schedule_prebuild(600)                # still fading out / open: retry
             return
         new = _build()
         old, _prebuilt = _prebuilt, new
@@ -613,6 +617,8 @@ def install_data_cache():
         from aqt import gui_hooks
         gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(2500, refresh_data_bg))
         gui_hooks.profile_did_open.append(lambda: schedule_prebuild(4000))   # ready early
+        QTimer.singleShot(5000, lambda: _prebuilt is None and schedule_prebuild(0))
+        QTimer.singleShot(3000, refresh_data_bg)       # (the hook may already have fired)
         gui_hooks.operation_did_execute.append(_schedule_refresh)
     except Exception:
         pass
