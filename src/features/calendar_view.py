@@ -565,23 +565,25 @@ def _detail_html(e):
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
-                "Study unsuspended cards</button>"
+                "Study active cards</button>"
                 "<button class='jkd-study jkd-prac' onclick=\"pycmd('janki:cal:det:practice')\">"
                 "Practice</button></div>"
                 "<div class='jkd-secs'>"
                 "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
                 "Study all cards</button>"
                 "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
-                "Unsuspend cards for this lecture</button>%s</div>"
+                "Unsuspend cards for this lecture</button></div>"
                 "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
                 "and suspends them again afterwards.</div>"
                 "<div class='jkd-links'><a data-n='%d' onclick=\"jkdTags(this)\">Show %s ▾</a> · "
                 "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
                 "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
-                % (sw, ("<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:lms')\">"
-                        "Open in LMS</button>") if e.get("url") else "",
-                   _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
+                % (sw, _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
         QTimer.singleShot(0, lambda m=m: _recount(m))
+    # Open in LMS whenever the calendar has the event's link — matched or not
+    if e.get("url"):
+        loc += ("<div class='jkd-lmsrow'><button class='jkd-sec jkd-lms' "
+                "onclick=\"pycmd('janki:cal:det:lms')\">Open in LMS</button></div>")
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
             % (html.escape(e["summary"]),
@@ -1702,6 +1704,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 30px 3px 14px;
   font:inherit;cursor:pointer;max-width:min(520px,90vw);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;transition:background-color .18s ease;}
+#jkc .jkd-lmsrow{margin:6px 0 2px;}
+#jkc .jkd-lms{font-size:.85em !important;padding:3px 12px !important;}
 #jkc .jkd-sub{display:flex;align-items:center;justify-content:center;gap:6px;}
 #jkc .jkd-unassign{width:26px;height:26px;border-radius:50%;border:1px solid rgba(255,255,255,.14);
   background:rgba(255,255,255,.07) !important;color:inherit;font:inherit;font-weight:700;cursor:pointer;
@@ -1868,7 +1872,7 @@ _JS = """<script>(function(){
  function applyCounts(){
    var c=document.getElementById('jkd-counts');if(c&&pendC!=null){c.innerHTML=pendC;pendC=null;}
    var x=document.getElementById('jkd-st-act'),y=document.getElementById('jkd-st-sus');
-   if(x&&y&&pendA){x.textContent='Study unsuspended cards ('+pendA[0]+')';
+   if(x&&y&&pendA){x.textContent='Study active cards ('+pendA[0]+')';
      y.textContent='Study all cards ('+pendA[1]+')';pendA=null;}}
  window.jkcCounts=function(h,a,s){if(h!=null)pendC=h;if(a!=null)pendA=[a,s];applyCounts();};
  // Safety net: a class page still showing "…" asks for its counts again (up to 8×)
