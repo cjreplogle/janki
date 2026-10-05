@@ -89,7 +89,7 @@ def _week_html():
     from ..integrations import lectures
     today = datetime.date.today()
     monday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(weeks=_week)
-    sunday = monday + datetime.timedelta(days=6)
+    sunday = monday + datetime.timedelta(days=4)        # weekdays only: Mon–Fri
     try:
         evs = lectures.events_between(monday, sunday)
     except Exception as e:
@@ -106,7 +106,7 @@ def _week_html():
     grid_h = int(span * px_per_min)
 
     cols = []
-    for di in range(7):
+    for di in range(5):
         d = monday + datetime.timedelta(days=di)
         blocks, allday = [], []
         for i, e in enumerate(evs):
@@ -163,7 +163,7 @@ _CSS = """<style>
   padding:4px 11px;cursor:pointer;transition:background .2s ease;}
 .jkc-bar button:hover{background:rgba(255,255,255,.16);}
 .jkc-lbl{font-weight:600;margin-left:6px;}.jkc-sp{flex:1;}
-.jkc-grid{display:grid;grid-template-columns:52px repeat(7,1fr);gap:0 6px;position:relative;}
+.jkc-grid{display:grid;grid-template-columns:52px repeat(5,1fr);gap:0 6px;position:relative;}
 .jkc-hours{position:relative;margin-top:52px;}
 .jkc-hr{position:absolute;left:0;right:-9999px;border-top:1px solid rgba(255,255,255,.06);}
 .jkc-hr span{position:absolute;top:-8px;left:0;font-size:.72em;opacity:.55;}
