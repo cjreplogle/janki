@@ -530,10 +530,12 @@ def _detail_html(e):
             "<label class='jkd-sw%s' onclick=\"pycmd('janki:cal:fam:%s')\"><span class='jkd-knob'>"
             "</span>%s</label>" % (" on" if f in _fams_on else "", f, lectures.FAMILY_LABEL.get(f, f))
             for f in present)
-        _cc = _counts_cache.get(_count_key(m))
+        # known numbers stay on screen while they're re-counted (with a small spinner)
+        _cc = _counts_cache.get(_count_key(m)) or _counts_last.get(m.get("key"))
         if _cc:                              # study buttons keep their numbers too
             QTimer.singleShot(0, lambda c=_cc: _set_study_counts(c[3] - c[2], c[3]))
-        body = ("<div id='jkd-counts' class='jkd-counts'>%s</div>" % (_counts_html(_cc) if _cc else "… cards") +
+        body = ("<div id='jkd-counts' class='jkd-counts'>%s</div>"
+                % ((_counts_html(_cc) + " <i class='jkd-reload'></i>") if _cc else "… cards") +
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
@@ -660,6 +662,7 @@ def _recount(m):
         def ok(r):
             new, due, sus, tot = r
             _counts_cache[key] = r
+            _counts_last[m.get("key")] = r
             if len(_counts_cache) > 200:
                 _counts_cache.pop(next(iter(_counts_cache)))
             _set_study_counts(tot - sus, tot)
@@ -672,6 +675,7 @@ def _recount(m):
 
 
 _counts_cache = {}     # (lecture, sources) → last counts, so a redraw doesn't flash "…"
+_counts_last = {}      # lecture → its latest counts (any sources): shown while recounting
 
 
 def _count_key(m):
@@ -1580,6 +1584,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
 @keyframes jkcSpin{to{transform:rotate(360deg);}}
 .jkc-tc{opacity:.75;}
+#jkc .jkd-reload{display:inline-block;width:9px;height:9px;margin-left:4px;vertical-align:1px;border-radius:50%;
+  border:2px solid rgba(156,188,243,.3);border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
@@ -1762,7 +1768,7 @@ _JS = """<script>(function(){
    function tick(){cWatch=setTimeout(function(){
      var c=document.getElementById('jkd-counts');
      if(!c||!document.querySelector('#jkc .jkc-detail'))return;
-     if(c.textContent.trim().charAt(0)==='…'&&cTries++<8){
+     if((c.textContent.trim().charAt(0)==='…'||c.querySelector('.jkd-reload'))&&cTries++<8){
        try{pycmd('janki:cal:recount');}catch(x){}tick();}},1200);}}
  var inDone=null, lastInner='';
  window.jkcSwap=function(inner,dir){
