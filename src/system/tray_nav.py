@@ -683,7 +683,10 @@ def _build_today_list(parent):
         from ..integrations import lectures
         from ..features import calendar_view as cv
         t = datetime.date.today()
-        evs = [e for e in lectures.events_between(t, t) if not cv._is_allday_kind(e["summary"])]
+        evs, fresh = lectures.events_cached_between(t, t)
+        if not fresh:
+            lectures.load_events_bg()
+        evs = [e for e in evs if not cv._is_allday_kind(e["summary"])]
     except Exception as exc:
         log(f"tray today: {exc}")
         evs = []

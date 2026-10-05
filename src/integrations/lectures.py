@@ -3214,6 +3214,55 @@ def events_between(d0, d1):
     return sorted(evs, key=lambda e: (e["date"], e["start"] if e["start"] is not None else -1))
 
 
+def _ev_key():
+    path = _cfg().get("ics_path", "")
+    if not path:
+        return None, None
+    return path, (("url", path) if _is_url(path) else (path, _src_mtime(path)))
+
+
+def events_cached_between(d0, d1):
+    """Like events_between but never reads the calendar on the caller's thread:
+    (events, fresh). Not fresh = the last-known events (maybe none) while a background
+    load_events_bg() brings them up to date."""
+    path, key = _ev_key()
+    if not path:
+        return [], True
+    evs = [e for e in _EV_CACHE["events"] if d0 <= e["date"] <= d1]
+    evs.sort(key=lambda e: (e["date"], e["start"] if e["start"] is not None else -1))
+    return evs, _EV_CACHE["key"] == key
+
+
+_EV_LOADING = {"on": False}
+
+
+def load_events_bg(done=None):
+    """Parse (or download) the calendar off the main thread, then call done()."""
+    path, key = _ev_key()
+    if not path or _EV_CACHE["key"] == key or _EV_LOADING["on"]:
+        return
+    _EV_LOADING["on"] = True
+
+    def work():
+        try:
+            evs = _parse_ics_events(path)
+        except Exception as e:
+            _log("calendar load: %s" % e)
+            evs = None
+
+        def back():
+            _EV_LOADING["on"] = False
+            if evs is not None:
+                _EV_CACHE["events"], _EV_CACHE["key"] = evs, key
+                if done:
+                    try:
+                        done()
+                    except Exception:
+                        pass
+        mw.taskman.run_on_main(back)
+    mw.taskman.run_in_background(work)
+
+
 _MATCH_CACHE = {"key": None, "map": {}}
 
 

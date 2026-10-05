@@ -187,8 +187,12 @@ def _week_html():
     today = datetime.date.today()
     days = _days()                                      # weekdays only
     monday, sunday = days[0], days[-1]
-    try:
-        evs = lectures.events_between(monday, sunday)
+    loading = False
+    try:   # never read/download the calendar here — that happens in the background
+        evs, fresh = lectures.events_cached_between(monday, sunday)
+        if not fresh:
+            loading = True
+            lectures.load_events_bg(lambda: _view and _swap("refresh"))
     except Exception as e:
         log("calendar events: %s" % e)
         evs = []
@@ -272,6 +276,7 @@ def _week_html():
         % (" on" if mode == k else "", k, k, l)
         for k, l in (("1", "Day"), ("3", "3-day"), ("week", "Week")))
     empty = ("" if evs else
+             "<div class='jkc-empty'>Loading calendar…</div>" if loading else
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
                 "" if lectures._cfg().get("ics_path") else
@@ -1348,6 +1353,11 @@ def _prewarm_work():
 
 
 def _schedule_prewarm():
+    try:                                             # read the calendar file early
+        from ..integrations import lectures
+        QTimer.singleShot(1500, lectures.load_events_bg)
+    except Exception:
+        pass
     try:
         from . import stats_embed
         stats_embed._when_idle(_prewarm, 8000)       # waits while you navigate/study
