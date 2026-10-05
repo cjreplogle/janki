@@ -649,7 +649,7 @@ def _apply_deck_visibility(animate: bool = False) -> None:
                     lay_ = w.parentWidget().layout() if w.parentWidget() else None
                     gap = max(0, lay_.spacing()) if lay_ is not None else 0
                     break
-            n = min(4, max(1, n_visible))
+            n = min(5, max(1, n_visible))          # five decks, then it scrolls
             _deck_scroll.setMaximumHeight(n * row_h + (n - 1) * gap + 6)
         except Exception:
             pass
