@@ -192,13 +192,19 @@ def _week_html():
     grid_h = int(span * px_per_min)
 
     cols = []
+    pending = False
     for d in days:
         blocks, allday = [], []
         for i, e in enumerate(evs):
             if e["date"] != d:
                 continue
-            m = lectures.match_event(e["summary"])
-            cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
+            m = lectures.peek_match(e["summary"])      # never match on the main thread
+            if m is lectures._PENDING:
+                pending = True
+                m = None
+                cls = "jkc-ev"                             # neutral until matched
+            else:
+                cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
             title = html.escape(e["summary"])
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
@@ -247,6 +253,12 @@ def _week_html():
            "Lecture wizard…</button></div></div>" % (seg, label))
     grid = ("<div class='jkc-grid' style='--jkc-n:%d'><div class='jkc-hours' "
             "style='height:%dpx'>%s</div>%s</div>" % (len(days), grid_h, hours, "".join(cols)))
+    global _pending_tries
+    if pending and _pending_tries < 2:        # match in the background, then refresh
+        _pending_tries += 1
+        QTimer.singleShot(0, _prewarm)
+    elif not pending:
+        _pending_tries = 0
     return bar + empty + grid
 
 
@@ -333,6 +345,7 @@ _JS = """<script>(function(){
      if(keep&&fresh&&fresh.parentNode)fresh.parentNode.replaceChild(keep,fresh);
      var g=grid(); if(!g||!g.animate)return;
      g.style.willChange='transform,opacity';
+     if(dir==='refresh')return;                       // quiet in-place update
      var from=dir==='next'?'translateX(28px)':(dir==='prev'?'translateX(-28px)':
               (dir==='zin'?'scale(0.97)':(dir==='zout'?'scale(1.03)':'none')));
      var a=g.animate([{transform:from,opacity:0},
@@ -561,9 +574,38 @@ def install_toolbar(links, toolbar):
         log("calendar toolbar: %s" % e)
 
 
+_warming = False
+_pending_tries = 0      # caps background-match → refresh rounds per opening
+
+
 def _prewarm():
-    """Read this week's events + their lecture matches ahead of time (idle only), so
-    opening the Calendar is instant."""
+    """Match ±2 weeks of events to lectures OFF the main thread (Anki's QueryOp, which
+    also serialises collection access), so neither opening the Calendar nor the first
+    arrow / view switch holds the window."""
+    global _warming
+    if _warming or getattr(mw, "col", None) is None:
+        return
+    _warming = True
+    try:
+        from aqt.operations import QueryOp
+
+        def done(_r):
+            global _warming
+            _warming = False
+            if _view and getattr(mw, "state", None) == "deckBrowser":
+                _swap("refresh")                   # colours/labels now that matches exist
+
+        def failed(_e):
+            global _warming
+            _warming = False
+        QueryOp(parent=mw, op=lambda _col: _prewarm_work(), success=done) \
+            .failure(failed).run_in_background()
+    except Exception as e:
+        _warming = False
+        log("calendar prewarm: %s" % e)
+
+
+def _prewarm_work():
     # Two weeks either side: the 3-Day view and week arrows reach beyond this week, and
     # matching events on first sight caused a hold on the first view switch / arrow.
     try:

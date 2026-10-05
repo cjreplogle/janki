@@ -3051,6 +3051,21 @@ def match_event(title):
         return None
 
 
+_PENDING = object()
+
+
+def peek_match(title):
+    """Cached match for `title` without computing it: the match/None if known,
+    _PENDING if it hasn't been matched yet (so a view can draw first, match later)."""
+    try:
+        akey = (_MAP_CACHE.get("key"), _src_mtime(_alias_path()))
+        if _MATCH_CACHE["key"] != akey or _MAP_CACHE.get("key") is None:
+            return _PENDING
+        return _MATCH_CACHE["map"].get(title, _PENDING)
+    except Exception:
+        return _PENDING
+
+
 def _match_event_uncached(title):
     try:
         families = _enabled_families()
