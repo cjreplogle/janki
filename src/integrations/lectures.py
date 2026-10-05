@@ -3141,6 +3141,12 @@ def _parse_ics_events(path):
         mand = bool(re.search(r"\bmandatory\b|\brequired\b|attendance required", blob))
         base = {"start": smin, "end": emin, "summary": unesc(summ),
                 "location": unesc(loc), "mandatory": mand}
+        # "Dress Code: …" written in a class's notes → that day's dress code
+        dm = re.search(r"dress\s*-?\s*code\s*[:\-–]\s*(.+?)(?:\\n|\\N|\n|$)", desc or "", re.I)
+        if dm:
+            val = unesc(dm.group(1)).strip(" .;,")
+            if val:
+                base["dress"] = val[:80]
         if rid:                                   # one moved/edited occurrence
             moved.add((uid, _ics_dt(rid, ridtz)[0]))
         # an all-day item spanning several days (an assignment window; DTEND is
@@ -3160,7 +3166,16 @@ def _parse_ics_events(path):
         for x in days:
             out.append(dict(base, date=x, _uid=uid))
     # an edited occurrence replaces the generated one for that day
-    return [e for e in out if not (e.get("_rec") and (e.get("_uid"), e["date"]) in moved)]
+    out = [e for e in out if not (e.get("_rec") and (e.get("_uid"), e["date"]) in moved)]
+    # one all-day "Dress code: …" notice per day, from the classes' notes
+    seen = set()
+    for e in list(out):
+        if e.get("dress") and (e["date"], e["dress"].lower()) not in seen:
+            seen.add((e["date"], e["dress"].lower()))
+            out.append({"date": e["date"], "start": None, "end": None,
+                        "summary": "Dress code: " + e["dress"], "location": "",
+                        "mandatory": False, "_dress": True})
+    return out
 
 
 _WD = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
