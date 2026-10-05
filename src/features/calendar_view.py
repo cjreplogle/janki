@@ -239,8 +239,11 @@ def _week_html():
             tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
                 if e.get("_dress"):                # a notice, not a class: not clickable
-                    allday.append("<div class='jkc-ev jkc-ad jkc-dress' title='%s'>%s</div>"
-                                  % (title, title))
+                    # the dress code itself first (a shirt icon stands in for the
+                    # "Dress code:" label, which used to push it off the chip)
+                    val = re.sub(r"(?i)^dress\s*-?\s*code\s*[:\-–]?\s*", "", e["summary"])
+                    allday.append("<div class='jkc-ev jkc-ad jkc-dress' title='%s'>%s%s</div>"
+                                  % (title, _SHIRT, html.escape(val or e["summary"])))
                     continue
                 allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s%s</div>"
                               % (cls, i, tip, mbadge, title))
@@ -677,6 +680,11 @@ def _course_colour(title):
     return _colours[key] % _PALETTE
 
 
+_SHIRT = ("<svg class='jkc-shirt' width='13' height='11' viewBox='0 0 26 22'><path d='M9 1"
+          "L1 5l3 6 3-1.5V21h12V9.5l3 1.5 3-6-8-4c-.6 2-2.4 3.2-4 3.2S9.6 3 9 1z' fill='none'"
+          " stroke='currentColor' stroke-width='2' stroke-linejoin='round'/></svg>")
+
+
 def _lanes(items):
     """Side-by-side lanes for overlapping classes: {index: (lane, lanes in its cluster)}.
     Events that overlap (directly or through a chain) share a cluster; each takes the
@@ -784,6 +792,7 @@ html body > center{margin-top:0 !important;padding-top:0 !important;}
 .jkc-ad{position:relative;margin:0 2px 2px;height:18px;line-height:16px;padding:0 8px !important;
   font-size:.74em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .jkc-ad .jkc-m{display:none;}
+#jkc .jkc-shirt{vertical-align:-1px;margin-right:5px;opacity:.85;}
 #jkc .jkc-dress{cursor:default;transform:none !important;filter:none !important;}
 /* where you are in the day: a thin red line with a dot on today's column */
 #jkc .jkc-now{position:absolute;left:0;right:0;height:0;z-index:5;pointer-events:none;display:none;
