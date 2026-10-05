@@ -777,7 +777,7 @@ def _set_weak_mode(mode):
         sfx.play("select")
     except Exception:
         pass
-    _swap("refresh")
+    _swap("fade")                           # the list faded out on click; fade back in
     if _weak is None:
         _weak_compute(mode)
 
@@ -1184,7 +1184,7 @@ def _ago(d):
 
 
 def _weak_html():
-    seg = "".join("<button class='jkw-m%s' onclick=\"pycmd('janki:cal:weakmode:%s')\">%s</button>"
+    seg = "".join("<button class='jkw-m%s' onclick=\"jkwMode(this,'%s')\">%s</button>"
                   % (" on" if _weak_mode == k else "", k, l)
                   for k, l in (("2w", "Biweekly"), ("block", "End of block")))
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
@@ -2039,6 +2039,13 @@ _JS = """<script>(function(){
    x.textContent=off?'+':'\u2212';x.title=off?'Use this tag again':'Leave this tag out for this lecture';
    pycmd('janki:cal:tagx:'+x.getAttribute('data-t')+':'+(off?1:0));
  },true);
+ // Weak areas: Biweekly ↔ End of block fades the list out, then the new one fades in
+ window.jkwMode=function(btn,k){
+   if(btn&&btn.classList.contains('on'))return;          // already showing
+   var g=grid();
+   if(g&&g.animate){var a=g.animate([{opacity:1},{opacity:0}],
+     {duration:110,easing:'ease-in',fill:'forwards'});outDone=a.finished.catch(function(){});}
+   pycmd('janki:cal:weakmode:'+k);};
  window.jkdTags=function(a){var t=document.getElementById('jkd-tags');if(!t)return;
    var o=t.classList.toggle('open'),n=+a.getAttribute('data-n'),w=n===1?'1 tag':n+' tags';
    a.textContent=o?'Hide '+w+' ▴':'Show '+w+' ▾';
