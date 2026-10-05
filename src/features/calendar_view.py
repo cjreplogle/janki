@@ -446,8 +446,12 @@ def _detail_bg(title, opts=False):
     """Match the class / list picker alternatives off the main thread, then refresh
     the open class page."""
     key = (title, opts)
-    if key in _detail_busy or _closing:
+    if key in _detail_busy or getattr(mw, "col", None) is None:
+        if key not in _detail_busy:
+            _ctlog("lecture lookup skipped: no collection")
         return
+    if _closing:
+        _ctlog("lecture lookup: _closing was stuck on — ignoring it")
     _detail_busy.add(key)
     _busy_update()
     from aqt.operations import QueryOp
@@ -489,6 +493,7 @@ def _detail_html(e):
     pending = m is lectures._PENDING
     if pending:
         m = None
+        _ctlog("page drawn — lecture not matched yet, matching in background")
         _detail_bg(e["summary"])
     when = "%s, %s %d" % (_DAY[e["date"].weekday()], e["date"].strftime("%b"), e["date"].day)
     if e["start"] is not None:
@@ -553,6 +558,7 @@ def _detail_html(e):
                 % (sw, ("<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:lms')\">"
                         "Open in LMS</button>") if e.get("url") else "",
                    _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
+        _ctlog("page drawn for %s — count scheduled" % (m.get("key"),))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     return ("<div class='jkc-grid jkc-detail'>"
             "<div class='jkd'><h2>%s%s</h2>%s<div class='jkd-when'>%s</div>%s%s</div></div>"
@@ -625,24 +631,49 @@ def _tags_html(m):
     return "".join(parts) or "<div class='jkd-tgh'>No tags</div>"
 
 
+def _ctlog(msg):   # TEMP timing probe for slow card counts
+    try:
+        import os
+        with open(os.path.join(os.path.dirname(__file__), "..", "..", "user_files",
+                               "count_timing.log"), "a") as f:
+            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
 def _recount(m):
     """New / due / suspended counts for the class (switched-on sources), off the main
     thread, then written into the page."""
-    if _closing:
+    if getattr(mw, "col", None) is None:
+        _ctlog("count skipped: no collection")
         return
+    if _closing:
+        _ctlog("count: _closing was stuck on — ignoring it")
     q = _lecture_query(m, _fams_on)
     if not q:
+        _ctlog("count skipped: no sources on (fams_on=%s)" % sorted(_fams_on))
         _set_counts("No sources switched on.")
         return
     key = _count_key(m)
     try:
         from aqt.operations import QueryOp
 
+        t_req = time.time()
+        _ctlog("count requested key=%s" % (m.get("key"),))
+
         def op(col):
             # one (cached) search for the lecture's cards, then ONE pass over those
             # cards for new / due / suspended — not three more filtered searches
             from ..integrations import lectures
+            t0 = time.time()
+            _ctlog("  started after waiting %.2fs" % (t0 - t_req))
+            lectures.detect_source_decks(col)
+            t1 = time.time()
+            hit = tuple(q) in lectures._FIND_CACHE
             ids = sorted(lectures._find_base(col, q))
+            t2 = time.time()
+            _ctlog("  detect %.2fs · search %.2fs (cached=%s, %d cards, %d terms)"
+                   % (t1 - t0, t2 - t1, hit, len(ids), len(q)))
             new = due = sus = 0
             today = col.sched.today
             for i in range(0, len(ids), 900):
@@ -655,9 +686,11 @@ def _recount(m):
                         new += 1
                     elif (qu == 2 and d <= today) or qu in (1, 3):
                         due += 1
+            _ctlog("  card read %.2fs" % (time.time() - t2))
             return (new, due, sus, len(ids))
 
         def ok(r):
+            _ctlog("  shown %.2fs after request" % (time.time() - t_req))
             new, due, sus, tot = r
             _counts_cache[key] = r
             if len(_counts_cache) > 200:
@@ -1408,6 +1441,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-bar .jkc-prev:active,.jkc-bar .jkc-prev.press{transform:translateX(-4px) scale(.86);}
 .jkc-bar .jkc-next:active,.jkc-bar .jkc-next.press{transform:translateX(4px) scale(.86);}
 .jkc-ev.jk-kb{outline:2px solid rgba(255,255,255,.75);outline-offset:1px;}
+#jkc .jk-kbf{outline:2px solid rgba(255,255,255,.8) !important;outline-offset:2px;border-radius:8px;}
 .jkc-c{display:flex;align-items:center;gap:6px;}
 .jkc-c .jkc-lbl{margin:0 6px;min-width:9em;text-align:center;}
 .jkc-bar button{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:8px;
@@ -1754,6 +1788,26 @@ _JS = """<script>(function(){
  function evs(){return Array.prototype.slice.call(document.querySelectorAll('#jkc .jkc-ev:not(.jkc-dress)'))
    .sort(function(a,b){var ra=a.getBoundingClientRect(),rb=b.getBoundingClientRect();
      return (ra.left-rb.left)||(ra.top-rb.top);});}
+ // Class page / Weak areas: arrow keys walk every control (spatially), Enter clicks
+ function kbItems(){return Array.prototype.slice.call(document.querySelectorAll(
+   '#jkc .jkc-detail button, #jkc .jkc-detail .jkd-sw, #jkc .jkc-detail .jkd-links a,'+
+   ' #jkc .jkc-detail .jkw-row, #jkc .jkc-detail summary, #jkc .jkc-detail .jkw-m,'+
+   ' #jkc .jkc-detail .jkd-x')).filter(function(x){var r=x.getBoundingClientRect();
+     return r.width>0&&r.height>0;});}
+ function kbPick(el){var o=document.querySelector('#jkc .jk-kbf');if(o)o.classList.remove('jk-kbf');
+   if(!el)return;el.classList.add('jk-kbf');try{pycmd('janki:sfx:move');}catch(x){}
+   var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}
+ function kbNext(cur,k){var a=cur.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2,
+   best=null,bd=1e9;
+   kbItems().forEach(function(x){if(x===cur||x.contains(cur)||cur.contains(x))return;
+     var b=x.getBoundingClientRect(),bx=b.left+b.width/2,by=b.top+b.height/2,dx=bx-ax,dy=by-ay;
+     var ok=k==='ArrowRight'?dx>4&&Math.abs(dy)<a.height:k==='ArrowLeft'?dx<-4&&Math.abs(dy)<a.height:
+            k==='ArrowDown'?dy>4:dy<-4;
+     if(!ok)return;
+     var d=(k==='ArrowDown'||k==='ArrowUp')?Math.abs(dy)*1+Math.abs(dx)*0.4:Math.abs(dx)+Math.abs(dy)*3;
+     if(d<bd){bd=d;best=x;}});
+   return best;}
+ document.addEventListener('mousemove',function(){kbPick(null);},{passive:true});
  function cols(){return Array.prototype.slice.call(
    document.querySelectorAll('#jkc .jkc-grid:not(.jkc-detail) .jkc-col'));}
  function markDay(col){var o=document.querySelector('#jkc .jkc-col.jk-kbday');
@@ -1774,9 +1828,19 @@ _JS = """<script>(function(){
    var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
    var k=e.key, det=document.querySelector('#jkc .jkc-detail');
    if(det){
-     if(k==='ArrowLeft'||k==='Escape'||k==='Backspace'){e.preventDefault();pycmd('janki:cal:det:back');}
-     else if(k==='Enter'||k===' '){e.preventDefault();pycmd('janki:cal:det:study:active');}
-     else if(k==='ArrowUp'){e.preventDefault();pycmd('janki:toolbar');}
+     if(k==='Escape'||k==='Backspace'){e.preventDefault();kbPick(null);pycmd('janki:cal:det:back');return;}
+     if(/^Arrow/.test(k)){e.preventDefault();
+       var cur=document.querySelector('#jkc .jk-kbf');
+       if(!cur){var f=kbItems()[0];if(f)kbPick(f);return;}       // first press: highlight
+       var nx=kbNext(cur,k);
+       if(nx)kbPick(nx);
+       else if(k==='ArrowLeft'){kbPick(null);pycmd('janki:cal:det:back');}
+       else if(k==='ArrowUp'){kbPick(null);pycmd('janki:toolbar');}
+       return;}
+     if(k==='Enter'||k===' '){e.preventDefault();
+       var c2=document.querySelector('#jkc .jk-kbf');
+       if(c2)c2.click();else pycmd('janki:cal:det:study:active');
+       return;}
      return;}
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
      var right=k==='ArrowRight',cs=cols(),cur=document.querySelector('#jkc .jkc-col.jk-kbday'),
@@ -2398,6 +2462,11 @@ def install():
         pass
     gui_hooks.profile_did_open.append(_on_open)
     gui_hooks.profile_will_close.append(_on_close)
+    try:     # a collection (re)loaded / sync finished = definitely not shutting down
+        gui_hooks.collection_did_load.append(lambda *_a: _on_open())
+        gui_hooks.sync_did_finish.append(_on_open)
+    except Exception:
+        pass
     gui_hooks.profile_did_open.append(_schedule_prewarm)
     gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1500, _restore_suspended))
     gui_hooks.deck_browser_will_render_content.append(_on_render)
