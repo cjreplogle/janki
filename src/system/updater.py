@@ -151,11 +151,47 @@ def _prompt_update(tag: str, url: str, asked: bool = False) -> None:
     mw.taskman.run_in_background(work, done)
 
 
+# A newer release found by the last check: (tag, url) — drives the main-screen
+# "Update" button. Manual checks are cooled down so repeated clicks can't burn
+# GitHub's unauthenticated API allowance (60 requests/hour per IP).
+available = None
+_last_fetch = {"t": 0.0, "res": None}
+_MANUAL_COOLDOWN = 60      # s
+
+
+def _fetch_cached():
+    import time
+    now = time.monotonic()
+    if _last_fetch["res"] is not None and now - _last_fetch["t"] < _MANUAL_COOLDOWN:
+        return _last_fetch["res"]
+    res = _fetch_latest()
+    _last_fetch.update(t=now, res=res)
+    return res
+
+
+def _set_available(tag, url):
+    global available
+    new = (tag, url) if tag else None
+    if new != available:
+        available = new
+        try:                                   # show/hide the main-screen button
+            if getattr(mw, "state", None) == "deckBrowser":
+                mw.deckBrowser.refresh()
+        except Exception:
+            pass
+
+
+def install_available():
+    """The main-screen Update button."""
+    if available:
+        _prompt_update(available[0], available[1], asked=True)
+
+
 def check(interactive: bool = False) -> None:
     """Check GitHub for a newer release. interactive=True also reports 'up to
     date' / errors; the background check stays silent unless an update exists."""
     def work():
-        return _fetch_latest()
+        return _fetch_cached()
 
     def done(fut):
         try:
@@ -166,9 +202,12 @@ def check(interactive: bool = False) -> None:
                 showInfo("Couldn't check for updates (%s)." % exc, title="Janki")
             return
         if _ver_tuple(tag) > _ver_tuple(_current_version()):
+            _set_available(tag, url)
             _prompt_update(tag, url, asked=interactive)   # a manual check always shows
-        elif interactive:
-            showInfo("Janki is up to date (v%s)." % _current_version(), title="Janki")
+        else:
+            _set_available(None, None)
+            if interactive:
+                showInfo("Janki is up to date (v%s)." % _current_version(), title="Janki")
 
     mw.taskman.run_in_background(work, done)
 

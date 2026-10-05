@@ -1011,6 +1011,26 @@ def _build_css(cfg, context):
             "document.write('<style id=jk-prepaint>'+css+'</style>');}catch(e){}})();</script>\n"
             % _view)
         parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
+        # Update available → a small pill bottom-right of the deck list.
+        try:
+            from ..system import updater as _upd
+            if _upd.available:
+                parts.append(
+                    "<style>#jk-update{position:fixed;right:14px;bottom:12px;z-index:50;"
+                    "background:rgba(156,188,243,.18);color:#cfe0ff;border:1px solid "
+                    "rgba(156,188,243,.45);border-radius:10px;padding:5px 12px;"
+                    "font-size:.92em;cursor:pointer;transition:background .2s ease,"
+                    "transform .2s cubic-bezier(.2,.8,.2,1);}"
+                    "#jk-update:hover{background:rgba(156,188,243,.3);transform:translateY(-1px);}"
+                    "</style><script>(function(){function add(){if(document.getElementById"
+                    "('jk-update'))return;var b=document.createElement('div');b.id='jk-update';"
+                    "b.title='A new Janki version is available';b.textContent=%s;"
+                    "b.onclick=function(){pycmd('janki:update');};document.body.appendChild(b);}"
+                    "if(document.readyState==='loading')document.addEventListener("
+                    "'DOMContentLoaded',add);else add();})();</script>\n"
+                    % json.dumps("\u2191 Update to " + _upd.available[0]))
+        except Exception:
+            pass
         # Keyboard-only deck navigation (↑/↓ move, →/← expand/collapse, Enter/Space
         # open). The selection reuses the hover look; with hover motion off it's a
         # plain background (never a layout change).
@@ -2479,6 +2499,13 @@ def _congrats_keys(*_):
 
 
 def on_js_message(handled, message, context):
+    if message == "janki:update":
+        try:
+            from ..system import updater as _upd
+            _upd.install_available()
+        except Exception:
+            pass
+        return (True, None)
     if message == "janki:toolbar":
         try:
             mw.toolbar.web.setFocus()
