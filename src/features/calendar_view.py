@@ -2555,8 +2555,11 @@ def _patch_bottom():
             if not _view:
                 return orig(self)
             # inside Weak areas the bar stays empty (no Identify / Load buttons)
-            buf = "" if _detail == WEAK else \
-                "<button onclick='pycmd(\"janki:cal:weak\");'>Study Progress</button>"
+            buf = "" if _detail == WEAK else (
+                "<button style='font-size:1.15em !important;padding:7px 22px !important;"
+                "border:1.5px solid rgba(255,255,255,.9) !important;border-radius:999px !important;"
+                "font-weight:600 !important;' onclick='pycmd(\"janki:cal:weak\");'>"
+                "Study Progress</button>")
             self.bottom.draw(
                 buf=buf,
                 link_handler=self._linkHandler,
