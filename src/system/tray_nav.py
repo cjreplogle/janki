@@ -619,37 +619,20 @@ def install_data_cache():
 
 
 def _deck_rows_live(col):
-    """Flattened deck tree as [(name, did, due_total, depth, parent_did, has_kids)] —
-    each deck followed by its subdecks, so subdecks can be shown/hidden per-parent.
-    Siblings at each level are ordered most-due first. Falls back to a flat name list."""
+    """Deck names + nesting as [(name, did, 0, depth, parent_did, has_kids)] — no due
+    counts: the tray doesn't need card data, and the scheduler's due tree was the
+    heaviest thing it read."""
     rows = []
-
-    def _due(n):
-        return int(getattr(n, "new_count", 0)) + int(getattr(n, "learn_count", 0)) \
-            + int(getattr(n, "review_count", 0))
-
-    def _walk(node, depth, parent_did):
-        kids = list(getattr(node, "children", []) or [])
-        kids.sort(key=lambda c: (-_due(c), str(getattr(c, "name", "")).lower()))
-        for c in kids:
-            try:
-                cid = int(c.deck_id)
-                has_kids = bool(getattr(c, "children", []) or [])
-                rows.append((c.name, cid, _due(c), depth, parent_did, has_kids))
-            except Exception:
-                continue
-            _walk(c, depth + 1, cid)
-
     try:
-        _walk(col.sched.deck_due_tree(), 0, None)
-    except Exception:
-        pass
-    if not rows:
-        try:
-            for nid in col.decks.all_names_and_ids(skip_empty_default=True):
-                rows.append((nid.name, int(nid.id), 0, 0, None, False))
-        except Exception as exc:
-            log(f"tray-nav decks: {exc}")
+        decks = sorted((d.name, int(d.id)) for d in col.decks.all_names_and_ids(
+            skip_empty_default=True) if not d.name.startswith("Janki Calendar"))
+        ids = {n: i for n, i in decks}
+        kids = {n.rsplit("::", 1)[0] for n, _i in decks if "::" in n}
+        for name, did in decks:
+            parent = ids.get(name.rsplit("::", 1)[0]) if "::" in name else None
+            rows.append((name, did, 0, name.count("::"), parent, name in kids))
+    except Exception as exc:
+        log(f"tray-nav decks: {exc}")
     return rows
 
 
@@ -2042,7 +2025,10 @@ def show_navigator() -> None:
             except Exception:
                 pass
             _nav = None
+        import time as _tt
+        _t0 = _tt.time()
         _nav = fresh if fresh is not None else _build()
+        _t1 = _tt.time()
         try:                                   # never taller than half the screen
             from aqt.qt import QGuiApplication
             scr = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -2057,8 +2043,19 @@ def show_navigator() -> None:
         # Set Space/level behavior BEFORE showing so the popup lands on the active
         # Space (even another app's fullscreen) rather than switching to Anki's.
         _prepare_over_fullscreen(_nav)
+        _t2 = _tt.time()
         _nav.show()
+        _t3 = _tt.time()
         _animate_open(_nav, _final_pos)
+        try:                                   # TEMP timing probe
+            import os
+            with open(os.path.join(os.path.dirname(__file__), "..", "..", "user_files",
+                                   "tray_open.log"), "a") as f:
+                f.write("%s prebuilt=%s build %.0fms · size/place %.0fms · show %.0fms\n"
+                        % (_tt.strftime("%H:%M:%S"), fresh is not None, (_t1 - _t0) * 1000,
+                           (_t2 - _t1) * 1000, (_t3 - _t2) * 1000))
+        except Exception:
+            pass
         QTimer.singleShot(400, refresh_data_bg)   # fresh counts for next time
         # Re-assert AFTER show: Qt rewrites the NSPanel's style mask / collection
         # behavior during show(), which would clobber the non-activating + all-Spaces
