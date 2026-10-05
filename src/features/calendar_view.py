@@ -527,7 +527,10 @@ def _detail_html(e):
             "<label class='jkd-sw%s' onclick=\"pycmd('janki:cal:fam:%s')\"><span class='jkd-knob'>"
             "</span>%s</label>" % (" on" if f in _fams_on else "", f, lectures.FAMILY_LABEL.get(f, f))
             for f in present)
-        body = ("<div id='jkd-counts' class='jkd-counts'>… cards</div>"
+        _cc = _counts_cache.get(_count_key(m))
+        if _cc:                              # study buttons keep their numbers too
+            QTimer.singleShot(0, lambda c=_cc: _set_study_counts(c[3] - c[2], c[3]))
+        body = ("<div id='jkd-counts' class='jkd-counts'>%s</div>" % (_counts_html(_cc) if _cc else "… cards") +
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
@@ -628,6 +631,7 @@ def _recount(m):
     if not q:
         _set_counts("No sources switched on.")
         return
+    key = _count_key(m)
     try:
         from aqt.operations import QueryOp
 
@@ -638,6 +642,9 @@ def _recount(m):
 
         def ok(r):
             new, due, sus, tot = r
+            _counts_cache[key] = r
+            if len(_counts_cache) > 200:
+                _counts_cache.pop(next(iter(_counts_cache)))
             _set_study_counts(tot - sus, tot)
             _set_counts("<b>%d</b> cards · <span class=c-new>%d new</span> · "
                         "<span class=c-due>%d due</span> · <span class=c-sus>%d suspended</span>"
@@ -645,6 +652,19 @@ def _recount(m):
         QueryOp(parent=mw, op=op, success=ok).run_in_background()
     except Exception as e:
         log("calendar recount: %s" % e)
+
+
+_counts_cache = {}     # (lecture, sources) → last counts, so a redraw doesn't flash "…"
+
+
+def _count_key(m):
+    return (m.get("key"), tuple(sorted(_fams_on)), tuple(m["searches"]))
+
+
+def _counts_html(r):
+    new, due, sus, tot = r
+    return ("<b>%d</b> cards · <span class=c-new>%d new</span> · <span class=c-due>%d due</span>"
+            " · <span class=c-sus>%d suspended</span>" % (tot, new, due, sus))
 
 
 def _set_study_counts(active, sus):
