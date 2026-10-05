@@ -1016,8 +1016,7 @@ def _weak_html():
     if not _weak:
         return head + ("<div class='jkd-counts'>No past lectures with cards found — "
                        "nothing to flag.</div></div></div>")
-    out = []
-    for i, r in enumerate(_weak[:25]):
+    def row(i, r):
         chips = []
         if r["unstarted"] >= 0.05:
             chips.append("<span class='jkw-c jkw-bad'>%d%% not started</span>"
@@ -1033,7 +1032,7 @@ def _weak_html():
             chips.append("<span class='jkw-c jkw-bad'>%d leech%s</span>"
                          % (r["leech"], "es" if r["leech"] != 1 else ""))
         done_pct = round(100 * (1 - r["unstarted"]))
-        out.append(
+        return (
             "<div class='jkw-row' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
             "<div class='jkw-main'><div class='jkw-t'>%s</div>"
             "<div class='jkw-sub'>%s · %d cards</div>"
@@ -1045,6 +1044,31 @@ def _weak_html():
             "Practice</button></div></div>"
             % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), r["n"], done_pct,
                "".join(chips), i, i))
+
+    rows = list(enumerate(_weak))
+    start = _weak_start(_weak_mode)
+    if _weak_mode != "block":
+        out = [row(i, r) for i, r in rows[:40]]
+        return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
+    # End of block: one group per two-week exam period, newest first; open one to see
+    # its lectures (still least-studied first)
+    groups = {}
+    for i, r in rows:
+        groups.setdefault(max(0, (r["e"]["date"] - start).days // 14), []).append((i, r))
+    out = []
+    for p in sorted(groups, reverse=True):
+        g = groups[p]
+        a = start + datetime.timedelta(days=14 * p)
+        b = a + datetime.timedelta(days=11)                       # Mon … Fri of week 2
+        uns = sum(r["unstarted"] for _i, r in g) / len(g)
+        weakest = g[0][1]["m"]["display"]
+        out.append(
+            "<details class='jkw-grp'%s><summary><span class='jkw-gt'>%s %d – %s %d</span>"
+            "<span class='jkw-gs'>%d lecture%s · %d%% not started · weakest: %s</span>"
+            "<span class='jkw-bar jkw-gbar'><i style='width:%d%%'></i></span></summary>%s</details>"
+            % (" open" if p == max(groups) else "", a.strftime("%b"), a.day, b.strftime("%b"), b.day,
+               len(g), "" if len(g) == 1 else "s", round(100 * uns), html.escape(weakest),
+               round(100 * (1 - uns)), "".join(row(i, r) for i, r in g[:40])))
     return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
 
 
@@ -1464,6 +1488,18 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   background:rgba(255,255,255,.1) !important;overflow:hidden;}
 #jkc .jkw-pbar i{display:block;height:100%;width:5%;border-radius:3px;background:#9cbcf3 !important;
   transition:width .25s ease;}
+#jkc .jkw-grp{max-width:760px;margin:10px auto 0;text-align:left;border-radius:14px;padding:4px 6px 6px;
+  background:rgba(255,255,255,.035) !important;border:1px solid rgba(255,255,255,.08);}
+#jkc .jkw-grp summary{list-style:none;cursor:pointer;padding:8px 10px;display:grid;
+  grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;}
+#jkc .jkw-grp summary::-webkit-details-marker{display:none;}
+#jkc .jkw-grp summary::before{content:'›';grid-row:span 2;font-size:1.3em;opacity:.6;
+  transition:transform .2s ease;display:inline-block;}
+#jkc .jkw-grp[open] summary::before{transform:rotate(90deg);}
+.jkw-gt{font-weight:700;}
+.jkw-gs{grid-column:2;opacity:.7;font-size:.85em;}
+#jkc .jkw-gbar{grid-column:2;margin-top:4px;}
+#jkc .jkw-grp .jkw-row{margin:6px 4px;}
 #jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
 #jkc .jkw-row{cursor:pointer;transition:background-color .15s ease;display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
