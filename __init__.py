@@ -849,9 +849,13 @@ def _startup():
         # main deck list (they live under the Practice button instead).
         try:
             from .src.features import practice as _practice
-            if hasattr(gui_hooks, "top_toolbar_did_init_links"):
+            # (also registered at import — see _early_practice_hooks — so the FIRST
+            # deck list, drawn before _startup, already hides the banks; no double add)
+            if hasattr(gui_hooks, "top_toolbar_did_init_links") and \
+                    _practice.install_practice_toolbar not in gui_hooks.top_toolbar_did_init_links._hooks:
                 gui_hooks.top_toolbar_did_init_links.append(_practice.install_practice_toolbar)
-            if hasattr(gui_hooks, "deck_browser_will_render_content"):
+            if hasattr(gui_hooks, "deck_browser_will_render_content") and \
+                    _practice.hide_practice_rows not in gui_hooks.deck_browser_will_render_content._hooks:
                 gui_hooks.deck_browser_will_render_content.append(_practice.hide_practice_rows)
             # The toolbar already drew during main-window init (before this hook
             # registered), so redraw it now to pick up the Practice link. Same for the
@@ -1066,6 +1070,23 @@ try:
 except Exception as _ol_exc:
     log("overlay_leave failed to install: %s" % _ol_exc)
 _bt.mark("imported lectures → janki import done")
+
+
+def _early_practice_hooks():
+    """Keep the Practice banks / AMBOSS tile out of the deck list from the very first
+    render. Anki draws the deck list BEFORE main_window_did_init (where _startup used
+    to register this), so the first frame showed every bank, then hid them."""
+    try:
+        from .src.features import practice as _practice
+        if hasattr(gui_hooks, "deck_browser_will_render_content"):
+            gui_hooks.deck_browser_will_render_content.append(_practice.hide_practice_rows)
+        if hasattr(gui_hooks, "top_toolbar_did_init_links"):
+            gui_hooks.top_toolbar_did_init_links.append(_practice.install_practice_toolbar)
+    except Exception as _e:
+        log(f"early practice hooks: {_e}")
+
+
+_early_practice_hooks()
 _bt.arm_first_render()
 
 
@@ -1452,3 +1473,4 @@ try:
     gui_hooks.deck_browser_did_render.append(_note_main_page)
 except Exception:
     pass
+
