@@ -184,8 +184,75 @@ def install() -> None:
     if not getattr(mw, "_janki_zxcv", False):
         gui_hooks.state_shortcuts_will_change.append(_add)
         gui_hooks.reviewer_did_show_question.append(_shown)
+        gui_hooks.state_did_change.append(lambda new, old: new == "review" and _trace_once())
         gui_hooks.reviewer_did_show_question.append(lambda c: _diag("question shown card=%s" % c.id))
         gui_hooks.reviewer_did_show_answer.append(lambda c: _diag("answer shown card=%s" % c.id))
         _filter = _KeyFilter(mw)
         QApplication.instance().installEventFilter(_filter)
         mw._janki_zxcv = True
+
+
+# --------------------------------------------------------------------------- stall tracing
+_traced = False
+
+
+def _trace_once(*_a) -> None:
+    """On first review, time every reviewer hook callback / step and watch the main thread
+    for stalls (>100ms), logging slow ones to janki-zxcv.log. Wrapped lazily so every
+    add-on's hooks are already registered."""
+    global _traced
+    if _traced:
+        return
+    _traced = True
+    try:
+        from aqt.reviewer import Reviewer
+        from aqt.qt import QTimer
+
+        def _wrap_hook(hook, name):
+            for i, cb in enumerate(list(getattr(hook, "_hooks", []))):
+                def timed(*a, _cb=cb):
+                    t0 = _time.monotonic()
+                    try:
+                        return _cb(*a)
+                    finally:
+                        ms = (_time.monotonic() - t0) * 1000
+                        if ms > 15:
+                            _diag("  slow %s %s.%s %dms" % (name, getattr(_cb, "__module__", "?"),
+                                  getattr(_cb, "__name__", "?"), ms))
+                hook._hooks[i] = timed
+        for nm in ("reviewer_did_answer_card", "card_will_show", "reviewer_did_show_question",
+                   "reviewer_will_show_context_menu", "reviewer_did_show_answer",
+                   "operation_did_execute", "state_did_change", "webview_will_set_content"):
+            h = getattr(gui_hooks, nm, None)
+            if h is not None:
+                _wrap_hook(h, nm)
+
+        for meth in ("nextCard", "_showQuestion", "_showAnswer", "_after_answering", "refresh_if_needed"):
+            orig = getattr(Reviewer, meth, None)
+            if orig is None:
+                continue
+            def w(self, *a, _o=orig, _n=meth, **k):
+                t0 = _time.monotonic()
+                try:
+                    return _o(self, *a, **k)
+                finally:
+                    ms = (_time.monotonic() - t0) * 1000
+                    if ms > 15:
+                        _diag("  slow Reviewer.%s %dms" % (_n, ms))
+            setattr(Reviewer, meth, w)
+
+        last = [_time.monotonic()]
+        tm = QTimer(mw)
+        def tick():
+            now = _time.monotonic()
+            gap = (now - last[0]) * 1000
+            last[0] = now
+            if gap > 120 and mw.state == "review":
+                _diag("STALL main thread %dms (bg tasks=%s)" % (
+                    gap, len(getattr(mw.taskman, "_futures", []) or [])))
+        tm.timeout.connect(tick)
+        tm.start(20)
+        mw._janki_zxcv_stall = tm
+        _diag("trace installed")
+    except Exception as e:
+        _diag("trace install failed: %s" % e)
