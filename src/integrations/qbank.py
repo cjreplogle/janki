@@ -1205,37 +1205,50 @@ def _borrow_pool_families():
     return tuple(fams) + ("#AK_Step1",)
 
 
-def build_borrow_index(col=None):
-    """Build the tagged-card similarity index (call from a background QueryOp).
-
-    Compact on purpose (it used to add ~180 MB at launch): two streaming passes instead
-    of holding every note's word set at once, note ids as positions in one array, and
-    each word's postings as a packed int array instead of a list of Python ints."""
-    import math
-    from array import array
-    col = col or mw.col
+def _borrow_rows(col):
+    """Collection part of the index build (QueryOp): only the tagged notes in the pool
+    families. Kept short — it's the only part that holds the collection."""
     fams = _borrow_pool_families()
+    out = []
+    for nid, tags, flds in col.db.execute(
+            "select id, tags, flds from notes where tags != ''"):
+        ts = tags.split()
+        if any(t.startswith(f) for t in ts for f in fams):
+            out.append((nid, ts, flds))
+    return out
 
-    def rows():
-        for nid, tags, flds in col.db.execute(
-                "select id, tags, flds from notes where tags != ''"):
-            ts = tags.split()
-            if any(t.startswith(f) for t in ts for f in fams):
-                tk = set(_ct_tokens(flds.replace("\x1f", " ")))
-                if tk:
-                    yield nid, ts, tk
 
+def build_borrow_index(col=None, raw=None):
+    """Build the tagged-card similarity index from `raw` rows (see _borrow_rows).
+
+    Compact on purpose (it used to add ~180 MB at launch): note ids as positions in one
+    array, each word's postings as a packed int array. Pure-Python tokenizing of every
+    tagged note holds the GIL, which starved the main thread (it also paints the card's
+    text-scroll animation) — so it runs off the collection and yields every few rows."""
+    import math, time
+    from array import array
+    if raw is None:
+        raw = _borrow_rows(col or mw.col)
+    toks = []
+    for k, (nid, ts, flds) in enumerate(raw):
+        if k % 40 == 39:
+            time.sleep(0.002)                        # let the main thread paint
+        tk = set(_ct_tokens(flds.replace("\x1f", " ")))
+        if tk:
+            toks.append((nid, ts, tk))
+    del raw
     df = collections.Counter()
-    n = 0
-    for _nid, _ts, tk in rows():                     # pass 1: document frequencies
+    for _nid, _ts, tk in toks:
         df.update(tk)
-        n += 1
+    n = len(toks)
     idf = {w: math.log((n + 1) / (d + 0.5)) for w, d in df.items()}
     keep = {w for w, d in df.items() if d < _BORROW_DF_CAP}
     del df
     nids, norms, tags_l = array("q"), array("d"), []
     inv = {}
-    for nid, ts, tk in rows():                       # pass 2: postings + norms
+    for k, (nid, ts, tk) in enumerate(toks):
+        if k % 200 == 199:
+            time.sleep(0.001)
         i = len(nids)
         nids.append(nid)
         norms.append(math.sqrt(sum(idf[w] ** 2 for w in tk)) or 1.0)
@@ -1252,6 +1265,12 @@ def build_borrow_index(col=None):
 
 
 _BORROW_BUILDING = [False]
+
+
+def prewarm_borrow_index():
+    """Build the index while idle on the deck list, ahead of the first review."""
+    if getattr(mw, "state", None) != "review" and getattr(mw, "col", None) is not None:
+        _ensure_borrow_index()
 
 
 def _ensure_borrow_index():
@@ -1273,8 +1292,16 @@ def _ensure_borrow_index():
             def failed(e):
                 _BORROW_BUILDING[0] = False
                 log("borrow index: %s" % e)
-            QueryOp(parent=mw, op=lambda col: build_borrow_index(col),
-                    success=done).failure(failed).run_in_background()
+            def got(raw):
+                # tokenize off the collection so card lookups never queue behind it
+                def fin(fut):
+                    try:
+                        done(fut.result())
+                    except Exception as e:
+                        failed(e)
+                mw.taskman.run_in_background(lambda: build_borrow_index(raw=raw), fin,
+                                             uses_collection=False)
+            QueryOp(parent=mw, op=_borrow_rows, success=got).failure(failed).run_in_background()
         except Exception as e:
             _BORROW_BUILDING[0] = False
             log("borrow index: %s" % e)

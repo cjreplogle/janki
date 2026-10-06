@@ -729,6 +729,10 @@ def _startup():
             zxcv.install()
             from .src.features import tag_export
             tag_export.install()
+            # Practice "borrowed tags" index: build while idle after launch instead of
+            # during the first reviews (it made the text scroll stutter there).
+            from .src.integrations import qbank as _qb_pw
+            QTimer.singleShot(15000, _qb_pw.prewarm_borrow_index)
         except Exception as _zx_exc:
             log("zxcv: %s" % _zx_exc)
         # Windows: register .jank / .qb / .rp with Anki once (per-user, no admin), so
