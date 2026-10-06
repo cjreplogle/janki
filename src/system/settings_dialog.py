@@ -281,14 +281,17 @@ class GlassSettings(QDialog):
         tabs.addTab(hk_page, "Hotkeys")
         tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
         tabs.setCurrentWidget(app_page)
-        if sys.platform.startswith("win") and getattr(self, "_jk_win_frameless", False):
-            # a bit wider by default, so the centred tabs (Hotkeys is last) end well
-            # clear of the × in the top-right corner
-            try:
-                self.setMinimumWidth(max(self.minimumWidth(),
-                                         tabs.tabBar().sizeHint().width() + 140))
-            except Exception:
-                pass
+        # The tabs are centred, so the gap to the window's edge is whatever width is
+        # left over: on a narrow window or with a larger system font (a friend's Mac
+        # had the first tab nearly under the close button) it shrank to nothing. Keep
+        # the window wide enough that the tab row always clears the traffic lights /
+        # the Windows × with the same margin on both sides.
+        try:
+            side = 140 if sys.platform.startswith("win") else 180
+            self.setMinimumWidth(max(self.minimumWidth(),
+                                     tabs.tabBar().sizeHint().width() + side))
+        except Exception:
+            pass
 
         lay.addWidget(tabs)
         if getattr(self, "_win_note", None) is not None:
