@@ -249,6 +249,62 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
         pass
 
 
+def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None:
+    """Jitter-free Focus toggle. Hiding/showing the bars RESIZES mw.web, and the page
+    only gets that resize a frame or two after Qt moves the view. Measuring + applying
+    the new layout before then (and re-centring after) made the text jump twice. So:
+      1. record the card's position (and the viewport size) in the page,
+      2. THEN collapse / restore the bars (in the callback — guaranteed order),
+      3. apply the Focus CSS + FLIP slide when the page's resize actually lands
+         (or at once if it already has; a 250 ms fallback if it never comes)."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        collapse()
+        return
+    import json as _json
+    mutate = (
+        "var s=document.getElementById('__janki_focus');"
+        "if(!s){s=document.createElement('style');s.id='__janki_focus';"
+        "(document.head||document.documentElement).appendChild(s);}"
+        "s.textContent=" + _json.dumps(_FOCUS_CSS) + ";"
+    ) if hidden else (
+        "var s=document.getElementById('__janki_focus');if(s)s.remove();"
+    )
+    arm = ("(function(){var el=document.getElementById('qa')||document.body.firstElementChild;"
+           "window.__jkFlip={first:el?el.getBoundingClientRect().top:null,"
+           "h:window.innerHeight};return 1;})()")
+    apply = (
+        "(function(){var P=window.__jkFlip||{first:null,h:-1};var t=null;"
+        "function go(){if(go.done)return;go.done=1;"
+        "window.removeEventListener('resize',go);if(t)clearTimeout(t);"
+        "var el=document.getElementById('qa')||document.body.firstElementChild;"
+        "try{" + (pre or "") + "}catch(_){}" + mutate +
+        "if(!el||P.first==null)return;"
+        "var last=el.getBoundingClientRect().top;"
+        "var dy=(P.first-last)+(" + str(int(offset_px)) + ");"
+        "if(Math.abs(dy)<1)return;"
+        "try{el.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
+        "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
+        "catch(e){}}"
+        "if(window.innerHeight!==P.h)go();"
+        "else{window.addEventListener('resize',go);t=setTimeout(go,250);}})()"
+    )
+
+    def after_arm(_r=None):
+        try:
+            collapse()
+        except Exception as e:
+            log("focus collapse: %s" % e)
+        try:
+            web.eval(apply)
+        except Exception:
+            pass
+    try:
+        web.page().runJavaScript(arm, after_arm)
+    except Exception:
+        after_arm()
+
+
 def reassert_chrome_hidden() -> None:
     """Re-hide the chrome if Focus Mode is engaged. Anki RE-SHOWS the top toolbar
     (toolbarWeb) on every card render, which pushes mw.web down by the toolbar's
@@ -607,48 +663,52 @@ def _focus_set_hidden(hidden: bool) -> None:
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
-            _clamp_toolbar(True)       # deterministic 0-height top band
-            bw = getattr(mw, "bottomWeb", None)
-            if bw is not None:
-                try:
-                    bw.hide()
-                except Exception:
-                    pass
-            # Force the central layout to reclaim the space the hidden chrome left,
-            # so mw.web fills to the very TOP. In fullscreen the vacated toolbar
-            # strip could otherwise linger as an empty band, and the card centres
-            # within the lowered region (looks un-centred, pushed down by the gap).
-            _reclaim_central_layout()
-            # flag + trim + centre + slide in ONE script (no in-between frames)
-            _focus_apply_card(True, off, pre="window.__jankiFocus=true;" + _CORE_APPLY)
+            def _collapse():
+                if not _focus_hidden:
+                    return
+                _clamp_toolbar(True)       # deterministic 0-height top band
+                bw = getattr(mw, "bottomWeb", None)
+                if bw is not None:
+                    try:
+                        bw.hide()
+                    except Exception:
+                        pass
+                # Force the central layout to reclaim the space the hidden chrome
+                # left, so mw.web fills to the very TOP (in fullscreen the vacated
+                # strip could otherwise linger as an empty band).
+                _reclaim_central_layout()
+            # record → collapse → centre + slide once the page's resize lands
+            _focus_flip_around(True, off, "window.__jankiFocus=true;" + _CORE_APPLY,
+                               _collapse)
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
-            # QWebEngine geometry can settle a frame late; re-reclaim + re-centre
-            # once the resize has actually landed so no top gap survives.
+
+            # late safety net only (layout is idempotent; no slide if already placed)
             def _settle():
                 if not _focus_hidden:
                     return
                 _reclaim_central_layout()
-                _focus_apply_card(True, 0)   # already in place — just re-assert centring
-            QTimer.singleShot(0, _settle)
+                _focus_apply_card(True, 0)
+            QTimer.singleShot(450, _settle)
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
         # Restore chrome height instantly (one reflow), slide the card to the top,
         # and fade the chrome back in over the top.
-        _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
-        bw = getattr(mw, "bottomWeb", None)
-        if bw is not None:
-            try:
-                bw.show()
-            except Exception:
-                pass
-        _reclaim_central_layout()
-        # flag + restore trim + drop the answer anchor + slide, in ONE script
-        _focus_apply_card(False, -toolbar_h, pre=(
+        def _restore():
+            _clamp_toolbar(False)          # release the 0-height clamp on the toolbar
+            bw = getattr(mw, "bottomWeb", None)
+            if bw is not None:
+                try:
+                    bw.show()
+                except Exception:
+                    pass
+            _reclaim_central_layout()
+            for wv in chrome:
+                _fade_chrome(wv, True)
+        # record → restore the bars → un-centre + slide once the resize lands
+        _focus_flip_around(False, -toolbar_h, (
             "window.__jankiFocus=false;" + _CORE_RESTORE +
             "var _b=document.body;if(_b){_b.style.removeProperty('justify-content');"
-            "_b.style.removeProperty('padding-top');}"))
-        for wv in chrome:
-            _fade_chrome(wv, True)
+            "_b.style.removeProperty('padding-top');}"), _restore)
 
     # Hide the card-timer progress bar in Focus Mode (restore it when off).
     if card_timer._card_timer_instance is not None:
