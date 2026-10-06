@@ -586,6 +586,8 @@ _TOOLBAR_KEYS_JS = r"""(function(){
    if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);sfx('move');pycmd('janki:deckfocus');}
  },true);
  document.addEventListener('mousemove',function(){var c=cur();if(c)sel(null);},{passive:true});
+ // the keyboard moved on to the page (Calendar lectures, deck list…): drop the ring
+ window.addEventListener('blur',function(){if(cur())sel(null);});
 })();"""
 
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=190, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n" \
