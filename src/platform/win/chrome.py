@@ -117,7 +117,7 @@ class CaptionButtons(QWidget):
         self.place()
 
     def place(self):
-        self.move(self.parent().width() - self.width(), TOP_GAP)
+        self.move(self.parent().width() - self.width(), 0)   # flush in the corner
         self.raise_()
 
 
@@ -232,6 +232,17 @@ def start_move():
         pass
 
 
+def _over_caption(gpos) -> bool:
+    """The caption buttons sit flush in the top-right corner: their top strip is a
+    button, not the window's top resize edge."""
+    try:
+        if _lights is None or not _lights.isVisible():
+            return False
+        return _lights.rect().contains(_lights.mapFromGlobal(gpos))
+    except Exception:
+        return False
+
+
 class _EdgeResizer(QObject):
     """App-wide: near the main window's edges, show a resize cursor and start a native
     resize on press. Watches all of mw's widgets (the web views eat mouse events)."""
@@ -245,7 +256,7 @@ class _EdgeResizer(QObject):
             e |= Qt.Edge.LeftEdge
         elif g.right() - gpos.x() < EDGE:
             e |= Qt.Edge.RightEdge
-        if gpos.y() - g.top() < EDGE:
+        if gpos.y() - g.top() < EDGE and not _over_caption(gpos):
             e |= Qt.Edge.TopEdge
         elif g.bottom() - gpos.y() < EDGE:
             e |= Qt.Edge.BottomEdge
