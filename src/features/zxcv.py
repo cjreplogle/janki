@@ -95,6 +95,20 @@ def _main_is_front() -> bool:
         and bool(aw.windowFlags() & (Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool))
 
 
+_last_ev = None
+
+
+def _first(ev) -> bool:
+    """The app filter sees one KeyPress per widget it propagates through (web view's
+    internal child → view → window), so act only on its first delivery."""
+    global _last_ev
+    sig = (ev.timestamp(), ev.key())
+    if sig == _last_ev:
+        return False
+    _last_ev = sig
+    return True
+
+
 class _KeyFilter(QObject):
     def eventFilter(self, obj, ev):
         t = ev.type()
@@ -117,14 +131,26 @@ class _KeyFilter(QObject):
                         QApplication.instance().applicationState()))
                 return False
             r = getattr(mw, "reviewer", None)
+            if r is not None and getattr(r, "state", None) == "question":
+                # Front side: a Z/X/C/V press flips to the answer (like Space) instead of
+                # doing nothing; the next press rates. A dead key here felt like a hang.
+                if t == QEvent.Type.ShortcutOverride:
+                    ev.accept()
+                    return True
+                if press and _first(ev):
+                    _diag("reveal ease=%d (question side)" % ease)
+                    try:
+                        r._showAnswer()
+                    except Exception as e:
+                        _diag("showAnswer error: %s" % e)
+                return True
             if r is None or getattr(r, "state", None) != "answer":
-                if press:
-                    _diag("ignored ease=%d: reviewer state=%s" % (ease, getattr(r, "state", None)))
-                return False                   # question side: like 1–4, nothing
+                return False
             if t == QEvent.Type.ShortcutOverride:
                 ev.accept()                    # claim the key before any QShortcut
                 return True
-            if not ev.isAutoRepeat():          # holding Z must not rate a run of cards
+            if not ev.isAutoRepeat() and _first(ev):
+                # (the app filter sees the event once per widget it propagates to)
                 _rate(ease)
             return True
         except Exception:
