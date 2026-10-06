@@ -83,8 +83,8 @@ def _arm_launch_go():
             pass
     t.timeout.connect(_run)
 
-    def go(delay=350):
-        t.start(max(delay, 350))
+    def go(delay=200):
+        t.start(max(delay, 200))
 
     try:
         mw.web.loadFinished.connect(_launch_loaded)
@@ -1219,9 +1219,10 @@ def _build_css(cfg, context):
             # used to show at once — the "it just appears")
             parts.append(
                 "<style>html.jk-launch body{opacity:0;animation:none!important;}"
-                "html.jk-launch.jk-go body{animation:jkLaunchIn .5s ease-out both!important;}"
-                "@keyframes jkLaunchIn{from{opacity:0;transform:translateY(4px)}"
-                "to{opacity:1;transform:none}}"
+                "html.jk-launch body{will-change:opacity;}"
+                "html.jk-launch.jk-go body{animation:jkLaunchIn .3s ease-out both!important;}"
+                # opacity only: moving the whole page made it repaint over the glass
+                "@keyframes jkLaunchIn{from{opacity:0}to{opacity:1}}"
                 "@media (prefers-reduced-motion: reduce){html.jk-launch body{opacity:1;}"
                 "html.jk-launch.jk-go body{animation:none!important;}}</style>"
                 "<script>(function(){var h=document.documentElement;"
@@ -1232,8 +1233,8 @@ def _build_css(cfg, context):
                 "try{sessionStorage.setItem('glassFadeToken','%s');}catch(e){}"
                 # started from Python once the main window is really on screen
                 "window.jkLaunchGo=function(){requestAnimationFrame(function(){"
-                "requestAnimationFrame(function(){h.classList.add('jk-go');"
-                "try{sessionStorage.setItem('jkLaunchDone','1');}catch(e){}});});};"
+                "h.classList.add('jk-go');"
+                "try{sessionStorage.setItem('jkLaunchDone','1');}catch(e){}});};"
                 "setTimeout(function(){h.classList.add('jk-go');},6000);"   # never stuck
                 "})();</script>\n" % hud._menu_fade_token)
             if not _LAUNCH_FADE["done"]:
