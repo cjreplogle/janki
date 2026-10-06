@@ -230,17 +230,41 @@ def _trace_once(*_a) -> None:
                         _diag("  slow Reviewer.%s %dms" % (_n, ms))
             setattr(Reviewer, meth, w)
 
-        last = [_time.monotonic()]
+        import sys, threading, traceback
+        beat = [_time.monotonic()]
+        main_id = threading.main_thread().ident
         tm = QTimer(mw)
         def tick():
-            now = _time.monotonic()
-            gap = (now - last[0]) * 1000
-            last[0] = now
-            if gap > 120 and mw.state == "review":
-                _diag("STALL main thread %dms (bg tasks=%s)" % (
-                    gap, len(getattr(mw.taskman, "_futures", []) or [])))
+            beat[0] = _time.monotonic()
         tm.timeout.connect(tick)
-        tm.start(20)
+        tm.start(30)
+
+        def watchdog():
+            dumped = 0.0
+            while True:
+                _time.sleep(0.05)
+                lag = _time.monotonic() - beat[0]
+                if lag < 0.15 or beat[0] == dumped:
+                    continue
+                dumped = beat[0]
+                try:
+                    frames = sys._current_frames()
+                    names = {t.ident: t.name for t in threading.enumerate()}
+                    out = ["STALL %dms state=%s — main thread:" % (lag * 1000, mw.state)]
+                    f = frames.get(main_id)
+                    if f is not None:
+                        out += ["    " + ln.strip().replace("\n", " | ")
+                                for ln in traceback.format_stack(f)[-14:]]
+                    for tid, fr in frames.items():
+                        if tid in (main_id, threading.get_ident()):
+                            continue
+                        top = traceback.extract_stack(fr)[-1]
+                        out.append("  thread %s: %s:%d %s" % (names.get(tid, tid),
+                                   top.filename.split("/")[-1], top.lineno, top.name))
+                    _diag("\n".join(out))
+                except Exception as e:
+                    _diag("watchdog: %s" % e)
+        threading.Thread(target=watchdog, name="janki-stall-watchdog", daemon=True).start()
         mw._janki_zxcv_stall = tm
         _diag("trace installed")
     except Exception as e:
