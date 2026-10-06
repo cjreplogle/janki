@@ -6586,46 +6586,103 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
 
 
 class _ImportProgress:
-    """Small floating, NON-modal progress panel (Anki stays usable underneath)."""
+    """Floating glass progress panel (Janki's tooltip/tray look), NON-modal so Anki
+    stays usable. The bar is custom-painted and animated: it glides to each stage and
+    keeps creeping toward the next one during a long step, so it never sits frozen."""
 
     def __init__(self, title):
-        from aqt.qt import QWidget, QVBoxLayout, QLabel, QProgressBar, Qt
-        w = QWidget(mw, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        import time
+        from aqt.qt import QWidget, Qt, QTimer, QFont
+        from ..user import glass as _glass
+        self._glass = _glass
+        self.title, self.text = title, "Starting…"
+        self.shown = 0.0        # fraction currently drawn
+        self.base = 0.0         # fraction for the current stage
+        self.cap = 0.06         # creep limit: just short of the next stage
+        self.t0 = time.monotonic()
+        prog = self
+
+        class _W(QWidget):
+            def paintEvent(self, _ev):
+                prog._paint(self)
+        w = _W(mw, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+               | Qt.WindowType.WindowStaysOnTopHint)
+        w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         w.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        w.setWindowTitle(title)
-        lay = QVBoxLayout(w)
-        self.label = QLabel("Starting…")
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 0)                     # indeterminate until we know steps
-        self.bar.setTextVisible(True)
-        lay.addWidget(self.label)
-        lay.addWidget(self.bar)
-        w.setFixedWidth(360)
+        w.setFixedSize(340, 78)
+        self.font_t = QFont(".AppleSystemUIFont", 12)
+        self.font_t.setBold(True)
+        self.font_s = QFont(".AppleSystemUIFont", 11)
         try:
             g = mw.geometry()
-            w.move(g.right() - 380, g.bottom() - 140)
+            w.move(g.right() - 360, g.bottom() - 110)
         except Exception:
             pass
         w.show()
+        try:
+            _glass.frost_popup_window(w, corner=12)
+        except Exception:
+            pass
         self.w = w
+        self.timer = QTimer(w)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(16)                         # ~60 fps
+
+    def _tick(self):
+        # creep within the stage (slows as it nears the cap), then ease the drawn
+        # value toward the target — smooth regardless of how bursty the stages are
+        self.base = min(self.cap, self.base + (self.cap - self.base) * 0.004)
+        target = self.base
+        self.shown += (target - self.shown) * 0.12
+        self.w.update()
+
+    def _paint(self, w):
+        from aqt.qt import QPainter, QColor, QRectF, Qt
+        try:
+            self._glass.paint_glass_pill(w, 12.0)
+        except Exception:
+            pass
+        p = QPainter(w)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fg = QColor(255, 255, 255, 235)
+        p.setPen(fg)
+        p.setFont(self.font_t)
+        p.drawText(QRectF(16, 10, w.width() - 80, 20), Qt.AlignmentFlag.AlignLeft, self.title)
+        p.setFont(self.font_s)
+        p.setPen(QColor(255, 255, 255, 170))
+        p.drawText(QRectF(w.width() - 70, 10, 54, 20), Qt.AlignmentFlag.AlignRight,
+                   "%d%%" % round(self.shown * 100))
+        p.drawText(QRectF(16, 30, w.width() - 32, 18), Qt.AlignmentFlag.AlignLeft, self.text)
+        track = QRectF(16, 56, w.width() - 32, 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.drawRoundedRect(track, 3, 3)
+        if self.shown > 0.002:
+            fill = QRectF(track.x(), track.y(), max(6.0, track.width() * self.shown), track.height())
+            p.setBrush(QColor(255, 255, 255, 210))
+            p.drawRoundedRect(fill, 3, 3)
+        p.end()
 
     def step(self, i, n, text):
         def _ui():
-            try:
-                self.bar.setRange(0, n)
-                self.bar.setValue(i)
-                self.bar.setFormat("%d / %d" % (i, n))
-                self.label.setText(text)
-            except Exception:
-                pass
+            self.text = text
+            self.base = max(self.base, i / float(n))
+            self.cap = min(0.98, (i + 1) / float(n) - 0.01)
         mw.taskman.run_on_main(_ui)
 
     def close(self):
-        try:
-            self.w.close()
-            self.w.deleteLater()
-        except Exception:
-            pass
+        from aqt.qt import QTimer
+        def _fin():
+            try:
+                self.timer.stop()
+                self.w.close()
+                self.w.deleteLater()
+            except Exception:
+                pass
+        # finish the sweep to 100% before disappearing
+        self.base = self.cap = 1.0
+        self.text = "Done"
+        QTimer.singleShot(350, _fin)
 
 
 def _docx_import_bg(path, qs, use_csv, map_did, root_nm, build_deck, on_done):
