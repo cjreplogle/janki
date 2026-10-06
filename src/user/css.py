@@ -2691,9 +2691,10 @@ def on_js_message(handled, message, context):
     if message == "janki:toolbar":
         try:
             mw.toolbar.web.setFocus()
-            from ..features import practice as _pr, stats_embed as _se
+            from ..features import practice as _pr, stats_embed as _se, calendar_view as _cv
             here = ("stats" if _se.is_open() else
-                    "janki_practice" if getattr(_pr, "_practice_view", False) else "decks")
+                    "janki_practice" if getattr(_pr, "_practice_view", False) else
+                    "janki_calendar" if getattr(_cv, "_view", False) else "decks")
             mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);" % here)
         except Exception:
             pass
