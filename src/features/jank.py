@@ -399,10 +399,11 @@ def _local_sources() -> dict:
         log("jank sources (banks): %s" % exc)
     seen = set()
     try:
-        root = os.path.dirname(_tagmap_dir())
-        cands = [os.path.join(root, "lecture_tagmap.json")]
-        cands += [os.path.join(_tagmap_dir(), f) for f in sorted(os.listdir(_tagmap_dir()))]
-        cands += [p for p in (_cfg().get("txt_paths") or [])]
+        # Only the maps Janki actually USES — the extra layers listed under Settings →
+        # Lectures → Tag map (.txt/.json). Leftover files (an old lecture_tagmap.json,
+        # a map since removed from that list) aren't offered: they can't be managed
+        # anywhere in Anki and would ship stale data.
+        cands = [p for p in (_cfg().get("txt_paths") or [])]
         for p in cands:
             if p.lower().endswith(".json") and os.path.isfile(p):
                 rp = os.path.realpath(p)
