@@ -1884,8 +1884,11 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      var holders=nodes.map(function(e){ var tn=e[0], text=e[1];\n"
         "        var holder=document.createElement('span'); holder.setAttribute('data-jtw','1');\n"
         "        holder.textContent=text; holder.style.clipPath=HIDE;\n"
+        # find the list items BEFORE swapping the text node out — afterwards it's
+        # detached (no parent), so no bullet was ever hidden
+        "        var lis=jkLi(tn);\n"
         "        if(tn.parentNode) tn.parentNode.replaceChild(holder, tn);\n"
-        "        return {el:holder, text:text, li:jkLi(tn)}; });\n"
+        "        return {el:holder, text:text, li:lis}; });\n"
         # The <li> ::marker isn't a text node, so it's untouched by any of this and
         # would pop in instantly ahead of its item's text — hide it (once per item;
         # a bullet's text can be split across several holders) until its FIRST
