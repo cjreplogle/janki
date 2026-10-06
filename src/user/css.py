@@ -61,6 +61,50 @@ _RETIRED_FONTS = {"Anthropic Serif Text"}     # removed options → the default 
 _LAUNCH_FADE = {"done": False}   # first deck list of the session gets the launch fade
 
 
+def _arm_launch_go():
+    """Start the first deck list's fade once the main window is actually showing:
+    now if it already is (after its page has loaded), else on its first Show (e.g.
+    opened from the tray). The page's web view can't tell reliably, so we do."""
+    from aqt.qt import QObject, QEvent
+
+    def go(delay=220):
+        def _run():
+            try:
+                if mw.isVisible() and mw.web is not None:
+                    mw.web.eval("window.jkLaunchGo&&window.jkLaunchGo()")
+            except Exception:
+                pass
+        QTimer.singleShot(delay, _run)
+
+    try:
+        mw.web.loadFinished.connect(_launch_loaded)
+    except Exception:
+        pass
+    _LAUNCH_FADE["go"] = go
+    if mw.isVisible():
+        go(350)                       # window up already: give the page time to load
+        return
+
+    class _ShowOnce(QObject):
+        def eventFilter(self, obj, ev):
+            if ev.type() == QEvent.Type.Show:
+                mw.removeEventFilter(self)
+                go(260)               # first paint of the window, then fade the list
+            return False
+    _LAUNCH_FADE["filter"] = _ShowOnce(mw)
+    mw.installEventFilter(_LAUNCH_FADE["filter"])
+
+
+def _launch_loaded(ok=True):
+    try:
+        mw.web.loadFinished.disconnect(_launch_loaded)
+    except Exception:
+        pass
+    g = _LAUNCH_FADE.get("go")
+    if g and mw.isVisible():
+        g(160)
+
+
 def ui_font_label(cfg=None):
     lbl = (cfg or _cfg()).get("card_font", DEFAULT_UI_FONT)
     return DEFAULT_UI_FONT if lbl in _RETIRED_FONTS else lbl
@@ -1160,7 +1204,7 @@ def _build_css(cfg, context):
             _LAUNCH_FADE["done"] = True
             parts.append(
                 "<style>html.jk-launch body{opacity:0;animation:none!important;}"
-                "html.jk-launch.jk-go body{animation:jkLaunchIn .45s ease-out both!important;}"
+                "html.jk-launch.jk-go body{animation:jkLaunchIn .5s ease-out both!important;}"
                 "@keyframes jkLaunchIn{from{opacity:0;transform:translateY(4px)}"
                 "to{opacity:1;transform:none}}"
                 "@media (prefers-reduced-motion: reduce){html.jk-launch body{opacity:1;}"
@@ -1168,15 +1212,12 @@ def _build_css(cfg, context):
                 "<script>(function(){var h=document.documentElement;"
                 "h.classList.add('jk-launch');"
                 "try{sessionStorage.setItem('glassFadeToken','%s');}catch(e){}"
-                "var gone=false;function go(){if(gone)return;gone=true;"
-                "requestAnimationFrame(function(){requestAnimationFrame(function(){"
-                "h.classList.add('jk-go');});});}"
-                "if(document.visibilityState==='visible'){"
-                "setTimeout(go,120);}"           # visible already: let the window settle
-                "else{document.addEventListener('visibilitychange',function(){"
-                "if(document.visibilityState==='visible')go();});}"
-                "setTimeout(go,2500);"           # never stay hidden
+                # started from Python once the main window is really on screen
+                "window.jkLaunchGo=function(){requestAnimationFrame(function(){"
+                "requestAnimationFrame(function(){h.classList.add('jk-go');});});};"
+                "setTimeout(function(){h.classList.add('jk-go');},6000);"   # never stuck
                 "})();</script>\n" % hud._menu_fade_token)
+            QTimer.singleShot(0, _arm_launch_go)
         else:
             parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
