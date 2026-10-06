@@ -260,7 +260,7 @@ def _set_transition(on: bool) -> None:
 
 
 
-def _freeze(on: bool) -> None:
+def _freeze(on: bool, exiting: bool = False) -> None:
     """Stop the main window repainting while the bars collapse/restore: Qt would show
     the web view's OLD frame at its NEW position for a frame (the flicker). Frozen, the
     screen keeps the last correct frame until the page has drawn at its new size with
@@ -269,7 +269,11 @@ def _freeze(on: bool) -> None:
         if on:
             # off by default: un-freezing repaints the whole glass window, which can
             # itself show one empty frame; the jump was the re-hide race (fixed)
-            if not _cfg().get("focus_freeze", False):
+            # "exit" (default): only when the bars come BACK — the card area shifts
+            # down and Qt shows its old frame lower for one frame (seen in a 60 fps
+            # recording); entering doesn't need it. True = both ways, False = never.
+            mode = _cfg().get("focus_freeze", "exit")
+            if not (mode is True or (mode == "exit" and exiting)):
                 return
             if not _frozen["on"]:
                 _frozen["on"] = True
@@ -348,7 +352,7 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
             y0 = web.mapToGlobal(web.rect().topLeft()).y()
         except Exception:
             y0 = None
-        _freeze(True)            # hold the last correct frame on screen (see _freeze)
+        _freeze(True, exiting=not hidden)   # hold the last correct frame (see _freeze)
         try:
             collapse()
         except Exception as e:
