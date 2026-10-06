@@ -734,7 +734,7 @@ def practice_button_html(card) -> str:
         + label + '</div>')
     # (in bottom-right mode the card-timer ring moves into this spot and fades while
     # the button is revealed — see card_timer._place_on_practice_btn)
-    return ('<div id="jk-pq-bar" style="position:fixed;right:10px;bottom:0;'
+    return ('<div id="jk-pq-bar" style="position:fixed;right:10px;bottom:8px;'
             'z-index:2147483000;display:flex;transition:opacity .15s;opacity:0;'
             'pointer-events:none;">' + btn + '</div>'
             '<script>' + _PQ_HOVER_JS + '</script>')
