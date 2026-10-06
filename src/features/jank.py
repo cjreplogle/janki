@@ -138,7 +138,7 @@ def _import_tagmap(path: str) -> str:
     return dest
 
 
-def _import_apkgs(paths, on_done) -> None:
+def _import_apkgs(paths, on_done, prog=None, base=0, total=1) -> None:
     """Import deck packages one after another in the background (Anki's own importer, no
     dialogs): add new notes, update existing ones only when the package's copy is newer,
     keep YOUR scheduling/review history and deck options."""
@@ -152,6 +152,10 @@ def _import_apkgs(paths, on_done) -> None:
             on_done(results)
             return
         p = queue.pop(0)
+        if prog is not None:
+            k = len(paths) - len(queue) - 1
+            prog.step(base + k, total, "Importing deck %d of %d: %s"
+                      % (k + 1, len(paths), os.path.basename(p)))
         req = ImportAnkiPackageRequest(
             package_path=p,
             options=ImportAnkiPackageOptions(
@@ -195,17 +199,20 @@ def import_jank(path: str, parent=None, on_done=None) -> None:
             lines.append("Decks: %d package(s), %d notes added/updated"
                          % (len(found["apkg"]) - len(deck_res.get("errors", [])),
                             deck_res.get("notes", 0)))
-        # Question banks
+        # Question banks: unpacked + tagged in the background (qb_res), decks built here
         if found["qb"]:
+            ok = qb_res.get("ok", 0)
+            errors.extend(qb_res.get("errors", []))
             from ..integrations import qbank
-            ok = 0
-            for p in found["qb"]:
+            for i, bid in enumerate(qb_res.get("bids", [])):
+                prog.step(S_DECKS + i, N, "Building Practice deck %d of %d…"
+                          % (i + 1, len(qb_res["bids"])))
                 try:
-                    qbank.import_qb(p, build_deck=True)   # straight into Anki as a deck
-                    ok += 1
+                    qbank.convert_bank_to_deck(bid)
                 except Exception as exc:
-                    errors.append("%s: %s" % (os.path.basename(p), exc))
+                    errors.append("%s: %s" % (bid, exc))
             lines.append("Question banks: %d installed and loaded into the Practice deck" % ok)
+        prog.step(S_REST, N, "Applying tag maps and rephrasings…")
         # .json: AI tag-matching replies (applied to the banks just installed) or
         # lecture → tag maps.
         if found["json"]:
@@ -248,6 +255,7 @@ def import_jank(path: str, parent=None, on_done=None) -> None:
             mw.reset()
         except Exception:
             pass
+        prog.close()
         man = found.get("manifest") or {}
         title = man.get("name") or os.path.basename(path)
         head = title + (("  ·  v%s" % man["version"]) if man.get("version") else "")
@@ -277,10 +285,56 @@ def import_jank(path: str, parent=None, on_done=None) -> None:
             pass
         showInfo(msg, parent=parent, title="Janki: .jank imported")
 
+    # Progress: decks (one step each) → banks unpacked + tagged (background) → one deck
+    # build per bank → tag maps / rephrasings.
+    from ..integrations import qbank as _qb
+    prog = _qb._ImportProgress("Importing .jank")
+    n_apkg, n_qb = len(found["apkg"]), len(found["qb"])
+    S_QB = n_apkg
+    S_DECKS = S_QB + (1 if n_qb else 0)
+    S_REST = S_DECKS + n_qb
+    N = S_REST + 1
+    qb_res = {}
+
+    def _banks(deck_res):
+        if not found["qb"]:
+            _rest(deck_res)
+            return
+        from aqt.operations import QueryOp
+        prog.step(S_QB, N, "Installing %d question bank%s and matching tags…"
+                  % (n_qb, "" if n_qb == 1 else "s"))
+
+        def op(col):
+            res = {"ok": 0, "errors": [], "bids": []}
+            for p in found["qb"]:
+                try:
+                    man = _qb.import_qb(p, build_deck=False, enrich=False, sync_deck=False)
+                    res["bids"].append(man.get("id"))
+                    res["ok"] += 1
+                except Exception as exc:
+                    res["errors"].append("%s: %s" % (os.path.basename(p), exc))
+            try:
+                _qb.assign_deck_tags_from_headers()
+                _qb.mine_concepts_from_banks()
+                _qb.assign_content_tags()
+                _qb._Q_CACHE.clear()
+            except Exception as exc:
+                log("jank bank enrich: %s" % exc)
+            return res
+
+        def done(res):
+            qb_res.update(res)
+            _rest(deck_res)
+
+        def failed(exc):
+            qb_res.update({"errors": [str(exc)]})
+            _rest(deck_res)
+        QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
+
     if found["apkg"]:
-        _import_apkgs(found["apkg"], _rest)
+        _import_apkgs(found["apkg"], _banks, prog, 0, N)
     else:
-        _rest({})
+        _banks({})
 
 
 def import_jank_dialog(parent=None, on_done=None) -> None:

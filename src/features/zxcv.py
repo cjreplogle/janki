@@ -20,10 +20,27 @@ _LOG = None
 _t_press = 0.0
 
 
+_DEBUG = None
+
+
+def _debug() -> bool:
+    """Read once (config reads touch the disk; this is on the key/review hot path)."""
+    global _DEBUG
+    if _DEBUG is None:
+        import os
+        try:
+            _DEBUG = bool(os.environ.get("JANKI_DEBUG") or _cfg().get("debug_trace", False))
+        except Exception:
+            _DEBUG = False
+    return _DEBUG
+
+
 def _diag(msg: str) -> None:
     """Per-press trace → ~/Library/Logs/janki-zxcv.log (why a press was ignored / how long
-    the next card took), to pin down intermittent 'Z does nothing' moments."""
+    the next card took). Debug only: JANKI_DEBUG=1 or config "debug_trace": true."""
     global _LOG
+    if not _debug():
+        return
     try:
         if _LOG is None:
             from ..platform import log_path
@@ -190,7 +207,7 @@ def _trace_once(*_a) -> None:
     for stalls (>100ms), logging slow ones to janki-zxcv.log. Wrapped lazily so every
     add-on's hooks are already registered."""
     global _traced
-    if _traced:
+    if _traced or not _debug():
         return
     _traced = True
     try:
