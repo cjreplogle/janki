@@ -6264,6 +6264,77 @@ def convert_to_deck_dialog(on_done=None):
             pass
 
 
+def map_questions_to_subdecks(qs, root_did, min_score=_DECK_MATCH_MIN):
+    """File each question under the subdeck of `root_did` its lecture header names.
+    Matched questions get `lecture` = the subdeck's path below the root (so the Practice
+    deck mirrors that tree: Practice::<bank>::<subdeck path>), keep the original header
+    in `src_lecture`, and borrow that subdeck's dominant card tags so practice links to
+    those cards. Unmatched questions keep their header. Returns (matched, total)."""
+    col = mw.col
+    lec = _lectures()
+    if col is None or lec is None or not root_did:
+        return (0, len(qs))
+    root = col.decks.name(root_did)
+    subs = []
+    for name, did in col.decks.children(root_did):
+        rel = name[len(root) + 2:] if name.startswith(root + "::") else name
+        subs.append((rel, did))
+    if not subs:
+        return (0, len(qs))
+    tag_cache = {}
+
+    def dominant_tags(did):
+        if did in tag_cache:
+            return tag_cache[did]
+        dids = [did] + [d for _n, d in col.decks.children(did)]
+        ids = ",".join(str(int(d)) for d in dids)
+        rows = col.db.list("select n.tags from notes n where n.id in (select nid from cards "
+                           "where did in (%s) or odid in (%s))" % (ids, ids))
+        cnt = collections.Counter(t for r in rows for t in set((r or "").split())
+                                  if not t.lower().startswith(("leech", "marked")))
+        n = max(1, len(rows))
+        tag_cache[did] = [t for t, c in cnt.most_common(3) if c >= 0.3 * n]
+        return tag_cache[did]
+
+    best_for, matched = {}, 0
+    for q in qs:
+        header = (q.get("lecture") or "").strip()
+        if not header:
+            continue
+        if header not in best_for:
+            best, best_s = None, 0.0
+            for rel, did in subs:
+                leaf = rel.split("::")[-1]
+                sc = max(_match_score(lec, header, leaf),
+                         _match_score(lec, header, rel.replace("::", " ")))
+                # tie → the deeper (more specific) subdeck
+                if sc > best_s or (sc == best_s and best and rel.count("::") > best[0].count("::")):
+                    best, best_s = (rel, did), sc
+            best_for[header] = best if best_s >= min_score else None
+        hit = best_for[header]
+        if hit:
+            rel, did = hit
+            q["src_lecture"] = header
+            q["lecture"] = rel
+            q["tags"] = sorted(set(q.get("tags") or []) | set(dominant_tags(did)))
+            matched += 1
+    return (matched, len(qs))
+
+
+def _subdeck_roots():
+    """Decks that have subdecks, for the map-to picker (Practice banks excluded)."""
+    out = []
+    try:
+        for d in mw.col.decks.all_names_and_ids():
+            if d.name.split("::")[0] == "Practice":
+                continue
+            if mw.col.decks.children(d.id):
+                out.append((d.name, d.id))
+    except Exception:
+        pass
+    return sorted(out, key=lambda x: x[0].lower())
+
+
 def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     """Pick a .docx, show how many questions it yields, then (on confirm) build a
     .qb next to it and import it. Untagged → matches by text similarity.
@@ -6285,17 +6356,42 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
         return
     lects = len({q.get("lecture") for q in qs if q.get("lecture")})
     imgs = sum(1 for q in qs if q.get("media_rids"))
-    m = QMessageBox(mw)
-    m.setWindowTitle("Build .qb from .docx")
-    m.setText("Parsed %d questions across %d lectures (%d with images)."
-              % (len(qs), lects, imgs))
-    m.setInformativeText("Create a .qb and import it now?\n(Untagged — matches by "
-                         "text similarity; concept tags can be added later.)")
-    create = m.addButton("Create & import", QMessageBox.ButtonRole.AcceptRole)
-    m.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-    m.exec()
-    if m.clickedButton() is not create:
+    from aqt.qt import (QDialog, QVBoxLayout, QLabel, QComboBox, QDialogButtonBox,
+                        QHBoxLayout)
+    dlg = QDialog(mw)
+    dlg.setWindowTitle("Build .qb from .docx")
+    lay = QVBoxLayout(dlg)
+    lay.addWidget(QLabel("Parsed %d questions across %d lectures (%d with images).\n\n"
+                         "Create a .qb and import it now?" % (len(qs), lects, imgs)))
+    row = QHBoxLayout()
+    row.addWidget(QLabel("Map to subdecks of:"))
+    combo = QComboBox()
+    combo.addItem("Don't map (group by lecture header)", 0)
+    for name, did in _subdeck_roots():
+        combo.addItem(name, did)
+    row.addWidget(combo, 1)
+    lay.addLayout(row)
+    hint = QLabel("Each question's “Lecture:” header is matched to a subdeck name; matched "
+                  "questions land in the same subdeck path under Practice and link to "
+                  "those cards' tags.")
+    hint.setWordWrap(True)
+    hint.setStyleSheet("color: gray; font-size: 11px;")
+    lay.addWidget(hint)
+    bb = QDialogButtonBox()
+    bb.addButton("Create & import", QDialogButtonBox.ButtonRole.AcceptRole)
+    bb.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
+    bb.accepted.connect(dlg.accept)
+    bb.rejected.connect(dlg.reject)
+    lay.addWidget(bb)
+    if not dlg.exec():
         return
+    map_did = combo.currentData() or 0
+    mapped = None
+    if map_did:
+        try:
+            mapped = map_questions_to_subdecks(qs, map_did)
+        except Exception as e:
+            log("docx subdeck map: %s" % e)
     try:
         out, man = _write_qb(path, qs)
         import_qb(out, build_deck=build_deck)
@@ -6306,8 +6402,10 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     deck_tagged, _t = assign_deck_tags_from_headers()   # deterministic deck tags
     mined, _m = mine_concepts_from_banks()     # concept mining (AI-free bridge)
     _sfx_loaded()
-    tooltip("Imported “%s” (%d questions); %d deck-tagged from headers, %d concept-"
-            "matched from text." % (man.get("name"), len(qs), deck_tagged, mined))
+    tooltip("Imported “%s” (%d questions); %s%d deck-tagged from headers, %d concept-"
+            "matched from text." % (man.get("name"), len(qs),
+                                    ("%d/%d mapped to subdecks; " % mapped) if mapped else "",
+                                    deck_tagged, mined))
     if on_done:
         try:
             on_done()
