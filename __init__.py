@@ -665,6 +665,36 @@ def _startup():
         except Exception:
             pass
 
+        def _leave_fs_before_save():
+            # Anki saves the main window's geometry (incl. FULLSCREEN) right after
+            # profile_will_close, and restores it before Janki loads next launch —
+            # the frameless Windows window came back confused from that. Record the
+            # state, then drop to the normal window so Anki saves a normal geometry.
+            try:
+                from aqt.qt import Qt as _Qt
+                if mw.windowState() & _Qt.WindowState.WindowFullScreen:
+                    if mw.isVisible():
+                        _save_size()               # last_win_fs=True (+ keeps normal)
+                    else:                          # quit from the tray: still mark it
+                        cur = mw.addonManager.getConfig(__name__) or {}
+                        cur["last_win_fs"] = True
+                        mw.addonManager.writeConfig(__name__, cur)
+                    mw._janki_user_fs = False
+                    if mw.isVisible():
+                        mw.showNormal()
+                    else:                          # hidden: drop the state, don't show
+                        mw.setWindowState(_Qt.WindowState.WindowNoState)
+                    c = _cfg()
+                    w, h = int(c.get("last_win_w", 0) or 0), int(c.get("last_win_h", 0) or 0)
+                    if w > 0 and h > 0 and c.get("last_win_x") is not None:
+                        mw.setGeometry(int(c["last_win_x"]), int(c["last_win_y"]), w, h)
+            except Exception as _e:
+                log("leave fs before save: %s" % _e)
+        try:
+            gui_hooks.profile_will_close.append(_leave_fs_before_save)
+        except Exception:
+            pass
+
         _bt.mark("shortcuts, lockdown, window geometry")
         try:
             if tray._tray_should_show():
