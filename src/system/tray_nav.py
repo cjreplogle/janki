@@ -1905,10 +1905,9 @@ def _build() -> "QWidget":
         tb._jk_on_name = _TOGGLE_ON_NAME[key]
         _add_corner_hint(tb, {"caption": "Tab+\\", "focus": "Tab+F",
                               "lockdown": "`+⌫"}[key], small=True)   # narrow buttons
-        trow.addWidget(tb)
-    lay.addLayout(trow)
+        trow.addWidget(tb, 1)
 
-    # Rephrase on/off — a full-width switch (display-only card rephrasing). Lit GREEN when
+    # Rephrase on/off — the right half of the toggles row (display-only card rephrasing). Lit GREEN when
     # on (distinct from the blue mode toggles above).
     rwrow = QHBoxLayout()
     rwrow.setSpacing(6)
@@ -1934,7 +1933,12 @@ def _build() -> "QWidget":
     cyc.setToolTip("Cycle the current card through its rephrasings")
     cyc.clicked.connect(lambda _c=False: _cycle_reword())
     rwrow.addWidget(cyc)
-    lay.addLayout(rwrow)
+    # one row: Caption / Focus / Lockdown in the left half, Rephrase + ⟳ in the right
+    both = QHBoxLayout()
+    both.setSpacing(6)
+    both.addLayout(trow, 1)
+    both.addLayout(rwrow, 1)
+    lay.addLayout(both)
 
     # (no "Load from Lectures" here any more: the Today tab + the Calendar cover it)
 
