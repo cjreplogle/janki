@@ -1456,11 +1456,33 @@ def _study_detail():
     study_event(_shown[_detail], _fams_on)
 
 
+def _fade_top_bar(new_state, _old=None):
+    """Review started from the Calendar: the top toolbar fades / drops in with the first
+    card (the toolbar page isn't rebuilt on entering review, so it's animated in place)."""
+    if new_state != "review" or not getattr(mw, "_jk_fade_top", False):
+        return
+    mw._jk_fade_top = False
+    try:
+        from ..util.config import _cfg
+        c = _cfg()
+        if not c.get("first_card_fade", True):
+            return
+        ms = max(300, int(c.get("first_card_fade_ms", 220)) + 150)
+        mw.toolbar.web.eval(
+            "(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)')"
+            ".matches)return;document.body.animate([{opacity:0,transform:'translateY(-6px)'},"
+            "{opacity:1,transform:'none'}],{duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'});"
+            "}catch(e){}})();" % ms)
+    except Exception as e:
+        log("top bar fade: %s" % e)
+
+
 def study_event(e, fams=None, which="all"):
     """Study a class's cards (see _study_detail). which: "active" (unsuspended only),
     "suspended" (only suspended — unsuspended for the session, restored after) or "all".
     fams=None → all its sources. Used by the class page and the tray's Today list."""
     mw._jk_fade_bottom = True          # Show Answer bar fades in (user/css.py)
+    mw._jk_fade_top = True             # …and the top toolbar (_fade_top_bar)
     from aqt.utils import tooltip
     from ..integrations import lectures
     m = lectures.match_event(e["summary"])
@@ -2280,6 +2302,7 @@ def practice_event(e):
     """Practice questions related to this class (its lecture's concept tags first,
     then wording), in a temporary filtered deck — judged like the Practice deck."""
     mw._jk_fade_bottom = True          # Show Answer bar fades in (user/css.py)
+    mw._jk_fade_top = True             # …and the top toolbar (_fade_top_bar)
     from aqt.utils import tooltip
     from aqt.operations import QueryOp
     from ..integrations import lectures
@@ -2855,6 +2878,7 @@ def install():
     except Exception:
         pass
     gui_hooks.profile_did_open.append(_on_open)
+    gui_hooks.state_did_change.append(_fade_top_bar)
     gui_hooks.profile_will_close.append(_on_close)
     try:     # a collection (re)loaded / sync finished = definitely not shutting down
         gui_hooks.collection_did_load.append(lambda *_a: _on_open())
