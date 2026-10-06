@@ -83,6 +83,13 @@ try:
 except Exception as _gl_exc:
     log("early glass hooks: %s" % _gl_exc)
 
+# The automatic sync when the profile opens runs without Anki's progress window.
+try:
+    from .src.system import bg_sync as _bg_sync
+    _bg_sync.install()
+except Exception as _bgs_exc:
+    log("background sync: %s" % _bgs_exc)
+
 # .jank / .qb / .rp opened from Finder (Open With → Anki) go to Janki's importers.
 try:
     from .src.features import file_open as _file_open

@@ -177,6 +177,7 @@
   "remote_zoom": true,
   "hot_corner": "off",
   "calendar_toolbar_icon": true,
+  "sync_in_background": true,
   "practice_match": "lenient",
   "lecture_source_skip": {},
   "card_tags_max": 6,
