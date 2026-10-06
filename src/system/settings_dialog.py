@@ -254,6 +254,11 @@ class GlassSettings(QDialog):
         tabs.addTab(hk_page, "Hotkeys")
         tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
         tabs.setCurrentWidget(app_page)
+        if sys.platform.startswith("win") and getattr(self, "_jk_win_frameless", False):
+            # keep the tab row (Hotkeys is last) clear of the × in the top-right corner
+            _cap_room = QWidget()
+            _cap_room.setFixedSize(54, 1)
+            tabs.setCornerWidget(_cap_room, Qt.Corner.TopRightCorner)
 
         lay.addWidget(tabs)
         if getattr(self, "_win_note", None) is not None:
