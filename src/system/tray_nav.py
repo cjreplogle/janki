@@ -1051,13 +1051,14 @@ def _build_practice_list(parent):
 
 
 def _sound_types_panel(parent):
-    """Inline levels under the header (right-click the speaker): Master, then one slider
+    """Levels floating over the tray under the header (right-click the speaker): Master, then one slider
     per type of sound (0–200 %). Inline, not a popup window — a Qt popup opened from the
     non-activating tray panel closes the instant it opens on macOS."""
     from aqt.qt import QSlider
     box = QFrame(parent)
     box.setObjectName("sndBox")
-    box.setStyleSheet("#sndBox{background:rgba(255,255,255,14);border-radius:8px;}"
+    box.setStyleSheet("#sndBox{background:rgba(34,36,44,248);border:1px solid rgba(255,255,255,40);"
+                      "border-radius:10px;}"
                       "QLabel{background:transparent;}")
     v = QVBoxLayout(box)
     v.setContentsMargins(10, 6, 10, 6)
@@ -1630,18 +1631,21 @@ def _build() -> "QWidget":
     snd_box._sync = _sync_mute
 
     def _toggle_levels():
-        snd_box.setVisible(not snd_box.isVisible())
-        _resize_nav()
-        try:
-            _apply_glass_panel(win)
-        except Exception:
-            pass
+        # floats OVER the tray (not in the layout), so nothing below it moves
+        if snd_box.isVisible():
+            snd_box.hide()
+            return
+        snd_box.setFixedWidth(root.width() - 24)
+        snd_box.adjustSize()
+        y = mute_btn.mapTo(root, mute_btn.rect().bottomLeft()).y() + 6
+        snd_box.move(12, y)
+        snd_box.raise_()
+        snd_box.show()
     mute_btn.customContextMenuRequested.connect(lambda _p: _toggle_levels())
     _sync_mute()
     hrow.addWidget(mute_btn)
     hrow.addWidget(opts_btn)
     lay.addLayout(hrow)
-    lay.addWidget(snd_box)
 
     # Decks | Practice | Today — a segmented control like the Calendar's view switch.
     pdid = _practice_did()
