@@ -587,6 +587,9 @@ def _prebuild():
     """Build the next tray while nobody's looking, so opening it is just a show()."""
     global _prebuilt
     try:
+        if getattr(mw, "state", None) == "review":
+            _review_dirty[0] = True              # rebuild after the review, not mid-card
+            return
         if getattr(mw, "col", None) is None:
             schedule_prebuild(2000)               # profile still loading: try again
             return
@@ -647,8 +650,24 @@ def refresh_data_bg(*_a):
 _refresh_timer = None
 
 
+_review_dirty = [False]
+
+
+def _after_review(new, old):
+    if new != "review" and _review_dirty[0]:
+        _review_dirty[0] = False
+        QTimer.singleShot(300, refresh_data_bg)
+
+
 def _schedule_refresh(*_a):
     global _refresh_timer
+    # Every card answer fires operation_did_execute. Re-reading the deck tree then holds
+    # the collection (Anki's backend is single-file), so the NEXT card's own lookups
+    # queued behind it, and the tray rebuild ran on the main thread: a 0.2–1.7 s freeze
+    # mid-review that swallowed Z/X/C/V. Counts can wait until you leave the reviewer.
+    if getattr(mw, "state", None) == "review":
+        _review_dirty[0] = True
+        return
     try:
         if _refresh_timer is None:
             _refresh_timer = QTimer(mw)
@@ -667,6 +686,7 @@ def install_data_cache():
         QTimer.singleShot(5000, lambda: _prebuilt is None and schedule_prebuild(0))
         QTimer.singleShot(3000, refresh_data_bg)       # (the hook may already have fired)
         gui_hooks.operation_did_execute.append(_schedule_refresh)
+        gui_hooks.state_did_change.append(_after_review)
     except Exception:
         pass
 
