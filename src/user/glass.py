@@ -572,7 +572,9 @@ def _sync_oled():
     if not GLASS:
         return                         # OLED is a glass-edition feature only
     cfg = _cfg()
-    want = bool(cfg.get("oled_fullscreen", False)) and mw.isFullScreen()
+    # Windows: maximised fills the screen too (and is what the □ button does)
+    filled = mw.isFullScreen() or (_WIN and mw.isMaximized())
+    want = bool(cfg.get("oled_fullscreen", False)) and filled
     if want != _oled_active:
         _set_oled(want)
 

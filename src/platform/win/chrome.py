@@ -149,6 +149,12 @@ class _PlaceOnResize(QObject):
         if ev.type() == QEvent.Type.WindowStateChange:
             sync_fullscreen()
             _keep_lights_on_top()
+            try:                       # OLED black in fullscreen / maximised
+                from ...user import glass as _g
+                from aqt.qt import QTimer as _T
+                _T.singleShot(0, _g._sync_oled)
+            except Exception:
+                pass
         return False
 
 

@@ -33,15 +33,22 @@ def _wallpaper_path():
 
 
 def _blur(img: QImage, strength: int = 5) -> QImage:
-    """Approximate a wide Gaussian: shrink hard, then grow back smoothly (twice)."""
+    """Approximate a wide Gaussian: shrink, then grow back — in HALVING steps. One
+    big 1/32 jump each way (as before) left blocky, diamond-patterned artefacts; a
+    pyramid of 2× bilinear steps averages smoothly."""
     w, h = img.width(), img.height()
-    s = max(1, 2 ** strength)
-    for _ in range(2):
-        small = img.scaled(max(1, w // s), max(1, h // s),
-                           Qt.AspectRatioMode.IgnoreAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
-        img = small.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
+    sizes = [(w, h)]
+    for _ in range(max(1, strength)):
+        cw, ch = sizes[-1]
+        if cw < 4 or ch < 4:
+            break
+        sizes.append((max(1, cw // 2), max(1, ch // 2)))
+    for (cw, ch) in sizes[1:]:                       # down
+        img = img.scaled(cw, ch, Qt.AspectRatioMode.IgnoreAspectRatio,
+                         Qt.TransformationMode.SmoothTransformation)
+    for (cw, ch) in reversed(sizes[:-1]):            # and back up
+        img = img.scaled(cw, ch, Qt.AspectRatioMode.IgnoreAspectRatio,
+                         Qt.TransformationMode.SmoothTransformation)
     return img
 
 
@@ -66,10 +73,18 @@ def _backdrop():
     img = QImage(path)
     if img.isNull():
         return None, None
-    img = img.scaled(sr.width(), sr.height(), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+    # work in PHYSICAL pixels (the screen's devicePixelRatio) so it isn't upscaled
+    # soft on a high-DPI display
+    try:
+        scr = mw.screen() if hasattr(mw, "screen") else QGuiApplication.primaryScreen()
+        dpr = float(scr.devicePixelRatio()) if scr else 1.0
+    except Exception:
+        dpr = 1.0
+    pw, ph = int(sr.width() * dpr), int(sr.height() * dpr)
+    img = img.scaled(pw, ph, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                      Qt.TransformationMode.SmoothTransformation)
-    x, y = (img.width() - sr.width()) // 2, (img.height() - sr.height()) // 2
-    img = _blur(img.copy(x, y, sr.width(), sr.height()))
+    x, y = (img.width() - pw) // 2, (img.height() - ph) // 2
+    img = _blur(img.copy(x, y, pw, ph), strength=6 if dpr > 1.25 else 5)
     _blurred = (path, mt, (sr.x(), sr.y(), sr.width(), sr.height()), img)
     return img, sr
 
@@ -121,9 +136,13 @@ class _Layer(QWidget):
             return
         img, sr = _backdrop()
         if img is not None:
+            from aqt.qt import QRectF
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             top_left = self.mapToGlobal(self.rect().topLeft())
-            src = QRect(top_left.x() - sr.x(), top_left.y() - sr.y(), self.width(), self.height())
-            p.drawImage(self.rect(), img, src)
+            k = img.width() / max(1, sr.width())       # image is in physical pixels
+            src = QRectF((top_left.x() - sr.x()) * k, (top_left.y() - sr.y()) * k,
+                         self.width() * k, self.height() * k)
+            p.drawImage(QRectF(self.rect()), img, src)
         p.fillRect(self.rect(), self.tint)
         p.end()
 
