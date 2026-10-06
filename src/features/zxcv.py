@@ -14,6 +14,26 @@ from aqt.qt import QApplication, QEvent, QObject, Qt
 
 from ..util.config import _cfg, log
 
+import time as _time
+
+_LOG = None
+_t_press = 0.0
+
+
+def _diag(msg: str) -> None:
+    """Per-press trace → ~/Library/Logs/janki-zxcv.log (why a press was ignored / how long
+    the next card took), to pin down intermittent 'Z does nothing' moments."""
+    global _LOG
+    try:
+        if _LOG is None:
+            from ..platform import log_path
+            _LOG = log_path("janki-zxcv.log")
+        with open(_LOG, "a") as f:
+            f.write("%s.%03d %s\n" % (_time.strftime("%H:%M:%S"), int(_time.time() * 1000) % 1000, msg))
+    except Exception:
+        pass
+
+
 _KEYS = {Qt.Key.Key_Z: 1, Qt.Key.Key_X: 2, Qt.Key.Key_C: 3, Qt.Key.Key_V: 4}
 _MODS = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
          | Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.ShiftModifier)
@@ -30,10 +50,22 @@ def _rate(ease: int) -> None:
             return
     except Exception:
         pass
+    global _t_press
+    _t_press = _time.monotonic()
+    _diag("rate ease=%d card=%s" % (ease, getattr(r.card, "id", None)))
     try:
         r._answerCard(ease)
     except Exception as e:
         log("zxcv: %s" % e)
+        _diag("answerCard error: %s" % e)
+    _diag("  _answerCard returned +%dms" % ((_time.monotonic() - _t_press) * 1000))
+
+
+def _shown(card) -> None:
+    global _t_press
+    if _t_press:
+        _diag("  next question shown +%dms" % ((_time.monotonic() - _t_press) * 1000))
+        _t_press = 0.0
 
 
 def _typing_into(w) -> bool:
@@ -72,12 +104,22 @@ class _KeyFilter(QObject):
             ease = _KEYS.get(ev.key())
             if ease is None or ev.modifiers() & _MODS:
                 return False
+            press = t == QEvent.Type.KeyPress and not ev.isAutoRepeat()
             if mw.state != "review" or not _cfg().get("zxcv_rating", True):
+                if press and mw.state == "review":
+                    _diag("ignored ease=%d: zxcv_rating off" % ease)
                 return False
             if not _main_is_front() or _typing_into(QApplication.focusWidget()):
+                if press:
+                    _diag("ignored ease=%d: not front (active=%s focus=%s appstate=%s)" % (
+                        ease, type(QApplication.activeWindow()).__name__,
+                        type(QApplication.focusWidget()).__name__,
+                        QApplication.instance().applicationState()))
                 return False
             r = getattr(mw, "reviewer", None)
             if r is None or getattr(r, "state", None) != "answer":
+                if press:
+                    _diag("ignored ease=%d: reviewer state=%s" % (ease, getattr(r, "state", None)))
                 return False                   # question side: like 1–4, nothing
             if t == QEvent.Type.ShortcutOverride:
                 ev.accept()                    # claim the key before any QShortcut
@@ -108,6 +150,7 @@ def install() -> None:
     global _filter
     if not getattr(mw, "_janki_zxcv", False):
         gui_hooks.state_shortcuts_will_change.append(_add)
+        gui_hooks.reviewer_did_show_question.append(_shown)
         _filter = _KeyFilter(mw)
         QApplication.instance().installEventFilter(_filter)
         mw._janki_zxcv = True
