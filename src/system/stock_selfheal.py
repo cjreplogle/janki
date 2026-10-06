@@ -43,7 +43,7 @@ _CACHE = Path.home() / ".janki_stock_cache"
 
 # Bump when the injected patch changes, so a cached .pyc from an older janki isn't
 # reused for the same Anki build.
-_PATCH_FMT = "v2"
+_PATCH_FMT = "v3"   # v3: --disable-frame-rate-limit (ProMotion)
 
 # Crash-guard sentinels (in $HOME so they survive an Anki reinstall).
 _PENDING = Path.home() / ".janki_glass_pending"
@@ -92,9 +92,13 @@ _INIT_INJECT = (
     "            except Exception:\n"
     "                pass\n"
     "            _jos.environ.setdefault('ANKI_GLASS', '1')\n"
-    "            _jos.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', "
-    "'--disable-gpu --disable-features=CalculateNativeWinOcclusion "
-    "--disable-renderer-backgrounding --disable-backgrounding-occluded-windows')\n"
+    "            _jflags = ('--disable-gpu --disable-features=CalculateNativeWinOcclusion '\n"
+    "                       '--disable-renderer-backgrounding --disable-backgrounding-occluded-windows')\n"
+    # Software compositing ticks at a fixed 60 Hz; lift that so ProMotion (120 Hz)
+    # displays scroll/animate past 60. Off switch without re-patching: ~/.janki_60fps
+    "            if not (_jhome / '.janki_60fps').exists():\n"
+    "                _jflags += ' --disable-frame-rate-limit'\n"
+    "            _jos.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', _jflags)\n"
     "            from aqt.qt import QSurfaceFormat as _JankiQSF\n"
     "            _jf = _JankiQSF.defaultFormat()\n"
     "            _jf.setAlphaBufferSize(8)\n"
@@ -386,6 +390,33 @@ def unpatch(purge: bool = True) -> int:
 
 # --- entry point ---------------------------------------------------------------
 
+_FMT_MARK = b"janki_60fps"           # present in v3+ snippets
+
+
+def _upgrade_patch() -> None:
+    """Running patched, but the files on disk carry an OLDER snippet (patched before
+    this format, e.g. without the 120 Hz flag): quietly rebuild them. Anki already
+    loaded the old code, so this takes effect from the next launch — no prompt, and
+    the stock backups (.janki-orig) are kept as they are."""
+    try:
+        ad = _aqt_dir()
+        if ad is None or not _files_patched(ad):
+            return
+        if _FMT_MARK in (ad / "__init__.pyc").read_bytes():
+            return                         # already current
+        h = _buildhash()
+        if not h or sys.version_info[:2] != (3, 13):
+            return
+        built = {name: _build_pyc(name, h) for name in _PATCHERS}
+        for name, src_pyc in built.items():
+            dst = ad / (Path(name).stem + ".pyc")
+            if dst.with_suffix(".pyc.janki-orig").exists():   # never lose the stock copy
+                shutil.copy2(src_pyc, dst)
+        log("self-heal: refreshed the glass patch (%s); active next launch." % _PATCH_FMT)
+    except Exception as exc:
+        log("self-heal upgrade: %s" % exc)
+
+
 def maybe_self_heal(early: bool = False) -> None:
     """Entry point — safe to call unconditionally at startup. `early` = called at
     add-on import, before Anki's window or collection opens: then a freshly applied
@@ -393,7 +424,8 @@ def maybe_self_heal(early: bool = False) -> None:
     if sys.platform != "darwin":
         return
     if os.environ.get("ANKI_GLASS"):
-        return                         # already patched/active
+        _upgrade_patch()               # already patched/active: refresh an old snippet
+        return
     ad = _aqt_dir()
     if ad is None:
         return                         # source build or not an app bundle

@@ -1788,7 +1788,10 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   opacity:0;transform:translateY(6px);transition:opacity .25s ease,transform .25s ease;}
 #jkc-busy.on{opacity:.9;transform:none;}
 #jkc-busy i{width:10px;height:10px;border-radius:50%;border:2px solid rgba(156,188,243,.3);
-  border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
+  border-top-color:#9cbcf3;}
+/* spin only while the chip is shown: hidden (opacity 0) it kept animating forever and
+   the page kept producing frames at rest */
+#jkc-busy.on i{animation:jkcSpin .8s linear infinite;}
 @keyframes jkcSpin{to{transform:rotate(360deg);}}
 .jkc-tc{opacity:.75;}
 #jkc .jkd-reload{display:inline-block;width:9px;height:9px;margin-left:4px;vertical-align:1px;border-radius:50%;

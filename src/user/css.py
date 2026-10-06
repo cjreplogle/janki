@@ -655,7 +655,13 @@ _PAD_NAV_JS = r"""(function(){
      edge(i+'u',b(12)||y<-0.5,'ArrowUp');   edge(i+'d',b(13)||y>0.5,'ArrowDown');
      edge(i+'l',b(14)||x<-0.5,'ArrowLeft'); edge(i+'r',b(15)||x>0.5,'ArrowRight');
      edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');}
-   if(document.hasFocus())requestAnimationFrame(tick);else setTimeout(tick,200);}
+   // A plain timer, NOT requestAnimationFrame: polling on every frame made the page
+   // ask for a new frame constantly (~60/s capped; a full CPU core uncapped) even
+   // with no controller. Poll at ~60 Hz only while a pad is connected and we have
+   // focus; otherwise check once a second.
+   var any=false;for(var j=0;j<ps.length;j++){if(ps[j]){any=true;break;}}
+   setTimeout(tick, any&&mine?16:1000);}
+ window.addEventListener('gamepadconnected',function(){setTimeout(tick,0);});
  tick();
 })();"""
 
@@ -1892,9 +1898,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        var spans=[]; for(var i=0;i<h.text.length;i++){ var sp=document.createElement('span');\n"
         "          sp.className='__jtwc'; sp.textContent=h.text[i]; sp.style.visibility='hidden';\n"
         "          h.el.appendChild(sp); spans.push(sp); }\n"
-        "        var perTick=Math.max(1, Math.ceil(spans.length/Math.max(1,dur/(1000/60))))*JK_FR, ci=0;\n"
-        "        function step(){ var b=perTick;\n"
-        "          while(b>0 && ci<spans.length){ spans[ci].style.visibility='visible'; ci++; b--; }\n"
+        # by ELAPSED TIME, not per frame: a fixed count per frame assumed 60 fps and
+        # raced / stalled when frames came faster or unevenly
+        "        var ci=0, t0=performance.now();\n"
+        "        function step(){ var want=Math.min(spans.length, Math.ceil(spans.length*"
+        "Math.min(1,(performance.now()-t0)/dur)));\n"
+        "          while(ci<want){ spans[ci].style.visibility='visible'; ci++; }\n"
         "          if(ci<spans.length) jkNext(step); else { finishHolder(h); next(); } }\n"
         "        jkNext(step);\n"
         "      }\n"
@@ -1916,9 +1925,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      function showLi(i){ var a=liFirst.get(i); if(a){ a.forEach(function(l){ l.style.visibility=''; }); liFirst.delete(i); } }\n"
         "      var fin=done; done=function(){ liAll.forEach(function(l){ l.style.visibility=''; }); fin(); };\n"
         "      reveal();   // reveal the now-emptied card (no flash of full text)\n"
-        "      var perTick=Math.max(1, Math.ceil(total/Math.max(1,(MS/12))))*JK_FR;\n"
-        "      var ni=0,ci=0;\n"
-        "      function step(){ var b=perTick;\n"
+        "      var ni=0,ci=0,shown=0,t0=performance.now();\n"
+        # characters due by now (elapsed time), not a fixed count per frame
+        "      function step(){ var b=Math.min(total,Math.ceil(total*Math.min(1,"
+        "(performance.now()-t0)/MS)))-shown; shown+=Math.max(0,b);\n"
         "        while(b>0 && ni<nodes.length){ var c=nodes[ni], rem=c[1].length-ci, take=Math.min(b,rem);\n"
         "          if(ci===0) showLi(ni);\n"
         "          c[0].nodeValue=c[1].slice(0,ci+take); ci+=take; b-=take;\n"
