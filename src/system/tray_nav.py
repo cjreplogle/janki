@@ -54,8 +54,8 @@ QPushButton#practice {
 QPushButton#practice:hover  { background: rgba(74,200,130,0.20); }
 QPushButton#practice:pressed{ background: rgba(74,200,130,0.30); }
 QLabel#cnt { color:#9fb4d8; font-size:11px; }
-QLabel#hint { color: rgba(233,238,247,0.34); font-size:9px; background: transparent; }
-QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:8px; background: transparent; }
+QLabel#hint, QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
+QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
 QPushButton#expander {
     padding:0 0 2px 0; margin:0; font-size:13px; font-weight:700; text-align:center;
     color:#aebbd2; background: transparent; border: none;
