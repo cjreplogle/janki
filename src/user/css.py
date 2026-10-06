@@ -653,7 +653,10 @@ _DECK_WIDTH_JS = r"""(function(){
    if(true){ var view=key.slice(-1); t.classList.add('jk-bank');
      if(!document.getElementById('jk-bank-cols')){ var st=document.createElement('style');
        st.id='jk-bank-cols';
-       st.textContent='table.jk-bank{table-layout:fixed;box-sizing:border-box;'
+       // scrollbar-gutter: a scrollbar appearing (list grew past the window) would
+       // narrow the page and nudge the centred table
+       st.textContent='html{scrollbar-gutter:stable both-edges;}'
+         +'table.jk-bank{table-layout:fixed;box-sizing:border-box;'
          +'max-width:calc(100vw - 24px)!important;}'
          +'table.jk-bank td.decktd a.deck{white-space:normal;}'
          +'table.jk-bank th.count,table.jk-bank tr.deck>td:not(.decktd):not(.opts)'
@@ -665,13 +668,14 @@ _DECK_WIDTH_JS = r"""(function(){
      // One fixed width for the whole Practice view (the widest it has needed, within
      // the window): expanding/collapsing banks never resizes or slides the table.
      key='jkDeckW:'+view+'3';               // per view; fresh key drops older widths
-     t.style.tableLayout='auto'; var nat0=natural(); t.style.tableLayout='';
-     // never wider than the window: deeper subdeck names wrap instead of pushing the
-     // columns off-screen
-     var pw=Math.min(cap(), Math.max(nat0, Math.min(stored(), cap())));
-     t.style.width=pw+'px'; put(key, String(pw)); put('jkColAnim','');
+     // A width that does NOT depend on the names: 960 px (or the window, if
+     // narrower). Sizing to the widest visible name meant a longer subdeck name
+     // revealed by + widened the centred table and slid every column. Long names
+     // wrap inside the name column instead; the count columns are pinned above.
+     var FIX=960;
+     t.style.width=Math.min(cap(), FIX)+'px'; put('jkColAnim','');
      window.addEventListener('resize', function(){
-       t.style.width=Math.min(cap(), parseFloat(get(key))||nat0)+'px'; });
+       t.style.width=Math.min(cap(), FIX)+'px'; });
      return; }
    var nat=natural(), prev=Math.min(stored(), cap());
    var target=Math.max(nat, prev), start=prev||nat;
