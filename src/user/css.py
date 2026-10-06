@@ -95,7 +95,9 @@ def _arm_launch_fade():
     # every deck-list load started so far has finished, and (3) the window is showing.
     # Whichever happens last triggers it, the same on any machine.
     def maybe():
-        if (state.get("startup_done") and state["loaded"] >= state.get("pending", 0)
+        if (state.get("startup_done")
+                and state.get("pending", 0) >= state.get("refreshes", 0)
+                and state["loaded"] >= state.get("pending", 0)
                 and mw.isVisible()):
             QTimer.singleShot(0, start)      # after the final page's first paint
 
@@ -129,6 +131,29 @@ def _arm_launch_fade():
             except Exception:
                 pass
     QTimer.singleShot(3000, safety)          # only a never-stuck-invisible net
+
+
+def _count_launch_refreshes():
+    """Deck-list refresh() runs its query in the background and renders later, so a
+    refresh requested during startup could land AFTER the fade (the text popped in
+    0.3 s later). Count requests until the fade starts; it waits for them to render."""
+    try:
+        from aqt.deckbrowser import DeckBrowser
+        if getattr(DeckBrowser.refresh, "_jk_lf", False):
+            return
+        orig = DeckBrowser.refresh
+
+        def refresh(self, *a, **k):
+            if not _LAUNCH_FADE.get("started"):
+                _LAUNCH_FADE["refreshes"] = _LAUNCH_FADE.get("refreshes", 0) + 1
+            return orig(self, *a, **k)
+        refresh._jk_lf = True
+        DeckBrowser.refresh = refresh
+    except Exception as exc:
+        log("launch fade refresh count: %s" % exc)
+
+
+_count_launch_refreshes()
 
 
 def launch_startup_done():
