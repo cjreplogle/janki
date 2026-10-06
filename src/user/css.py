@@ -73,7 +73,8 @@ def _arm_launch_fade():
         mw.setWindowOpacity(0.0)
     except Exception:
         return
-    state = {"started": False, "loaded": False}
+    state = _LAUNCH_FADE
+    state.update(started=False, loaded=0)
 
     def start():
         if state["started"]:
@@ -85,19 +86,24 @@ def _arm_launch_fade():
             pass
         try:
             from . import glass as _g
-            _g._fade_window(mw, mw.windowOpacity(), 1.0, 280)
+            _g._fade_window(mw, mw.windowOpacity(), 1.0, 200)
         except Exception:
             mw.setWindowOpacity(1.0)
 
-    # Event-driven, not timed: fade when BOTH the page has loaded and the window is
-    # showing — whichever happens second triggers it (works the same on any machine).
+    # Event-driven, not timed: fade once (1) Janki's startup has finished — it redraws
+    # the deck list, and fading before that showed the text vanish and pop back — (2)
+    # every deck-list load started so far has finished, and (3) the window is showing.
+    # Whichever happens last triggers it, the same on any machine.
     def maybe():
-        if state["loaded"] and mw.isVisible():
-            QTimer.singleShot(0, start)      # after the loaded page's first paint
+        if (state.get("startup_done") and state["loaded"] >= state.get("pending", 0)
+                and mw.isVisible()):
+            QTimer.singleShot(0, start)      # after the final page's first paint
 
     def on_load(_ok=True):
-        state["loaded"] = True
+        state["loaded"] += 1
         maybe()
+
+    state["maybe"] = maybe
 
     try:
         mw.web.loadFinished.connect(on_load)
@@ -122,7 +128,15 @@ def _arm_launch_fade():
                 mw.setWindowOpacity(1.0)
             except Exception:
                 pass
-    QTimer.singleShot(2500, safety)          # only a never-stuck-invisible net
+    QTimer.singleShot(3000, safety)          # only a never-stuck-invisible net
+
+
+def launch_startup_done():
+    """Called at the end of Janki's _startup (its deck-list redraws are issued)."""
+    _LAUNCH_FADE["startup_done"] = True
+    m = _LAUNCH_FADE.get("maybe")
+    if m:
+        m()
 
 
 def ui_font_label(cfg=None):
@@ -1218,6 +1232,8 @@ def _build_css(cfg, context):
         if not _LAUNCH_FADE["done"]:
             _LAUNCH_FADE["done"] = True
             _arm_launch_fade()
+        if not _LAUNCH_FADE.get("started"):
+            _LAUNCH_FADE["pending"] = _LAUNCH_FADE.get("pending", 0) + 1   # a load begins
         parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
             and screens.get("bottom_bar", True):

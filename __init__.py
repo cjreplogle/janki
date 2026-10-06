@@ -1119,6 +1119,10 @@ def _startup():
         else:
             log("inactive (not started via AnkiGlass; no ANKI_GLASS).")
         _bt.mark("fullscreen watcher, card timer, AMBOSS frost → _startup done")
+        try:
+            css.launch_startup_done()     # launch fade waits for startup's redraws
+        except Exception:
+            pass
         _bt.startup_done()
     except Exception as exc:
         _bt.mark("startup error")
