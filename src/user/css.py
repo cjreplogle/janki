@@ -1109,6 +1109,18 @@ def _build_css(cfg, context):
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
             and screens.get("bottom_bar", True):
         parts.append("<style>\nbody #outer {\n" + props + "  margin:4px 0;\n}\n</style>\n")
+        # Review started from the Calendar (class page / tray): the Show Answer bar
+        # fades in with the first card instead of popping in (flag set by
+        # calendar_view.study_event / practice_event, used once)
+        if isinstance(context, ReviewerBottomBar) and getattr(mw, "_jk_fade_bottom", False) \
+                and cfg.get("first_card_fade", True):
+            mw._jk_fade_bottom = False
+            parts.append(
+                "<style>@media (prefers-reduced-motion: no-preference){"
+                "body{animation:jkBarIn %dms cubic-bezier(.2,.8,.2,1) both;}}"
+                "@keyframes jkBarIn{from{opacity:0;transform:translateY(6px)}"
+                "to{opacity:1;transform:none}}</style>\n"
+                % max(300, int(cfg.get("first_card_fade_ms", 220)) + 150))
         # Bottom buttons: subtle dark fill (slightly darker than the tint) + dark
         # shadow so they read as distinct, visible buttons.
         parts.append(

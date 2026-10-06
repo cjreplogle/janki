@@ -1460,6 +1460,7 @@ def study_event(e, fams=None, which="all"):
     """Study a class's cards (see _study_detail). which: "active" (unsuspended only),
     "suspended" (only suspended — unsuspended for the session, restored after) or "all".
     fams=None → all its sources. Used by the class page and the tray's Today list."""
+    mw._jk_fade_bottom = True          # Show Answer bar fades in (user/css.py)
     from aqt.utils import tooltip
     from ..integrations import lectures
     m = lectures.match_event(e["summary"])
@@ -2278,6 +2279,7 @@ _PRACTICE_MIN = 3     # fewer related questions than this → treat as none
 def practice_event(e):
     """Practice questions related to this class (its lecture's concept tags first,
     then wording), in a temporary filtered deck — judged like the Practice deck."""
+    mw._jk_fade_bottom = True          # Show Answer bar fades in (user/css.py)
     from aqt.utils import tooltip
     from aqt.operations import QueryOp
     from ..integrations import lectures
