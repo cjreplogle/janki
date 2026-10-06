@@ -867,6 +867,10 @@ class _Tour(QWidget):
 
     def _show_step(self, st, rect):
         new = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
+        if new is not None:
+            # keep the ring inside the overlay: a toolbar item's padded hole ran past
+            # the window top, so the ring lost its top edge
+            new = new.intersected(self.rect().adjusted(1, 1, -1, -1))
         old = self.hole
         first = not self.isVisible() or not self.bubble.isVisible()
         self.hole = new
@@ -918,7 +922,12 @@ class _Tour(QWidget):
             return
         reg = QRegion(self.rect())
         if self.hole is not None and self.hole.height() < self.height() * 0.5:
-            reg = reg.subtracted(QRegion(self.hole.adjusted(2, 2, -2, -2)))
+            # Rounded hole, inset past the 2px ring: a square hole cut the ring's
+            # corners away and showed as a box inside it
+            from aqt.qt import QPainterPath, QRectF
+            cut = QPainterPath()
+            cut.addRoundedRect(QRectF(self.hole.adjusted(3, 3, -3, -3)), 8, 8)
+            reg = reg.subtracted(QRegion(cut.toFillPolygon().toPolygon()))
             # …but never under the bubble (or its slide path): it was cut where it
             # crossed the lit hole
             area = self.bubble.geometry()
@@ -1096,6 +1105,8 @@ class _Tour(QWidget):
         if self.steps[self.i] is not st:
             return
         new = rect.adjusted(-8, -6, 8, 6) if rect is not None else None
+        if new is not None:
+            new = new.intersected(self.rect().adjusted(1, 1, -1, -1))
         old = self.hole
         self.hole = new
         self._place_bubble(animate=True)
