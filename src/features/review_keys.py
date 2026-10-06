@@ -102,18 +102,24 @@ def _on_js(handled, message, context):
 
 
 class _BarKeys(QObject):
-    """While the bar has the keyboard, Space/Enter/arrows go to it — not to Anki's
-    reviewer shortcuts (Space would otherwise answer Good whatever was selected)."""
+    """While the bottom bar or the toolbar has the keyboard during review, Space/Enter/
+    arrows go to it — not to Anki's reviewer shortcuts (Enter/Space would otherwise
+    flip or answer the card instead of opening what's selected)."""
     _KEYS = {Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Left,
              Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Escape}
 
     def eventFilter(self, obj, ev):
         try:
-            if (_bar_active and ev.type() == QEvent.Type.ShortcutOverride
-                    and ev.key() in self._KEYS and _in_review()):
+            if (ev.type() == QEvent.Type.ShortcutOverride and ev.key() in self._KEYS
+                    and _in_review()):
                 fw = QApplication.focusWidget()
-                bw = getattr(mw, "bottomWeb", None)
-                if fw is not None and bw is not None and (fw is bw or bw.isAncestorOf(fw)):
+
+                def inside(w):
+                    return fw is not None and w is not None and (fw is w or w.isAncestorOf(fw))
+                tw = getattr(getattr(mw, "toolbar", None), "web", None)
+                # the bottom bar while it has a selection, or the toolbar (arrow-key
+                # navigating up there): Enter opens the selected item, not the card
+                if (_bar_active and inside(getattr(mw, "bottomWeb", None))) or inside(tw):
                     ev.accept()
         except Exception:
             pass
