@@ -54,7 +54,8 @@ QPushButton#practice {
 QPushButton#practice:hover  { background: rgba(74,200,130,0.20); }
 QPushButton#practice:pressed{ background: rgba(74,200,130,0.30); }
 QLabel#cnt { color:#9fb4d8; font-size:11px; }
-QLabel#hint, QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
+QLabel#hint, QPushButton#tgl[jkIco="true"], QPushButton[jkIco="true"] { padding:3px 4px 11px 4px; }
+QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
 QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
 QPushButton#expander {
     padding:0 0 2px 0; margin:0; font-size:13px; font-weight:700; text-align:center;
@@ -1302,7 +1303,10 @@ class _CornerHint(QObject):
             lab = getattr(obj, "_jk_hint", None)
             if lab is not None:
                 lab.adjustSize()
-                lab.move(obj.width() - lab.width() - 6, 1)
+                if getattr(obj, "_jk_hint_bottom", False):     # icon buttons: bottom centre
+                    lab.move((obj.width() - lab.width()) // 2, obj.height() - lab.height() - 1)
+                else:
+                    lab.move(obj.width() - lab.width() - 6, 1)
         return False
 
 
@@ -1898,6 +1902,8 @@ def _build() -> "QWidget":
         tb = QPushButton()                         # icon only; the name is the tooltip
         tb.setIcon(_white_icon(ico))
         tb.setIconSize(QSize(16, 16))
+        tb.setProperty("jkIco", True)             # icon sits high; the hint goes under it
+        tb._jk_hint_bottom = True
         tb.setToolTip(label)
         tb.setObjectName("tgl")
         tb.clicked.connect(lambda _c=False, k=key: _toggle(k))
