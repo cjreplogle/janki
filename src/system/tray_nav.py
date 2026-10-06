@@ -916,7 +916,7 @@ class _DayView(QWidget):
             self.items.append({"e": e, "col": col, "lane": ln, "lanes": nl})
         self.hover = None
         # 8am–1pm fills the page exactly; a longer day scrolls at the same scale
-        self.PX_H = (_PAGE_H - 12) / 5.0
+        self.PX_H = (_PAGE_H - 12 - 23) / 5.0      # 8 AM–1 PM fills the page under the day bar
         self.setFixedHeight(int((hi - lo) / 60 * self.PX_H) + 12)
 
     def _rect(self, it):
