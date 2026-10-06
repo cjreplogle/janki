@@ -134,16 +134,32 @@ class _Layer(QWidget):
             p.fillRect(self.rect(), self.tint)
             p.end()
             return
+        # Cached: the window-sized slice (wallpaper + tint) is cut ONCE per position /
+        # size / tint and each repaint is a 1:1 blit. Scaling the full-resolution
+        # blur on every repaint held Python's lock long enough that Windows skipped
+        # Janki's keyboard hook (Tab chords "did nothing" for a few seconds).
+        top_left = self.mapToGlobal(self.rect().topLeft())
         img, sr = _backdrop()
-        if img is not None:
-            from aqt.qt import QRectF
-            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            top_left = self.mapToGlobal(self.rect().topLeft())
-            k = img.width() / max(1, sr.width())       # image is in physical pixels
-            src = QRectF((top_left.x() - sr.x()) * k, (top_left.y() - sr.y()) * k,
-                         self.width() * k, self.height() * k)
-            p.drawImage(QRectF(self.rect()), img, src)
-        p.fillRect(self.rect(), self.tint)
+        key = (top_left.x(), top_left.y(), self.width(), self.height(),
+               self.tint.rgba(), id(img), self.devicePixelRatioF())
+        if getattr(self, "_jk_cache_key", None) != key:
+            from aqt.qt import QRectF, QPixmap
+            dpr = self.devicePixelRatioF()
+            pm = QPixmap(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr)))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(QColor(0, 0, 0, 0))
+            q = QPainter(pm)
+            if img is not None:
+                q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                k = img.width() / max(1, sr.width())   # image is in physical pixels
+                src = QRectF((top_left.x() - sr.x()) * k, (top_left.y() - sr.y()) * k,
+                             self.width() * k, self.height() * k)
+                q.drawImage(QRectF(0, 0, self.width(), self.height()), img, src)
+            q.fillRect(0, 0, self.width(), self.height(), self.tint)
+            q.end()
+            self._jk_cache = pm
+            self._jk_cache_key = key
+        p.drawPixmap(0, 0, self._jk_cache)
         p.end()
 
 
