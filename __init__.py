@@ -1144,6 +1144,7 @@ def _early_practice_hooks():
             gui_hooks.deck_browser_will_render_content.append(_practice.hide_practice_rows)
         if hasattr(gui_hooks, "top_toolbar_did_init_links"):
             gui_hooks.top_toolbar_did_init_links.append(_practice.install_practice_toolbar)
+        _practice.keep_renames_in_practice()
     except Exception as _e:
         log(f"early practice hooks: {_e}")
 

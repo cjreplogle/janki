@@ -702,3 +702,33 @@ class PracticePanel(QDialog):
         if kind == "bad":
             return base % "background:rgba(230,90,90,0.30);"
         return base % "background:rgba(255,255,255,0.08);"
+
+
+def keep_renames_in_practice():
+    """Renaming a deck under "Practice" (gear → Rename) keeps it there. Anki's box shows
+    the full path ("Practice::Bank"); typing just a new title moved the deck out to the
+    top level. A new name that leaves out the path keeps the deck's old parent
+    ("Practice::Bank::Section" → "Practice::Bank::<new>"). Moving it elsewhere is still
+    possible by typing a full path, or by dragging."""
+    try:
+        import aqt.deckbrowser as _db
+        if getattr(_db.rename_deck, "_jk_practice", False):
+            return
+        orig = _db.rename_deck
+
+        def rename_deck(*a, **k):
+            try:
+                did, new = k.get("deck_id"), k.get("new_name")
+                if did is not None and new:
+                    old = mw.col.decks.name(did)
+                    root = _PRACTICE_PARENT + "::"
+                    new = new.strip()
+                    if old.startswith(root) and not new.startswith(root) and "::" not in new:
+                        k["new_name"] = old.rsplit("::", 1)[0] + "::" + new
+            except Exception as e:
+                log("practice rename: %s" % e)
+            return orig(*a, **k)
+        rename_deck._jk_practice = True
+        _db.rename_deck = rename_deck
+    except Exception as e:
+        log("practice rename hook: %s" % e)
