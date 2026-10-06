@@ -1141,10 +1141,14 @@ def _build_css(cfg, context):
             # rounding exactly). The default outline's corners didn't match, so the
             # dark button fill showed as a box inside the ring.
             "body #outer button:focus, body button:focus { outline: none !important; }\n"
+            # The ring is a BORDER on the button itself (padding shrinks by the same
+            # 2px so nothing moves): it shares the fill's exact rounded corners at any
+            # height. A box-shadow ring took its corners from the unclamped 15px radius
+            # while the 28px-tall button clamps its own to ~14px — a box showed inside.
             "body #outer button:focus-visible, body button:focus-visible {\n"
             "  outline: none !important;\n"
-            "  box-shadow: 0 0 0 2px rgba(176,203,246,0.75), 0 1px 3px rgba(0,0,0,0.45)"
-            " !important; }\n"
+            "  border: 2px solid rgba(176,203,246,0.8) !important;\n"
+            "  padding: 4px 12px !important; }\n"
             # Again/Hard/Good/Easy: tinted background + text color (data-ease 1/2/3/4)
             # Background tint is visible on pure black (OLED) and subtle on glass.
             "body #outer button[data-ease='1']{\n"
@@ -1512,8 +1516,9 @@ def _build_css(cfg, context):
                      "html body a.hitem:focus,html body a.hitem:focus-visible,"
                      "html body .toolbar a:focus{outline:none!important;}"
                      "html body a.hitem:focus-visible,html body a.hitem.jk-tbsel{"
-                     "border-radius:8px!important;"
-                     "box-shadow:0 0 0 2px rgba(176,203,246,0.75)!important;}</style>"
+                     "border-radius:8px!important;box-shadow:none!important;"
+                     "border:2px solid rgba(176,203,246,0.8)!important;"
+                     "padding:3px 10px!important;}</style>"
                      "<script>" + _TOOLBAR_KEYS_JS + "</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
