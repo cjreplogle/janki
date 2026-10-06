@@ -18,7 +18,7 @@ from aqt import mw
 from aqt.qt import (
     QEvent, QObject,
     Qt, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QPushButton, QScrollArea, QCursor, QPoint, QTimer,
+    QPushButton, QScrollArea, QCursor, QPoint, QTimer, QSize,
     QPropertyAnimation, QEasingCurve,
 )
 
@@ -1050,6 +1050,76 @@ def _build_practice_list(parent):
     return box
 
 
+def _white_icon(kind, size=16):
+    """Plain white line icons drawn with QPainter (font glyphs can come out as colour
+    emoji on macOS): caption, focus, lock, speaker, speaker_off, gear."""
+    import math
+    from aqt.qt import QPainter, QColor, QPen, QPixmap, QIcon, QRectF, QPointF, QPainterPath
+    dpr = 3
+    pm = QPixmap(size * dpr, size * dpr)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.scale(dpr * size / 16.0, dpr * size / 16.0)     # shapes are drawn on a 16-unit grid
+    white = QColor(255, 255, 255)
+    pen = QPen(white, 1.5)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    S = 16.0
+    if kind == "caption":                          # closed captions: [CC]
+        p.drawRoundedRect(QRectF(1, 3, 14, 10), 2.5, 2.5)
+        p.setPen(QPen(white, 1.3, cap=Qt.PenCapStyle.RoundCap))
+        for x in (3.6, 8.6):                       # two Cs (open on the right)
+            p.drawArc(QRectF(x, 5.6, 3.8, 4.8), 45 * 16, 270 * 16)
+    elif kind == "focus":                          # target: rings + crosshair ticks
+        c = QPointF(8, 8)
+        p.drawEllipse(c, 5.2, 5.2)
+        p.drawEllipse(c, 2.4, 2.4)
+        for (x0, y0, x1, y1) in ((8, 0.8, 8, 3.6), (8, 12.4, 8, 15.2),
+                                 (0.8, 8, 3.6, 8), (12.4, 8, 15.2, 8)):
+            p.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+        p.setBrush(white)
+        p.drawEllipse(c, 0.9, 0.9)
+    elif kind == "lock":                           # padlock
+        p.drawArc(QRectF(S / 2 - 3.5, 1.5, 7, 9), 0, 180 * 16)
+        p.drawLine(QPointF(S / 2 - 3.5, 6), QPointF(S / 2 - 3.5, 7.5))
+        p.drawLine(QPointF(S / 2 + 3.5, 6), QPointF(S / 2 + 3.5, 7.5))
+        p.setBrush(white)
+        p.drawRoundedRect(QRectF(2.5, 7.5, S - 5, S - 9), 1.5, 1.5)
+    elif kind in ("speaker", "speaker_off"):
+        path = QPainterPath()
+        path.moveTo(2, 6); path.lineTo(5, 6); path.lineTo(9, 2.5)
+        path.lineTo(9, S - 2.5); path.lineTo(5, S - 6); path.lineTo(2, S - 6)
+        path.closeSubpath()
+        p.setBrush(white)
+        p.drawPath(path)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        if kind == "speaker":
+            p.drawArc(QRectF(7, 5, 5, 6), -60 * 16, 120 * 16)
+            p.drawArc(QRectF(7, 2.5, 8, 11), -60 * 16, 120 * 16)
+        else:
+            p.drawLine(QPointF(11, 5.5), QPointF(15, 10.5))
+            p.drawLine(QPointF(15, 5.5), QPointF(11, 10.5))
+    elif kind == "gear":
+        c = QPointF(S / 2, S / 2)
+        p.setBrush(white)
+        for i in range(8):                         # teeth
+            a = i * math.pi / 4
+            p.save()
+            p.translate(c)
+            p.rotate(math.degrees(a))
+            p.drawRect(QRectF(-1.3, -S / 2 + 0.5, 2.6, 3))
+            p.restore()
+        p.drawEllipse(c, S / 2 - 3, S / 2 - 3)
+        p.setBrush(QColor(0, 0, 0, 0))
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        p.drawEllipse(c, 2, 2)
+    p.end()
+    pm.setDevicePixelRatio(dpr)
+    return QIcon(pm)
+
+
 def _sound_types_panel(parent):
     """Levels floating over the tray under the header (right-click the speaker): Master, then one slider
     per type of sound (0–200 %). Inline, not a popup window — a Qt popup opened from the
@@ -1590,7 +1660,9 @@ def _build() -> "QWidget":
     hrow.addWidget(hdr)
     hrow.addStretch(1)
     # Gear: U+FE0E forces the monochrome (text) glyph instead of a colour emoji.
-    opts_btn = QPushButton("⚙︎")
+    opts_btn = QPushButton()
+    opts_btn.setIcon(_white_icon("gear", 18))
+    opts_btn.setIconSize(QSize(18, 18))
     opts_btn.setObjectName("gear")            # 1.5× the header's other icon buttons
     opts_btn.setToolTip("Janki settings")
     opts_btn.clicked.connect(_open_settings)
@@ -1604,7 +1676,7 @@ def _build() -> "QWidget":
             on = int(c.get("sfx_volume", 0)) > 0 and not c.get("sfx_muted", False)
         except Exception:
             on = False
-        mute_btn.setText("\U0001F50A\uFE0E" if on else "\U0001F507\uFE0E")
+        mute_btn.setIcon(_white_icon("speaker" if on else "speaker_off"))
         mute_btn.setToolTip("Mute Janki sounds" if on else
                             "Janki sounds are off — click to unmute" if _cfg().get("sfx_muted")
                             else "Janki sounds are off (turn them up in Settings ▸ Appearance ▸ Sounds)")
@@ -1801,9 +1873,12 @@ def _build() -> "QWidget":
     trow = QHBoxLayout()
     trow.setSpacing(6)
     # little monochrome glyphs (U+FE0E = text form, so they take the button's colour)
-    for key, label in (("caption", "\u25AD\u2009Caption"), ("focus", "\u25CE\u2009Focus"),
-                       ("lockdown", "\U0001F512\uFE0E\u2009Lockdown")):
-        tb = QPushButton(label)
+    for key, label, ico in (("caption", "Caption", "caption"), ("focus", "Focus", "focus"),
+                            ("lockdown", "Lockdown", "lock")):
+        tb = QPushButton()                         # icon only; the name is the tooltip
+        tb.setIcon(_white_icon(ico))
+        tb.setIconSize(QSize(16, 16))
+        tb.setToolTip(label)
         tb.setObjectName("tgl")
         tb.clicked.connect(lambda _c=False, k=key: _toggle(k))
         _toggle_btns[key] = tb
