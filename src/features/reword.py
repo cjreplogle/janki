@@ -2451,6 +2451,12 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
 
     dlg = QDialog(parent or mw)
     dlg.setWindowTitle("Rephrase prompt")
+    try:     # glass + Janki-painted checkboxes (the inherited glass QSS hides Qt's own box)
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        pass
     v = QVBoxLayout(dlg)
     lbl = QLabel(
         "Builds a prompt that asks any chat model to write alternate phrasings for the cards in "

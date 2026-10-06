@@ -1409,6 +1409,12 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
 
     d = QDialog(par)
     d.setWindowTitle("Generate tag map from objectives")
+    try:     # glass + Janki-painted checkboxes (the inherited glass QSS hides Qt's own box)
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(d)
+        _css.apply_widget_ui_font(d)
+    except Exception:
+        pass
     lay = QVBoxLayout(d)
     lay.addWidget(QLabel(
         "Parsed <b>%d lectures</b> from “%s”." %
