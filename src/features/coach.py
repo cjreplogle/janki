@@ -367,7 +367,7 @@ def _focus_or_caption():
         return False
 
 
-def _leave_review():
+def _leave_review(to_decks=True):
     """Leaving the Focus & Caption step: switch both off if left on, back to decks."""
     try:
         from . import focus
@@ -378,7 +378,8 @@ def _leave_review():
             focus._toggle_focus_mode()
     except Exception as e:
         log("coach leave review: %s" % e)
-    _back_to_decks()
+    if to_decks:
+        _back_to_decks()
 
 
 def _import_used():
@@ -707,7 +708,14 @@ class _Tour(QWidget):
     def go(self, i):
         prev = self.steps[self.i] if 0 <= self.i < len(self.steps) else None
         if prev is not None and i != self.i and prev.get("leave"):
-            prev["leave"]()
+            nxt = self.steps[i] if 0 <= i < len(self.steps) else None
+            if prev["leave"] is _leave_review and nxt is not None \
+                    and nxt.get("enter") is _open_sample:
+                # Focus → Reviewing: both on the sample card — switch Focus/Caption
+                # off but stay on the card (going to Decks reloaded it for nothing)
+                _leave_review(to_decks=False)
+            else:
+                prev["leave"]()
             QTimer.singleShot(300, lambda n=i: self._go(n))   # after the redraw
             return
         self._go(i)
