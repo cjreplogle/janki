@@ -6313,12 +6313,113 @@ def map_questions_to_subdecks(qs, root_did, min_score=_DECK_MATCH_MIN):
             best_for[header] = best if best_s >= min_score else None
         hit = best_for[header]
         if hit:
-            rel, did = hit
-            q["src_lecture"] = header
-            q["lecture"] = rel
-            q["tags"] = sorted(set(q.get("tags") or []) | set(dominant_tags(did)))
+            _place(q, hit, header, dominant_tags)
             matched += 1
+    # Fallback when the bank's organisation doesn't mirror the deck's: compare what the
+    # questions SAY with the cards in each subdeck (TF-IDF, cosine). Questions sharing a
+    # header vote as a group (one lecture's questions usually belong together); a lone /
+    # headerless question has to clear a higher bar on its own.
+    left = [q for q in qs if not q.get("src_lecture")]
+    if left:
+        try:
+            matched += _content_map(col, subs, left, dominant_tags)
+        except Exception as e:
+            log("subdeck content map: %s" % e)
     return (matched, len(qs))
+
+
+def _place(q, hit, header, dominant_tags):
+    rel, did = hit
+    q["src_lecture"] = header or "(none)"
+    q["lecture"] = rel
+    q["tags"] = sorted(set(q.get("tags") or []) | set(dominant_tags(did)))
+
+
+_CM_GROUP_MIN, _CM_SINGLE_MIN, _CM_MARGIN = 0.10, 0.16, 1.25
+
+
+def _content_map(col, subs, qs, dominant_tags):
+    import math
+    # profile = the cards sitting DIRECTLY in each subdeck (parents just aggregate kids)
+    prof = {}
+    for rel, did in subs:
+        rows = col.db.list("select n.flds from notes n where n.id in "
+                           "(select nid from cards where did=? or odid=?)", did, did)
+        if rows:
+            c = collections.Counter()
+            for f in rows:
+                c.update(set(_ct_tokens(f.replace("\x1f", " "))))
+            prof[(rel, did)] = c
+    if not prof:
+        return 0
+    n = len(prof)
+    df = collections.Counter(w for c in prof.values() for w in c)
+    idf = {w: math.log((n + 1) / (d + 0.5)) for w, d in df.items()}
+    vecs = {}
+    for k, c in prof.items():
+        v = {w: (1 + math.log(cnt)) * idf[w] for w, cnt in c.items()}
+        nrm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+        vecs[k] = (v, nrm)
+
+    def qtext(q):
+        return " ".join([q.get("stem", ""), " ".join(q.get("choices") or []),
+                         q.get("explanation", ""), q.get("objective", ""),
+                         q.get("lecture", "")])
+
+    def scores(text):
+        tk = collections.Counter(w for w in _ct_tokens(text) if w in idf)
+        qv = {w: (1 + math.log(c)) * idf[w] for w, c in tk.items()}
+        qn = math.sqrt(sum(x * x for x in qv.values())) or 1.0
+        return {k: sum(qv[w] * v.get(w, 0.0) for w in qv) / (qn * nrm)
+                for k, (v, nrm) in vecs.items()}
+
+    by_rel = {rel: did for rel, did in subs}
+
+    def pick(sc, floor):
+        if not sc:
+            return None
+        ranked = sorted(sc.items(), key=lambda kv: -kv[1])
+        (k1, s1) = ranked[0]
+        if s1 < floor:
+            return None
+        if len(ranked) < 2 or s1 >= ranked[1][1] * _CM_MARGIN:
+            return k1
+        # Near-tie between siblings (e.g. Hypersensitivity::KCOM vs ::cobo, both the same
+        # topic from two sources): file it under their shared parent instead of guessing.
+        a, b = k1[0].split("::"), ranked[1][0][0].split("::")
+        common = []
+        for x, y in zip(a, b):
+            if x != y:
+                break
+            common.append(x)
+        par = "::".join(common)
+        if par and par in by_rel:
+            return (par, by_rel[par])
+        return None
+
+    groups = collections.defaultdict(list)
+    for q in qs:
+        groups[(q.get("lecture") or "").strip()].append(q)
+    placed = 0
+    for header, grp in groups.items():
+        if header and len(grp) >= 2:
+            per = [scores(qtext(q)) for q in grp]
+            tot = collections.Counter()
+            for sc in per:
+                tot.update(sc)
+            hit = pick({k: v / len(grp) for k, v in tot.items()}, _CM_GROUP_MIN)
+            if hit:
+                for q in grp:
+                    _place(q, hit, header, dominant_tags)
+                placed += len(grp)
+                continue
+            # the group is mixed: fall through and place members one by one
+        for q in grp:
+            hit = pick(scores(qtext(q)), _CM_SINGLE_MIN)
+            if hit:
+                _place(q, hit, header, dominant_tags)
+                placed += 1
+    return placed
 
 
 def _subdeck_roots():
