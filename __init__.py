@@ -382,14 +382,8 @@ def _startup():
                     qbank.assign_content_tags()
             except Exception as _cn_exc:
                 log("content tags: %s" % _cn_exc)
-            # Similar-card index so untagged cards can borrow tags (background, ~2 s).
-            try:
-                from aqt.operations import QueryOp
-                QueryOp(parent=mw, op=lambda col: qbank.build_borrow_index(col),
-                        success=lambda n: log("borrow index: %d tagged notes" % n)
-                        ).run_in_background()
-            except Exception as _bi_exc:
-                log("borrow index: %s" % _bi_exc)
+            # (The similar-card "borrow" index is built on first need during reviews —
+            # qbank._ensure_borrow_index — not here: it held ~180 MB from launch.)
             try:
                 mobilecards.refresh_if_stale()   # push card-script fixes to mobile themes
             except Exception as _mc_exc:
@@ -399,6 +393,10 @@ def _startup():
             except Exception as _bs_exc:
                 log("bank sync install: %s" % _bs_exc)
         QTimer.singleShot(3000, _deferred_practice_sync)
+        # after launch's background work (calendar matching, tray, sounds) settles,
+        # give the freed memory back to macOS
+        from .src.util import memory as _mem
+        QTimer.singleShot(10000, lambda: _mem.relieve("launch"))
 
         _bt.mark("practice note type sync")
         # Intersperse practice questions into normal review sessions (wraps the

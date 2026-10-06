@@ -1162,7 +1162,7 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
 # match questions through the normal tag matching. Benchmarked on hidden-tag Hutch
 # cards: 32% top-1 right lecture vs 8% for text fallback. Index built once per session
 # in the background (~2 s); ~1 ms per card after, cached. Local only.
-_BORROW = {"inv": None, "idf": None, "norm": None, "tags": None, "cache": {}}
+_BORROW = {"inv": None, "idf": None, "norm": None, "nids": None, "tags": None, "cache": {}}
 _BORROW_K = 5           # nearest tagged cards to consult
 _BORROW_VOTE = 0.25     # keep a tag once its similarity-weighted votes reach this × best
 _BORROW_DF_CAP = 800    # skip words common to more notes than this (no signal, slow)
@@ -1174,36 +1174,89 @@ def _borrow_pool_families():
 
 
 def build_borrow_index(col=None):
-    """Build the tagged-card similarity index (call from a background QueryOp)."""
+    """Build the tagged-card similarity index (call from a background QueryOp).
+
+    Compact on purpose (it used to add ~180 MB at launch): two streaming passes instead
+    of holding every note's word set at once, note ids as positions in one array, and
+    each word's postings as a packed int array instead of a list of Python ints."""
     import math
+    from array import array
     col = col or mw.col
     fams = _borrow_pool_families()
-    pool, df = {}, collections.Counter()
-    for nid, tags, flds in col.db.execute("select id, tags, flds from notes where tags != ''"):
-        ts = tags.split()
-        if not any(t.startswith(f) for t in ts for f in fams):
-            continue
-        tk = set(_ct_tokens(flds.replace("\x1f", " ")))
-        if tk:
-            pool[nid] = (tk, ts)
-            df.update(tk)
-    n = len(pool)
+
+    def rows():
+        for nid, tags, flds in col.db.execute(
+                "select id, tags, flds from notes where tags != ''"):
+            ts = tags.split()
+            if any(t.startswith(f) for t in ts for f in fams):
+                tk = set(_ct_tokens(flds.replace("\x1f", " ")))
+                if tk:
+                    yield nid, ts, tk
+
+    df = collections.Counter()
+    n = 0
+    for _nid, _ts, tk in rows():                     # pass 1: document frequencies
+        df.update(tk)
+        n += 1
     idf = {w: math.log((n + 1) / (d + 0.5)) for w, d in df.items()}
-    inv = collections.defaultdict(list)
-    for nid, (tk, _ts) in pool.items():
+    keep = {w for w, d in df.items() if d < _BORROW_DF_CAP}
+    del df
+    nids, norms, tags_l = array("q"), array("d"), []
+    inv = {}
+    for nid, ts, tk in rows():                       # pass 2: postings + norms
+        i = len(nids)
+        nids.append(nid)
+        norms.append(math.sqrt(sum(idf[w] ** 2 for w in tk)) or 1.0)
+        tags_l.append(tuple(t for t in ts if not t.lower().startswith("leech")))
         for w in tk:
-            if df[w] < _BORROW_DF_CAP:
-                inv[w].append(nid)
-    norm = {nid: math.sqrt(sum(idf[w] ** 2 for w in tk)) or 1.0 for nid, (tk, _ts) in pool.items()}
-    _BORROW.update(inv=dict(inv), idf=idf, norm=norm,
-                   tags={nid: ts for nid, (_tk, ts) in pool.items()}, cache={})
-    return n
+            if w in keep:
+                arr = inv.get(w)
+                if arr is None:
+                    inv[w] = arr = array("i")
+                arr.append(i)
+    idf = {w: v for w, v in idf.items() if w in keep}   # only words that can match
+    _BORROW.update(inv=inv, idf=idf, norm=norms, nids=nids, tags=tags_l, cache={})
+    return len(nids)
+
+
+_BORROW_BUILDING = [False]
+
+
+def _ensure_borrow_index():
+    """Build the index the first time a review needs it (not at launch)."""
+    if _BORROW["inv"] is not None or _BORROW_BUILDING[0]:
+        return
+    _BORROW_BUILDING[0] = True
+
+    def start():
+        try:
+            from aqt.operations import QueryOp
+
+            def done(n):
+                _BORROW_BUILDING[0] = False
+                log("borrow index: %d tagged notes" % n)
+                from ..util import memory
+                memory.relieve_later(1000, "borrow index")
+
+            def failed(e):
+                _BORROW_BUILDING[0] = False
+                log("borrow index: %s" % e)
+            QueryOp(parent=mw, op=lambda col: build_borrow_index(col),
+                    success=done).failure(failed).run_in_background()
+        except Exception as e:
+            _BORROW_BUILDING[0] = False
+            log("borrow index: %s" % e)
+    try:
+        mw.taskman.run_on_main(start)
+    except Exception:
+        start()
 
 
 def borrowed_keys(note):
     """Leaf keys an untagged note borrows from its nearest tagged cards (cached), or an
     empty set until the index is ready."""
     if _BORROW["inv"] is None:
+        _ensure_borrow_index()
         return set()
     hit = _BORROW["cache"].get(note.id)
     if hit is not None:
@@ -1214,16 +1267,21 @@ def borrowed_keys(note):
     tk = set(_ct_tokens(text))
     acc = collections.Counter()
     for w in tk:
-        for other in inv.get(w, ()):
-            acc[other] += idf[w] ** 2
+        wt = idf.get(w)
+        if wt is None:
+            continue
+        for i in inv.get(w, ()):
+            acc[i] += wt ** 2
     qn = math.sqrt(sum(idf.get(w, 0.0) ** 2 for w in tk)) or 1.0
-    top = sorted(((sc / (qn * norm[o]), o) for o, sc in acc.items()), reverse=True)[:_BORROW_K]
+    top = sorted(((sc / (qn * norm[i]), i) for i, sc in acc.items()), reverse=True)[:_BORROW_K]
     vote = collections.Counter()
-    for sim, o in top:
-        for leaf in _leaf_keys([t for t in tags.get(o, ()) if not t.lower().startswith("leech")]):
+    for sim, i in top:
+        for leaf in _leaf_keys(list(tags[i])):
             if leaf not in _GENERIC_LEAVES:
                 vote[leaf] += sim
     keep = {l for l, v in vote.items() if top and v >= _BORROW_VOTE * top[0][0]}
+    if len(_BORROW["cache"]) > 5000:
+        _BORROW["cache"].clear()
     _BORROW["cache"][note.id] = keep
     return keep
 

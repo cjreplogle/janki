@@ -47,9 +47,24 @@ def _process_age_s() -> "float | None":
 _age_at_t0 = _process_age_s()
 
 
+def footprint_mb() -> "float | None":
+    """This process's physical footprint (what Activity Monitor shows), in MB."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None)
+        buf = ctypes.create_string_buffer(512)
+        if libc.proc_pid_rusage(os.getpid(), 2, buf) != 0:      # RUSAGE_INFO_V2
+            return None
+        return ctypes.c_uint64.from_buffer(buf, 72).value / 1048576.0   # ri_phys_footprint
+    except Exception:
+        return None
+
+
 def mark(label: str) -> None:
     if not _done:
-        _marks.append((label, time.perf_counter()))
+        _marks.append((label, time.perf_counter(), footprint_mb()))
 
 
 def _fmt() -> str:
@@ -64,9 +79,14 @@ def _fmt() -> str:
     if _age_at_t0 is not None:
         lines.append("%8d ms            Anki process start → Janki import" % (base * 1000))
     prev = _T0
-    for label, t in _marks:
+    prev_mb = None
+    for label, t, mb in _marks:
         since_start = (base + (t - _T0)) * 1000
-        lines.append("%8d ms  (+%5d)  %s" % (since_start, (t - prev) * 1000, label))
+        mem = ""
+        if mb is not None:
+            mem = "%5.0f MB (%+4.0f)  " % (mb, mb - prev_mb if prev_mb is not None else 0)
+            prev_mb = mb
+        lines.append("%8d ms  (+%5d)  %s%s" % (since_start, (t - prev) * 1000, mem, label))
         prev = t
     return "\n".join(lines) + "\n"
 
@@ -136,3 +156,4 @@ def arm_first_render() -> None:
         pass
     # Safety net: if the deck list never renders (e.g. start-to-tray), still write.
     QTimer.singleShot(20000, lambda: finish("timeout (no deck list render within 20s)"))
+

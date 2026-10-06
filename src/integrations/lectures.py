@@ -311,6 +311,7 @@ def _get_map(families):
            tuple(families))
     if _MAP_CACHE["key"] != key:
         m = build_lecture_map(families)
+        _ak_index_reset()            # the whole-collection tag index is only for the build
         keys = list(m.keys())
         opts = sorted(keys, key=lambda k: m[k]["display"].lower())
         _MAP_CACHE["key"] = key

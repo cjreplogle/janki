@@ -1081,6 +1081,8 @@ def _weak_compute(mode, then=None):
         _weak_fails.pop(mode, None)
         _busy_update()
         _weak_cache[mode] = (key, rows)
+        from ..util import memory              # the big read is done: hand its pages back
+        memory.relieve_later(1500, "study progress")
         if _weak_mode == mode:
             _weak = rows
             if _view and _detail == WEAK:
