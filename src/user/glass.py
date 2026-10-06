@@ -1630,17 +1630,59 @@ def _win_glass_dialog(dialog) -> None:
         return
     _glass_dialogs.append(dialog)
     _install_smooth_controls()
+    if getattr(dialog, "_jk_win_frameless", False):
+        _win_frameless_dialog(dialog)
 
     class _OnShow(QObject):
         def eventFilter(self, obj, ev):
             if ev.type() == QEvent.Type.Show:
                 QTimer.singleShot(0, lambda: _style_glass_window(obj))
+                if getattr(obj, "_jk_win_frameless", False):
+                    QTimer.singleShot(0, lambda: _win_frameless_native(obj))
                 d = getattr(obj, "_jk_close_dot", None)
                 if d is not None:
                     d.raise_()
             return False
     dialog._jk_win_show = _OnShow(dialog)
     dialog.installEventFilter(dialog._jk_win_show)
+
+
+def _win_frameless_dialog(dialog) -> None:
+    """Mac-like Windows dialog: no title bar — the content runs to the top edge (tabs on
+    the top row, like the Mac's content-under-titlebar), drag by the empty background,
+    and a Windows-style × flush in the top-right corner. Stays OPAQUE (a translucent
+    frameless dialog renders in software on Windows — that was the lag)."""
+    try:
+        dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        dialog._jk_expanded = True
+        dialog._jk_drag = _DragByBackground(dialog)
+        dialog.installEventFilter(dialog._jk_drag)
+        from ..platform.win import chrome as _wch
+        btn = _wch._CapButton("close", dialog.close, dialog)
+        dialog._jk_close_dot = btn
+
+        class _Place(QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+                    btn.move(obj.width() - btn.width(), 0)
+                    btn.raise_()
+                return False
+        dialog._jk_close_place = _Place(dialog)
+        dialog.installEventFilter(dialog._jk_close_place)
+        btn.show()
+    except Exception as exc:
+        log(f"win frameless dialog: {exc}")
+
+
+def _win_frameless_native(dialog) -> None:
+    """Rounded corners + the window shadow back on the frameless dialog (DWM)."""
+    try:
+        from ..platform.win import dwm
+        hwnd = int(dialog.winId())
+        dwm.extend_frame(hwnd)
+        dwm.set_corners(hwnd, False)
+    except Exception as exc:
+        log(f"win frameless native: {exc}")
 
 
 def glass_dialog(dialog) -> None:

@@ -48,6 +48,7 @@ class GlassSettings(QDialog):
                     self._jk_close_scs.append(_sc)
         except Exception as _e:
             log("settings close shortcut: %s" % _e)
+        self._jk_win_frameless = True            # Windows: Mac-like, no title bar
         try:
             from ..user import glass
             glass.glass_dialog(self)             # frost like the main window (macOS)
