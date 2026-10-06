@@ -1941,7 +1941,7 @@ _JS = """<script>(function(){
    document.querySelectorAll('#jkc .jkd-counts[data-k]').forEach(function(c){
      var k=c.getAttribute('data-k');
      var t=c.textContent.trim();
-     if(t.charAt(0)!=='…'){if(/\d/.test(t))lastC[k]=c.innerHTML;}   // numbers rendered: remember
+     if(t.charAt(0)!=='…'){if(/[0-9]/.test(t))lastC[k]=c.innerHTML;}   // numbers rendered: remember
      else if(lastC[k]&&c.innerHTML!==lastC[k])c.innerHTML=lastC[k];});}
  try{new MutationObserver(function(){fillCounts();})
    .observe(document.body,{childList:true,subtree:true});}catch(x){}
