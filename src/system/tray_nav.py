@@ -1800,7 +1800,9 @@ def _build() -> "QWidget":
     _toggle_btns = {}
     trow = QHBoxLayout()
     trow.setSpacing(6)
-    for key, label in (("caption", "Caption"), ("focus", "Focus"), ("lockdown", "Lockdown")):
+    # little monochrome glyphs (U+FE0E = text form, so they take the button's colour)
+    for key, label in (("caption", "\u25AD\u2009Caption"), ("focus", "\u25CE\u2009Focus"),
+                       ("lockdown", "\U0001F512\uFE0E\u2009Lockdown")):
         tb = QPushButton(label)
         tb.setObjectName("tgl")
         tb.clicked.connect(lambda _c=False, k=key: _toggle(k))
