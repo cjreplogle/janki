@@ -211,7 +211,8 @@ class GlassSettings(QDialog):
         lock_page = QWidget();  lock_lay = QVBoxLayout(lock_page)
         focus_tabs.addTab(flare_page, "Flare")
         focus_tabs.addTab(timer_page, "Timer")
-        focus_tabs.addTab(cap_page, "Caption")
+        if not sys.platform.startswith("win"):   # caption mode is macOS-only
+            focus_tabs.addTab(cap_page, "Caption")
         focus_tabs.addTab(pomo_page, "Pomodoro")
         focus_tabs.addTab(lock_page, "Lockdown")
         hc_page = QWidget(); hc_lay = QVBoxLayout(hc_page)
@@ -3469,6 +3470,8 @@ class GlassSettings(QDialog):
                     self._stop()
 
         for group in hk.GROUPS:
+            if group == "Caption" and sys.platform.startswith("win"):
+                continue                         # caption mode is macOS-only
             acts = [a for a in hk.ACTIONS if a[1] == group]
             if not acts:
                 continue

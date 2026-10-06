@@ -79,7 +79,7 @@ def _hotkeys_page():
         return _page(
             _title("Hotkeys that work in the background"),
             _body("Hold <b>Tab</b> and press <b>Z / X / C / V</b> to rate cards, "
-                  "<b>Tab+\\</b> for the caption, <b>Ctrl+Alt+A</b> to show or hide Anki "
+                  "<b>Ctrl+Alt+A</b> to show or hide Anki "
                   "— even while you're in another app."),
             status), None
     from ..util import keytap
@@ -192,7 +192,8 @@ def _done_page():
         _title("You're set"),
         _body("A few things to try:<br>"
               "• <b>Tab+F</b> — Focus mode (hides everything but the card)<br>"
-              "• <b>Tab+\\</b> — Caption mode, to study over other apps<br>"
+              + ("• <b>Tab+\\</b> — Caption mode, to study over other apps<br>"
+                 if sys.platform == "darwin" else "") +
               "• <b>Z / X / C / V</b> — rate cards, like 1–4<br>"
               "• <b>%s</b> — show or hide Anki from anywhere<br><br>"
               "Everything is adjustable in <b>Janki Settings</b> — the gear on the main "
@@ -313,12 +314,12 @@ def _tour_pages():
          "you're on.<br>"
          "• Right answers retire the question; <b>Completion</b> shows how much of a bank "
          "you've cleared."),
-        ("Focus mode & Caption mode",
+        ("Focus mode & Caption mode" if sys.platform == "darwin" else "Focus mode",
          "• <b>Tab+F</b> — Focus mode: hides the toolbar and buttons so only the card "
          "remains, and hides the cursor when idle.<br>"
-         "• <b>Tab+\\</b> — Caption mode: the card floats as a small caption over other "
-         "apps (videos, lectures). Move it with <b>Tab+arrows</b>, resize text with "
-         "<b>Shift+Tab+= / −</b>.<br>"
+         + ("• <b>Tab+\\</b> — Caption mode: the card floats as a small caption over "
+            "other apps (videos, lectures). Move it with <b>Tab+arrows</b>, resize text "
+            "with <b>Shift+Tab+= / −</b>.<br>" if sys.platform == "darwin" else "") +
          "• Rate with <b>Tab+Z / X / C / V</b> even while another app is in front."),
         ("Card timer & flares",
          "A small ring fills while you're on a card. If you linger too long, the window "

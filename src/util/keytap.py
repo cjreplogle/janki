@@ -57,6 +57,9 @@ _lk_ignore_until_release = False  # after the chord engages lockdown, ignore it 
 
 # macOS virtual key codes to intercept when Tab is held
 _GLOBAL_KC = {6, 7, 8, 9, 49, 53, 42, 3, 31, 12, 126, 125, 124, 123}  # Z X C V Space Escape Backslash F O Q ↑ ↓ → ←
+if sys.platform.startswith("win"):
+    # caption mode is macOS-only: no Tab+\ (toggle) or Tab+arrows (move the caption)
+    _GLOBAL_KC -= {42, 126, 125, 124, 123}
 # Shift+Tab + '='/'-' → grow/shrink the caption font (only while the caption HUD
 # is up). Shift-gated so plain Tab+= / Tab+- stay free for anything else.
 _CAP_FONT_KC = {24, 27}  # 24 = '='(+), 27 = '-'

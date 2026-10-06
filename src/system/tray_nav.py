@@ -2145,8 +2145,11 @@ def _build() -> "QWidget":
     trow = QHBoxLayout()
     trow.setSpacing(6)
     # little monochrome glyphs (U+FE0E = text form, so they take the button's colour)
-    for key, label, ico in (("caption", "Caption", "caption"), ("focus", "Focus", "focus"),
-                            ("lockdown", "Lockdown", "lock")):
+    _tgls = (("caption", "Caption", "caption"), ("focus", "Focus", "focus"),
+             ("lockdown", "Lockdown", "lock"))
+    if sys.platform.startswith("win"):          # caption mode isn't on Windows
+        _tgls = _tgls[1:]
+    for key, label, ico in _tgls:
         tb = QPushButton()                         # icon only; the name is the tooltip
         tb.setIcon(_white_icon(ico))
         tb.setIconSize(QSize(16, 16))
@@ -2202,7 +2205,8 @@ def _build() -> "QWidget":
     # initial state statically (no animation on first open); toggling animates it.
     global _pos_shown
     _pos_section = _build_pos_section()
-    _pos_shown = bool(_toggle_states().get("caption", False))
+    _pos_shown = (bool(_toggle_states().get("caption", False))
+                  and not sys.platform.startswith("win"))
     _pos_section.setVisible(_pos_shown)
     if not _pos_shown:
         _pos_section.setMaximumHeight(0)

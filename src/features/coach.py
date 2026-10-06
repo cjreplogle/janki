@@ -89,8 +89,8 @@ def _open_sample():
             note.fields[0] = ("<b>Janki sample card</b><br><br>Which shortcut hides "
                               "everything except this card?")
             if len(note.fields) > 1:
-                note.fields[1] = ("<b>Tab+F</b> — Focus mode. Tab+\\ turns the card "
-                                  "into a caption over other apps.")
+                note.fields[1] = ("<b>Tab+F</b> — Focus mode." + (
+                    " Tab+\\ turns the card into a caption over other apps." if _MAC else ""))
             col.add_note(note, did)
             _sample["did"] = did
             _sample["cids"] = list(_sample["cids"]) + list(note.card_ids())
@@ -437,13 +437,19 @@ def _k(aid):
 _ORDER = ["Practice question banks", "Try a practice question", "Stats", "Janki Settings",
           "Import File", "Today's lectures", "Calendar",
           # everything that happens on a card, back to back
-          "On the card", "Focus & Caption", "Reviewing", "Card timer & flares",
+          "On the card", "Focus & Caption", "Focus mode", "Reviewing", "Card timer & flares",
           "Getting around by keyboard", "You're all set"]
 
 
 def _ordered(steps):
     rank = {t: i for i, t in enumerate(_ORDER)}
     return sorted(steps, key=lambda st: rank.get(st["title"], len(_ORDER) - 2))
+
+
+# caption mode is macOS-only: the Windows tour only teaches Focus
+_FOCUS_TITLE = "Focus & Caption" if _MAC else "Focus mode"
+_FOCUS_TEXT_WIN = ("A sample card is open. Try <b>Tab+F</b> — Focus mode hides everything "
+                   "but the card. Press it again to switch back.")
 
 
 def _steps():
@@ -487,14 +493,14 @@ def _steps():
                   "the wording<br>"
                   "• <b>Bottom-right</b> — a <b>related practice question</b> from your "
                   "banks (or <b>Tab+Q</b>); press it again to come back"),
-        dict(target=None, title="Focus & Caption", hands_on=True, enter=_open_sample,
+        dict(target=None, title=_FOCUS_TITLE, hands_on=True, enter=_open_sample,
              leave=_leave_review,
              try_=("Reopen the sample card", _open_sample),
              detect=_focus_or_caption, done_msg="That's it — press it again to switch back.",
-             text="A sample card is open. Try:<br>• <b>Tab+F</b> — Focus mode hides "
-                  "everything but the card<br>• <b>Tab+\\</b> — Caption mode floats "
-                  "the card over other apps (move it with Tab+arrows)<br>Press the same "
-                  "keys again to switch back."),
+             text=("A sample card is open. Try:<br>• <b>Tab+F</b> — Focus mode hides "
+                   "everything but the card<br>• <b>Tab+\\</b> — Caption mode floats "
+                   "the card over other apps (move it with Tab+arrows)<br>Press the same "
+                   "keys again to switch back.") if _MAC else _FOCUS_TEXT_WIN),
         dict(target=("bottom", "Import File"), title="Import File",
              try_=("Try Import File", lambda: _click("bottom", "Import File")),
              detect=_import_used, wait=lambda: _sig["import_open"],
