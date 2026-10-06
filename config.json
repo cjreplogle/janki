@@ -177,10 +177,13 @@
   "hot_corner": "off",
   "calendar_toolbar_icon": true,
   "practice_match": "lenient",
-    "lecture_source_skip": {},
-    "card_tags_max": 6,
-    "calendar_fams_off": ["aj", "ak"],
-    "calendar_view": "week",
+  "lecture_source_skip": {},
+  "card_tags_max": 6,
+  "calendar_fams_off": [
+    "aj",
+    "ak"
+  ],
+  "calendar_view": "week",
   "last_main_page": "decks",
   "tray_mode": "decks",
   "sfx_volume": 0,
@@ -193,5 +196,6 @@
   "deck_gap_px": 6,
   "deck_group_gap_px": 6,
   "zxcv_rating": true,
-  "force_dark_mode": true
+  "force_dark_mode": true,
+  "win_windowed_fullscreen": true
 }

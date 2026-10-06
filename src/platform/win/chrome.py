@@ -231,7 +231,7 @@ def _windowed_fullscreen() -> bool:
     instead of maximising — a borderless window, not exclusive fullscreen."""
     try:
         return bool((mw.addonManager.getConfig(__name__) or {}).get(
-            "win_windowed_fullscreen", False))
+            "win_windowed_fullscreen", True))
     except Exception:
         return False
 

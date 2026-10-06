@@ -2343,7 +2343,7 @@ class GlassSettings(QDialog):
             self._wfs.setToolTip("The maximise button fills the entire screen as a "
                                  "borderless window, taskbar included. Click it again "
                                  "to go back to a normal window.")
-            self._wfs.setChecked(bool(self.cfg.get("win_windowed_fullscreen", False)))
+            self._wfs.setChecked(bool(self.cfg.get("win_windowed_fullscreen", True)))
 
             def _on_wfs(on):
                 self.cfg["win_windowed_fullscreen"] = bool(on)
