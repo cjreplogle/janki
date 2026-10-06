@@ -319,8 +319,9 @@ def practice_now():
     # The current card's concepts dominate (weight 5); the recently reviewed cards'
     # concepts are also fair game (weight 1 per card they appeared on), so their
     # questions fill in after the current card's own matches.
-    # deck guesses (deck:…) count half: borrowed/real tags proved far more precise
-    weights = collections.Counter({l: (2.5 if l.startswith("deck:") else 5.0) for l in leaves})
+    # A deck match is as strong as a tag match now that imports file questions into
+    # the matching subdeck (deck:<path> on the question).
+    weights = collections.Counter({l: 5.0 for l in leaves})
     if _cfg().get("practice_q_recent", True):
         for s in _tabq_recent:
             for l in s:

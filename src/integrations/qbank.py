@@ -1158,20 +1158,29 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
             if qid in exclude_qids:
                 continue
             score = 0.0
-            qleaves = (_leaf_keys(q.get("tags")) | _leaf_keys(q.get("mined_tags"))
-                       | _leaf_keys(q.get("content_tags")))
+            # Explicit keys (the bank's / tag map's tags and mapped decks) outrank keys
+            # Janki inferred from the text (mined concepts, content-assigned lectures).
+            own = _leaf_keys(q.get("tags"))
+            inferred = _leaf_keys(q.get("mined_tags")) | _leaf_keys(q.get("content_tags"))
+            qleaves = own | inferred
+            inter_own = leaves & own
             inter = leaves & qleaves
             # Among questions that match by tag/deck, rank the ones about THIS card's
             # content first: every card in a deck shares the same deck match, so on a
             # tie the bank's first question won for every card.
             rel = _card_cover(tokens, _q_tokens(meta.get("dir", ""), ordinal, q)) \
                 if (inter or tokens) else 0.0
-            if inter:
-                score = 10.0 + _w(inter) + 4.0 * rel  # exact tag/concept match wins
+            # Tiers are far apart (weights capped) so no amount of word similarity or
+            # inferred hits can lift a question over one matching by real tag/deck.
+            if inter_own:
+                score = 100.0 + min(_w(inter_own) + 0.5 * _w(inter - inter_own), 30.0) \
+                    + 4.0 * rel                       # matched tag / deck: decisive
+            elif inter:
+                score = 50.0 + min(_w(inter), 30.0) + 4.0 * rel   # inferred concept
             elif not exact_only:
                 fuzz = _fuzzy_leaf_score(card_word_sets, qleaves)
                 if fuzz > 0:
-                    score = 6.0 + fuzz + 2.0 * rel   # near-miss tag variant
+                    score = 20.0 + min(fuzz, 10.0) + 2.0 * rel   # near-miss tag variant
                 elif use_text_fallback and tokens:
                     ov = _weighted_overlap(tokens, _q_tokens(meta.get("dir", ""), ordinal, q))
                     if ov >= 0.30:
@@ -6335,7 +6344,12 @@ def _place(q, hit, header, dominant_tags):
     rel, did = hit
     q["src_lecture"] = header or "(none)"
     q["lecture"] = rel
-    q["tags"] = sorted(set(q.get("tags") or []) | set(dominant_tags(did)))
+    extra = set(dominant_tags(did))
+    try:
+        extra.add("deck:" + mw.col.decks.name(did))   # match cards in that exact deck
+    except Exception:
+        pass
+    q["tags"] = sorted(set(q.get("tags") or []) | extra)
 
 
 _CM_GROUP_MIN, _CM_SINGLE_MIN, _CM_MARGIN = 0.10, 0.16, 1.25
@@ -6478,6 +6492,8 @@ def apply_tag_map(qs, csv_path, root_name=None):
             q["src_lecture"] = q.get("lecture") or "(none)"
             q["lecture"] = rel
         tags = {t for c in tcols for t in (r.get(c) or "").split() if t}
+        if deck:
+            tags.add("deck:" + deck)               # match cards in that exact deck
         if tags:
             q["tags"] = sorted(set(q.get("tags") or []) | tags)
         if deck or tags:
