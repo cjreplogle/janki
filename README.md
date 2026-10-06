@@ -140,6 +140,13 @@ Some features unavailable.
   the Lectures → Sources tab (or just run **Tools → Load today's lectures** and
   pick a tag map when prompted). Nothing is uploaded — the calendar is read
   locally (a URL source is optional and fetched only if you enter one).*
+- **Lecture Card Manager** — click the calendar icon in the toolbar for a week view of
+  your classes, built from your calendar and lecture → tag map (matched lectures in blue,
+  fuzzy matches edged amber). Click a class to manage that lecture's cards in one place:
+  **Study active cards** or **Study all cards** (a temporary filtered deck — reviews count
+  normally), **Suspend / Unsuspend cards for this lecture**, and see which tags it pulls
+  in. **Study Progress** ranks the lectures you've already had by how under-studied
+  they are, so you know what to catch up on. Everything is read locally.
 - **Caption Mode** — Trying to multitask but still see your anki cards? Press **`Tab + \`**
   to change the Anki notecard view to be in "caption" form. **`Tab+Arrow Keys`**
   adjusts their screen position. Remains visible in this view even when other
