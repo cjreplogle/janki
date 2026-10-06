@@ -2703,12 +2703,17 @@ def _patch_bottom():
             # inside Weak areas the bar stays empty (no Identify / Load buttons)
             buf = "" if _detail == WEAK else (
                 # hover feedback that stays in place (a lift got clipped by the bar's edge)
-                "<style>.jk-sp{transition:background-color .15s ease,border-color .15s ease,"
-                "box-shadow .15s ease !important;}"
-                ".jk-sp:hover{background:rgba(255,255,255,.16) !important;"
+                # (#outer / body in the selectors: the glass bottom-bar CSS uses
+                # `body #outer button:hover`, which outranks a bare class)
+                "<style>body #outer button.jk-sp,body button.jk-sp{"
+                "transition:background-color .15s ease,border-color .15s ease,"
+                "box-shadow .15s ease,transform .1s ease !important;}"
+                "body #outer button.jk-sp:hover,body button.jk-sp:hover{"
+                "background:rgba(255,255,255,.18) !important;"
                 "border-color:#fff !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),"
-                "inset 0 0 14px rgba(156,188,243,.35) !important;}"
-                ".jk-sp:active{background:rgba(255,255,255,.08) !important;"
+                "inset 0 0 14px rgba(156,188,243,.4) !important;}"
+                "body #outer button.jk-sp:active,body button.jk-sp:active{"
+                "background:rgba(255,255,255,.08) !important;"
                 "transform:scale(.97) !important;}</style>"
                 "<button class='jk-sp' style='font-size:1.15em !important;padding:7px 22px !important;"
                 "border:1px solid rgba(255,255,255,.75) !important;border-radius:999px !important;"
