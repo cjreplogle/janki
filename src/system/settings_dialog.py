@@ -2337,6 +2337,20 @@ class GlassSettings(QDialog):
             gen_lay.addLayout(_lk_row)
             gen_lay.addWidget(_lk_hint)
 
+            # □ → windowed fullscreen (covers the taskbar) instead of maximise
+            self._wfs = QCheckBox("Windowed fullscreen: □ covers the whole screen "
+                                  "(hides the taskbar)")
+            self._wfs.setToolTip("The maximise button fills the entire screen as a "
+                                 "borderless window, taskbar included. Click it again "
+                                 "to go back to a normal window.")
+            self._wfs.setChecked(bool(self.cfg.get("win_windowed_fullscreen", False)))
+
+            def _on_wfs(on):
+                self.cfg["win_windowed_fullscreen"] = bool(on)
+                mw.addonManager.writeConfig(__name__, self.cfg)
+            self._wfs.toggled.connect(_on_wfs)
+            gen_lay.addWidget(self._wfs)
+
         # --- Tour ------------------------------------------------------------
         self._tour_btn = QPushButton("Take the Janki tour…")
         self._tour_btn.setToolTip("A short walk-through of where each feature lives.")

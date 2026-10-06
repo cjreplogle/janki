@@ -220,8 +220,20 @@ def toggle_maximize():
     normal; normal → maximized."""
     if mw.isFullScreen() or mw.isMaximized():
         mw.showNormal()
+    elif _windowed_fullscreen():
+        mw.showFullScreen()        # borderless, covers the taskbar too
     else:
         mw.showMaximized()
+
+
+def _windowed_fullscreen() -> bool:
+    """Config win_windowed_fullscreen: □ fills the whole screen (taskbar included)
+    instead of maximising — a borderless window, not exclusive fullscreen."""
+    try:
+        return bool((mw.addonManager.getConfig(__name__) or {}).get(
+            "win_windowed_fullscreen", False))
+    except Exception:
+        return False
 
 
 def start_move():
