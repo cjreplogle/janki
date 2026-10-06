@@ -549,7 +549,10 @@ def _startup():
             # Anki's own restoreGeometry brings the saved FULLSCREEN state back too —
             # open windowed instead (then apply the saved normal size below).
             try:
-                if mw.isFullScreen():
+                # Anki's own restoreGeometry brings back FULLSCREEN *and* MAXIMIZED
+                # (Windows' max button). Resizing a still-maximized window left it
+                # half-maximized/confused — go normal first, re-maximize at the end.
+                if mw.isFullScreen() or mw.isMaximized():
                     mw.showNormal()
             except Exception:
                 pass
@@ -672,13 +675,15 @@ def _startup():
             # state, then drop to the normal window so Anki saves a normal geometry.
             try:
                 from aqt.qt import Qt as _Qt
-                if mw.windowState() & _Qt.WindowState.WindowFullScreen:
-                    if mw.isVisible():
-                        _save_size()               # last_win_fs=True (+ keeps normal)
-                    else:                          # quit from the tray: still mark it
-                        cur = mw.addonManager.getConfig(__name__) or {}
-                        cur["last_win_fs"] = True
-                        mw.addonManager.writeConfig(__name__, cur)
+                st = mw.windowState()
+                if mw.isVisible():
+                    _save_size()                   # fs / max flags (+ keeps normal geom)
+                elif st & (_Qt.WindowState.WindowFullScreen | _Qt.WindowState.WindowMaximized):
+                    cur = mw.addonManager.getConfig(__name__) or {}   # quit from tray
+                    cur["last_win_fs"] = bool(st & _Qt.WindowState.WindowFullScreen)
+                    cur["last_win_max"] = bool(st & _Qt.WindowState.WindowMaximized)
+                    mw.addonManager.writeConfig(__name__, cur)
+                if st & _Qt.WindowState.WindowFullScreen:
                     mw._janki_user_fs = False
                     if mw.isVisible():
                         mw.showNormal()
