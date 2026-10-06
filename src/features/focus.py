@@ -260,6 +260,24 @@ def _set_transition(on: bool) -> None:
 
 
 
+_appkit = {"lib": None}
+
+
+def _screen_updates(enable: bool) -> None:
+    """Hold / release ALL of this app's on-screen updates (NSDisable/EnableScreenUpdates).
+    Qt's setUpdatesEnabled didn't cover the web view (Chromium draws it on its own), so
+    the stale frame still showed. Deprecated by Apple but functional; the system also
+    re-enables updates by itself after ~1 s, so it can never stick."""
+    if sys.platform != "darwin":
+        return
+    import ctypes
+    if _appkit["lib"] is None:
+        _appkit["lib"] = ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    fn = _appkit["lib"].NSEnableScreenUpdates if enable else _appkit["lib"].NSDisableScreenUpdates
+    fn.restype = None
+    fn()
+
+
 def _freeze(on: bool, exiting: bool = False) -> None:
     """Stop the main window repainting while the bars collapse/restore: Qt would show
     the web view's OLD frame at its NEW position for a frame (the flicker). Frozen, the
@@ -277,16 +295,15 @@ def _freeze(on: bool, exiting: bool = False) -> None:
                 return
             if not _frozen["on"]:
                 _frozen["on"] = True
-                mw.setUpdatesEnabled(False)
+                _screen_updates(False)
                 QTimer.singleShot(200, lambda: _freeze(False))
         elif _frozen["on"]:
             _frozen["on"] = False
-            mw.setUpdatesEnabled(True)
-            mw.update()
+            _screen_updates(True)
     except Exception:
         _frozen["on"] = False
         try:
-            mw.setUpdatesEnabled(True)
+            _screen_updates(True)
         except Exception:
             pass
 
