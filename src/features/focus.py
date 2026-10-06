@@ -249,6 +249,39 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
         pass
 
 
+_frozen = {"on": False}
+
+
+def _freeze(on: bool) -> None:
+    """Stop the main window repainting while the bars collapse/restore: Qt would show
+    the web view's OLD frame at its NEW position for a frame (the flicker). Frozen, the
+    screen keeps the last correct frame until the page has drawn at its new size with
+    the card held in place (janki:focus:thaw), or 200 ms at most."""
+    try:
+        if on:
+            if not _frozen["on"]:
+                _frozen["on"] = True
+                mw.setUpdatesEnabled(False)
+                QTimer.singleShot(200, lambda: _freeze(False))
+        elif _frozen["on"]:
+            _frozen["on"] = False
+            mw.setUpdatesEnabled(True)
+            mw.update()
+    except Exception:
+        _frozen["on"] = False
+        try:
+            mw.setUpdatesEnabled(True)
+        except Exception:
+            pass
+
+
+def on_js_message(handled, message, context):
+    if message == "janki:focus:thaw":
+        _freeze(False)
+        return (True, None)
+    return handled
+
+
 def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None:
     """Jitter-free Focus toggle. Hiding/showing the bars RESIZES mw.web, and the page
     only gets that resize a frame or two after Qt moves the view. Measuring + applying
@@ -282,13 +315,15 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         # early `return`s (e.g. a plain text card) used to skip the centring CSS, so
         # the card stayed at the top until a later pass centred it (the jump)
         + mutate + "try{(function(){" + (pre or "") + "})();}catch(_){}" +
-        "if(!el||P.first==null)return;"
+        "function thaw(){requestAnimationFrame(function(){requestAnimationFrame(function(){"
+        "try{pycmd('janki:focus:thaw');}catch(e){}});});}"
+        "if(!el||P.first==null){thaw();return;}"
         "var last=el.getBoundingClientRect().top;"
         "var dy=(P.first-last)+(window.__jkFlipOff||0);"
-        "if(Math.abs(dy)<1)return;"
+        "if(Math.abs(dy)>=1){"
         "try{el.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
         "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
-        "catch(e){}}"
+        "catch(e){}}thaw();}"
         "if(window.innerHeight!==P.h)go();"
         "else{window.addEventListener('resize',go);t=setTimeout(go,250);}})()"
     )
@@ -301,6 +336,7 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
             y0 = web.mapToGlobal(web.rect().topLeft()).y()
         except Exception:
             y0 = None
+        _freeze(True)            # hold the last correct frame on screen (see _freeze)
         try:
             collapse()
         except Exception as e:

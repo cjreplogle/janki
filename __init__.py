@@ -1155,6 +1155,7 @@ except Exception:
 
 try:
     gui_hooks.webview_did_receive_js_message.append(css.on_js_message)
+    gui_hooks.webview_did_receive_js_message.append(focus.on_js_message)   # Focus thaw
 except Exception:
     pass
 
