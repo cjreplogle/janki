@@ -508,8 +508,8 @@ def _steps():
              done_msg="Close the loader when you're done — the tour continues.",
              text="With a lecture → tag spreadsheet set up, this unsuspends exactly "
                   "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
-        dict(target=("toolbar", "Calendar"), title="Calendar",
-             try_=("Open the Calendar", _open_calendar),
+        dict(target=("toolbar", "Calendar"), title="Calendar", enter=_open_calendar,
+             try_=("Reopen the Calendar", _open_calendar),
              detect=_calendar_open, done_msg="Click a class to study it — or carry on.",
              leave=_back_to_decks,
              text="Your week of classes from your lecture calendar: dress codes along the "
