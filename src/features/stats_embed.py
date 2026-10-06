@@ -1145,7 +1145,10 @@ def _on_main_window_init() -> None:
     mw.onStats = _patched_on_stats(orig)
     try:
         from aqt.qt import QTimer
-        _when_idle(_preload, 6000)               # after launch settles + you pause
+        # Preloading the graphs page costs a whole web renderer (~100–200 MB) for as
+        # long as Anki runs; it's built on the first Stats click unless you opt in.
+        if _cfg().get("stats_preload", False):
+            _when_idle(_preload, 6000)           # after launch settles + you pause
     except Exception:
         pass
     try:

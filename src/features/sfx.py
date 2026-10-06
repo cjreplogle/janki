@@ -254,6 +254,35 @@ def play_on_exit():
         log("sfx exit: %s" % e)
 
 
+def _reap_orphan_mpv():
+    """Anki's audio player (anki_audio/mpv) outlives Anki when it's killed or relaunched
+    hard; each launch then leaves one more idle mpv behind (41 of them = ~300 MB were
+    found). Ends mpv processes from this Anki whose parent is gone (ppid 1)."""
+    if sys.platform != "darwin":
+        return
+    import subprocess
+    import threading
+
+    def run():
+        try:
+            out = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True,
+                                 text=True, timeout=5).stdout
+            n = 0
+            for ln in out.splitlines():
+                parts = ln.split(None, 2)
+                if len(parts) == 3 and parts[1] == "1" and parts[2].endswith("anki_audio/mpv"):
+                    try:
+                        os.kill(int(parts[0]), 15)
+                        n += 1
+                    except Exception:
+                        pass
+            if n:
+                log("ended %d orphaned mpv process(es)" % n)
+        except Exception as e:
+            log("mpv reap: %s" % e)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def install():
     gui_hooks.reviewer_did_answer_card.append(_on_answer)
     gui_hooks.reviewer_did_show_answer.append(_on_show_answer)   # a subtle slide
@@ -275,5 +304,6 @@ def install():
     try:
         from aqt.qt import QTimer
         gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(3000, preload))
+        gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(8000, _reap_orphan_mpv))
     except Exception:
         pass
