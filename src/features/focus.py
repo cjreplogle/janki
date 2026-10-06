@@ -250,6 +250,14 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
 
 
 _frozen = {"on": False}
+_transition = {"on": False}
+
+
+def _set_transition(on: bool) -> None:
+    _transition["on"] = on
+    if on:
+        QTimer.singleShot(1000, lambda: _transition.update(on=False))   # safety
+
 
 
 def _freeze(on: bool) -> None:
@@ -276,7 +284,7 @@ def _freeze(on: bool) -> None:
 
 
 def on_js_message(handled, message, context):
-    if message == "janki:focus:thaw":
+    if isinstance(message, str) and message.startswith("janki:focus:thaw"):
         _freeze(False)
         return (True, None)
     return handled
@@ -368,8 +376,9 @@ def reassert_chrome_hidden() -> None:
     focus_hidden=True). Called from the per-render hooks so the
     toolbar stays hidden card-to-card. Cheap and idempotent: no-op unless a chrome
     view is actually visible, so it won't fight the fade animation on toggle."""
-    if not _focus_hidden or state._pomo_on_break:
-        return
+    if not _focus_hidden or state._pomo_on_break or _transition["on"]:
+        return          # (mid-toggle: the animated collapse owns the bars — an instant
+                        # collapse from the tick here was the jump on most toggles)
     # Top toolbar: pin height to 0 (deterministic — Anki re-shows it per render and
     # plain hide() lost that race). Bottom bar: hide() is enough (its slot is at the
     # bottom, so it never creates a top band, and clamping BOTH corrupted the layout).
@@ -710,6 +719,7 @@ def _focus_set_hidden(hidden: bool) -> None:
     toolbar_h = int(getattr(tb, "_janki_full_h", 0) or 0) if tb is not None else 0
 
     if hidden:
+        _set_transition(True)          # until the animated collapse has run
         # Fade the chrome out first (still occupying layout, so nothing reflows),
         # THEN collapse its height and slide the card to centre.
         for wv in chrome:
@@ -719,6 +729,7 @@ def _focus_set_hidden(hidden: bool) -> None:
             if not _focus_hidden:      # toggled back during the fade — abort
                 return
             def _collapse():
+                _set_transition(False)
                 if not _focus_hidden:
                     return
                 _clamp_toolbar(True)       # deterministic 0-height top band
