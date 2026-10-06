@@ -115,6 +115,13 @@ class _KeyFilter(QObject):
         if t not in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
             return False
         try:
+            if (t == QEvent.Type.KeyPress and ev.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return)
+                    and not ev.isAutoRepeat() and mw.state == "review"):
+                r0 = getattr(mw, "reviewer", None)
+                _diag("key %s state=%s obj=%s active=%s" % (
+                    "Space" if ev.key() == Qt.Key.Key_Space else "Enter",
+                    getattr(r0, "state", None), type(obj).__name__,
+                    type(QApplication.activeWindow()).__name__))
             ease = _KEYS.get(ev.key())
             if ease is None or ev.modifiers() & _MODS:
                 return False
@@ -177,6 +184,8 @@ def install() -> None:
     if not getattr(mw, "_janki_zxcv", False):
         gui_hooks.state_shortcuts_will_change.append(_add)
         gui_hooks.reviewer_did_show_question.append(_shown)
+        gui_hooks.reviewer_did_show_question.append(lambda c: _diag("question shown card=%s" % c.id))
+        gui_hooks.reviewer_did_show_answer.append(lambda c: _diag("answer shown card=%s" % c.id))
         _filter = _KeyFilter(mw)
         QApplication.instance().installEventFilter(_filter)
         mw._janki_zxcv = True
