@@ -30,6 +30,32 @@ class GlassSettings(QDialog):
         except Exception:
             self.close()
 
+    def _close_only(self):
+        """macOS: Settings shows just the close button. Re-asserted on every show /
+        activation — a child dialog (the .jank builder) brought the minimise and
+        zoom/fullscreen buttons back over the General tab."""
+        if sys.platform != "darwin":
+            return
+        try:
+            from ..user import glass as _g
+            _g.hide_titlebar_extras(self)
+        except Exception:
+            pass
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        from aqt.qt import QTimer as _T
+        _T.singleShot(0, self._close_only)
+
+    def changeEvent(self, ev):
+        super().changeEvent(ev)
+        try:
+            from aqt.qt import QEvent as _E, QTimer as _T
+            if ev.type() == _E.Type.ActivationChange and self.isActiveWindow():
+                _T.singleShot(0, self._close_only)
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__(mw)
         self.setWindowTitle("Janki")
