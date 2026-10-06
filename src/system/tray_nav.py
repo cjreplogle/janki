@@ -1321,7 +1321,7 @@ def _build_today_list(parent):
     # own compact style (#icon forces 28 px squares)
     _qss = ("QPushButton{background:transparent;border:none;border-radius:6px;padding:0 6px;"
             "color:#c9d4e8;text-align:center;}"
-            "QPushButton:hover{background:rgba(255,255,255,0.14);color:#fff;}")
+            "QPushButton:hover{background:rgba(255,255,255,0.07);color:#fff;}")
     for b in (prev_b, next_b):
         b.setObjectName("dayArrow")
         b.setFixedSize(24, 18)
