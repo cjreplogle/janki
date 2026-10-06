@@ -11,8 +11,10 @@ from aqt.qt import (QWidget, QHBoxLayout, QPainter, QColor, QEvent, QObject, Qt,
                     QApplication, QRectF, QPointF, QPen, QCursor)
 
 EDGE = 6          # px band along the window edge that resizes
-TOP_GAP = 6       # px breathing room above the caption buttons/toolbar pill (matches
-                  # the #header padding-top in css.py so both sit at the same offset)
+TOP_GAP = 14      # px strip above the toolbar + caption buttons: a top margin on the
+                  # central layout (so it works in every look, not via toolbar CSS).
+                  # Its top EDGE px resize; the rest is a grab strip that drags the
+                  # window (double-click maximises) — see _TopStrip.
 _lights = None
 _resizer = None
 
@@ -117,6 +119,25 @@ class CaptionButtons(QWidget):
     def place(self):
         self.move(self.parent().width() - self.width(), TOP_GAP)
         self.raise_()
+
+
+class _TopStrip(QObject):
+    """Press in the central widget's top margin (below the resize edge) = move the
+    window; double-click = maximise / restore."""
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+            try:
+                y = ev.position().y()
+                if y < TOP_GAP and ev.button() == Qt.MouseButton.LeftButton:
+                    if t == QEvent.Type.MouseButtonDblClick:
+                        toggle_maximize()
+                    else:
+                        start_move()
+                    return True
+            except Exception:
+                pass
+        return False
 
 
 class _PlaceOnResize(QObject):
@@ -282,6 +303,18 @@ def install():
     if was_visible:                       # setWindowFlags hides the window; bring it back
         mw.setGeometry(geo)
         mw.show()
+    # the grab strip: a top margin on the central layout (toolbar, pill and caption
+    # buttons all start below it)
+    try:
+        cw = mw.centralWidget()
+        lay = cw.layout() if cw is not None else None
+        if lay is not None:
+            m = lay.contentsMargins()
+            lay.setContentsMargins(m.left(), TOP_GAP, m.right(), m.bottom())
+            mw._jk_top_strip = _TopStrip(cw)
+            cw.installEventFilter(mw._jk_top_strip)
+    except Exception:
+        pass
     _lights = CaptionButtons(mw)
     _lights.show()
     _lights.raise_()

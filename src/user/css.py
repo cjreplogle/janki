@@ -1505,7 +1505,7 @@ def _build_css(cfg, context):
                 # A few px of breathing room above the pill so it (and the caption
                 # buttons, offset by the same TOP_GAP in chrome.py) don't sit flush
                 # against the window's very top edge.
-                " padding-top:6px !important;"
+                " padding-top:0 !important;"   # gap is chrome.TOP_GAP (native margin)
                 " box-sizing:border-box !important; }\n</style>\n")
         if sys.platform.startswith("win") and _win_frameless():
             # Frameless window: the toolbar's empty space is the title bar.
