@@ -248,6 +248,33 @@ def _restore_bank(key):
         shutil.rmtree(src, ignore_errors=True)
 
 
+_deferred = []
+
+
+def _defer_from_review(fn) -> bool:
+    """While reviewing, queue `fn` to run once the reviewer is left (coalesced)."""
+    try:
+        from aqt import mw, gui_hooks
+        if getattr(mw, "state", None) != "review":
+            return False
+        if fn not in _deferred:
+            _deferred.append(fn)
+        if not getattr(mw, "_janki_review_defer_hooked", False):
+            def _flush(new, old):
+                if new != "review" and _deferred:
+                    fns = list(_deferred); _deferred.clear()
+                    for f in fns:
+                        try:
+                            f()
+                        except Exception as e:
+                            log("deferred %s: %s" % (getattr(f, "__name__", f), e))
+            gui_hooks.state_did_change.append(_flush)
+            mw._janki_review_defer_hooked = True
+        return True
+    except Exception:
+        return False
+
+
 def sync_banks_with_cards(changes=None, handler=None):
     """operation_did_execute hook: drop banks whose cards were all deleted, and
     restore trashed banks whose cards came back. Only banks that HAD cards count
@@ -255,6 +282,11 @@ def sync_banks_with_cards(changes=None, handler=None):
     global _banks_seen
     if changes is not None and not (getattr(changes, "deck", False)
                                     or getattr(changes, "note", False)):
+        return
+    # Answering a card fires this too (deck counts change) and the full card scan
+    # stalled the next card ~40ms+. Banks can't vanish mid-review, so catch up once
+    # you leave the reviewer instead.
+    if changes is not None and _defer_from_review(sync_banks_with_cards):
         return
     try:
         now = _banks_with_cards()

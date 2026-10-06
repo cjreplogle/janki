@@ -442,6 +442,9 @@ def _startup():
                 def _janki_reconcile_banks(changes, handler):
                     try:
                         if getattr(changes, "deck", False):
+                            from .src.integrations.qbank import _defer_from_review
+                            if _defer_from_review(_qb_rec.reconcile_names):
+                                return    # answering a card: don't stall the next one
                             _qb_rec.reconcile_names()
                     except Exception:
                         pass
@@ -889,6 +892,14 @@ def _startup():
         if hasattr(gui_hooks, 'reviewer_did_show_answer'):
             def _on_show_answer(_r):
                 state._remote_active = True
+                # The rest (~300ms: contrast scan, chrome, AMBOSS, practice buttons)
+                # ran inside Anki's _showAnswer and held up the answer + the next key.
+                # Defer one tick so the answer shows and Z/X/C/V are live first.
+                QTimer.singleShot(0, _on_show_answer_late)
+
+            def _on_show_answer_late():
+                if getattr(getattr(mw, "reviewer", None), "state", None) != "answer":
+                    return        # already rated past this answer
                 hud.caption_practice_gate()   # keep caption off on the practice back
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg

@@ -138,21 +138,10 @@ class _KeyFilter(QObject):
                         QApplication.instance().applicationState()))
                 return False
             r = getattr(mw, "reviewer", None)
-            if r is not None and getattr(r, "state", None) == "question":
-                # Front side: a Z/X/C/V press flips to the answer (like Space) instead of
-                # doing nothing; the next press rates. A dead key here felt like a hang.
-                if t == QEvent.Type.ShortcutOverride:
-                    ev.accept()
-                    return True
-                if press and _first(ev):
-                    _diag("reveal ease=%d (question side)" % ease)
-                    try:
-                        r._showAnswer()
-                    except Exception as e:
-                        _diag("showAnswer error: %s" % e)
-                return True
             if r is None or getattr(r, "state", None) != "answer":
-                return False
+                if press and _first(ev):
+                    _diag("ignored ease=%d: reviewer state=%s" % (ease, getattr(r, "state", None)))
+                return False                   # question side: like 1–4, nothing
             if t == QEvent.Type.ShortcutOverride:
                 ev.accept()                    # claim the key before any QShortcut
                 return True
