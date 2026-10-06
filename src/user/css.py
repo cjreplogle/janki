@@ -668,11 +668,11 @@ _DECK_WIDTH_JS = r"""(function(){
      // One fixed width for the whole Practice view (the widest it has needed, within
      // the window): expanding/collapsing banks never resizes or slides the table.
      key='jkDeckW:'+view+'3';               // per view; fresh key drops older widths
-     // A width that does NOT depend on the names: 960 px (or the window, if
+     // A width that does NOT depend on the names: 760 px (or the window, if
      // narrower). Sizing to the widest visible name meant a longer subdeck name
      // revealed by + widened the centred table and slid every column. Long names
      // wrap inside the name column instead; the count columns are pinned above.
-     var FIX=960;
+     var FIX=760;
      t.style.width=Math.min(cap(), FIX)+'px'; put('jkColAnim','');
      window.addEventListener('resize', function(){
        t.style.width=Math.min(cap(), FIX)+'px'; });
@@ -1019,7 +1019,7 @@ def _build_css(cfg, context):
         # once — after a +/− redraw that first frame was the narrow natural width)
         parts.append("<style>html{scrollbar-gutter:stable both-edges;}"
                      "body center>table:first-of-type{table-layout:fixed;box-sizing:border-box;"
-                     "width:min(960px,calc(100vw - 24px))!important;}"
+                     "width:min(760px,calc(100vw - 24px))!important;}"
                      "body center>table:first-of-type th.count,"
                      "body center>table:first-of-type tr.deck>td:not(.decktd):not(.opts)"
                      "{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}"
