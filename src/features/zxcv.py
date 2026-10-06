@@ -45,6 +45,24 @@ def _typing_into(w) -> bool:
         return False
 
 
+def _main_is_front() -> bool:
+    """Anki is the active app and no real dialog is in front of the reviewer. Not just
+    mw.isActiveWindow(): right after launch / tray-open, Qt's active window can briefly be
+    one of Janki's own frameless panels (HUD, caption, glass overlay) or still be None
+    while the window activates, which used to swallow the first Z/X/C/V presses."""
+    if mw.isActiveWindow():
+        return True
+    app = QApplication.instance()
+    if app.applicationState() != Qt.ApplicationState.ApplicationActive:
+        return False
+    aw = QApplication.activeWindow()
+    if aw is None:
+        return mw.isVisible()
+    from aqt.qt import QDialog
+    return not isinstance(aw, QDialog) and not aw.isModal() and aw.window() is not mw.window() \
+        and bool(aw.windowFlags() & (Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool))
+
+
 class _KeyFilter(QObject):
     def eventFilter(self, obj, ev):
         t = ev.type()
@@ -56,7 +74,7 @@ class _KeyFilter(QObject):
                 return False
             if mw.state != "review" or not _cfg().get("zxcv_rating", True):
                 return False
-            if not mw.isActiveWindow() or _typing_into(QApplication.focusWidget()):
+            if not _main_is_front() or _typing_into(QApplication.focusWidget()):
                 return False
             r = getattr(mw, "reviewer", None)
             if r is None or getattr(r, "state", None) != "answer":
