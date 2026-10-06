@@ -2099,6 +2099,8 @@ def _build() -> "QWidget":
     rwb.clicked.connect(_rw_clicked)
     _toggle_btns["reword"] = rwb
     rwb._jk_on_name = _TOGGLE_ON_NAME["reword"]
+    rwb.setProperty("jkIco", True)                # label raised, Tab+R centred under it
+    rwb._jk_hint_bottom = True
     _add_corner_hint(rwb, "Tab+R")
     rwrow.addWidget(rwb, 1)
     cyc = QPushButton("⟳")
