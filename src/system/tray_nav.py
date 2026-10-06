@@ -1059,9 +1059,9 @@ def _class_info(view, e, rect):
         except Exception:
             pass
     if when:
-        lines.append("🕘\uFE0E " + when)
+        lines.append(when)
     if e.get("location"):
-        lines.append("📍\uFE0E " + e["location"])
+        lines.append(e["location"])
     try:
         from ..integrations import lectures
         m = lectures.peek_match(e.get("summary") or "")
