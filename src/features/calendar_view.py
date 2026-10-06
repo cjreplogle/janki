@@ -13,6 +13,7 @@ transitions, toolbar handling and keyboard focus.
 Only the user's own Janki reads their calendar, locally (lectures.events_between).
 """
 import datetime
+import os
 import time
 import html
 import re
@@ -561,7 +562,7 @@ def _detail_html(e):
         if _cc:                              # study buttons keep their numbers too
             QTimer.singleShot(0, lambda c=_cc: _set_study_counts(c[3] - c[2], c[3]))
         body = ("<div id='jkd-counts' class='jkd-counts'>%s</div>"
-                % ((_counts_html(_cc) + " <i class='jkd-reload'></i>") if _cc else "… cards") +
+                % (_counts_html(_cc) if _cc else "… cards") +   # recount: corner chip only
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
@@ -665,6 +666,14 @@ def _recount(m):
         _set_counts("No sources switched on.")
         return
     key = _count_key(m)
+    global _count_busy
+    _count_busy += 1
+    _busy_update()                       # the bottom-right "Updating…" chip, not "…"
+
+    def _done():
+        global _count_busy
+        _count_busy = max(0, _count_busy - 1)
+        _busy_update()
     try:
         from aqt.operations import QueryOp
 
@@ -688,22 +697,63 @@ def _recount(m):
             return (new, due, sus, len(ids))
 
         def ok(r):
+            _done()
             new, due, sus, tot = r
             _counts_cache[key] = r
             _counts_last[m.get("key")] = r
+            _save_counts()
             if len(_counts_cache) > 200:
                 _counts_cache.pop(next(iter(_counts_cache)))
             _set_study_counts(tot - sus, tot)
             _set_counts("<b>%d</b> cards · <span class=c-new>%d new</span> · "
                         "<span class=c-due>%d due</span> · <span class=c-sus>%d suspended</span>"
                         % (tot, new, due, sus))
-        QueryOp(parent=mw, op=op, success=ok).run_in_background()
+        QueryOp(parent=mw, op=op, success=ok).failure(
+            lambda e: (_done(), log("calendar recount: %s" % e))).run_in_background()
     except Exception as e:
+        _done()
         log("calendar recount: %s" % e)
 
 
 _counts_cache = {}     # (lecture, sources) → last counts, so a redraw doesn't flash "…"
 _counts_last = {}      # lecture → its latest counts (any sources): shown while recounting
+_count_busy = 0        # recounts running (lights the corner chip)
+# _counts_last is kept on disk too, so a class page opened after a restart shows its
+# last numbers at once (card counts only, in the add-on's own user_files)
+_COUNTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                            "user_files", "class_counts.json")
+
+
+def _load_counts():
+    try:
+        with open(_COUNTS_FILE) as f:
+            for k, v in json.load(f).items():
+                _counts_last[k] = tuple(v)
+    except Exception:
+        pass
+
+
+def _save_counts():
+    def w():
+        try:
+            os.makedirs(os.path.dirname(_COUNTS_FILE), exist_ok=True)
+            data = {str(k): list(v) for k, v in list(_counts_last.items())[-500:]}
+            tmp = _COUNTS_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, _COUNTS_FILE)
+        except Exception as e:
+            log("class counts save: %s" % e)
+    t = globals().get("_save_t")
+    if t is None:
+        t = QTimer()
+        t.setSingleShot(True)
+        t.timeout.connect(w)
+        globals()["_save_t"] = t
+    t.start(1500)
+
+
+_load_counts()
 
 
 def _count_key(m):
@@ -2644,7 +2694,8 @@ def _busy_update():
     calendar work runs (matching, weak areas, class page lookups, calendar download)."""
     try:
         from ..integrations import lectures
-        on = bool(_warming or _weak_busy or _detail_busy or lectures._EV_LOADING["on"])
+        on = bool(_warming or _weak_busy or _detail_busy or _count_busy
+                  or lectures._EV_LOADING["on"])
         if _view:
             mw.web.eval("window.jkcBusy&&window.jkcBusy(%s)" % ("true" if on else "false"))
     except Exception:
