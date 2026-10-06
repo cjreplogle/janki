@@ -892,13 +892,16 @@ class _Tour(QWidget):
         bubble takes input, and keys go to Anki."""
         from aqt.qt import QRegion
         if self.steps[self.i].get("hands_on"):
-            reg = QRegion(self.bubble.geometry())
+            area = self.bubble.geometry()
             an = getattr(self, "_bubble_anim", None)
             if an is not None and an.state() == an.State.Running:
-                end = an.endValue()                 # cover start + destination while
-                if isinstance(end, QPoint):          # sliding
+                end = an.endValue()
+                if isinstance(end, QPoint):
                     end = QRect(end, self.bubble.size())
-                reg = reg.united(QRegion(end))
+                # the whole box spanned by start AND destination: a diagonal slide
+                # passes through neither, and the bubble was cut off mid-slide
+                area = area.united(end)
+            reg = QRegion(area.adjusted(-18, -18, 18, 18))   # + room for the shadow
             self.setMask(reg)
 
             def _focus_card_keep_tour_on_top():
@@ -910,6 +913,16 @@ class _Tour(QWidget):
         reg = QRegion(self.rect())
         if self.hole is not None and self.hole.height() < self.height() * 0.5:
             reg = reg.subtracted(QRegion(self.hole.adjusted(2, 2, -2, -2)))
+            # …but never under the bubble (or its slide path): it was cut where it
+            # crossed the lit hole
+            area = self.bubble.geometry()
+            an = getattr(self, "_bubble_anim", None)
+            if an is not None and an.state() == an.State.Running:
+                end = an.endValue()
+                if isinstance(end, QPoint):
+                    end = QRect(end, self.bubble.size())
+                area = area.united(end)
+            reg = reg.united(QRegion(area))
         self.setMask(reg)
 
     _DUR = 240     # step transitions: quick, eased — smooth without feeling slow
@@ -1001,10 +1014,13 @@ class _Tour(QWidget):
             if old is not None:
                 old.stop()
                 old.deleteLater()            # don't pile up finished animations
-            an = QPropertyAnimation(b, b"geometry", self)
+            # size snaps once (the new text fades in anyway); only the POSITION
+            # slides — animating the size re-wrapped the text every frame (jumping)
+            b.resize(goal.size())
+            an = QPropertyAnimation(b, b"pos", self)
             an.setDuration(self._DUR)
-            an.setStartValue(b.geometry())
-            an.setEndValue(goal)
+            an.setStartValue(b.pos())
+            an.setEndValue(goal.topLeft())
             an.setEasingCurve(QEasingCurve.Type.OutCubic)
             an.finished.connect(lambda: self._apply_mask())   # mask follows the bubble
             self._bubble_anim = an
