@@ -54,9 +54,8 @@ QPushButton#practice {
 QPushButton#practice:hover  { background: rgba(74,200,130,0.20); }
 QPushButton#practice:pressed{ background: rgba(74,200,130,0.30); }
 QLabel#cnt { color:#9fb4d8; font-size:11px; }
-QLabel#hint, QPushButton#tgl[jkIco="true"], QPushButton[jkIco="true"] { padding:3px 4px 11px 4px; }
-QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
-QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
+QPushButton#tgl[jkIco="true"], QPushButton[jkIco="true"] { padding:3px 4px 11px 4px; }
+QLabel#hint, QLabel#hintSm { color: rgba(233,238,247,0.34); font-size:7.5px; background: transparent; }
 QPushButton#expander {
     padding:0 0 2px 0; margin:0; font-size:13px; font-weight:700; text-align:center;
     color:#aebbd2; background: transparent; border: none;
@@ -897,8 +896,9 @@ class _DayView(QWidget):
     PX_H = 30            # pixels per hour
     GUTTER = 44          # time labels on the left
 
-    def __init__(self, parent, evs, lectures, cv):
+    def __init__(self, parent, evs, lectures, cv, is_today=True):
         super().__init__(parent)
+        self.is_today = is_today
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         timed = [e for e in evs if e["start"] is not None]
@@ -966,7 +966,7 @@ class _DayView(QWidget):
                            int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop), "★")
         now = datetime.datetime.now()                       # the red now-line
         m = now.hour * 60 + now.minute
-        if self.lo <= m <= self.hi:
+        if self.is_today and self.lo <= m <= self.hi:
             y = 6 + (m - self.lo) / 60 * self.PX_H
             p.setPen(QPen(QColor(255, 107, 107), 2))
             p.drawLine(self.GUTTER - 2, int(y), self.width() - 4, int(y))
@@ -985,7 +985,7 @@ class _DayView(QWidget):
         h = self._hit(ev.position())
         if h != self.hover:
             self.hover = h
-            self.setToolTip("Study %s" % self.items[h]["e"]["summary"] if h is not None else "")
+            self.setToolTip("Study %s  (right-click for details)" % self.items[h]["e"]["summary"] if h is not None else "")
             self.update()
 
     def leaveEvent(self, _ev):
@@ -994,8 +994,126 @@ class _DayView(QWidget):
 
     def mousePressEvent(self, ev):
         h = self._hit(ev.position())
+        if h is not None and ev.button() == Qt.MouseButton.RightButton:
+            _class_info(self, self.items[h]["e"], self._rect(self.items[h]))
+            return
+        _class_info_close()
         if h is not None:
             _study_class(self.items[h]["e"])
+
+
+_info_card = None
+
+
+def _class_info_close():
+    global _info_card
+    c = _info_card
+    _info_card = None
+    try:
+        if c is not None:
+            c.hide()
+            c.deleteLater()
+    except Exception:
+        pass
+
+
+def _fmt_min(m):
+    if m is None:
+        return ""
+    h, mm = divmod(int(m), 60)
+    return "%d:%02d %s" % ((h % 12) or 12, mm, "AM" if h < 12 else "PM")
+
+
+def _class_info(view, e, rect):
+    """Right-click a class in the tray day view: a small card floating over the tray
+    (not a popup window — those close at once from the non-activating panel) with its
+    time, room, matched lecture and Study / Open in LMS."""
+    global _info_card
+    import html as _h
+    from aqt.qt import QGraphicsOpacityEffect
+    _class_info_close()
+    root = view.window().findChild(QFrame, "navRoot") or view.window()
+    card = QFrame(root)
+    card.setObjectName("infoCard")
+    card.setStyleSheet("#infoCard{background:rgba(34,36,44,250);border:1px solid rgba(255,255,255,40);"
+                       "border-radius:10px;} QLabel{background:transparent;color:#e6e9f0;}")
+    v = QVBoxLayout(card)
+    v.setContentsMargins(12, 10, 12, 10)
+    v.setSpacing(4)
+    top = QHBoxLayout()
+    title = QLabel("<b>%s</b>" % _h.escape(e.get("summary") or "Class"))
+    title.setWordWrap(True)
+    top.addWidget(title, 1)
+    x = QPushButton("✕")
+    x.setObjectName("icon")
+    x.setFixedSize(20, 20)
+    x.clicked.connect(lambda _c=False: _class_info_close())
+    top.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
+    v.addLayout(top)
+    lines = []
+    when = " – ".join(t for t in (_fmt_min(e.get("start")), _fmt_min(e.get("end"))) if t)
+    d = e.get("date")
+    if d is not None:
+        try:
+            when = d.strftime("%a %b ") + str(d.day) + (" · " + when if when else "")
+        except Exception:
+            pass
+    if when:
+        lines.append("🕘\uFE0E " + when)
+    if e.get("location"):
+        lines.append("📍\uFE0E " + e["location"])
+    try:
+        from ..integrations import lectures
+        m = lectures.peek_match(e.get("summary") or "")
+        if m and m is not lectures._PENDING:
+            lines.append("Lecture: " + m.get("display", ""))
+    except Exception:
+        pass
+    if e.get("mandatory"):
+        lines.append("<span style='color:#ff9d8a'>★ Attendance required</span>")
+    for ln in lines:
+        lb = QLabel(ln if ln.startswith("<") else _h.escape(ln))
+        lb.setWordWrap(True)
+        lb.setStyleSheet("color:#b8c3d8;font-size:11px;")
+        v.addWidget(lb)
+    btns = QHBoxLayout()
+    btns.setSpacing(6)
+    sb = QPushButton("Study")
+    sb.setObjectName("tgl")
+    sb.clicked.connect(lambda _c=False: (_class_info_close(), _study_class(e)))
+    btns.addWidget(sb, 1)
+    if e.get("url"):
+        lb_ = QPushButton("Open in LMS")
+        lb_.setObjectName("tgl")
+
+        def _lms(_c=False, u=e["url"]):
+            from aqt.qt import QDesktopServices, QUrl
+            _class_info_close()
+            _hide()
+            QDesktopServices.openUrl(QUrl(u))
+        lb_.clicked.connect(_lms)
+        btns.addWidget(lb_, 1)
+    v.addLayout(btns)
+    card.setFixedWidth(root.width() - 24)
+    card.adjustSize()
+    # just under the class block, flipped above it when it would run off the bottom
+    y = view.mapTo(root, rect.bottomLeft().toPoint()).y() + 4
+    if y + card.height() > root.height() - 6:
+        y = max(6, view.mapTo(root, rect.topLeft().toPoint()).y() - card.height() - 4)
+    card.move(12, y)
+    eff = QGraphicsOpacityEffect(card)
+    eff.setOpacity(0.0)
+    card.setGraphicsEffect(eff)
+    card.raise_()
+    card.show()
+    anim = QPropertyAnimation(eff, b"opacity", card)
+    anim.setDuration(160)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+    card._jk_anim = anim
+    anim.start()
+    _info_card = card
 
 
 def _practice_banks_live(col):
@@ -1185,33 +1303,82 @@ def _sound_types_panel(parent):
 
 
 def _build_today_list(parent):
-    """Today's classes from the calendar: time + title in its course colour; click one
-    to study it (every card, suspended ones restored afterwards)."""
+    """A day's classes from the calendar (today by default; ‹ › seek through days, the
+    date label jumps back to today): time + title in its course colour; click one to
+    study it (every card, suspended ones restored afterwards)."""
     import datetime
     box = QWidget(parent)
     v = QVBoxLayout(box)
     v.setContentsMargins(0, 0, 0, 0)
     v.setSpacing(5)
-    try:
-        from ..integrations import lectures
-        from ..features import calendar_view as cv
-        t = datetime.date.today()
-        evs, fresh = lectures.events_cached_between(t, t)
-        if not fresh:
-            lectures.load_events_bg()
-        evs = [e for e in evs if not cv._is_allday_kind(e["summary"])]
-    except Exception as exc:
-        log(f"tray today: {exc}")
-        evs = []
-    if not evs:
-        lbl = QLabel("No classes today")
-        lbl.setObjectName("cnt")
-        v.addWidget(lbl)
-    # A mini day view like the Calendar: hour lines + labels, each class a block at its
-    # time in its course colour (outline only); click one to study it.
-    if evs:
-        v.addWidget(_DayView(box, evs, lectures, cv))
+
+    nav = QHBoxLayout()
+    nav.setContentsMargins(0, 0, 0, 0)
+    nav.setSpacing(4)
+    prev_b = QPushButton("‹")
+    next_b = QPushButton("›")
+    for b in (prev_b, next_b):
+        b.setObjectName("icon")
+        b.setFixedSize(26, 22)
+    day_lbl = QPushButton()
+    day_lbl.setObjectName("icon")
+    day_lbl.setFixedHeight(22)
+    day_lbl.setStyleSheet("font-size:12px;font-weight:600;")
+    nav.addWidget(prev_b)
+    nav.addWidget(day_lbl, 1)
+    nav.addWidget(next_b)
+    v.addLayout(nav)
+
+    holder = QWidget(box)
+    hv = QVBoxLayout(holder)
+    hv.setContentsMargins(0, 0, 0, 0)
+    hv.setSpacing(5)
+    v.addWidget(holder)
     v.addStretch(1)
+    st = {"off": 0}
+
+    def fill():
+        while hv.count():
+            w = hv.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        t = datetime.date.today()
+        d = t + datetime.timedelta(days=st["off"])
+        rel = {0: "Today", -1: "Yesterday", 1: "Tomorrow"}.get(st["off"])
+        day_lbl.setText((rel + " · " if rel else "") + d.strftime("%a %b ") + str(d.day))
+        day_lbl.setToolTip("" if st["off"] == 0 else "Back to today")
+        evs = []
+        try:
+            from ..integrations import lectures
+            from ..features import calendar_view as cv
+            evs, fresh = lectures.events_cached_between(d, d)
+            if not fresh:
+                lectures.load_events_bg()
+            evs = [e for e in evs if not cv._is_allday_kind(e["summary"])]
+        except Exception as exc:
+            log(f"tray today: {exc}")
+        if not evs:
+            lbl = QLabel("No classes today" if st["off"] == 0 else "No classes")
+            lbl.setObjectName("cnt")
+            hv.addWidget(lbl)
+        else:
+            # A mini day view like the Calendar: hour lines + labels, each class a block
+            # at its time in its course colour (outline only); click one to study it.
+            hv.addWidget(_DayView(holder, evs, lectures, cv, is_today=st["off"] == 0))
+
+    def seek(n):
+        _class_info_close()
+        st["off"] = 0 if n is None else st["off"] + n
+        fill()
+        try:
+            from ..features import sfx
+            sfx.play("move")
+        except Exception:
+            pass
+    prev_b.clicked.connect(lambda _c=False: seek(-1))
+    next_b.clicked.connect(lambda _c=False: seek(1))
+    day_lbl.clicked.connect(lambda _c=False: seek(None))
+    fill()
     return box
 
 
