@@ -38,13 +38,13 @@ QPushButton {
 }
 QPushButton:hover  { background: rgba(255,255,255,0.15); }
 QPushButton:pressed{ background: rgba(255,255,255,0.22); }
-QPushButton#tgl        { padding:7px 10px; }
-QPushButton#tglOn       { background: rgba(96,156,246,0.38); border-color: rgba(130,178,252,0.65); color:#ffffff; }
-QPushButton#tglOnBlue   { background: rgba(96,156,246,0.22); border-color: rgba(130,178,252,0.48); color:#ffffff; }
-QPushButton#tglOnGreen  { background: rgba(52,199,89,0.20); border-color: rgba(90,214,124,0.45); color:#ffffff; }
-QPushButton#tglOnRed    { background: rgba(235,87,87,0.22); border-color: rgba(245,125,125,0.48); color:#ffffff; }
-QPushButton#tglOnOrange { background: rgba(255,159,10,0.20); border-color: rgba(255,186,90,0.46); color:#ffffff; }
-QPushButton#tglOnPale   { background: rgba(255,150,150,0.16); border-color: rgba(255,175,175,0.42); color:#ffffff; }
+QPushButton#tgl        { text-align:center; padding:7px 10px; }
+QPushButton#tglOn       { text-align:center; background: rgba(96,156,246,0.38); border-color: rgba(130,178,252,0.65); color:#ffffff; }
+QPushButton#tglOnBlue   { text-align:center; background: rgba(96,156,246,0.22); border-color: rgba(130,178,252,0.48); color:#ffffff; }
+QPushButton#tglOnGreen  { text-align:center; background: rgba(52,199,89,0.20); border-color: rgba(90,214,124,0.45); color:#ffffff; }
+QPushButton#tglOnRed    { text-align:center; background: rgba(235,87,87,0.22); border-color: rgba(245,125,125,0.48); color:#ffffff; }
+QPushButton#tglOnOrange { text-align:center; background: rgba(255,159,10,0.20); border-color: rgba(255,186,90,0.46); color:#ffffff; }
+QPushButton#tglOnPale   { text-align:center; background: rgba(255,150,150,0.16); border-color: rgba(255,175,175,0.42); color:#ffffff; }
 QPushButton#foot       { color:#cdd7ea; }
 QPushButton#quit:hover { background: rgba(230,90,90,0.30); border-color: rgba(240,120,120,0.6); }
 QPushButton#practice {
