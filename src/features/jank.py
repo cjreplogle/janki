@@ -439,11 +439,143 @@ def _bank_match_count(bank_dir: str) -> int:
     return n
 
 
-def _pack_bank(bank_dir: str, dest_dir: str, stem: str, with_matches: bool = True) -> str:
+_NO_LEC = "(no lecture)"
+
+
+def _bank_rows(bank_dir: str) -> list:
+    out = []
+    try:
+        with open(os.path.join(bank_dir, "questions.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    q = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(q, dict):
+                    out.append(q)
+    except Exception:
+        pass
+    return out
+
+
+def _bank_lectures(bank_dir: str) -> dict:
+    """{lecture path: question count} for a bank, in first-seen order."""
+    out = {}
+    for q in _bank_rows(bank_dir):
+        L = (q.get("lecture") or "").strip() or _NO_LEC
+        out[L] = out.get(L, 0) + 1
+    return out
+
+
+def _tagmap_entries(path: str) -> list:
+    """[(lecture name, [tag lines])] from a lecture tag map .json (dict or list form)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+
+    def lines(t):
+        return [t] if isinstance(t, str) else [str(x) for x in (t or []) if x]
+    out = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            out.append((str(k), lines(v)))
+    elif isinstance(data, list):
+        for it in data:
+            if isinstance(it, dict):
+                nm = it.get("name") or it.get("lecture") or it.get("title")
+                tg = it.get("tags", it.get("tag", it.get("searches")))
+                if nm:
+                    out.append((str(nm), lines(tg)))
+    return out
+
+
+def _write_tagmap_subset(path: str, names, dest_dir: str) -> str:
+    keep = set(names)
+    sub = {n: t for n, t in _tagmap_entries(path) if n in keep}
+    out = os.path.join(dest_dir, os.path.basename(path))
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(sub, f, ensure_ascii=False, indent=2)
+    return out
+
+
+def _line_keys(line: str) -> set:
+    """Match keys for one tag-map line: its concept leaf, or the deck for deck: lines."""
+    from ..integrations import qbank
+    t = str(line).strip().strip("\"'()").strip()
+    if t.lower().startswith("deck:"):
+        return {("deck:" + t[5:].strip().strip("\"'")).lower()}
+    if t.lower().startswith("tag:"):
+        t = t[4:]
+    t = t.strip().strip("\"'*")
+    return qbank._leaf_keys([t]) if t else set()
+
+
+def _deck_keys(dids_names) -> set:
+    """Everything the ticked decks are about: each deck (+ subdecks) as deck:<name> and
+    the concept leaves of every tag on their cards."""
+    from ..integrations import qbank
+    col = mw.col
+    keys, dids = set(), set()
+    for did, nm in dids_names:
+        dids.add(did)
+        keys.add(("deck:" + nm).lower())
+        for cn, cd in col.decks.children(did):
+            dids.add(cd)
+            keys.add(("deck:" + cn).lower())
+    if dids:
+        ids = ",".join(str(int(d)) for d in dids)
+        tags = set()
+        for r in col.db.list("select distinct n.tags from notes n where n.id in (select nid "
+                             "from cards where did in (%s) or odid in (%s))" % (ids, ids)):
+            tags.update((r or "").split())
+        keys |= qbank._leaf_keys(list(tags))
+    return keys
+
+
+def _q_keys(q) -> set:
+    from ..integrations import qbank
+    return (qbank._leaf_keys(q.get("tags")) | qbank._leaf_keys(q.get("mined_tags"))
+            | qbank._leaf_keys(q.get("content_tags")))
+
+
+def _pack_bank(bank_dir: str, dest_dir: str, stem: str, with_matches: bool = True,
+               lectures=None) -> str:
     """Re-pack an installed bank folder as a .qb (zip) for the bundle. with_matches=False
     ships it untagged (tag matches stripped from questions.jsonl)."""
     import zipfile
     out = os.path.join(dest_dir, stem + ".qb")
+    if lectures is not None:
+        # A SELECTION ships as its own bank (id/name marked), so importing it never
+        # replaces a recipient's full copy of the same bank.
+        import hashlib
+        keep = set(lectures)
+        qs = [q for q in _bank_rows(bank_dir)
+              if ((q.get("lecture") or "").strip() or _NO_LEC) in keep]
+        if not with_matches:
+            for q in qs:
+                for k in _MATCH_FIELDS:
+                    q.pop(k, None)
+        try:
+            with open(os.path.join(bank_dir, "manifest.json"), encoding="utf-8") as f:
+                man = json.load(f)
+        except Exception:
+            man = {"qb_format": 1, "id": stem}
+        h = hashlib.sha1("\n".join(sorted(keep)).encode("utf-8")).hexdigest()[:6]
+        man["id"] = "%s-sel-%s" % (man.get("id") or stem, h)
+        man["name"] = "%s (selection)" % (man.get("name") or stem)
+        man["count"] = len(qs)
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("manifest.json", json.dumps(man, ensure_ascii=False, indent=2))
+            z.writestr("questions.jsonl", "\n".join(json.dumps(q, ensure_ascii=False) for q in qs))
+            used = {m for q in qs for m in (q.get("media") or [])}
+            mdir = os.path.join(bank_dir, "media")
+            for m in used:
+                mp = os.path.join(mdir, m)
+                if os.path.isfile(mp):
+                    z.write(mp, "media/" + m)
+        return out
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for base, _dirs, files in os.walk(bank_dir):
             for f in files:
@@ -582,7 +714,13 @@ def packager_dialog(parent=None) -> None:
         det = ("%d questions" % b["count"]) if b["count"] else ""
         if m:
             det += (" · " if det else "") + "%d tag-matched" % m
-        _leaf(g_banks, b["name"], det, ("bank", b))
+        bi = _leaf(g_banks, b["name"], det, ("bank", b))
+        bi.setFlags(bi.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+        lecs = _bank_lectures(b["dir"])
+        if len(lecs) > 1:                          # ▸ pick lectures (packs only those)
+            for L, n in lecs.items():
+                _leaf(bi, L, "%d question%s" % (n, "" if n == 1 else "s"),
+                      ("banklec", (b["id"], L)))
     opt_matches = None
     if not src["banks"]:
         _leaf(g_banks, "No banks installed", "", None).setFlags(Qt.ItemFlag.NoItemFlags)
@@ -598,8 +736,15 @@ def packager_dialog(parent=None) -> None:
         g_banks.addChild(opt_matches)
     g_maps = _group("Lecture tag maps")
     for p in src["tagmaps"]:
-        _leaf(g_maps, os.path.basename(p), os.path.dirname(p).replace(os.path.expanduser("~"), "~"),
-              ("file", p))
+        mi = _leaf(g_maps, os.path.basename(p),
+                   os.path.dirname(p).replace(os.path.expanduser("~"), "~"), ("file", p))
+        ents = _tagmap_entries(p)
+        if len(ents) > 1:                          # ▸ pick lectures (packs only those)
+            mi.setFlags(mi.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+            mi.setText(1, "%d lectures · %s" % (len(ents), mi.text(1)))
+            for nm, lines in ents:
+                _leaf(mi, nm, "%d tag%s" % (len(lines), "" if len(lines) == 1 else "s"),
+                      ("mapentry", (p, nm, lines)))
     if not src["tagmaps"]:
         _leaf(g_maps, "No tag maps yet", "", None).setFlags(Qt.ItemFlag.NoItemFlags)
     g_rp = _group("Rephrasings")
@@ -648,6 +793,9 @@ def packager_dialog(parent=None) -> None:
         log("jank decks: %s" % exc)
     g_disk = _group("Added from disk")
     tree.expandAll()
+    for g in (g_banks, g_maps):                  # bank / map lectures start collapsed
+        for i in range(g.childCount()):
+            g.child(i).setExpanded(False)
     for i in range(g_decks.childCount()):        # decks start collapsed (subdecks on ▸)
         def _collapse(it):
             it.setExpanded(False)
@@ -665,8 +813,11 @@ def packager_dialog(parent=None) -> None:
             for ci in range(it.childCount()):
                 c = it.child(ci)
                 d = c.data(0, ROLE)
-                if d and c.checkState(0) == Qt.CheckState.Checked:
+                st = c.checkState(0)
+                if d and st == Qt.CheckState.Checked:
                     sel.append(d)
+                elif d and st == Qt.CheckState.PartiallyChecked and d[0] in ("bank", "file"):
+                    sel.append(("partial-" + d[0], d))
                 walk(c)
         for gi in range(tree.topLevelItemCount()):
             walk(tree.topLevelItem(gi))
@@ -676,6 +827,10 @@ def packager_dialog(parent=None) -> None:
         sel = _selected()
         kinds = {}
         for kind, d in sel:
+            if kind in ("banklec", "mapentry"):
+                continue
+            if kind.startswith("partial-"):
+                kind, d = d
             key = kind
             if kind == "file":
                 key = os.path.splitext(d)[1].lower()
@@ -704,6 +859,67 @@ def packager_dialog(parent=None) -> None:
                       os.path.dirname(p).replace(os.path.expanduser("~"), "~"), ("file", p), True)
         g_disk.setExpanded(True)
         _refresh()
+
+    from aqt.qt import QCheckBox
+    follow = QCheckBox("Trim banks and tag maps to the ticked decks")
+    follow.setToolTip("Ticks only the bank lectures and tag-map lectures that the decks "
+                      "you ticked actually use (their tags, subdecks, or mapped deck). "
+                      "Adjust by hand afterwards if you like.")
+    v.addWidget(follow)
+
+    def _apply_follow(*_a):
+        if not follow.isChecked():
+            return
+        picked = []
+
+        def walk(it):
+            for ci in range(it.childCount()):
+                c = it.child(ci)
+                d = c.data(0, ROLE)
+                if d and d[0] == "deck" and c.checkState(0) == Qt.CheckState.Checked:
+                    picked.append(d[1])
+                walk(c)
+        walk(g_decks)
+        try:
+            keys = _deck_keys(picked) if picked else set()
+        except Exception as exc:
+            log("jank follow decks: %s" % exc)
+            return
+        tree.blockSignals(True)
+        try:
+            for bi in range(g_banks.childCount()):
+                b_it = g_banks.child(bi)
+                bd = b_it.data(0, ROLE)
+                if not bd or bd[0] != "bank":
+                    continue
+                hit = {((q.get("lecture") or "").strip() or _NO_LEC)
+                       for q in _bank_rows(bd[1]["dir"]) if keys & _q_keys(q)}
+                if b_it.childCount():
+                    for ci in range(b_it.childCount()):
+                        c = b_it.child(ci)
+                        c.setCheckState(0, Qt.CheckState.Checked if c.data(0, ROLE)[1][1] in hit
+                                        else Qt.CheckState.Unchecked)
+                else:
+                    b_it.setCheckState(0, Qt.CheckState.Checked if hit else Qt.CheckState.Unchecked)
+            for mi in range(g_maps.childCount()):
+                m_it = g_maps.child(mi)
+                for ci in range(m_it.childCount()):
+                    c = m_it.child(ci)
+                    _p, _nm, lines = c.data(0, ROLE)[1]
+                    ok = any(keys & _line_keys(ln) for ln in lines)
+                    c.setCheckState(0, Qt.CheckState.Checked if ok else Qt.CheckState.Unchecked)
+        finally:
+            tree.blockSignals(False)
+        # parents' tri-state is recomputed by Qt on child changes; nudge a repaint
+        tree.viewport().update()
+        _refresh()
+
+    def _on_item(it, _col):
+        d = it.data(0, ROLE)
+        if follow.isChecked() and d and d[0] == "deck":
+            _apply_follow()
+    tree.itemChanged.connect(_on_item)
+    follow.toggled.connect(_apply_follow)
 
     row = QHBoxLayout()
     add = QPushButton("Add files from disk…")
@@ -796,10 +1012,26 @@ def packager_dialog(parent=None) -> None:
         tmp = tempfile.mkdtemp(prefix="janki-jank-build-")
         try:
             files = []
+            keep = (opt_matches is None
+                    or opt_matches.checkState(0) == Qt.CheckState.Checked)
+            full_banks = {d["id"] for k, d in sel if k == "bank"}
+            lec_pick, map_pick = {}, {}
+            for k, d in sel:
+                if k == "banklec" and d[0] not in full_banks:
+                    lec_pick.setdefault(d[0], []).append(d[1])
+                elif k == "mapentry":
+                    map_pick.setdefault(d[0], []).append(d[1])
+            for k, d in sel:
+                if k == "partial-bank":
+                    b = d[1]
+                    files.append(_pack_bank(b["dir"], tmp, "".join(
+                        ch for ch in b["id"] if ch.isalnum() or ch in "._-") or "bank",
+                        with_matches=keep, lectures=lec_pick.get(b["id"], [])))
+                elif k == "partial-file":
+                    p = d[1]
+                    files.append(_write_tagmap_subset(p, map_pick.get(p, []), tmp))
             for kind, d in sel:
                 if kind == "bank":
-                    keep = (opt_matches is None
-                            or opt_matches.checkState(0) == Qt.CheckState.Checked)
                     files.append(_pack_bank(d["dir"], tmp, "".join(
                         ch for ch in d["id"] if ch.isalnum() or ch in "._-") or "bank",
                         with_matches=keep))
