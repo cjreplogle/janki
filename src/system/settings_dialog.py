@@ -2233,8 +2233,6 @@ class GlassSettings(QDialog):
                  "Truly clear window with a frosted blur (Windows' own, or Janki's "
                  "wallpaper blur where Windows can't draw it, e.g. in a VM). Renders on "
                  "the CPU — a bit slower."),
-                ("See-through, clear", "software", "off",
-                 "Truly clear window, no blur. Renders on the CPU — a bit slower."),
                 ("Wallpaper blur", "gpu", "wallpaper",
                  "Uses the graphics card. Janki paints your blurred wallpaper behind "
                  "the window — looks like glass, smoothest."),
@@ -2249,7 +2247,7 @@ class GlassSettings(QDialog):
                 b = str(self.cfg.get("win_backdrop", "auto")).lower()
                 for i, (_t, rr, bb, _d) in enumerate(_looks):
                     if rr == r and (bb == b or (r == "software" and bb == "auto"
-                                                and b in ("on", "wallpaper", "live"))):
+                                                and b in ("on", "wallpaper", "live", "off"))):
                         return i
                 return 0 if r == "software" else 2
             _lk_row = QHBoxLayout()
@@ -2262,8 +2260,10 @@ class GlassSettings(QDialog):
                 _vm = _dwm.is_virtual_machine()
             except Exception:
                 pass
-            _tags = (["recommended on a PC", "", "fastest", "best in a VM", ""] if _vm else
-                     ["recommended", "", "fastest", "for VMs", ""])
+            # (no "See-through, clear": fully clear pixels let clicks fall through
+            # to whatever is behind, so the window couldn't be grabbed or focused)
+            _tags = (["recommended on a PC", "fastest", "best in a VM", ""] if _vm else
+                     ["recommended", "fastest", "for VMs", ""])
             for (_t, _r, _b, _d), _tg in zip(_looks, _tags):
                 self._lk_box.addItem(_t + ("  —  " + _tg if _tg else ""))
                 self._lk_box.setItemData(self._lk_box.count() - 1, _d,

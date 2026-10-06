@@ -158,7 +158,19 @@ def backdrop_mode() -> str:
         m = "off" if c.get("disable_animations") or c.get("glass_enabled", True) is False else str(c.get("win_backdrop", "auto")).lower()
     except Exception:
         m = "auto"
-    return m if m in ("auto", "on", "off", "live", "wallpaper") else "auto"
+    m = m if m in ("auto", "on", "off", "live", "wallpaper") else "auto"
+    if m == "off" and c_render_software():
+        m = "auto"        # "See-through, clear" was dropped: fully clear pixels let
+                          # clicks fall through, so the window couldn't be grabbed
+    return m
+
+
+def c_render_software() -> bool:
+    try:
+        from . import preboot
+        return preboot.running_mode() == "software"
+    except Exception:
+        return False
 
 
 def dwm_blur_works() -> bool:
@@ -182,6 +194,8 @@ def backdrop_wanted() -> bool:
         mode = "auto"
     if mode == "on":
         return True
+    if mode == "off" and c_render_software():
+        mode = "auto"                          # see backdrop_mode()
     if mode in ("off", "live", "wallpaper"):
         return False
     return transparency_effects_on() and not is_virtual_machine()
