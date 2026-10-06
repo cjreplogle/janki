@@ -800,9 +800,20 @@ def _reload_all_webviews():
         pass
     # Reload every known webview: mw.web (main content), toolbar, and any
     # AnkiWebView found as a child of centralWidget.
+    # The Calendar builds its pages (class page, Study Progress) in place with JS, so
+    # a raw reload snaps back to the page it was first drawn as — opening a class in
+    # the first seconds after launch got "kicked out" to the week. Re-render it
+    # through the deck browser instead (keeps whatever page is open).
+    in_calendar = False
+    try:
+        from ..features import calendar_view as _cv
+        in_calendar = bool(_cv._view) and getattr(mw, 'state', None) == 'deckBrowser'
+    except Exception:
+        pass
+    skip_main = in_review or in_calendar
     views_to_reload = []
     try:
-        if getattr(mw, 'web', None) and not in_review:
+        if getattr(mw, 'web', None) and not skip_main:
             views_to_reload.append(mw.web)
         tb = getattr(mw, 'toolbar', None)
         tb_web = getattr(tb, 'web', None) if tb else None
@@ -810,7 +821,7 @@ def _reload_all_webviews():
             views_to_reload.append(tb_web)
         central = mw.centralWidget()
         for v in ([c for c in central.children() if isinstance(c, AnkiWebView)] if central else []):
-            if v not in views_to_reload:
+            if v not in views_to_reload and not (skip_main and v is getattr(mw, 'web', None)):
                 views_to_reload.append(v)
     except Exception:
         pass
@@ -829,6 +840,11 @@ def _reload_all_webviews():
             tb.draw()
     except Exception:
         pass
+    if in_calendar:
+        try:
+            mw.deckBrowser.refresh()
+        except Exception:
+            pass
     # Re-render the open card (question or answer, whichever is showing) so the
     # reviewer picks up the new CSS without unloading the card.
     if in_review:
