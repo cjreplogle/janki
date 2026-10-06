@@ -1873,8 +1873,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      var totalChars=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!totalChars){ reveal(); done(); return; }\n"
         "      var MS=totalMs(totalChars);\n"
-        "      function jkLi(tn){ var p=tn.parentElement; while(p && p!==qa){\n"
-        "        if((p.tagName||'')==='LI') return p; p=p.parentNode; } return null; }\n"
+        # EVERY <li> around the text (not just the nearest): a parent item whose text is
+        # all in a nested list / child element otherwise kept its bullet from the start
+        "      function jkLi(tn){ var out=[], p=tn.parentElement; while(p && p!==qa){\n"
+        "        if((p.tagName||'')==='LI') out.push(p); p=p.parentNode; } return out; }\n"
         # Build every holder up front (stable full-size layout, nothing reflows once
         # revealing starts) and hide each with a full clip — clip-path doesn't affect
         # layout, so this is safe to set before reveal() and before measuring lines.
@@ -1889,8 +1891,9 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # a bullet's text can be split across several holders) until its FIRST
         # holder starts revealing.
         "      var liSeen=[];\n"
-        "      holders.forEach(function(h){ if(h.li && liSeen.indexOf(h.li)<0){\n"
-        "        liSeen.push(h.li); h.li.style.visibility='hidden'; h.liFirst=true; } });\n"
+        "      holders.forEach(function(h){ h.liFirst=[]; (h.li||[]).forEach(function(li){\n"
+        "        if(liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden';\n"
+        "          h.liFirst.push(li); } }); });\n"
         "      reveal();\n"
         "      function finishHolder(h){ try{ var par=h.el.parentNode;\n"
         "        if(par){ par.replaceChild(document.createTextNode(h.text), h.el); par.normalize(); } }catch(e){} }\n"
@@ -1900,7 +1903,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      function next(){\n"
         "        if(idx>=holders.length){ finishAll(); return; }\n"
         "        var h=holders[idx++];\n"
-        "        if(h.liFirst){ try{ h.li.style.visibility=''; }catch(e){} }\n"
+        "        h.liFirst.forEach(function(li){ try{ li.style.visibility=''; }catch(e){} });\n"
         "        var dur=Math.max(16, MS*(h.text.length/totalChars));\n"
         "        var oneLine=h.el.getClientRects().length<=1;\n"
         "        if(oneLine && typeof h.el.animate==='function'){\n"
