@@ -187,7 +187,13 @@ def _patch_tooltip():
             win.move(geo.x() + x_offset + 18,
                      geo.y() + geo.height() - win.height() - y_offset)
 
+        # Fade in / out (it used to pop in and vanish)
+        win.setWindowOpacity(0.0)
         win.show()
+        try:
+            glass._fade_window(win, 0.0, 1.0, 180)
+        except Exception:
+            win.setWindowOpacity(1.0)
 
         # Strip the macOS window shadow and force full transparency natively.
         def _native_clear():
@@ -205,7 +211,14 @@ def _patch_tooltip():
             if GLASS:
                 glass.frost_popup_window(win, corner=10)   # rounded blur behind the pill
         QTimer.singleShot(0, _native_clear)
-        QTimer.singleShot(period, win.hide)
+
+        def _fade_out():
+            try:
+                glass._fade_window(win, win.windowOpacity(), 0.0, 220,
+                                   then=lambda: (win.hide(), win.deleteLater()))
+            except Exception:
+                win.hide()
+        QTimer.singleShot(max(0, period - 220), _fade_out)
 
     _orig = getattr(_aqtu, "_janki_orig_tooltip", None) or _aqtu.tooltip
     _aqtu._janki_orig_tooltip = _orig
