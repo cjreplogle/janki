@@ -561,7 +561,15 @@ def _startup():
                 scr = mw.screen() if hasattr(mw, "screen") else None
                 avail = scr.availableGeometry() if scr else None
                 resized_up = False
-                if sys.platform.startswith("win") and avail is not None:
+                # Closed in fullscreen: don't trust any saved/restored geometry —
+                # coming back out of a restored fullscreen left the (frameless)
+                # Windows window confused. Open at a sane default, centred.
+                closed_fs = bool(c.get("last_win_fs")) and avail is not None
+                if closed_fs:
+                    w = int(avail.width() * 0.78)
+                    h = int(avail.height() * 0.82)
+                    resized_up = True
+                elif sys.platform.startswith("win") and avail is not None:
                     # Windows' frameless glass chrome (caption buttons, toolbar pill)
                     # needs real room. Treat a saved size that's too small a FRACTION
                     # of the actual screen the same as "nothing saved" and re-default
@@ -603,6 +611,18 @@ def _startup():
                 # fullscreen / lockdown); open windowed at the saved size instead.
                 if c.get("last_win_max") and not c.get("last_win_fs"):
                     mw.showMaximized()
+                if closed_fs:                       # forget it: next launch is normal
+                    cur = mw.addonManager.getConfig(__name__) or {}
+                    cur["last_win_fs"] = False
+                    mw.addonManager.writeConfig(__name__, cur)
+                if sys.platform.startswith("win"):
+                    try:                            # caption buttons / chrome follow
+                        from .src.platform.win import chrome as _wch
+                        _wch.sync_fullscreen()
+                        if _wch._lights is not None:
+                            _wch._lights.place()
+                    except Exception:
+                        pass
             except Exception as _e:
                 log("win geom restore: %s" % _e)
         QTimer.singleShot(300, _restore_size)
