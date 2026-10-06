@@ -1039,8 +1039,16 @@ class _FullscreenWatcher(QObject):
                 _sync_oled()
                 # fullscreen enter/exit animates (~1s) and rebuilds the frame —
                 # re-assert at several points as it settles (respects OLED).
-                for d in (80, 400, 900, 1400, 2200, 3500):   # slow transitions too
-                    QTimer.singleShot(d, _reapply_native)
+                if _WIN:
+                    # Windows changes state instantly: re-apply now (+ once after the
+                    # resize lands). The late re-applies below are for macOS's
+                    # animated fullscreen — on Windows they re-styled things a second
+                    # or more later (contents "taking a sec to align").
+                    _reapply_native()
+                    QTimer.singleShot(60, _reapply_native)
+                else:
+                    for d in (80, 400, 900, 1400, 2200, 3500):   # slow transitions too
+                        QTimer.singleShot(d, _reapply_native)
                 if sys.platform == "darwin" and \
                         bool(ev.oldState() & Qt.WindowState.WindowFullScreen) and \
                         not mw.isFullScreen():
