@@ -1505,8 +1505,11 @@ def _build_css(cfg, context):
                      "border-radius:8px;transform:translateY(-1px);}"
                      # keyboard focus ring as a box-shadow on the same 8px rounding (the
                      # default outline's corners didn't match the fill → a box inside it)
-                     "html body a.hitem:focus-visible,html body a.hitem.jk-tbsel:focus{"
-                     "outline:none!important;border-radius:8px;"
+                     # any focus state (programmatic focus doesn't match :focus-visible)
+                     "html body a.hitem:focus,html body a.hitem:focus-visible,"
+                     "html body .toolbar a:focus{outline:none!important;}"
+                     "html body a.hitem:focus-visible,html body a.hitem.jk-tbsel{"
+                     "border-radius:8px!important;"
                      "box-shadow:0 0 0 2px rgba(176,203,246,0.75)!important;}</style>"
                      "<script>" + _TOOLBAR_KEYS_JS + "</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
