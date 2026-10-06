@@ -1321,9 +1321,12 @@ def _build_today_list(parent):
         b.setObjectName("icon")
         b.setFixedSize(26, 22)
     day_lbl = QPushButton()
-    day_lbl.setObjectName("icon")
+    day_lbl.setObjectName("dayLbl")              # not #icon: that one is capped at 28 px wide
     day_lbl.setFixedHeight(22)
-    day_lbl.setStyleSheet("font-size:12px;font-weight:600;")
+    day_lbl.setStyleSheet("QPushButton{background:transparent;border:none;border-radius:7px;"
+                          "padding:0 6px;font-size:12px;font-weight:600;color:#c9d4e8;"
+                          "text-align:center;}"
+                          "QPushButton:hover{background:rgba(255,255,255,0.14);color:#fff;}")
     nav.addWidget(prev_b)
     nav.addWidget(day_lbl, 1)
     nav.addWidget(next_b)
