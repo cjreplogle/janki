@@ -778,6 +778,9 @@ def clean_stored_tags():
     return fixed
 
 
+_MAX_Q_TAGS = 60      # more tags than this on one question = noise, not a topic
+
+
 def retag_from_lecture_map():
     """Stamp concept tags onto every imported question by resolving its stored
     `lecture` against the Lectures feature's lecture→tag map (fuzzy). Local, no
@@ -808,9 +811,15 @@ def retag_from_lecture_map():
             if not ek or ek not in m:
                 continue
             leaves = _leaves_from_searches(m[ek].get("searches"))
-            if leaves:
-                q["tags"] = sorted(leaves)
-                changed = True
+            # A lecture whose map entry expands to a huge tag list (a broad wildcard /
+            # whole-subject search) says nothing specific — stamping it made those
+            # questions "match" nearly every card (19k tags on Gene Regulation). Skip
+            # it, and ADD tags rather than replacing what the import/tag map gave.
+            if leaves and len(leaves) <= _MAX_Q_TAGS:
+                new = sorted(set(t for t in (q.get("tags") or []) if len(q.get("tags") or []) <= _MAX_Q_TAGS) | leaves)
+                if new != (q.get("tags") or []):
+                    q["tags"] = new
+                    changed = True
                 tagged += 1
         if changed:
             _rewrite_bank(dir_name, qs)
@@ -1139,6 +1148,36 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
         return sum(lw.get(l, 1.0) for l in ls)
 
     card_word_sets = [_leaf_words(l) for l in leaves]   # precomputed once for fuzzy
+    # The card's deck path(s) (from its deck: keys): a question FILED under a lecture
+    # whose path is that deck's tail (the Practice subdeck mirrors it — set by the
+    # .docx subdeck mapping / tag map) is an explicit deck match even without a
+    # deck: tag on the question (banks imported before those were stored).
+    card_decks = [l[5:] for l in leaves if l.startswith("deck:")]
+    # Names the card is filed/tagged under (deck leaf + tag leaves): a question whose
+    # lecture HEADER agrees with one of them is about the same lecture. Breaks ties
+    # inside a tier — e.g. a urea-cycle question that content-matching mis-tagged
+    # "TCA" no longer beats the real "TCA Cycle and Ox Phos" questions for a TCA card.
+    lec_mod = _lectures()
+    topic_names = set()
+    for cd in card_decks:
+        topic_names.add(cd.split("::")[-1])
+    topic_names |= {l for l in leaves if not l.startswith("deck:")}
+    topic_names = [t for t in topic_names if len(t) >= 4]
+    _hdr_cache = {}
+
+    def _hdr(header):
+        if not header or lec_mod is None or not topic_names:
+            return 0.0
+        h = _hdr_cache.get(header)
+        if h is None:
+            seg = header.split("::")[-1]
+            try:
+                h = max(max(_match_score(lec_mod, t, seg), _match_score(lec_mod, seg, t))
+                        for t in topic_names)
+            except Exception:
+                h = 0.0
+            _hdr_cache[header] = h
+        return h
     scored = []
     for bid, meta in list_banks().items():
         if not meta.get("enabled", True):
@@ -1160,10 +1199,21 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
             score = 0.0
             # Explicit keys (the bank's / tag map's tags and mapped decks) outrank keys
             # Janki inferred from the text (mined concepts, content-assigned lectures).
-            own = _leaf_keys(q.get("tags"))
+            raw_tags = q.get("tags") or []
+            if len(raw_tags) > _MAX_Q_TAGS:
+                # bloated (old over-broad lecture-map stamp): keep only its deck keys
+                own = _leaf_keys([t for t in raw_tags if str(t).startswith("deck:")])
+            else:
+                own = _leaf_keys(raw_tags)
             inferred = _leaf_keys(q.get("mined_tags")) | _leaf_keys(q.get("content_tags"))
             qleaves = own | inferred
             inter_own = leaves & own
+            lec = (q.get("lecture") or "").strip().lower()
+            if card_decks and lec and len(lec) >= 4 and q.get("src_lecture"):
+                for cd in card_decks:
+                    if cd == lec or cd.endswith("::" + lec):
+                        inter_own = inter_own | {"deck:" + cd}
+                        break
             inter = leaves & qleaves
             # Among questions that match by tag/deck, rank the ones about THIS card's
             # content first: every card in a deck shares the same deck match, so on a
@@ -1172,11 +1222,17 @@ def _rank_questions(leaves, tokens, use_text_fallback=True, exclude_qids=None,
                 if (inter or tokens) else 0.0
             # Tiers are far apart (weights capped) so no amount of word similarity or
             # inferred hits can lift a question over one matching by real tag/deck.
+            hb = 6.0 * _hdr(q.get("lecture") or q.get("src_lecture") or "") \
+                if (inter or rel) else 0.0
             if inter_own:
                 score = 100.0 + min(_w(inter_own) + 0.5 * _w(inter - inter_own), 30.0) \
-                    + 4.0 * rel                       # matched tag / deck: decisive
+                    + 4.0 * rel + hb                  # matched tag / deck: decisive
             elif inter:
-                score = 50.0 + min(_w(inter), 30.0) + 4.0 * rel   # inferred concept
+                concept = {l for l in inter if not l.startswith("deck:")}
+                if concept:                       # inferred concept / lecture tag
+                    score = 50.0 + min(_w(concept), 30.0) + 4.0 * rel + hb
+                else:                             # only a content-GUESSED deck: weakest
+                    score = 35.0 + min(_w(inter), 4.0) + 4.0 * rel + hb
             elif not exact_only:
                 fuzz = _fuzzy_leaf_score(card_word_sets, qleaves)
                 if fuzz > 0:
