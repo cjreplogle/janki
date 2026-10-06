@@ -3122,7 +3122,7 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
     op = "1" if showing_reworded else "0"
     pe = "auto" if showing_reworded else "none"
     return (
-        '<div id="jk-rw-bar" style="position:fixed;left:10px;bottom:0;z-index:2147483000;'
+        '<div id="jk-rw-bar" style="position:fixed;left:10px;bottom:8px;z-index:2147483000;'
         'display:flex;gap:8px;align-items:center;transition:opacity .15s;'
         'opacity:%s;pointer-events:%s;">' % (op, pe) + toggle + nxt + '</div>')
 
