@@ -105,6 +105,8 @@ def _arm_launch_fade():
         # "the most recent render's page has loaded" — not a count of loads: a redraw
         # landing mid-load cancels the earlier page's load, which then never reports
         # finished (the count stayed one short until an unrelated reload, ~2 s late)
+        if _ok is False:
+            return                           # an aborted (superseded) load
         state["loaded"] = state.get("pending", 0)
         maybe()
 
