@@ -1036,8 +1036,21 @@ def _class_info(view, e, rect):
     root = view.window().findChild(QFrame, "navRoot") or view.window()
     card = QFrame(root)
     card.setObjectName("infoCard")
+    # buttons styled here: the tray's own button fills are painted per-widget, so new
+    # buttons with just an objectName came out invisible (text only)
     card.setStyleSheet("#infoCard{background:rgba(34,36,44,250);border:1px solid rgba(255,255,255,40);"
-                       "border-radius:10px;} QLabel{background:transparent;color:#e6e9f0;}")
+                       "border-radius:10px;} QLabel{background:transparent;color:#e6e9f0;}"
+                       "QPushButton#icb{background:rgba(255,255,255,0.10);color:#eef2fa;"
+                       "border:1px solid rgba(255,255,255,0.18);border-radius:7px;padding:5px 8px;"
+                       "font-weight:600;}"
+                       "QPushButton#icb:hover{background:rgba(255,255,255,0.16);}"
+                       "QPushButton#icbStudy{background:rgba(96,156,246,0.85);color:#0d1a30;"
+                       "border:none;border-radius:7px;padding:5px 8px;font-weight:700;}"
+                       "QPushButton#icbStudy:hover{background:rgba(130,178,252,0.95);}"
+                       "QPushButton#icbPrac{background:rgba(52,199,89,0.22);color:#c9f7c9;"
+                       "border:1px solid rgba(90,214,124,0.45);border-radius:7px;padding:5px 8px;"
+                       "font-weight:600;}"
+                       "QPushButton#icbPrac:hover{background:rgba(52,199,89,0.32);}")
     v = QVBoxLayout(card)
     v.setContentsMargins(12, 10, 12, 10)
     v.setSpacing(4)
@@ -1080,12 +1093,26 @@ def _class_info(view, e, rect):
     btns = QHBoxLayout()
     btns.setSpacing(6)
     sb = QPushButton("Study")
-    sb.setObjectName("tgl")
+    sb.setObjectName("icbStudy")
     sb.clicked.connect(lambda _c=False: (_class_info_close(), _study_class(e)))
     btns.addWidget(sb, 1)
+    pb = QPushButton("Practice")
+    pb.setObjectName("icbPrac")
+
+    def _prac(_c=False):
+        _class_info_close()
+        _hide()
+        _restore_main()
+        try:
+            from ..features import calendar_view
+            calendar_view.practice_event(e)
+        except Exception as exc:
+            log(f"tray-nav class practice: {exc}")
+    pb.clicked.connect(_prac)
+    btns.addWidget(pb, 1)
     if e.get("url"):
         lb_ = QPushButton("Open in LMS")
-        lb_.setObjectName("tgl")
+        lb_.setObjectName("icb")
 
         def _lms(_c=False, u=e["url"]):
             from aqt.qt import QDesktopServices, QUrl
