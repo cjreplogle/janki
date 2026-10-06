@@ -2300,8 +2300,30 @@ class GlassSettings(QDialog):
                         pass
             self._lk_box.currentIndexChanged.connect(_on_lk)
             _lk_hint_text()
+            # The Windows "patch" button: clears a crash-guard lock, (re)installs the
+            # See-through hook when that look is chosen, and restarts.
+            self._lk_fix = QPushButton("Re-apply glass")
+            self._lk_fix.setToolTip("Clears a glass lock left by an interrupted launch, "
+                                    "reinstalls the see-through hook if needed, and "
+                                    "restarts Anki.")
+
+            def _on_lk_fix():
+                from aqt.utils import askUser, showWarning
+                _jc.reset_win_glass_failure()
+                self.cfg["win_glass"] = True
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                sw = _pb.render_mode() == "software"
+                if sw and not _pb.install():
+                    showWarning("Couldn't set up the see-through start-up hook on this "
+                                "Anki install.", parent=self)
+                    return
+                if askUser("Glass is re-applied. Restart Anki now?", parent=self,
+                           title="Janki"):
+                    _restart_anki(sw)
+            self._lk_fix.clicked.connect(_on_lk_fix)
             _lk_row.addWidget(_lk_lbl)
             _lk_row.addWidget(self._lk_box)
+            _lk_row.addWidget(self._lk_fix)
             _lk_row.addStretch()
             gen_lay.addLayout(_lk_row)
             gen_lay.addWidget(_lk_hint)
