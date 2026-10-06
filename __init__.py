@@ -1100,6 +1100,9 @@ def _startup():
                     QTimer.singleShot(5000, _ask_restart)
             else:
                 QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
+                # a clean quit isn't a crash (quitting within the first few seconds —
+                # e.g. relaunching quickly — used to trip the guard and drop glass)
+                mw.app.aboutToQuit.connect(stock_selfheal.confirm_glass_ok)
 
         _bt.mark("glass setup")
         # ACTIVE = features (run in BOTH editions — safe edition has these without
