@@ -1502,7 +1502,12 @@ def _build_css(cfg, context):
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
         parts.append("<style>html body a.hitem.jk-tbsel{background:rgba(255,255,255,.12)!important;"
-                     "border-radius:8px;transform:translateY(-1px);}</style>"
+                     "border-radius:8px;transform:translateY(-1px);}"
+                     # keyboard focus ring as a box-shadow on the same 8px rounding (the
+                     # default outline's corners didn't match the fill → a box inside it)
+                     "html body a.hitem:focus-visible,html body a.hitem.jk-tbsel:focus{"
+                     "outline:none!important;border-radius:8px;"
+                     "box-shadow:0 0 0 2px rgba(176,203,246,0.75)!important;}</style>"
                      "<script>" + _TOOLBAR_KEYS_JS + "</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
         parts.append("<style>\nbody #header {\n" + props + "}\n</style>\n")
