@@ -81,6 +81,11 @@ def _win_glass_window(w, extra_alpha=0.0, small=False, sel=None):
             w._jk_dwm_key = key
             dwm.apply(key[0], material=key[1], blur=blur, tint=(r, g, b),
                       dark=not key[4], small_corners=small)
+        # dwm.apply rounds the corners; a window filling the screen keeps them square
+        # (re-applying glass at the end of the OLED fade re-rounded them, so whatever
+        # was behind peeked through the corners)
+        if w is mw and (mw.isFullScreen() or mw.isMaximized()):
+            dwm.set_fullscreen(int(w.winId()), True)
         if _oled_active and w is mw:
             r = g = b = 0                      # OLED: true black, not the tint
             a = 255
