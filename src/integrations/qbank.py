@@ -6298,6 +6298,8 @@ def map_questions_to_subdecks(qs, root_did, min_score=_DECK_MATCH_MIN):
 
     best_for, matched = {}, 0
     for q in qs:
+        if q.get("src_lecture"):
+            continue                           # already placed (explicit tag map)
         header = (q.get("lecture") or "").strip()
         if not header:
             continue
@@ -6422,6 +6424,66 @@ def _content_map(col, subs, qs, dominant_tags):
     return placed
 
 
+def find_tag_map(docx_path):
+    """A `<name>_tag_map.csv` beside the .docx (also tolerates a numbered copy like
+    Bank_2.docx → Bank_tag_map.csv). None if there isn't one."""
+    d, base = os.path.split(os.path.splitext(docx_path)[0])
+    for stem in (base, re.sub(r"[_ ]\d+$", "", base)):
+        p = os.path.join(d, stem + "_tag_map.csv")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def apply_tag_map(qs, csv_path, root_name=None):
+    """Apply an explicit question→deck/tag map. CSV columns: Q (question number),
+    a deck column (full deck path), optionally a tag column and the Stem (a stem prefix
+    guards against a map made for a different bank/order). The deck becomes the
+    question's Practice subdeck path below `root_name` (or below the decks' shared
+    prefix); the tag is added to the question. Returns rows applied."""
+    import csv
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return 0
+    cols = list(rows[0].keys())
+    qcol = next((c for c in cols if c.strip().lower() in ("q", "#", "question", "num", "number")), cols[0])
+    dcol = next((c for c in cols if "deck" in c.lower()), None)
+    tcols = [c for c in cols if "tag" in c.lower()]
+    scol = next((c for c in cols if c.strip().lower() == "stem"), None)
+    decks = [(r.get(dcol) or "").strip() for r in rows] if dcol else []
+    if not root_name and decks:
+        parts = [d.split("::") for d in decks if d]
+        common = []
+        for seg in zip(*parts):
+            if len(set(seg)) != 1:
+                break
+            common.append(seg[0])
+        if parts and all(len(p) == len(common) for p in parts):
+            common = common[:-1]               # every row in one deck → keep its leaf
+        root_name = "::".join(common)
+    byid = {str(q.get("id", "")).lstrip("q"): q for q in qs}
+    n = 0
+    for r in rows:
+        q = byid.get(str(r.get(qcol, "")).strip().lstrip("qQ"))
+        if q is None:
+            continue
+        st = (r.get(scol) or "").strip().lower()[:30] if scol else ""
+        if st and st not in (q.get("stem") or "").lower():
+            continue                           # map row is for a different question
+        deck = (r.get(dcol) or "").strip() if dcol else ""
+        if deck:
+            rel = deck[len(root_name) + 2:] if root_name and deck.startswith(root_name + "::") else deck
+            q["src_lecture"] = q.get("lecture") or "(none)"
+            q["lecture"] = rel
+        tags = {t for c in tcols for t in (r.get(c) or "").split() if t}
+        if tags:
+            q["tags"] = sorted(set(q.get("tags") or []) | tags)
+        if deck or tags:
+            n += 1
+    return n
+
+
 def _subdeck_roots():
     """Decks that have subdecks, for the map-to picker (Practice banks excluded)."""
     out = []
@@ -6472,6 +6534,14 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
         combo.addItem(name, did)
     row.addWidget(combo, 1)
     lay.addLayout(row)
+    tag_map = find_tag_map(path)
+    from aqt.qt import QCheckBox
+    use_map = QCheckBox("Use tag map: %s" % os.path.basename(tag_map)) if tag_map else None
+    if use_map is not None:
+        use_map.setChecked(True)
+        use_map.setToolTip("Questions listed in the CSV go exactly where it says (deck + "
+                           "tag); anything it doesn't cover falls back to matching.")
+        lay.addWidget(use_map)
     hint = QLabel("Each question's “Lecture:” header is matched to a subdeck name; matched "
                   "questions land in the same subdeck path under Practice and link to "
                   "those cards' tags.")
@@ -6488,6 +6558,13 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
         return
     map_did = combo.currentData() or 0
     mapped = None
+    from_map = 0
+    if use_map is not None and use_map.isChecked():
+        try:
+            root_nm = mw.col.decks.name(map_did) if map_did else None
+            from_map = apply_tag_map(qs, tag_map, root_nm)
+        except Exception as e:
+            showWarning("Couldn't read the tag map:\n\n%s" % e)
     if map_did:
         try:
             mapped = map_questions_to_subdecks(qs, map_did)
@@ -6505,7 +6582,8 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     _sfx_loaded()
     tooltip("Imported “%s” (%d questions); %s%d deck-tagged from headers, %d concept-"
             "matched from text." % (man.get("name"), len(qs),
-                                    ("%d/%d mapped to subdecks; " % mapped) if mapped else "",
+                                    (("%d from tag map; " % from_map) if from_map else "")
+                                    + (("%d/%d mapped to subdecks; " % mapped) if mapped else ""),
                                     deck_tagged, mined))
     if on_done:
         try:
