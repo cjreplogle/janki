@@ -1014,25 +1014,19 @@ def _build_css(cfg, context):
         # doesn't mark top-level rows, but they're the only ones whose name cell has no
         # leading &nbsp; indent — tag those, then pad every top-level row after the
         # first. Runs after all Python-side rewrites (e.g. the Practice view's banks).
-        # Pre-paint: apply the remembered width + fixed columns synchronously while the
-        # page is still parsing, so the first frame after a +/− redraw is already
-        # laid out (the width script below used to pin it a frame later → a jump).
-        try:
-            from ..features import practice as _prv
-            _view = "p" if getattr(_prv, "_practice_view", False) else "d"
-        except Exception:
-            _view = "d"
-        parts.append(
-            "<script>(function(){try{var w=parseFloat(sessionStorage.getItem('jkDeckW:%s3'))||0;"
-            "var T='body center > table:first-of-type';"
-            "var css=T+'{table-layout:fixed!important;max-width:calc(100vw - 24px)!important;}'"
-            "+T+' th.count,'+T+' tr.deck>td:not(.decktd):not(.opts)'"
-            "+'{width:7.2em!important;min-width:7.2em!important;max-width:7.2em!important;"
-            "box-sizing:border-box!important;}'"
-            "+T+' td.opts,'+T+' th:last-child:not(.count){width:2.4em!important;}'"
-            "+(w?T+'{width:'+w+'px!important;}':'');"
-            "document.write('<style id=jk-prepaint>'+css+'</style>');}catch(e){}})();</script>\n"
-            % _view)
+        # The fixed table width + pinned columns + scrollbar gutter as a STATIC style
+        # (the script below applies them too, but only after the page has painted
+        # once — after a +/− redraw that first frame was the narrow natural width)
+        parts.append("<style>html{scrollbar-gutter:stable both-edges;}"
+                     "body center>table:first-of-type{table-layout:fixed;box-sizing:border-box;"
+                     "width:min(960px,calc(100vw - 24px))!important;}"
+                     "body center>table:first-of-type th.count,"
+                     "body center>table:first-of-type tr.deck>td:not(.decktd):not(.opts)"
+                     "{width:7.2em;min-width:7.2em;max-width:7.2em;box-sizing:border-box;}"
+                     "body center>table:first-of-type td.decktd{overflow-wrap:anywhere;}"
+                     "body center>table:first-of-type td.decktd a.deck{white-space:normal;}"
+                     "body center>table:first-of-type td.opts{width:2.4em;min-width:2.4em;}"
+                     "</style>\n")
         parts.append("<script>" + _DECK_WIDTH_JS + "</script>\n")   # before the dropdown
         # Update available → a small pill bottom-right of the deck list.
         try:
