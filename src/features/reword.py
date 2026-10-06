@@ -2458,6 +2458,9 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     except Exception:
         pass
     v = QVBoxLayout(dlg)
+    if getattr(dlg, "_jk_expanded", False):         # content sits in the titlebar row
+        _m = v.contentsMargins()
+        v.setContentsMargins(_m.left(), 34, _m.right(), _m.bottom())
     lbl = QLabel(
         "Builds a prompt that asks any chat model to write alternate phrasings for the cards in "
         "the decks you check below. Paste it into Claude/ChatGPT — it returns a "
@@ -2509,6 +2512,9 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     hv.addStretch()
     scroll.setWidget(host)
     v.addWidget(scroll)
+    # A see-through (glass) window doesn't erase what a scroll blits past the list's
+    # edge — rows smeared over the text below. Repaint the whole window on scroll.
+    scroll.verticalScrollBar().valueChanged.connect(lambda *_a: dlg.update())
 
     est = QLabel(""); est.setStyleSheet("color:#9aa0aa; margin-top:4px;")
     v.addWidget(est)

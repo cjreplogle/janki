@@ -1416,6 +1416,9 @@ def _generate_map_from_los(day_offset=0, parent=None, on_map_ready=None,
     except Exception:
         pass
     lay = QVBoxLayout(d)
+    if getattr(d, "_jk_expanded", False):           # content sits in the titlebar row
+        _m = lay.contentsMargins()
+        lay.setContentsMargins(_m.left(), 34, _m.right(), _m.bottom())
     lay.addWidget(QLabel(
         "Parsed <b>%d lectures</b> from “%s”." %
         (len(lectures), os.path.basename(path))))
