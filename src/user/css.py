@@ -97,12 +97,15 @@ def _arm_launch_fade():
     def maybe():
         if (state.get("startup_done")
                 and state.get("pending", 0) >= state.get("refreshes", 0)
-                and state["loaded"] >= state.get("pending", 0)
+                and state["loaded"] >= state.get("pending", 0)   # LATEST render loaded
                 and mw.isVisible()):
             QTimer.singleShot(0, start)      # after the final page's first paint
 
     def on_load(_ok=True):
-        state["loaded"] += 1
+        # "the most recent render's page has loaded" — not a count of loads: a redraw
+        # landing mid-load cancels the earlier page's load, which then never reports
+        # finished (the count stayed one short until an unrelated reload, ~2 s late)
+        state["loaded"] = state.get("pending", 0)
         maybe()
 
     state["maybe"] = maybe
@@ -144,7 +147,9 @@ def _count_launch_refreshes():
         orig = DeckBrowser.refresh
 
         def refresh(self, *a, **k):
-            if not _LAUNCH_FADE.get("started"):
+            # only startup's own refreshes: the one the background launch sync asks
+            # for when it finishes (seconds later) must not keep the window hidden
+            if not _LAUNCH_FADE.get("started") and not _LAUNCH_FADE.get("startup_done"):
                 _LAUNCH_FADE["refreshes"] = _LAUNCH_FADE.get("refreshes", 0) + 1
             return orig(self, *a, **k)
         refresh._jk_lf = True
