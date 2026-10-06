@@ -2235,10 +2235,10 @@ class GlassSettings(QDialog):
                  "the CPU — a bit slower."),
                 ("See-through, clear", "software", "off",
                  "Truly clear window, no blur. Renders on the CPU — a bit slower."),
-                ("Wallpaper blur (fast)", "gpu", "wallpaper",
+                ("Wallpaper blur", "gpu", "wallpaper",
                  "Uses the graphics card. Janki paints your blurred wallpaper behind "
                  "the window — looks like glass, smoothest."),
-                ("Live blur (fast)", "gpu", "live",
+                ("Live blur", "gpu", "live",
                  "Uses the graphics card. Janki blurs the windows behind Anki "
                  "(Anki is hidden from screenshots and screen sharing while on)."),
                 ("Solid", "gpu", "off", "No glass — a plain dark window."),
@@ -2255,8 +2255,17 @@ class GlassSettings(QDialog):
             _lk_row = QHBoxLayout()
             _lk_lbl = QLabel("Window glass")
             self._lk_box = _QCB()
-            for _t, _r, _b, _d in _looks:
-                self._lk_box.addItem(_t)
+            # Short tags so the right pick is obvious (in a VM Windows can't blur, so
+            # Live is the one that shows what's behind)
+            _vm = False
+            try:
+                _vm = _dwm.is_virtual_machine()
+            except Exception:
+                pass
+            _tags = (["recommended on a PC", "", "fastest", "best in a VM", ""] if _vm else
+                     ["recommended", "", "fastest", "for VMs", ""])
+            for (_t, _r, _b, _d), _tg in zip(_looks, _tags):
+                self._lk_box.addItem(_t + ("  —  " + _tg if _tg else ""))
                 self._lk_box.setItemData(self._lk_box.count() - 1, _d,
                                          Qt.ItemDataRole.ToolTipRole)
             self._lk_box.setCurrentIndex(_cur_look())
