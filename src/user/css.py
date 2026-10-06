@@ -1183,6 +1183,10 @@ def _build_css(cfg, context):
         parts.append("<style>\nbody center > table:first-of-type {\n" + props
                      + "  overflow:hidden;\n}\n</style>\n")
         parts.append("<style>#studiedToday,#sts-table{display:none!important;}</style>\n")
+        # Even spacing: Anki's deck page starts with a 2em body margin + 1rem table
+        # padding (~45px), about double the gap above the toolbar pill. Match it.
+        parts.append("<style>html body{margin-top:14px!important;}"
+                     "body center>table:first-of-type{padding-top:6px!important;}</style>\n")
         # A little more air between WHOLE decks (subdeck spacing unchanged). Anki
         # doesn't mark top-level rows, but they're the only ones whose name cell has no
         # leading &nbsp; indent — tag those, then pad every top-level row after the
