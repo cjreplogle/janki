@@ -1137,6 +1137,13 @@ def _build_css(cfg, context):
             "  box-shadow: 0 1px 3px rgba(0,0,0,0.45) !important; }\n"
             "body #outer button:hover, body button:hover {\n"
             "  background: rgba(0,0,0,0.40) !important; }\n"
+            # Keyboard focus: a ring drawn as box-shadow (follows the button's own
+            # rounding exactly). The default outline's corners didn't match, so the
+            # dark button fill showed as a box inside the ring.
+            "body #outer button:focus-visible, body button:focus-visible {\n"
+            "  outline: none !important;\n"
+            "  box-shadow: 0 0 0 2px rgba(176,203,246,0.75), 0 1px 3px rgba(0,0,0,0.45)"
+            " !important; }\n"
             # Again/Hard/Good/Easy: tinted background + text color (data-ease 1/2/3/4)
             # Background tint is visible on pure black (OLED) and subtle on glass.
             "body #outer button[data-ease='1']{\n"
