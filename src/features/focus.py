@@ -290,7 +290,7 @@ def _freeze(on: bool, exiting: bool = False) -> None:
             # "exit" (default): only when the bars come BACK — the card area shifts
             # down and Qt shows its old frame lower for one frame (seen in a 60 fps
             # recording); entering doesn't need it. True = both ways, False = never.
-            mode = _cfg().get("focus_freeze", "exit")
+            mode = _cfg().get("focus_freeze", False)   # neither Qt nor AppKit could hold the web view's frame
             if not (mode is True or (mode == "exit" and exiting)):
                 return
             if not _frozen["on"]:
