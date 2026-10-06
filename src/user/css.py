@@ -1140,6 +1140,7 @@ def _build_css(cfg, context):
             # Keyboard focus: a ring drawn as box-shadow (follows the button's own
             # rounding exactly). The default outline's corners didn't match, so the
             # dark button fill showed as a box inside the ring.
+            "body #outer button:focus, body button:focus { outline: none !important; }\n"
             "body #outer button:focus-visible, body button:focus-visible {\n"
             "  outline: none !important;\n"
             "  box-shadow: 0 0 0 2px rgba(176,203,246,0.75), 0 1px 3px rgba(0,0,0,0.45)"
