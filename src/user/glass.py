@@ -1667,8 +1667,36 @@ def _win_frameless_dialog(dialog) -> None:
                     btn.move(obj.width() - btn.width(), 0)
                     btn.raise_()
                 return False
+        # A backing plate in the tint at ~92%: the DWM shadow/frame extension turns the
+        # whole client see-through and the dialog's own background is transparent, so
+        # text sat straight on whatever was behind — hard to read.
+        from aqt.qt import QWidget, QPainter
+
+        class _Plate(QWidget):
+            def paintEvent(self, _e):
+                try:
+                    r, g, b = _tint_rgb(_cfg())
+                except Exception:
+                    r, g, b = 24, 25, 30
+                p = QPainter(self)
+                p.fillRect(self.rect(), QColor(r, g, b, int(255 * float(
+                    _cfg().get("win_dialog_opacity", 0.92)))))
+                p.end()
+        plate = _Plate(dialog)
+        plate.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        dialog._jk_plate = plate
+
+        class _Place(QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+                    plate.setGeometry(0, 0, obj.width(), obj.height())
+                    plate.lower()
+                    btn.move(obj.width() - btn.width(), 0)
+                    btn.raise_()
+                return False
         dialog._jk_close_place = _Place(dialog)
         dialog.installEventFilter(dialog._jk_close_place)
+        plate.show()
         btn.show()
     except Exception as exc:
         log(f"win frameless dialog: {exc}")
