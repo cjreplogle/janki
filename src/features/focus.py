@@ -179,6 +179,7 @@ def _focus_chrome():
 
 _FOCUS_ANIM_MS = 220        # card slide duration
 _FOCUS_FADE_MS = 220        # chrome fade/slide out (the hide waits for it)
+_DIP_MS = 90               # card dips out this fast before the bars move
 _FOCUS_IN_MS = 370          # chrome fade/slide back in (matches the Calendar entry)
 
 
@@ -279,13 +280,18 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         "window.removeEventListener('resize',go);if(t)clearTimeout(t);"
         "var el=document.getElementById('qa')||document.body.firstElementChild;"
         "try{" + (pre or "") + "}catch(_){}" + mutate +
-        "if(!el||P.first==null)return;"
+        "var q=document.getElementById('qa');"
+        "function show(){if(q){q.style.transition='';q.style.opacity='';}}"
+        "if(!el||P.first==null){show();return;}"
         "var last=el.getBoundingClientRect().top;"
         "var dy=(P.first-last)+(" + str(int(offset_px)) + ");"
-        "if(Math.abs(dy)<1)return;"
-        "try{el.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
+        # the card was dipped out before the bars moved (hides the one stale frame
+        # Qt shows at the new geometry); it fades back in as it slides home
+        "try{var o0=q?parseFloat(getComputedStyle(q).opacity)||0:1;show();"
+        "el.animate([{transform:'translateY('+dy+'px)',opacity:o0},"
+        "{transform:'translateY(0)',opacity:1}],"
         "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
-        "catch(e){}}"
+        "catch(e){show();}}"
         "if(window.innerHeight!==P.h)go();"
         "else{window.addEventListener('resize',go);t=setTimeout(go,250);}})()"
     )
@@ -303,6 +309,24 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         web.page().runJavaScript(arm, after_arm)
     except Exception:
         after_arm()
+
+
+def _dip_card(ms: int) -> None:
+    """Fade the card out quickly before the bars collapse/restore — the stale frame
+    (old content at the new position) then happens while it's invisible."""
+    web = getattr(mw, "web", None)
+    if web is None:
+        return
+    try:
+        web.eval("(function(){var q=document.getElementById('qa');if(!q)return;"
+                 "if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)')"
+                 ".matches)return;"
+                 "q.style.transition='opacity " + str(ms) + "ms ease';"
+                 "q.style.opacity='0';"
+                 "setTimeout(function(){if(q.style.opacity==='0'){q.style.transition='';"
+                 "q.style.opacity='';}},1500);})()")    # safety: never stay hidden
+    except Exception:
+        pass
 
 
 def reassert_chrome_hidden() -> None:
@@ -659,6 +683,7 @@ def _focus_set_hidden(hidden: bool) -> None:
         # THEN collapse its height and slide the card to centre.
         for wv in chrome:
             _fade_chrome(wv, False)
+        QTimer.singleShot(max(0, _FOCUS_FADE_MS - _DIP_MS), lambda: _focus_hidden and _dip_card(_DIP_MS))
 
         def _after_fade(off=toolbar_h):
             if not _focus_hidden:      # toggled back during the fade — abort
@@ -704,11 +729,18 @@ def _focus_set_hidden(hidden: bool) -> None:
             _reclaim_central_layout()
             for wv in chrome:
                 _fade_chrome(wv, True)
-        # record → restore the bars → un-centre + slide once the resize lands
-        _focus_flip_around(False, -toolbar_h, (
+        # dip the card → record → restore the bars → un-centre + slide in on resize
+        _dip_card(_DIP_MS)
+
+        def _go(th=toolbar_h):
+            if _focus_hidden:              # toggled again meanwhile
+                return
+            _focus_flip_around(False, -th, _show_pre, _restore)
+        QTimer.singleShot(_DIP_MS + 10, _go)
+        _show_pre = (
             "window.__jankiFocus=false;" + _CORE_RESTORE +
             "var _b=document.body;if(_b){_b.style.removeProperty('justify-content');"
-            "_b.style.removeProperty('padding-top');}"), _restore)
+            "_b.style.removeProperty('padding-top');}")
 
     # Hide the card-timer progress bar in Focus Mode (restore it when off).
     if card_timer._card_timer_instance is not None:
