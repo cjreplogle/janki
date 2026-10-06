@@ -571,7 +571,7 @@ def _detail_html(e):
                 "<div class='jkd-secs'>"
                 "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
                 "Study all cards</button>"
-                "<button class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
+                "<button id='jkd-susp' class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
                 "Unsuspend cards for this lecture</button></div>"
                 "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
                 "and suspends them again afterwards.</div>"
@@ -1180,25 +1180,34 @@ def _now_min():
     return t.hour * 60 + t.minute
 
 
-def _spark_svg(vals, w=96, h=30):
+def _spark_svg(vals, w=96, h=42):
     """A tiny smoothed line of daily reviews (last 14 days) — plain SVG, no script."""
     if not vals:
         return ""
     top = max(vals) or 1
     n = len(vals)
-    pts = [(2 + i * (w - 4) / (n - 1), h - 3 - (v / top) * (h - 8)) for i, v in enumerate(vals)]
+    ph = h - 12                                          # plot height; the day axis sits below
+    pts = [(2 + i * (w - 4) / (n - 1), ph - 3 - (v / top) * (ph - 8)) for i, v in enumerate(vals)]
     d = "M%.1f,%.1f" % pts[0]
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):            # smooth: midpoint curves
         mx = (x0 + x1) / 2
         d += " C%.1f,%.1f %.1f,%.1f %.1f,%.1f" % (mx, y0, mx, y1, x1, y1)
-    area = d + " L%.1f,%d L%.1f,%d Z" % (pts[-1][0], h - 1, pts[0][0], h - 1)
+    area = d + " L%.1f,%d L%.1f,%d Z" % (pts[-1][0], ph - 1, pts[0][0], ph - 1)
+    ticks = "".join("<line x1='%.1f' y1='%d' x2='%.1f' y2='%d'/>" % (pts[i][0], ph, pts[i][0], ph + 2)
+                    for i in (0, n // 2, n - 1))
+    axis = ("<g stroke='rgba(255,255,255,.25)' stroke-width='1'>"
+            "<line x1='2' y1='%d' x2='%d' y2='%d'/>%s</g>"
+            "<g fill='rgba(255,255,255,.5)' font-size='8' font-family='-apple-system,sans-serif'>"
+            "<text x='2' y='%d'>%dd</text><text x='%.1f' y='%d' text-anchor='middle'>%dd</text>"
+            "<text x='%d' y='%d' text-anchor='end'>today</text></g>"
+            % (ph, w - 2, ph, ticks, h - 1, -(n - 1), pts[n // 2][0], h - 1, -(n - 1 - n // 2), w - 2, h - 1))
     tot = sum(vals)
     return ("<svg class='jkw-spark' width='%d' height='%d' viewBox='0 0 %d %d'>"
             "<title>%d review%s in the last 14 days</title>"
             "<path d='%s' fill='rgba(156,188,243,.14)' stroke='none'/>"
             "<path d='%s' fill='none' stroke='%s' stroke-width='1.6' stroke-linecap='round'/>"
-            "</svg>" % (w, h, w, h, tot, "" if tot == 1 else "s", area, d,
-                        "#9cbcf3" if tot else "rgba(255,255,255,.25)"))
+            "%s</svg>" % (w, h, w, h, tot, "" if tot == 1 else "s", area, d,
+                        "#9cbcf3" if tot else "rgba(255,255,255,.25)", axis))
 
 
 def _date_label(d):
@@ -1449,7 +1458,7 @@ def study_event(e, fams=None, which="all"):
         tooltip("Couldn't start studying (%s)." % ex)
 
 
-def _unsuspend_detail():
+def _unsuspend_detail(suspend=False):
     from aqt.utils import tooltip
     from aqt.operations import CollectionOp
     from ..integrations import lectures
@@ -1461,12 +1470,17 @@ def _unsuspend_detail():
     box = {"n": 0}
 
     def op(col):
+        if suspend:
+            ids = _cids(col, q, "-is:suspended")
+            box["n"] = len(ids)
+            return col.sched.suspend_cards(ids)
         ids = _cids(col, q, "is:suspended")
         box["n"] = len(ids)
         return col.sched.unsuspend_cards(ids)
 
     def ok(_c):
-        tooltip("Unsuspended %d card(s) for “%s”." % (box["n"], m["display"]))
+        tooltip("%s %d card(s) for “%s”." % ("Suspended" if suspend else "Unsuspended",
+                                              box["n"], m["display"]))
         try:
             from . import sfx
             sfx.play("loaded")
@@ -1873,7 +1887,13 @@ _JS = """<script>(function(){
    var c=document.getElementById('jkd-counts');if(c&&pendC!=null){c.innerHTML=pendC;pendC=null;}
    var x=document.getElementById('jkd-st-act'),y=document.getElementById('jkd-st-sus');
    if(x&&y&&pendA){x.textContent='Study active cards ('+pendA[0]+')';
-     y.textContent='Study all cards ('+pendA[1]+')';pendA=null;}}
+     y.textContent='Study all cards ('+pendA[1]+')';
+     // nothing left suspended → the button flips to suspending the lecture again
+     var z=document.getElementById('jkd-susp');
+     if(z){var sus=pendA[1]>0&&pendA[1]===pendA[0];
+       z.textContent=sus?'Suspend cards for this lecture':'Unsuspend cards for this lecture';
+       z.setAttribute('onclick',"pycmd('janki:cal:det:"+(sus?'suspend':'unsuspend')+"')");}
+     pendA=null;}}
  window.jkcCounts=function(h,a,s){if(h!=null)pendC=h;if(a!=null)pendA=[a,s];applyCounts();};
  // Safety net: a class page still showing "…" asks for its counts again (up to 8×)
  var cWatch=null,cTries=0;
@@ -2424,6 +2444,8 @@ def on_js_message(handled, message, context):
             study_event(_shown[_detail], _fams_on, which)
         elif cmd == "det:unsuspend":
             _unsuspend_detail()
+        elif cmd == "det:suspend":
+            _unsuspend_detail(suspend=True)
         elif cmd == "det:tags":
             from ..integrations import lectures
             _show_tags(lectures.match_event(_shown[_detail]["summary"]))
@@ -2680,9 +2702,17 @@ def _patch_bottom():
                 return orig(self)
             # inside Weak areas the bar stays empty (no Identify / Load buttons)
             buf = "" if _detail == WEAK else (
-                "<button style='font-size:1.15em !important;padding:7px 22px !important;"
+                # hover feedback that stays in place (a lift got clipped by the bar's edge)
+                "<style>.jk-sp{transition:background-color .15s ease,border-color .15s ease,"
+                "box-shadow .15s ease !important;}"
+                ".jk-sp:hover{background:rgba(255,255,255,.16) !important;"
+                "border-color:#fff !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),"
+                "inset 0 0 14px rgba(156,188,243,.35) !important;}"
+                ".jk-sp:active{background:rgba(255,255,255,.08) !important;"
+                "transform:scale(.97) !important;}</style>"
+                "<button class='jk-sp' style='font-size:1.15em !important;padding:7px 22px !important;"
                 "border:1px solid rgba(255,255,255,.75) !important;border-radius:999px !important;"
-                "font-weight:600 !important;transform:none !important;' "
+                "font-weight:600 !important;transform:none;' "
                 "onclick='pycmd(\"janki:cal:weak\");'>"
                 "Study Progress</button>")
             self.bottom.draw(

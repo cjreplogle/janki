@@ -38,11 +38,23 @@ REVIEW = {"reveal", "again", "hard", "good", "easy", "right", "wrong", "timeup"}
 _fx = {}
 
 
+# Types for the tray's right-click levels (key, label, preview sound).
+CATS = (("nav", "Navigation", "select"), ("review", "Reviews", "good"),
+        ("practice", "Practice", "right"), ("timer", "Timer", "timeup"))
+
+
+def _cat(name):
+    if name in ("right", "wrong"):
+        return "practice"
+    if name == "timeup":
+        return "timer"
+    return "review" if name in REVIEW else "nav"
+
+
 def _cat_gain(c, name):
-    """Per-type level (tray volume → right-click): 'review' sounds vs 'nav' sounds."""
-    cat = "review" if name in REVIEW else "nav"
+    """Per-type level (tray volume → right-click), see CATS."""
     try:
-        return float((c.get("sfx_cat_gain") or {}).get(cat, 100)) / 100.0
+        return float((c.get("sfx_cat_gain") or {}).get(_cat(name), 100)) / 100.0
     except Exception:
         return 1.0
 # Played on every card while studying — kept at half level so they don't wear.

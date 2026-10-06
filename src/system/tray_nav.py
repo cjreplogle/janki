@@ -1050,56 +1050,66 @@ def _build_practice_list(parent):
     return box
 
 
-def _sound_types_popup(anchor):
-    """Small glass panel under the speaker: a slider per type of sound (0–200 %)."""
+def _sound_types_panel(parent):
+    """Inline levels under the header (right-click the speaker): Master, then one slider
+    per type of sound (0–200 %). Inline, not a popup window — a Qt popup opened from the
+    non-activating tray panel closes the instant it opens on macOS."""
     from aqt.qt import QSlider
-    pop = QFrame(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-    pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-    pop._jk_tray_child = True                 # clicks here don't dismiss the tray
-    pop.setStyleSheet("QFrame{background:rgba(30,32,40,245);border:1px solid rgba(255,255,255,40);"
-                      "border-radius:10px;} QLabel{color:#e6e9f0;background:transparent;border:none;}")
-    v = QVBoxLayout(pop)
-    v.setContentsMargins(12, 10, 12, 10)
-    v.setSpacing(6)
-    gains = dict(_cfg().get("sfx_cat_gain") or {})
-    for key, label in (("nav", "Navigation"), ("review", "Reviews")):
+    box = QFrame(parent)
+    box.setObjectName("sndBox")
+    box.setStyleSheet("#sndBox{background:rgba(255,255,255,14);border-radius:8px;}"
+                      "QLabel{background:transparent;}")
+    v = QVBoxLayout(box)
+    v.setContentsMargins(10, 6, 10, 6)
+    v.setSpacing(2)
+    from ..features import sfx
+    c = _cfg()
+    gains = dict(c.get("sfx_cat_gain") or {})
+    rows = [("__master", "Master", int(c.get("sfx_volume", 0)), 100, "select")]
+    rows += [(k, lab, int(gains.get(k, 100)), 200, snd) for k, lab, snd in sfx.CATS]
+    for key, label, cur, hi, snd in rows:
         row = QHBoxLayout()
         lb = QLabel(label)
-        lb.setFixedWidth(78)
+        lb.setFixedWidth(72)
         row.addWidget(lb)
         sl = QSlider(Qt.Orientation.Horizontal)
-        sl.setRange(0, 200)
-        sl.setValue(int(gains.get(key, 100)))
-        sl.setFixedWidth(130)
+        sl.setRange(0, hi)
+        sl.setValue(cur)
         val = QLabel()
-        val.setFixedWidth(38)
+        val.setFixedWidth(36)
+        val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         def changed(x, key=key, val=val, save=True):
             val.setText("off" if x == 0 else "%d%%" % x)
             if not save:
                 return
             cc = mw.addonManager.getConfig(__name__) or {}
-            g = dict(cc.get("sfx_cat_gain") or {})
-            g[key] = int(x)
-            cc["sfx_cat_gain"] = g
+            if key == "__master":
+                cc["sfx_volume"] = int(x)
+                if x > 0:
+                    cc["sfx_muted"] = False
+            else:
+                g = dict(cc.get("sfx_cat_gain") or {})
+                g[key] = int(x)
+                cc["sfx_cat_gain"] = g
             mw.addonManager.writeConfig(__name__, cc)
+            if box._sync:
+                box._sync()
 
-        def preview(key=key):
+        def preview(snd=snd):
             try:
-                from ..features import sfx
-                sfx.play("good" if key == "review" else "select", force=True)
+                sfx.play(snd, force=True)
             except Exception:
                 pass
         sl.valueChanged.connect(changed)
         sl.sliderReleased.connect(preview)
         changed(sl.value(), save=False)
-        row.addWidget(sl)
+        row.addWidget(sl, 1)
         row.addWidget(val)
         v.addLayout(row)
-    pop.adjustSize()
-    g = anchor.mapToGlobal(anchor.rect().bottomRight())
-    pop.move(g.x() - pop.width(), g.y() + 6)
-    pop.show()
+    box._sync = None
+    box.hide()
+    return box
 
 
 def _build_today_list(parent):
@@ -1616,11 +1626,22 @@ def _build() -> "QWidget":
     mute_btn.clicked.connect(_toggle_mute)
     # right-click: a level per type of sound (Navigation / Reviews)
     mute_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-    mute_btn.customContextMenuRequested.connect(lambda _p, b=mute_btn: _sound_types_popup(b))
+    snd_box = _sound_types_panel(root)
+    snd_box._sync = _sync_mute
+
+    def _toggle_levels():
+        snd_box.setVisible(not snd_box.isVisible())
+        _resize_nav()
+        try:
+            _apply_glass_panel(win)
+        except Exception:
+            pass
+    mute_btn.customContextMenuRequested.connect(lambda _p: _toggle_levels())
     _sync_mute()
     hrow.addWidget(mute_btn)
     hrow.addWidget(opts_btn)
     lay.addLayout(hrow)
+    lay.addWidget(snd_box)
 
     # Decks | Practice | Today — a segmented control like the Calendar's view switch.
     pdid = _practice_did()
