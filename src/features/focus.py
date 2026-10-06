@@ -178,28 +178,33 @@ def _focus_chrome():
 
 
 _FOCUS_ANIM_MS = 220        # card slide duration
-_FOCUS_FADE_MS = 160        # chrome opacity fade duration
+_FOCUS_FADE_MS = 220        # chrome fade/slide out (the hide waits for it)
+_FOCUS_IN_MS = 370          # chrome fade/slide back in (matches the Calendar entry)
 
 
 def _fade_chrome(wv, visible: bool) -> None:
-    """Cross-fade a chrome webview's content by animating its <body> opacity in the
-    page (QGraphicsOpacityEffect renders black on QWebEngineView/macOS, so we fade
-    CSS opacity inside the page instead). Height is toggled instantly by the caller
-    — fading opacity is GPU-cheap and avoids the per-frame relayout that animating
-    the webview's height caused (the jitter)."""
+    """Fade + slide a chrome webview's content (the top bar up / the bottom bar down)
+    by animating its <body> in the page — the same motion as a review started from the
+    Calendar. (QGraphicsOpacityEffect renders black on QWebEngineView/macOS, so it's
+    done inside the page; height is toggled instantly by the caller — GPU-cheap, no
+    per-frame relayout.)"""
+    dy = "-6px" if wv is getattr(mw, "toolbarWeb", None) else "6px"
     try:
         if visible:
             wv.eval("(function(){var b=document.body;if(!b)return;"
-                    "b.style.transition='none';b.style.opacity='0';"
-                    "requestAnimationFrame(function(){"
-                    "b.style.transition='opacity " + str(_FOCUS_FADE_MS) + "ms ease';"
-                    "b.style.opacity='1';"
-                    "setTimeout(function(){b.style.transition='';},"
-                    + str(_FOCUS_FADE_MS + 60) + ");});})()")
+                    "if(b._jkA)b._jkA.cancel();b.style.opacity='';b.style.transform='';"
+                    "if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)')"
+                    ".matches)return;"
+                    "b._jkA=b.animate([{opacity:0,transform:'translateY(" + dy + ")'},"
+                    "{opacity:1,transform:'none'}],{duration:" + str(_FOCUS_IN_MS) + ","
+                    "easing:'cubic-bezier(.2,.8,.2,1)'});})()")
         else:
             wv.eval("(function(){var b=document.body;if(!b)return;"
-                    "b.style.transition='opacity " + str(_FOCUS_FADE_MS) + "ms ease';"
-                    "b.style.opacity='0';})()")
+                    "if(b._jkA)b._jkA.cancel();"
+                    "b._jkA=b.animate([{opacity:1,transform:'none'},"
+                    "{opacity:0,transform:'translateY(" + dy + ")'}],"
+                    "{duration:" + str(_FOCUS_FADE_MS) + ",easing:'cubic-bezier(.4,0,.6,1)',"
+                    "fill:'forwards'});})()")
     except Exception:
         pass
 
