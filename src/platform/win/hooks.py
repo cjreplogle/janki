@@ -221,12 +221,70 @@ def _run():
     _hook = None
 
 
+class _QtFallback:
+    """When the low-level hook misses its deadline (its Python callback waited on the
+    interpreter lock), Windows skips it and the keys reach Anki as ordinary key
+    events. Catch Tab+<chord key> there too, so the chord still works. When the hook
+    DID run it swallowed the keys, so this never sees them — no double fire."""
+
+    def __init__(self):
+        from aqt.qt import QObject, QEvent
+
+        class _F(QObject):
+            def eventFilter(_s, obj, ev):
+                try:
+                    t = ev.type()
+                    if t not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                        return False
+                    if not keytap._key_tap_enabled:
+                        return False
+                    kc = vk_to_kc(int(ev.nativeVirtualKey()))
+                    if kc is None:
+                        return False
+                    if kc == _hk.leader_kc:
+                        if t == QEvent.Type.KeyPress:
+                            self.tab = True
+                        else:
+                            self.tab = False
+                        return False            # a lone Tab still does its normal job
+                    # Tab counts as held if either side saw it (the hook may have
+                    # caught Tab but missed this key, or the other way round)
+                    held = self.tab or (keytap._tab_held and
+                                        time.monotonic() - getattr(keytap, "_tab_last", 0) < 1.5)
+                    if t != QEvent.Type.KeyPress or not held or ev.isAutoRepeat():
+                        return False
+                    canon = _hk.tab_map.get(kc)
+                    if canon == 15:
+                        keytap._key_bridge.reword_toggle.emit()
+                        return True
+                    if canon in keytap._GLOBAL_KC:
+                        keytap._tab_used_combo = True   # the Tab release won't type a Tab
+                        keytap._gtap_log("Qt fallback chord kc=%s" % canon)
+                        keytap._key_bridge.send_key.emit(canon)
+                        return True
+                except Exception:
+                    pass
+                return False
+        self.tab = False
+        self.f = _F()
+
+
+_fallback = None
+
+
 def start():
-    global _thread
+    global _thread, _fallback
     if _thread is not None:
         return
     _thread = threading.Thread(target=_run, name="janki-keyhook", daemon=True)
     _thread.start()
+    try:
+        from aqt.qt import QApplication
+        if _fallback is None:
+            _fallback = _QtFallback()
+            QApplication.instance().installEventFilter(_fallback.f)
+    except Exception:
+        pass
     try:
         from aqt.qt import QApplication
         app = QApplication.instance()
