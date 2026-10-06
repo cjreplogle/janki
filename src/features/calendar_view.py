@@ -561,8 +561,9 @@ def _detail_html(e):
         _cc = _counts_cache.get(_count_key(m)) or _counts_last.get(m.get("key"))
         if _cc:                              # study buttons keep their numbers too
             QTimer.singleShot(0, lambda c=_cc: _set_study_counts(c[3] - c[2], c[3]))
-        body = ("<div id='jkd-counts' class='jkd-counts'>%s</div>"
-                % (_counts_html(_cc) if _cc else "… cards") +   # recount: corner chip only
+        body = ("<div id='jkd-counts' class='jkd-counts' data-k='%s'>%s</div>"
+                % (html.escape(str(m.get("key")), quote=True),
+                   _counts_html(_cc) if _cc else "… cards") +   # recount: corner chip only
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
@@ -1933,8 +1934,21 @@ _JS = """<script>(function(){
  // Counts can land while the class page is still sliding in (its elements don't
  // exist yet): keep them and apply as soon as the page is in place.
  var pendC=null,pendA=null;
+ // last counts per lecture: a page swapped in still showing "… cards" (a slide copy
+ // missed the update) is filled from here instead of waiting on a recount
+ var lastC={};
+ function fillCounts(){
+   document.querySelectorAll('#jkc .jkd-counts[data-k]').forEach(function(c){
+     var k=c.getAttribute('data-k');
+     var t=c.textContent.trim();
+     if(t.charAt(0)!=='…'){if(/\d/.test(t))lastC[k]=c.innerHTML;}   // numbers rendered: remember
+     else if(lastC[k]&&c.innerHTML!==lastC[k])c.innerHTML=lastC[k];});}
+ try{new MutationObserver(function(){fillCounts();})
+   .observe(document.body,{childList:true,subtree:true});}catch(x){}
  function applyCounts(){
-   var c=document.getElementById('jkd-counts');if(c&&pendC!=null){c.innerHTML=pendC;pendC=null;}
+   if(pendC!=null){var els=document.querySelectorAll('#jkc .jkd-counts[data-k]');
+     if(els.length){els.forEach(function(c){c.innerHTML=pendC;lastC[c.getAttribute('data-k')]=pendC;});
+       pendC=null;}}
    var x=document.getElementById('jkd-st-act'),y=document.getElementById('jkd-st-sus');
    if(x&&y&&pendA){x.textContent='Study active cards ('+pendA[0]+')';
      y.textContent='Study all cards ('+pendA[1]+')';
