@@ -255,10 +255,11 @@ class GlassSettings(QDialog):
         tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
         tabs.setCurrentWidget(app_page)
         if sys.platform.startswith("win") and getattr(self, "_jk_win_frameless", False):
-            # keep the tab row (Hotkeys is last) clear of the × in the top-right corner
-            _cap_room = QWidget()
-            _cap_room.setFixedSize(54, 1)
-            tabs.setCornerWidget(_cap_room, Qt.Corner.TopRightCorner)
+            # keep the tabs (Hotkeys is last) and the panel's corner clear of the × in
+            # the top-right: the content stops left of it (a tab-bar corner widget was
+            # ignored with the centred tab bar)
+            _m2 = lay.contentsMargins()
+            lay.setContentsMargins(_m2.left(), _m2.top(), _m2.right() + 40, _m2.bottom())
 
         lay.addWidget(tabs)
         if getattr(self, "_win_note", None) is not None:
