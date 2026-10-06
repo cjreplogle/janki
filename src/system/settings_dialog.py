@@ -2222,6 +2222,88 @@ class GlassSettings(QDialog):
             _bd_row.addStretch()
             gen_lay.addLayout(_bd_row)
 
+            # ONE "Window glass" choice replaces the two rows above (Rendering ×
+            # frosted blur): they depended on each other — several pairs made no sense
+            # (e.g. "Off" = see-through only in software mode, solid in Fast) and the
+            # restart rules weren't visible. Each choice here is a complete look.
+            for _w in (_rm_lbl, self._rm_box, _bd_lbl, self._bd_box, _bd_hint):
+                _w.setVisible(False)
+            _looks = (
+                ("See-through + blur", "software", "auto",
+                 "Truly clear window with a frosted blur (Windows' own, or Janki's "
+                 "wallpaper blur where Windows can't draw it, e.g. in a VM). Renders on "
+                 "the CPU — a bit slower."),
+                ("See-through, clear", "software", "off",
+                 "Truly clear window, no blur. Renders on the CPU — a bit slower."),
+                ("Wallpaper blur (fast)", "gpu", "wallpaper",
+                 "Uses the graphics card. Janki paints your blurred wallpaper behind "
+                 "the window — looks like glass, smoothest."),
+                ("Live blur (fast)", "gpu", "live",
+                 "Uses the graphics card. Janki blurs the windows behind Anki "
+                 "(Anki is hidden from screenshots and screen sharing while on)."),
+                ("Solid", "gpu", "off", "No glass — a plain dark window."),
+            )
+
+            def _cur_look():
+                r = _pb.render_mode()
+                b = str(self.cfg.get("win_backdrop", "auto")).lower()
+                for i, (_t, rr, bb, _d) in enumerate(_looks):
+                    if rr == r and (bb == b or (r == "software" and bb == "auto"
+                                                and b in ("on", "wallpaper", "live"))):
+                        return i
+                return 0 if r == "software" else 2
+            _lk_row = QHBoxLayout()
+            _lk_lbl = QLabel("Window glass")
+            self._lk_box = _QCB()
+            for _t, _r, _b, _d in _looks:
+                self._lk_box.addItem(_t)
+                self._lk_box.setItemData(self._lk_box.count() - 1, _d,
+                                         Qt.ItemDataRole.ToolTipRole)
+            self._lk_box.setCurrentIndex(_cur_look())
+            _lk_hint = QLabel("")
+            _lk_hint.setWordWrap(True)
+            _lk_hint.setStyleSheet("color: gray;")
+
+            def _lk_hint_text(extra=""):
+                i = self._lk_box.currentIndex()
+                _lk_hint.setText(_looks[i][3] + (("  " + extra) if extra else ""))
+
+            def _on_lk(i):
+                from aqt.utils import askUser
+                _t, mode, bd, _d = _looks[i]
+                # this launch's rendering (a Fast launch runs without the hook, so
+                # running_mode() is empty there)
+                was = _pb.running_mode() or ("software" if _pb.active() else "gpu")
+                self.cfg["win_render"] = mode
+                self.cfg["win_backdrop"] = bd
+                self.cfg["win_glass"] = True
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                if mode == "software":
+                    _jc.reset_win_glass_failure()
+                    _pb.install()
+                elif _pb.installed():
+                    _pb.uninstall()
+                if mode != was:
+                    _lk_hint_text("Needs a restart.")
+                    if askUser("“%s” needs Anki to restart. Restart now?" % _t,
+                               parent=self, title="Janki"):
+                        _restart_anki(mode == "software")
+                        return
+                else:
+                    _lk_hint_text()
+                    try:                       # same rendering: switch the look live
+                        glass._reapply_native()
+                        glass._restyle_glass_dialogs()
+                    except Exception:
+                        pass
+            self._lk_box.currentIndexChanged.connect(_on_lk)
+            _lk_hint_text()
+            _lk_row.addWidget(_lk_lbl)
+            _lk_row.addWidget(self._lk_box)
+            _lk_row.addStretch()
+            gen_lay.addLayout(_lk_row)
+            gen_lay.addWidget(_lk_hint)
+
         # --- Tour ------------------------------------------------------------
         self._tour_btn = QPushButton("Take the Janki tour…")
         self._tour_btn.setToolTip("A short walk-through of where each feature lives.")
