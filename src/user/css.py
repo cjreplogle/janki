@@ -577,7 +577,11 @@ _TOOLBAR_KEYS_JS = r"""(function(){
    sel(last?it[it.length-1]:(it.filter(function(a){return a.id===id;})[0]||it[0]));};
  document.addEventListener('keydown',function(e){
    if(e.metaKey||e.ctrlKey||e.altKey)return;
-   var c=cur(); if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
+   var c=cur();
+   if(!c&&/^Arrow(Left|Right)$/.test(e.key)){   // focused toolbar, nothing selected yet
+     var a=document.activeElement, it0=items();
+     c=(a&&it0.indexOf(a)>=0)?a:it0[0]; if(!c)return; sel(c); e.preventDefault(); return;}
+   if(!c)return; var it=items(), i=it.indexOf(c), k=e.key;
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault(); sfx('move');
      if(k==='ArrowRight'&&i===it.length-1){sel(null);pycmd('janki:gear');return;}  // → the gear
      sel(it[Math.max(0,Math.min(it.length-1,i+(k==='ArrowRight'?1:-1)))]);return;}
@@ -586,8 +590,12 @@ _TOOLBAR_KEYS_JS = r"""(function(){
    if(k==='ArrowDown'||k==='Escape'){e.preventDefault();sel(null);sfx('move');pycmd('janki:deckfocus');}
  },true);
  document.addEventListener('mousemove',function(){var c=cur();if(c)sel(null);},{passive:true});
- // the keyboard moved on to the page (Calendar lectures, deck list…): drop the ring
- window.addEventListener('blur',function(){if(cur())sel(null);});
+ // the keyboard moved on to the page (Calendar lectures, deck list…): drop the ring —
+ // but remember it, so switching to another app and back puts it right back
+ var held=null;
+ window.addEventListener('blur',function(){var c=cur();if(c){held=c;sel(null);}});
+ window.addEventListener('focus',function(){if(held&&!cur()&&held.offsetParent!==null)sel(held);held=null;});
+ document.addEventListener('mousedown',function(){held=null;},true);
 })();"""
 
 _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n var DUR=190, EASE='cubic-bezier(.2,.8,.2,1)';\n function ind(tr){var td=tr.querySelector('td.decktd'); if(!td) return 0;\n   return td.textContent.match(/^\xa0*/)[0].length;}\n function kids(tr){var out=[], base=ind(tr), n=tr.nextElementSibling;\n   while(n&&n.classList.contains('deck')&&ind(n)>base){out.push(n); n=n.nextElementSibling;}\n   return out;}\n" \
