@@ -285,6 +285,9 @@ def apply(text: str, card, kind) -> str:
         if rec.get("src") != _hash(_plain(text)):
             return text            # card was edited since → stale, show original
         variants = rec.get("variants") or []
+        if not rec.get("html"):    # hide already-stored padded rewords (pre-_rambling)
+            _pt = _plain(text)
+            variants = [v for v in variants if not _rambling(v, _pt)]
         if not variants:
             return text            # nothing to reword/toggle to
         reps = int(getattr(card, "reps", 0) or 0)
@@ -642,6 +645,20 @@ def _too_similar(variant: str, original: str) -> bool:
     return difflib.SequenceMatcher(None, o.split(), v.split()).ratio() > 0.8
 
 
+def _rambling(variant: str, original: str) -> bool:
+    """True when the model padded the card with invented filler: a repeated line, more lines
+    than the original structure allows, or far more words. (The on-device model sometimes keeps
+    going after the reword, tacking on made-up sentences and echoing the last one.)"""
+    vl = [_norm(x) for x in (variant or "").split("\n") if _norm(x)]
+    if len(vl) != len(set(vl)):
+        return True
+    ol = [x for x in (original or "").split("\n") if _norm(x)]
+    if ol and len(vl) > len(ol) + max(1, len(ol) // 2):
+        return True
+    ow, vw = len(_norm(original).split()), len(_norm(variant).split())
+    return bool(ow) and vw > ow * 2 + 8
+
+
 def _valid_variants(variants, side: str, is_cloze: bool, terms, orig_blanks: int,
                     original: str = "", lenient: bool = False) -> list:
     """Keep only variants that respect the card's meaning contract: cloze QUESTIONS must keep the
@@ -663,6 +680,8 @@ def _valid_variants(variants, side: str, is_cloze: bool, terms, orig_blanks: int
         if _LEAK_RE.search(vv):                        # instruction/prompt text seeped in
             continue
         if _too_similar(vv, original):                 # just cosmetic edits → not a real reword
+            continue
+        if original and _rambling(vv, original):       # invented/echoed filler lines
             continue
         if is_cloze and side == "q":
             nb = vv.count("[...]")
