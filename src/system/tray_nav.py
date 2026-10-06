@@ -1951,6 +1951,36 @@ def _build() -> "QWidget":
             anim.finished.connect(lambda: (snd_box.hide(), setattr(snd_box, "_jk_closing", False)))
         snd_box._jk_anim = anim
         anim.start()
+        _watch_outside(not closing)
+
+    # A click anywhere outside the panel closes it (the speaker itself still toggles).
+    class _Outside(QObject):
+        def eventFilter(self, obj, ev):
+            try:
+                if ev.type() == QEvent.Type.MouseButtonPress and snd_box.isVisible() \
+                        and not getattr(snd_box, "_jk_closing", False):
+                    gp = ev.globalPosition().toPoint()
+                    inside = snd_box.rect().contains(snd_box.mapFromGlobal(gp))
+                    on_spk = mute_btn.rect().contains(mute_btn.mapFromGlobal(gp))
+                    if not inside and not on_spk:
+                        QTimer.singleShot(0, _toggle_levels)
+            except Exception:
+                pass
+            return False
+
+    def _watch_outside(on):
+        from aqt.qt import QApplication
+        f = getattr(snd_box, "_jk_outside", None)
+        try:
+            if on and f is None:
+                f = snd_box._jk_outside = _Outside(snd_box)
+                QApplication.instance().installEventFilter(f)
+            elif not on and f is not None:
+                QApplication.instance().removeEventFilter(f)
+                snd_box._jk_outside = None
+        except Exception:
+            pass
+    snd_box.destroyed.connect(lambda *_: _watch_outside(False))
     mute_btn.customContextMenuRequested.connect(lambda _p: _toggle_levels())
     _sync_mute()
     hrow.addWidget(mute_btn)
