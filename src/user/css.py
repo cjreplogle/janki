@@ -633,6 +633,28 @@ _DECK_KEYS_JS = r"""(function(){
  else restore();
 })();"""
 
+# Bottom-edge fade for the deck list: rows sink out over the last 64px above the
+# button bar instead of being cut off. Per-row opacity from each row's position —
+# recomputed only on scroll / resize / redraw (rAF-coalesced), so nothing animates at
+# rest. (A CSS mask can't do it: on a scrolling page it scrolls with the content.)
+_DECK_EDGE_FADE_JS = r"""(function(){
+ if(window.__jkEdgeFade)return; window.__jkEdgeFade=true;
+ var ZONE=64, pend=false;
+ function run(){pend=false;var H=window.innerHeight;
+   var rs=document.querySelectorAll('tr.deck');
+   for(var i=0;i<rs.length;i++){var r=rs[i].getBoundingClientRect();
+     var o=r.top>=H?0:Math.max(0,Math.min(1,(H-(r.top+r.height*0.5))/ZONE));
+     o=Math.round(o*20)/20; if(rs[i].__jkeo!==o){rs[i].__jkeo=o;
+       rs[i].style.opacity=o===1?'':String(o);}}}
+ function sched(){if(!pend){pend=true;requestAnimationFrame(run);}}
+ window.addEventListener('scroll',sched,{passive:true});
+ window.addEventListener('resize',sched);
+ function start(){sched();
+   new MutationObserver(sched).observe(document.body,{childList:true,subtree:true});}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);
+ else start();
+})();"""
+
 # The remote (a gamepad — no key events) drives the same keyboard handlers: d-pad →
 # arrow keys, face buttons → Enter ("next"). Standard-mapping d-pad buttons 12–15 or
 # the raw X/Y axes (the 8bitdo Zero 2 reports its d-pad as axes).
@@ -1222,6 +1244,7 @@ def _build_css(cfg, context):
                      "if(document.readyState==='loading')document.addEventListener("
                      "'DOMContentLoaded',w);else w();})();</script>\n")
         parts.append("<script>" + _PAD_NAV_JS + "</script>\n")
+        parts.append("<script>" + _DECK_EDGE_FADE_JS + "</script>\n")
         if cfg.get("ui_animations", True) and not _redesign_on():
             parts.append("<script>" + _DECK_DROPDOWN_JS + "</script>\n")
         parts.append("<style>" + _DECK_STICKY_CSS + "</style>\n"
