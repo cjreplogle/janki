@@ -1319,6 +1319,12 @@ try:
 except Exception:
     pass
 
+try:
+    from .src.features import review_keys as _review_keys
+    _review_keys.install()
+except Exception:
+    pass
+
 
 
 # Contanki re-enables itself on profile open and could come back on while a menu is
