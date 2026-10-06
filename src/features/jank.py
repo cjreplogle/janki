@@ -447,6 +447,21 @@ def _export_rp(dest_dir: str, set_name=None) -> str:
     return out
 
 
+def _export_deck_apkg(dest_dir: str, did: int, name: str, with_scheduling: bool) -> str:
+    """Export one deck (with its subdecks, notes and media) to an .apkg in dest_dir."""
+    from anki.collection import ExportAnkiPackageOptions, DeckIdLimit
+    stem = "".join(ch for ch in name.replace("::", " - ")
+                   if ch.isalnum() or ch in " ._-").strip() or "deck"
+    out = os.path.join(dest_dir, stem + ".apkg")
+    mw.col.export_anki_package(
+        out_path=out,
+        options=ExportAnkiPackageOptions(with_scheduling=with_scheduling,
+                                         with_deck_configs=with_scheduling,
+                                         with_media=True, legacy=False),
+        limit=DeckIdLimit(deck_id=did))
+    return out
+
+
 def packager_dialog(parent=None) -> None:
     """Build a .jank: tick what to include from this install (question banks, lecture tag
     maps, rephrasings) and/or add files from disk (.qb / .json / .rp / .apkg), name the drop,
@@ -541,6 +556,40 @@ def packager_dialog(parent=None) -> None:
             _leaf(g_rp, sname, "%d card sides" % src["rp"][sname], ("rp", sname))
     else:
         _leaf(g_rp, "No rephrasings stored", "", None).setFlags(Qt.ItemFlag.NoItemFlags)
+    # Anki decks (with their subdecks) — exported as .apkg inside the bundle; the
+    # importer already brings .apkg files in.
+    g_decks = _group("Decks")
+    opt_sched = None
+    try:
+        rows = []
+        for nid in mw.col.decks.all_names_and_ids(skip_empty_default=True):
+            nm = nid.name
+            top = nm.split("::")[0]
+            if top in ("Practice",) or top.startswith("Janki Calendar"):
+                continue                       # banks + temporary class decks
+            rows.append((nm, int(nid.id)))
+        for nm, did in sorted(rows, key=lambda r: r[0].lower()):
+            depth = nm.count("::")
+            try:
+                n = mw.col.decks.card_count(did, include_subdecks=True)
+                det = "%d card%s" % (n, "" if n == 1 else "s")
+            except Exception:
+                det = ""
+            if depth == 0 and any(x.startswith(nm + "::") for x, _d in rows):
+                det += (" · " if det else "") + "with subdecks"
+            _leaf(g_decks, "    " * depth + nm.split("::")[-1], det, ("deck", (did, nm)))
+        if rows:
+            opt_sched = QTreeWidgetItem(["Include review history (scheduling)",
+                                         "off: recipients start the cards fresh"])
+            opt_sched.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            opt_sched.setCheckState(0, Qt.CheckState.Unchecked)
+            opt_sched.setForeground(1, Qt.GlobalColor.gray)
+            f_ = opt_sched.font(0); f_.setItalic(True); opt_sched.setFont(0, f_)
+            g_decks.addChild(opt_sched)
+        else:
+            _leaf(g_decks, "No decks", "", None).setFlags(Qt.ItemFlag.NoItemFlags)
+    except Exception as exc:
+        log("jank decks: %s" % exc)
     g_disk = _group("Added from disk")
     tree.expandAll()
 
@@ -567,9 +616,10 @@ def packager_dialog(parent=None) -> None:
                 key = os.path.splitext(d)[1].lower()
             kinds[key] = kinds.get(key, 0) + 1
         nb = kinds.get("bank", 0) + kinds.get(".qb", 0)
+        nd = kinds.get(".apkg", 0) + kinds.get("deck", 0)
         bits = []
-        if kinds.get(".apkg"):
-            bits.append("%d deck%s" % (kinds[".apkg"], "" if kinds[".apkg"] == 1 else "s"))
+        if nd:
+            bits.append("%d deck%s" % (nd, "" if nd == 1 else "s"))
         if nb:
             bits.append("%d bank%s" % (nb, "" if nb == 1 else "s"))
         if kinds.get(".json"):
@@ -692,6 +742,15 @@ def packager_dialog(parent=None) -> None:
                     files.append(_export_rp(tmp, d))      # d = the set name
                 elif kind == "file":
                     files.append(d)
+            # decks: one .apkg per picked deck (its subdecks included); a subdeck whose
+            # parent is also picked is already inside the parent's package
+            picked = [d for k, d in sel if k == "deck"]
+            names = [nm for _did, nm in picked]
+            sched = opt_sched is not None and opt_sched.checkState(0) == Qt.CheckState.Checked
+            for did, nm in picked:
+                if any(nm.startswith(o + "::") for o in names if o != nm):
+                    continue
+                files.append(_export_deck_apkg(tmp, did, nm, sched))
             n = build_jank(out, files, name.text(), ver.text(), notes.toPlainText())
         except Exception as exc:
             showWarning("Couldn't build the .jank:\n\n%s" % exc, parent=dlg)
