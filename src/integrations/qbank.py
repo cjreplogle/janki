@@ -71,7 +71,7 @@ def _safe(s):
 # ---------------------------------------------------------------------------
 # Import
 # ---------------------------------------------------------------------------
-def import_qb(path, build_deck=False):
+def import_qb(path, build_deck=False, enrich=True, sync_deck=True):
     """Validate + extract a .qb into user_files/qbanks/<id>/ and register it.
     Re-importing the same id replaces it (an update). Returns the manifest.
     build_deck: also load it into Anki as Practice::<bank> even when no Practice
@@ -105,16 +105,17 @@ def import_qb(path, build_deck=False):
     # Deterministic (no-AI) enrichment so the bank matches review cards without
     # anyone pasting questions into an AI: lecture tags from headers + concept
     # mining from answer/explanation text.
-    try:
-        assign_deck_tags_from_headers()
-        mine_concepts_from_banks()
-        assign_content_tags()
-        _Q_CACHE.pop(dir_name, None)
-    except Exception as e:
-        log("qbank import enrich: %s" % e)
+    if enrich:
+        try:
+            assign_deck_tags_from_headers()
+            mine_concepts_from_banks()
+            assign_content_tags()
+            _Q_CACHE.pop(dir_name, None)
+        except Exception as e:
+            log("qbank import enrich: %s" % e)
     # Keep the Practice deck in sync: if one already exists, fold this (new or
     # re-imported) bank into it right away.
-    if build_deck or _practice_deck_exists():
+    if sync_deck and (build_deck or _practice_deck_exists()):
         try:
             convert_bank_to_deck(bid)
             mw.reset()
@@ -6579,39 +6580,120 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     if not dlg.exec():
         return
     map_did = combo.currentData() or 0
-    mapped = None
-    from_map = 0
-    if tag_map[0] and use_map.isChecked():
+    use_csv = tag_map[0] if (tag_map[0] and use_map.isChecked()) else None
+    root_nm = mw.col.decks.name(map_did) if map_did else None
+    _docx_import_bg(path, qs, use_csv, map_did, root_nm, build_deck, on_done)
+
+
+class _ImportProgress:
+    """Small floating, NON-modal progress panel (Anki stays usable underneath)."""
+
+    def __init__(self, title):
+        from aqt.qt import QWidget, QVBoxLayout, QLabel, QProgressBar, Qt
+        w = QWidget(mw, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        w.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        w.setWindowTitle(title)
+        lay = QVBoxLayout(w)
+        self.label = QLabel("Starting…")
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 0)                     # indeterminate until we know steps
+        self.bar.setTextVisible(True)
+        lay.addWidget(self.label)
+        lay.addWidget(self.bar)
+        w.setFixedWidth(360)
         try:
-            root_nm = mw.col.decks.name(map_did) if map_did else None
-            from_map = apply_tag_map(qs, tag_map[0], root_nm)
-        except Exception as e:
-            showWarning("Couldn't read the tag map:\n\n%s" % e)
-    if map_did:
-        try:
-            mapped = map_questions_to_subdecks(qs, map_did)
-        except Exception as e:
-            log("docx subdeck map: %s" % e)
-    try:
-        out, man = _write_qb(path, qs)
-        import_qb(out, build_deck=build_deck)
-    except Exception as e:
-        showWarning("Could not create/import .qb:\n\n%s" % e)
-        return
-    retag_from_lecture_map()                   # M1 calendar map (if it matches)
-    deck_tagged, _t = assign_deck_tags_from_headers()   # deterministic deck tags
-    mined, _m = mine_concepts_from_banks()     # concept mining (AI-free bridge)
-    _sfx_loaded()
-    tooltip("Imported “%s” (%d questions); %s%d deck-tagged from headers, %d concept-"
-            "matched from text." % (man.get("name"), len(qs),
-                                    (("%d from tag map; " % from_map) if from_map else "")
-                                    + (("%d/%d mapped to subdecks; " % mapped) if mapped else ""),
-                                    deck_tagged, mined))
-    if on_done:
-        try:
-            on_done()
+            g = mw.geometry()
+            w.move(g.right() - 380, g.bottom() - 140)
         except Exception:
             pass
+        w.show()
+        self.w = w
+
+    def step(self, i, n, text):
+        def _ui():
+            try:
+                self.bar.setRange(0, n)
+                self.bar.setValue(i)
+                self.bar.setFormat("%d / %d" % (i, n))
+                self.label.setText(text)
+            except Exception:
+                pass
+        mw.taskman.run_on_main(_ui)
+
+    def close(self):
+        try:
+            self.w.close()
+            self.w.deleteLater()
+        except Exception:
+            pass
+
+
+def _docx_import_bg(path, qs, use_csv, map_did, root_nm, build_deck, on_done):
+    """Run the slow parts of a .docx import off the main thread: mapping, writing the
+    .qb, extracting it, and the tagging passes over every bank. Only the Practice deck
+    build (collection writes) comes back to the main thread at the end."""
+    from aqt.operations import QueryOp
+    from aqt.utils import tooltip, showWarning
+    prog = _ImportProgress("Importing question bank")
+    N = 7
+    res = {"from_map": 0, "mapped": None}
+
+    def op(col):
+        if use_csv:
+            prog.step(0, N, "Applying tag map…")
+            res["from_map"] = apply_tag_map(qs, use_csv, root_nm)
+        if map_did:
+            prog.step(1, N, "Matching questions to subdecks…")
+            try:
+                res["mapped"] = map_questions_to_subdecks(qs, map_did)
+            except Exception as e:
+                log("docx subdeck map: %s" % e)
+        prog.step(2, N, "Writing .qb…")
+        out, man = _write_qb(path, qs)
+        prog.step(3, N, "Extracting bank…")
+        man = import_qb(out, build_deck=False, enrich=False, sync_deck=False)
+        prog.step(4, N, "Tagging from lecture map + headers…")
+        retag_from_lecture_map()
+        res["deck_tagged"] = assign_deck_tags_from_headers()[0]
+        prog.step(5, N, "Mining concepts from text…")
+        res["mined"] = mine_concepts_from_banks()[0]
+        try:
+            assign_content_tags()
+        except Exception as e:
+            log("content tags: %s" % e)
+        _Q_CACHE.clear()
+        res["man"] = man
+        return man
+
+    def done(man):
+        prog.step(6, N, "Building Practice deck…")
+        bid = None
+        try:
+            bid = man.get("id")
+            if bid and (build_deck or _practice_deck_exists()):
+                convert_bank_to_deck(bid)
+                mw.reset()
+        except Exception as e:
+            log("docx import deck build: %s" % e)
+        prog.close()
+        _sfx_loaded()
+        mapped = res["mapped"]
+        tooltip("Imported “%s” (%d questions); %s%d deck-tagged from headers, %d concept-"
+                "matched from text." % (man.get("name"), len(qs),
+                                        (("%d from tag map; " % res["from_map"]) if res["from_map"] else "")
+                                        + (("%d/%d mapped to subdecks; " % mapped) if mapped else ""),
+                                        res.get("deck_tagged", 0), res.get("mined", 0)))
+        if on_done:
+            try:
+                on_done()
+            except Exception:
+                pass
+
+    def failed(e):
+        prog.close()
+        showWarning("Could not create/import .qb:\n\n%s" % e)
+
+    QueryOp(parent=mw, op=op, success=done).failure(failed).run_in_background()
 
 
 # ---------------------------------------------------------------------------
