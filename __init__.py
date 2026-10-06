@@ -746,6 +746,17 @@ def _startup():
             except Exception as _fa_exc:
                 log("file associations: %s" % _fa_exc)
 
+        # macOS: double-clicking .jank / .qb / .rp opens Anki (once; only for types with
+        # no default app, so a user's own choice stays).
+        if sys.platform == "darwin" and not _cfg().get("mac_assoc_done", False):
+            try:
+                from .src.platform.mac import assoc as _massoc
+                if _massoc.register_file_types():
+                    _c = _cfg_raw(); _c["mac_assoc_done"] = True
+                    mw.addonManager.writeConfig(__name__, _c)
+            except Exception as _ma_exc:
+                log("mac file associations: %s" % _ma_exc)
+
         # Gamepad poller DISABLED (GameController is focus-gated — can't read the
         # pad while Anki is backgrounded, so it only double-fires with Contanki).
         # _start_gamepad_poll()
