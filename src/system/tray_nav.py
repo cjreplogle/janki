@@ -6,6 +6,7 @@ reach Open Anki / Quit — all styled to match the main window's glass.
 macOS only (needs the native blur/vibrancy). On other platforms the tray keeps its
 plain QMenu (see tray.py)."""
 
+import re
 import sys
 import time
 import ctypes
@@ -1359,7 +1360,21 @@ def _build_today_list(parent):
             evs, fresh = lectures.events_cached_between(d, d)
             if not fresh:
                 lectures.load_events_bg()
+            dress = []
+            for e in evs:                         # dress codes: one line under the day bar
+                if cv._is_allday_kind(e["summary"]):
+                    t_ = re.sub(r"(?i)^\s*dress\s*[-:]?\s*code\s*[:\-–]?\s*", "",
+                                e["summary"]).strip()
+                    if t_ and t_.lower() not in [x.lower() for x in dress]:
+                        dress.append(t_)
             evs = [e for e in evs if not cv._is_allday_kind(e["summary"])]
+            if dress:
+                dl = QLabel("Dress code: " + "; ".join(dress))
+                dl.setWordWrap(True)
+                dl.setStyleSheet("color:#f2c879;font-size:11px;font-weight:600;"
+                                 "background:rgba(242,200,121,0.12);border-radius:6px;"
+                                 "padding:3px 8px;")
+                hv.addWidget(dl)
         except Exception as exc:
             log(f"tray today: {exc}")
         if not evs:
