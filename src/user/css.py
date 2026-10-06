@@ -71,6 +71,7 @@ def _arm_launch_go():
         def _run():
             try:
                 if mw.isVisible() and mw.web is not None:
+                    _LAUNCH_FADE["fired"] = True     # later renders: normal behaviour
                     mw.web.eval("window.jkLaunchGo&&window.jkLaunchGo()")
             except Exception:
                 pass
@@ -81,6 +82,7 @@ def _arm_launch_go():
     except Exception:
         pass
     _LAUNCH_FADE["go"] = go
+    QTimer.singleShot(8000, lambda: _LAUNCH_FADE.update(fired=True))   # stop holding regardless
     if mw.isVisible():
         go(350)                       # window up already: give the page time to load
         return
@@ -1195,13 +1197,15 @@ def _build_css(cfg, context):
         # whole (self-adapting: measures actual clipping, no magic px threshold).
         if cfg.get("amboss_qbank_autohide", True):
             parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
-        if not _LAUNCH_FADE["done"]:
+        if not _LAUNCH_FADE.get("fired"):
             # FIRST deck list of the session: Anki usually renders it before the window
             # is on screen, so the normal .15s fade played unseen and the list just
             # appeared. Hold it invisible and fade it in once the page is actually
             # visible (Chromium's visibilityState follows the window); a timer
             # guarantees it can never stay hidden.
-            _LAUNCH_FADE["done"] = True
+            # (EVERY deck-list render keeps the hold until the fade has started: Janki's
+            # startup redraws the list right after the first render, and that redraw
+            # used to show at once — the "it just appears")
             parts.append(
                 "<style>html.jk-launch body{opacity:0;animation:none!important;}"
                 "html.jk-launch.jk-go body{animation:jkLaunchIn .5s ease-out both!important;}"
@@ -1217,7 +1221,11 @@ def _build_css(cfg, context):
                 "requestAnimationFrame(function(){h.classList.add('jk-go');});});};"
                 "setTimeout(function(){h.classList.add('jk-go');},6000);"   # never stuck
                 "})();</script>\n" % hud._menu_fade_token)
-            QTimer.singleShot(0, _arm_launch_go)
+            if not _LAUNCH_FADE["done"]:
+                _LAUNCH_FADE["done"] = True
+                QTimer.singleShot(0, _arm_launch_go)
+            elif _LAUNCH_FADE.get("go") and mw.isVisible():
+                _LAUNCH_FADE["go"](260)       # a redraw replaced the held page: start it
         else:
             parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
