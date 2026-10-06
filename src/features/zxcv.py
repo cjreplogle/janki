@@ -3,12 +3,20 @@
 _answerCard path, so Janki's practice-card grading applies unchanged. Anki's review
 shortcuts are only live while Anki is focused, so the global Tab+Z/X/C/V chords are
 unaffected. They take priority: an Anki action on the same plain key moves to Alt+key
-(V = replay your recorded voice → Alt+V). Config: zxcv_rating (default on)."""
+(V = replay your recorded voice → Alt+V). Config: zxcv_rating (default on).
+
+The keys are caught by an app-wide key filter rather than QShortcuts: a QShortcut goes
+silent when anything else (another add-on, a rebinding) registers the same plain key —
+Qt treats that as ambiguous and fires neither — so rating only worked some of the time.
+Ctrl/Alt/Win+Z etc. are never touched (Ctrl+Z stays Anki's undo)."""
 from aqt import mw, gui_hooks
+from aqt.qt import QApplication, QEvent, QObject, Qt
 
 from ..util.config import _cfg, log
 
-_KEYS = (("z", 1), ("x", 2), ("c", 3), ("v", 4))
+_KEYS = {Qt.Key.Key_Z: 1, Qt.Key.Key_X: 2, Qt.Key.Key_C: 3, Qt.Key.Key_V: 4}
+_MODS = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+         | Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.ShiftModifier)
 
 
 def _rate(ease: int) -> None:
@@ -28,21 +36,60 @@ def _rate(ease: int) -> None:
         log("zxcv: %s" % e)
 
 
+def _typing_into(w) -> bool:
+    """A native text field has focus (e.g. a dialog's search box): let it type."""
+    try:
+        from aqt.qt import QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox
+        return isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox))
+    except Exception:
+        return False
+
+
+class _KeyFilter(QObject):
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t not in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
+            return False
+        try:
+            ease = _KEYS.get(ev.key())
+            if ease is None or ev.modifiers() & _MODS:
+                return False
+            if mw.state != "review" or not _cfg().get("zxcv_rating", True):
+                return False
+            if not mw.isActiveWindow() or _typing_into(QApplication.focusWidget()):
+                return False
+            r = getattr(mw, "reviewer", None)
+            if r is None or getattr(r, "state", None) != "answer":
+                return False                   # question side: like 1–4, nothing
+            if t == QEvent.Type.ShortcutOverride:
+                ev.accept()                    # claim the key before any QShortcut
+                return True
+            if not ev.isAutoRepeat():          # holding Z must not rate a run of cards
+                _rate(ease)
+            return True
+        except Exception:
+            return False
+
+
+_filter = None
+
+
 def _add(state: str, shortcuts: list) -> None:
     if state != "review" or not _cfg().get("zxcv_rating", True):
         return
     # Z/X/C/V win: whatever Anki had on the plain key (V = replay your recorded voice)
     # moves to Alt+<key>, so it's still there
-    keys = {k for k, _e in _KEYS}
+    keys = {"z", "x", "c", "v"}
     for i, (k, fn) in enumerate(list(shortcuts)):
         kl = str(k).lower()
         if kl in keys:
             shortcuts[i] = ("Alt+" + kl.upper(), fn)
-    for key, ease in _KEYS:
-        shortcuts.append((key, lambda e=ease: _rate(e)))
 
 
 def install() -> None:
+    global _filter
     if not getattr(mw, "_janki_zxcv", False):
         gui_hooks.state_shortcuts_will_change.append(_add)
+        _filter = _KeyFilter(mw)
+        QApplication.instance().installEventFilter(_filter)
         mw._janki_zxcv = True

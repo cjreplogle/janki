@@ -544,6 +544,37 @@ class GlassSettings(QDialog):
         self._uniform.stateChanged.connect(on_uniform)
         app_text_lay.addWidget(self._uniform)
 
+        # Text shadows: the readability halo behind text on the glass. High performance
+        # (default on Windows) = one light layer, dropped while a card types out.
+        from ..user import css as _css_ts
+        _ts_row = QHBoxLayout()
+        _ts_row.addWidget(QLabel("Text shadows"))
+        self._tshadow = QComboBox()
+        for _t, _v, _tip in (
+                ("High performance", "performance",
+                 "A light halo, switched off while a card's text types out. Smoothest."),
+                ("Quality", "quality",
+                 "A fuller two-layer halo, kept while text types out. Costs more on "
+                 "Windows, especially with See-through glass."),
+                ("Off", "off", "No halo behind text.")):
+            self._tshadow.addItem(_t, _v)
+            self._tshadow.setItemData(self._tshadow.count() - 1, _tip,
+                                      Qt.ItemDataRole.ToolTipRole)
+        self._tshadow.setCurrentIndex(
+            _css_ts.TEXT_SHADOW_MODES.index(_css_ts.text_shadow_mode(self.cfg)))
+
+        def _on_tshadow(_i):
+            self.cfg["text_shadow"] = self._tshadow.currentData()
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                glass._reload_all_webviews()
+            except Exception:
+                pass
+        self._tshadow.currentIndexChanged.connect(_on_tshadow)
+        _ts_row.addWidget(self._tshadow)
+        _ts_row.addStretch()
+        app_text_lay.addLayout(_ts_row)
+
         # Card tags (e.g. AnKing's tag list) pinned above the answer buttons: how many
         # show before the rest fold behind "+N more".
         _tg_row = QHBoxLayout()
@@ -2298,8 +2329,7 @@ class GlassSettings(QDialog):
                 pass
             # (no "See-through, clear": fully clear pixels let clicks fall through
             # to whatever is behind, so the window couldn't be grabbed or focused)
-            _tags = (["recommended on a PC", "fastest", "best in a VM", ""] if _vm else
-                     ["recommended", "fastest", "for VMs", ""])
+            _tags = ["", "fastest", "recommended", ""]
             for (_t, _r, _b, _d), _tg in zip(_looks, _tags):
                 self._lk_box.addItem(_t + ("  —  " + _tg if _tg else ""))
                 self._lk_box.setItemData(self._lk_box.count() - 1, _d,

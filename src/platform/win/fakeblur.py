@@ -117,19 +117,40 @@ class _Layer(QWidget):
             # one step behind instead — a slight trail, no back-and-forth.
             use_tl = (_live.get("lag_tl") or tl) if moving else tl
 
-            def _draw_at(img, cap, at):
-                kx = img.width() / max(1, cap.width())
-                ky = img.height() / max(1, cap.height())
-                src = QRectF((at.x() - cap.x()) * kx, (at.y() - cap.y()) * ky,
-                             self.width() * kx, self.height() * ky)
-                p.drawImage(QRectF(self.rect()), img, src)
+            def _scaled(img, cap, at, serial):
+                """The capture's slice behind the window, scaled to the window ONCE
+                per (capture, position, size) — repaints are then a plain blit."""
+                dpr = self.devicePixelRatioF()
+                key = (serial, at.x(), at.y(), self.width(), self.height(), dpr)
+                cache = _live.setdefault("scaled", {})
+                pm = cache.get(key)
+                if pm is None:
+                    from aqt.qt import QPixmap
+                    kx = img.width() / max(1, cap.width())
+                    ky = img.height() / max(1, cap.height())
+                    src = QRectF((at.x() - cap.x()) * kx, (at.y() - cap.y()) * ky,
+                                 self.width() * kx, self.height() * ky)
+                    pm = QPixmap(max(1, int(self.width() * dpr)),
+                                 max(1, int(self.height() * dpr)))
+                    pm.setDevicePixelRatio(dpr)
+                    q = QPainter(pm)
+                    q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                    q.drawImage(QRectF(0, 0, self.width(), self.height()), img, src)
+                    q.end()
+                    if len(cache) > 3:             # current + previous (cross-fade)
+                        cache.clear()
+                    cache[key] = pm
+                return pm
             fade = min(1.0, (now - _live.get("t_swap", 0)) / 0.18)
             prev = _live.get("prev")
             if prev is not None and fade < 1.0 and not moving:
-                _draw_at(prev, _live["prev_rect"], _live.get("prev_tl") or use_tl)
+                p.drawPixmap(0, 0, _scaled(prev, _live["prev_rect"],
+                                           _live.get("prev_tl") or use_tl,
+                                           _live.get("prev_serial")))
                 p.setOpacity(fade)
-                QTimer.singleShot(16, self.update)        # keep the cross-fade going
-            _draw_at(_live["img"], _live["rect"], use_tl)
+                QTimer.singleShot(33, self.update)        # cross-fade at ~30 fps
+            p.drawPixmap(0, 0, _scaled(_live["img"], _live["rect"], use_tl,
+                                       _live.get("serial")))
             p.setOpacity(1.0)
             p.fillRect(self.rect(), self.tint)
             p.end()
@@ -238,10 +259,130 @@ _MARGIN = 300        # px captured around the window, so drags stay covered
 _SCALE = 8           # blur works on a 1/8-size copy; smooth up-scaling spreads it out
 
 
+class _Capturer:
+    """Screen capture on a worker thread. GDI StretchBlt (HALFTONE) reads the area and
+    shrinks it to 1/_SCALE in one call, so the main thread never touches the
+    full-resolution pixels: it only gets a small image back (blurring THAT is cheap).
+    QScreen.grabWindow + toImage + scale of the full area ran on the main thread 10
+    times a second and stalled every animation for a few ms each time."""
+
+    def __init__(self):
+        import threading
+        from aqt.qt import QObject, pyqtSignal
+
+        class _Bridge(QObject):
+            done = pyqtSignal(object)
+        self.bridge = _Bridge()
+        self.bridge.done.connect(_on_capture)
+        self.req = None                    # (x, y, w, h) physical px, sw, sh, rect
+        self.ev = threading.Event()
+        self.busy = False
+        t = threading.Thread(target=self._run, name="janki-liveblur", daemon=True)
+        t.start()
+
+    def request(self, req):
+        if self.busy:
+            return                         # one capture in flight at a time
+        self.req = req
+        self.ev.set()
+
+    def _run(self):
+        while True:
+            self.ev.wait()
+            self.ev.clear()
+            req, self.req = self.req, None
+            if req is None:
+                continue
+            self.busy = True
+            try:
+                data = _gdi_capture(*req[:6])
+                if data is not None:
+                    self.bridge.done.emit((data, req[4], req[5], req[6]))
+            except Exception:
+                pass
+            finally:
+                self.busy = False
+
+
+_GDI = None
+
+
+def _gdi():
+    """Private user32/gdi32 handles with 64-bit-safe signatures (own WinDLL instances,
+    so other modules' ctypes setups aren't touched)."""
+    global _GDI
+    if _GDI is None:
+        import ctypes
+        from ctypes import wintypes as W
+        u32, g32 = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32")
+        H, I, U, P = W.HANDLE, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p
+        for fn, res, args in (
+                (u32.GetDC, H, [H]), (u32.ReleaseDC, I, [H, H]),
+                (g32.CreateCompatibleDC, H, [H]),
+                (g32.CreateCompatibleBitmap, H, [H, I, I]),
+                (g32.SelectObject, H, [H, H]), (g32.DeleteObject, W.BOOL, [H]),
+                (g32.DeleteDC, W.BOOL, [H]), (g32.SetStretchBltMode, I, [H, I]),
+                (g32.SetBrushOrgEx, W.BOOL, [H, I, I, P]),
+                (g32.StretchBlt, W.BOOL, [H, I, I, I, I, H, I, I, I, I, W.DWORD]),
+                (g32.GetDIBits, I, [H, H, U, U, P, P, U])):
+            fn.restype, fn.argtypes = res, args
+        _GDI = (u32, g32)
+    return _GDI
+
+
+def _gdi_capture(x, y, w, h, sw, sh):
+    """(x, y, w, h) of the screen in physical pixels -> sw x sh BGRA bytes."""
+    u32, g32 = _gdi()
+    sdc = u32.GetDC(None)
+    if not sdc:
+        return None
+    mdc = bmp = old = None
+    try:
+        mdc = g32.CreateCompatibleDC(sdc)
+        bmp = g32.CreateCompatibleBitmap(sdc, sw, sh)
+        old = g32.SelectObject(mdc, bmp)
+        g32.SetStretchBltMode(mdc, 4)                  # HALFTONE: averages, no aliasing
+        g32.SetBrushOrgEx(mdc, 0, 0, None)
+        # SRCCOPY only. CAPTUREBLT hides + re-shows the mouse cursor around every
+        # read (the cursor flickered 10x/s); under DWM a plain read of the screen DC
+        # already includes layered windows.
+        if not g32.StretchBlt(mdc, 0, 0, sw, sh, sdc, x, y, w, h, 0x00CC0020):
+            return None
+
+        import ctypes
+
+        class BIH(ctypes.Structure):
+            _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
+                        ("biHeight", ctypes.c_int32), ("biPlanes", ctypes.c_uint16),
+                        ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
+                        ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_int32),
+                        ("biYPelsPerMeter", ctypes.c_int32), ("biClrUsed", ctypes.c_uint32),
+                        ("biClrImportant", ctypes.c_uint32)]
+        bih = BIH(ctypes.sizeof(BIH), sw, -sh, 1, 32, 0, 0, 0, 0, 0, 0)   # top-down
+        buf = ctypes.create_string_buffer(sw * sh * 4)
+        g32.SelectObject(mdc, old)
+        old = None
+        if not g32.GetDIBits(mdc, bmp, 0, sh, buf, ctypes.byref(bih), 0):
+            return None
+        return buf.raw
+    finally:
+        if old is not None:
+            g32.SelectObject(mdc, old)
+        if bmp:
+            g32.DeleteObject(bmp)
+        if mdc:
+            g32.DeleteDC(mdc)
+        u32.ReleaseDC(None, sdc)
+
+
+_capturer = None
+
+
 def _grab():
-    """Capture the screen area around + behind the main window at 1/8 size, lightly
-    blurred. Paint maps the window's CURRENT position into it, so the frosted
+    """Ask the worker for a capture of the screen area around + behind the main window
+    at 1/8 size. Paint maps the window's CURRENT position into it, so the frosted
     background stays put while the window moves (no waiting for a new capture)."""
+    global _capturer
     if not _live["on"] or _layer is None or mw.isMinimized() or not mw.isVisible():
         return
     import time as _t
@@ -259,21 +400,36 @@ def _grab():
         h = ((g.bottom() + 1 - y0) // _SCALE) * _SCALE
         if w <= 0 or h <= 0:
             return
-        pm = scr.grabWindow(0, x0 - sg.x(), y0 - sg.y(), w, h)
-        if pm.isNull():
-            return
-        small = pm.toImage().scaled(w // _SCALE, h // _SCALE,
-                                    Qt.AspectRatioMode.IgnoreAspectRatio,
-                                    Qt.TransformationMode.SmoothTransformation)
-        img = _blur(small, strength=1)
+        # Qt positions are logical; GDI wants physical pixels. A screen's logical
+        # origin equals its physical origin — only the offsets inside it scale.
+        d = float(scr.devicePixelRatio() or 1.0)
+        px = int(sg.x() + (x0 - sg.x()) * d)
+        py = int(sg.y() + (y0 - sg.y()) * d)
         from aqt.qt import QRect
-        rect = QRect(x0, y0, w, h)
+        if _capturer is None:
+            _capturer = _Capturer()
+        _capturer.request((px, py, int(w * d), int(h * d),
+                           w // _SCALE, h // _SCALE, QRect(x0, y0, w, h)))
+    except Exception:
+        pass
+
+
+def _on_capture(res):
+    """Main thread: a small capture arrived from the worker."""
+    if not _live["on"] or _layer is None:
+        return
+    try:
+        data, sw, sh, rect = res
+        small = QImage(data, sw, sh, sw * 4, QImage.Format.Format_RGB32).copy()
+        img = _blur(small, strength=1)
         old = _live.get("img")
         if old is not None and _live.get("rect") == rect and old == img:
             return                             # nothing behind changed: no repaint
         # Cross-fade from the previous capture so changes blend in instead of snapping.
         _live["prev"], _live["prev_rect"] = old, _live.get("rect")
         _live["img"], _live["rect"] = img, rect
+        _live["prev_serial"] = _live.get("serial")
+        _live["serial"] = (_live.get("serial") or 0) + 1   # paint-cache key
         _live["prev_tl"] = None
         import time
         _live["t_swap"] = time.monotonic()

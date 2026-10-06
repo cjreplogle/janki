@@ -34,13 +34,13 @@ _GPU_FLAGS = "--disable-features=CalculateNativeWinOcclusion --disable-renderer-
 
 
 def render_mode() -> str:
-    """Configured rendering: "software" (see-through glass, default) or "gpu" (fast)."""
+    """Configured rendering: "gpu" (fast, default) or "software" (see-through glass)."""
     try:
         from aqt import mw
-        m = str((mw.addonManager.getConfig(__name__) or {}).get("win_render", "software")).lower()
+        m = str((mw.addonManager.getConfig(__name__) or {}).get("win_render", "gpu")).lower()
     except Exception:
-        m = "software"
-    return "gpu" if m == "gpu" else "software"
+        m = "gpu"
+    return "software" if m == "software" else "gpu"
 
 
 def frameless() -> bool:

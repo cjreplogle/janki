@@ -171,12 +171,29 @@ def set_owner(hwnd: int, owner: int, click_through: bool = False) -> None:
     user32.SetWindowLongPtrW(h, GWL_EXSTYLE, ex)
 
 
+def _relaunch_env() -> dict:
+    """This process's environment minus what the See-through start-up hook set. The
+    relaunched Anki inherits our environment, so leftovers made a switch to a GPU look
+    start in software mode again, still flagged as See-through -> it asked to restart
+    on every launch. The hook (when installed) sets these itself in the new process."""
+    env = dict(os.environ)
+    env.pop("JANKI_WIN_PREBOOT", None)
+    env.pop("JANKI_WIN_RENDER", None)
+    try:
+        from . import preboot
+        if env.get("QTWEBENGINE_CHROMIUM_FLAGS") in (preboot._FLAGS, preboot._GPU_FLAGS):
+            env.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+    except Exception:
+        pass
+    return env
+
+
 def relaunch_after_exit(delay_s: int = 3) -> None:
     """Start Anki again a few seconds from now (after this instance has quit)."""
     try:
         import subprocess
         subprocess.Popen('cmd /c "timeout /t %d /nobreak >nul & start "" %s"'
-                         % (int(delay_s), _anki_command()),
+                         % (int(delay_s), _anki_command()), env=_relaunch_env(),
                          creationflags=0x08000000, close_fds=True)   # CREATE_NO_WINDOW
     except Exception:
         pass

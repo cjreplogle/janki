@@ -618,7 +618,16 @@ def _set_central_margins(collapse: bool) -> None:
                 m = lay.contentsMargins()
                 lay._janki_margins = (m.left(), m.top(), m.right(), m.bottom())
                 lay._janki_spacing = lay.spacing()
-            lay.setContentsMargins(0, 0, 0, 0)
+            # Frameless Windows window: keep the top grab strip (chrome.TOP_GAP) -
+            # with the toolbar hidden it's the only place left to drag the window.
+            top = 0
+            if getattr(mw, "_jk_frameless", False):
+                try:
+                    from ..platform.win import chrome as _chrome
+                    top = _chrome.TOP_GAP
+                except Exception:
+                    top = 0
+            lay.setContentsMargins(0, top, 0, 0)
             lay.setSpacing(0)
         elif hasattr(lay, "_janki_margins"):
             lay.setContentsMargins(*lay._janki_margins)

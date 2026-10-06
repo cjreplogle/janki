@@ -122,21 +122,34 @@ class CaptionButtons(QWidget):
 
 
 class _TopStrip(QObject):
-    """Press in the central widget's top margin (below the resize edge) = move the
-    window; double-click = maximise / restore."""
+    """Press in the central widget's top margin (below the resize edge) and drag = move
+    the window; double-click = maximise / restore. The drag starts after a few px of
+    movement, so a plain click in fullscreen doesn't drop out of it."""
+    _press = None
+
     def eventFilter(self, obj, ev):
         t = ev.type()
-        if t in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
-            try:
-                y = ev.position().y()
-                if y < TOP_GAP and ev.button() == Qt.MouseButton.LeftButton:
+        try:
+            if t in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                if ev.position().y() < TOP_GAP and ev.button() == Qt.MouseButton.LeftButton:
                     if t == QEvent.Type.MouseButtonDblClick:
+                        self._press = None
                         toggle_maximize()
                     else:
-                        start_move()
+                        self._press = ev.globalPosition().toPoint()
                     return True
-            except Exception:
-                pass
+            elif t == QEvent.Type.MouseMove and self._press is not None:
+                if not ev.buttons() & Qt.MouseButton.LeftButton:
+                    self._press = None
+                elif (ev.globalPosition().toPoint() - self._press).manhattanLength() > 3:
+                    self._press = None
+                    start_move()
+                return True
+            elif t == QEvent.Type.MouseButtonRelease and self._press is not None:
+                self._press = None
+                return True
+        except Exception:
+            self._press = None
         return False
 
 
@@ -237,12 +250,32 @@ def _windowed_fullscreen() -> bool:
 
 
 def start_move():
-    """Begin a native window drag (Aero Snap works). Called on toolbar mouse-down.
-    Never in fullscreen: dragging a fullscreen window moved it while Qt still
-    thought it was fullscreen — the two then disagreed about the state."""
-    if mw.isFullScreen():
-        return
+    """Begin a native window drag (Aero Snap works). Called once a press in the top
+    strip / the toolbar's empty space starts moving. From fullscreen or maximised the
+    window first drops back to its normal size under the cursor (like dragging a
+    maximised window's title bar) — moving a fullscreen window in place left Qt and
+    Windows disagreeing about its state."""
     try:
+        if mw.isFullScreen() or mw.isMaximized():
+            from aqt.qt import QTimer
+            g = mw.geometry()
+            gp = QCursor.pos()
+            fx = (gp.x() - g.left()) / max(1, g.width())
+            mw.showNormal()
+
+            def _go():
+                try:
+                    n = mw.geometry()
+                    p = QCursor.pos()
+                    mw.move(p.x() - int(fx * n.width()), p.y() - TOP_GAP // 2)
+                    if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
+                        h = mw.windowHandle()
+                        if h is not None:
+                            h.startSystemMove()
+                except Exception:
+                    pass
+            QTimer.singleShot(0, _go)
+            return
         h = mw.windowHandle()
         if h is not None:
             h.startSystemMove()
@@ -361,6 +394,34 @@ def install():
         global _alt
         _alt = _AltMenu(mb)
         QApplication.instance().installEventFilter(_alt)
+        # Qt switches off the shortcuts of a HIDDEN menu bar's actions (Ctrl+Z undo,
+        # Ctrl+Shift+A add-ons, …) — they only worked after an Alt tap showed it.
+        # Also attaching every menu action to the main window keeps them live. Again a
+        # bit later for actions add-ons add once the profile has loaded.
+        from aqt.qt import QTimer
+        keep_menu_shortcuts()
+        QTimer.singleShot(3000, keep_menu_shortcuts)
+    except Exception:
+        pass
+
+
+def keep_menu_shortcuts():
+    """Attach every (sub)menu action that has a shortcut to the main window, so its
+    shortcut works while the menu bar is hidden. Idempotent."""
+    try:
+        seen = set()
+
+        def walk(menu):
+            for a in menu.actions():
+                if id(a) in seen:
+                    continue
+                seen.add(id(a))
+                sub = a.menu()
+                if sub is not None:
+                    walk(sub)
+                elif not a.shortcut().isEmpty() and mw not in a.associatedObjects():
+                    mw.addAction(a)
+        walk(mw.menuBar())
     except Exception:
         pass
 

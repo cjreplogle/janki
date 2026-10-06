@@ -57,13 +57,19 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 - Hotkeys: show/hide `Ctrl+Alt+A`, lockdown `Ctrl+Alt+L`, chord backtick+Backspace.
   Recorder stores Qt mods with Mac names: Control→"cmd", Meta(Win key)→"ctrl", Alt→"opt".
 - Main-screen Settings gear defaults ON on Windows (`main_settings_button_win`).
+- Default look: **Live blur** (GPU + `win_backdrop: live`). Relaunches (`shell.relaunch_after_exit`)
+  strip the hook's env vars — inheriting them kept a GPU look in software mode (restart loop).
+- The hidden menu bar's shortcuts (Ctrl+Z undo…) are re-attached to `mw`
+  (`chrome.keep_menu_shortcuts`); Qt disables shortcuts of a hidden QMenuBar.
+- Z/X/C/V rating is an app key filter (`features/zxcv.py`), not QShortcuts (ambiguity).
+- Text shadows: Appearance → Text (`text_shadow`: performance [Windows default] / quality / off).
 
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.6.2** (Windows: **v2.6.2w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.6.2** (Windows: **v2.6.3w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.

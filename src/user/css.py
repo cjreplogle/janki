@@ -779,8 +779,25 @@ def _win_frameless() -> bool:
 
 _WIN_SOFT = (sys.platform.startswith("win")
              and os.environ.get("JANKI_WIN_RENDER") == "software")
-_TEXT_SHADOW = ("0 0 2px rgba(0,0,0,.95)" if _WIN_SOFT
-                else "0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85)")
+# Readability halo behind text on the glass (Settings > Appearance > Text > Text
+# shadows). "performance" (Windows default): one light layer, dropped while a card types
+# out. "quality" (macOS default): the full two-layer halo, kept throughout. "off": none.
+_SHADOW_PERF = "0 0 2px rgba(0,0,0,.95)"
+_SHADOW_QUALITY = "0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85)"
+TEXT_SHADOW_MODES = ("performance", "quality", "off")
+
+
+def text_shadow_mode(cfg=None) -> str:
+    cfg = cfg if cfg is not None else _cfg()
+    m = str(cfg.get("text_shadow") or "").lower()
+    if m in TEXT_SHADOW_MODES:
+        return m
+    return "performance" if sys.platform.startswith("win") else "quality"
+
+
+def _text_shadow(cfg=None) -> str:
+    m = text_shadow_mode(cfg)
+    return {"performance": _SHADOW_PERF, "quality": _SHADOW_QUALITY}.get(m, "none")
 
 _REDESIGN_ID = "2119814566"      # "Anki Redesign" on AnkiWeb
 
@@ -914,8 +931,8 @@ def _build_css(cfg, context):
         "body, body * {\n"
         "  text-shadow: %s !important; }\n"
         "</style>\n"
-    ) % _TEXT_SHADOW
-    if sys.platform.startswith("win"):
+    ) % _text_shadow(cfg)
+    if text_shadow_mode(cfg) == "performance":
         # The typewriter reveal (css.py: _typewriter_head) toggles this class for
         # its brief animation window. Windows glass software-rasterizes every
         # repaint, and re-blurring a text-shadow on every newly-visible char span
@@ -1536,15 +1553,6 @@ def _build_css(cfg, context):
                 # against the window's very top edge.
                 " padding-top:0 !important;"   # gap is chrome.TOP_GAP (native margin)
                 " box-sizing:border-box !important; }\n</style>\n")
-        if sys.platform.startswith("win") and _win_frameless():
-            # Frameless window: the toolbar's empty space is the title bar.
-            parts.append(
-                "<script>(function(){function bare(e){return !e.target.closest("
-                "'a,button,input,select,.hitem');}"
-                "document.addEventListener('mousedown',function(e){"
-                "if(e.button===0&&e.detail===1&&bare(e))pycmd('jkwin:move');},true);"
-                "document.addEventListener('dblclick',function(e){"
-                "if(bare(e))pycmd('jkwin:max');},true);})();</script>\n")
         # The nav items (a.hitem) live inside one island (div.toolbar). Give the
         # ISLAND the dark fill (matching the bottom buttons), keep items clear, and
         # only highlight the item you're hovering.
@@ -1619,6 +1627,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # window every frame, so step every other frame there with twice the
         # characters per step: same typing speed, half the repaints.
         f"  var JK_FR={2 if _WIN_SOFT else 1};\n"
+        # High-performance text shadows (Windows default): drop the halo while the
+        # text types out, so the blur isn't re-rasterized for every revealed step; it
+        # returns once the card settles (see body.jk-tw-active in _build_css).
+        f"  var JK_NOHALO={'true' if text_shadow_mode(cfg) == 'performance' else 'false'};\n"
         "  function jkNext(f){ if(JK_FR>1){ requestAnimationFrame(function(){ requestAnimationFrame(f); }); }"
         " else { requestAnimationFrame(f); } }\n"
         f'  var PREV_HASH="{prev_hash}";\n'
@@ -1726,7 +1738,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "          var rtl=getComputedStyle(h.el).direction==='rtl';\n"
         "          try{\n"
         "            var anim=h.el.animate([{clipPath:rtl?'inset(0 0 0 100%)':HIDE},{clipPath:SHOW}],\n"
-        "              {duration:dur, easing:'linear', fill:'forwards'});\n"
+        "              {duration:dur, fill:'forwards', easing:JK_FR>1 ?\n"
+        "                'steps('+Math.max(1,Math.round(dur/(JK_FR*1000/60)))+',end)' : 'linear'});\n"
         "            anim.onfinish=function(){ finishHolder(h); next(); };\n"
         "            anim.oncancel=function(){ finishHolder(h); next(); };\n"
         "          }catch(e){ finishHolder(h); next(); }\n"
@@ -1815,10 +1828,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Drop the readability halo for the animation's duration only (Windows glass
         # only — see the matching body.jk-tw-active rule in css.py's _build_css).
         # Removes a growing per-tick shadow-blur cost with nothing visibly lost.
-        "      if(JK_FR>1) document.body.classList.add('jk-tw-active');\n"
+        "      if(JK_NOHALO) document.body.classList.add('jk-tw-active');\n"
         "      if(observer) observer.disconnect();\n"
         "      typeOut(false, function(){ animating=false;\n"
-        "        if(JK_FR>1) document.body.classList.remove('jk-tw-active');\n"
+        "        if(JK_NOHALO) document.body.classList.remove('jk-tw-active');\n"
         "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }); }\n"
         "    // childList-only + SYNCHRONOUS run: the observer microtask fires before\n"
         "    // the browser paints, so emptying the text here means the full text is\n"
@@ -2213,11 +2226,34 @@ def _stats_head() -> str:
     return css + "<script>\n" + js_data + "</script>\n" + "<script>\n" + js_body + "</script>\n"
 
 
+# Press on the toolbar's empty space and drag (> 3px) = move the window; double-click =
+# maximise. Starting on movement (not press) lets a fullscreen window stay put on a
+# plain click; start_move restores it under the cursor once a drag begins.
+_WIN_TOOLBAR_DRAG_JS = (
+    "(function(){function bare(e){return !e.target.closest("
+    "'a,button,input,select,textarea,.hitem');}var d=null;"
+    "document.addEventListener('mousedown',function(e){"
+    "d=(e.button===0&&e.detail===1&&bare(e))?[e.screenX,e.screenY]:null;"
+    "if(d)e.preventDefault();},true);"
+    "document.addEventListener('mousemove',function(e){"
+    "if(!d)return;if(!(e.buttons&1)){d=null;return;}"
+    "if(Math.abs(e.screenX-d[0])+Math.abs(e.screenY-d[1])>3){d=null;"
+    "pycmd('jkwin:move');}},true);"
+    "document.addEventListener('mouseup',function(){d=null;},true);"
+    "document.addEventListener('dblclick',function(e){"
+    "if(bare(e))pycmd('jkwin:max');},true);})();")
+
+
 def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> None:
     try:
         css = _build_css(_cfg(), context)
         if css:
             web_content.head += "\n" + css
+        # Frameless Windows window: the toolbar's empty space is the title bar - in
+        # every look (not tied to the toolbar's glass styling being on).
+        if sys.platform.startswith("win") and isinstance(context, TopToolbar) \
+                and _win_frameless():
+            web_content.head += "\n<script>" + _WIN_TOOLBAR_DRAG_JS + "</script>\n"
         # Typewriter reveal on the reviewer card (independent of the glass theme).
         # Skip it entirely on Janki Practice (MCQ) cards: they have their own
         # per-choice reveal animation, and the typewriter's hide-then-reveal of
@@ -2526,14 +2562,15 @@ _CONGRATS_GLASS_CSS = (
     "{background:transparent!important;background-color:transparent!important;"
     "background-image:none!important;}"
     "html,body{background:transparent!important;background-color:transparent!important;}"
-    "body,body *{text-shadow:" + _TEXT_SHADOW + "!important;}"
 )
-_CONGRATS_GLASS_JS = (
-    "(function(){if(document.getElementById('__janki_congrats_glass'))return;"
-    "var s=document.createElement('style');s.id='__janki_congrats_glass';"
-    "s.textContent='" + _CONGRATS_GLASS_CSS + "';"
-    "if(document.head)document.head.appendChild(s);})();"
-)
+
+
+def _congrats_glass_js(cfg) -> str:
+    css = _CONGRATS_GLASS_CSS + "body,body *{text-shadow:" + _text_shadow(cfg) + "!important;}"
+    return ("(function(){if(document.getElementById('__janki_congrats_glass'))return;"
+            "var s=document.createElement('style');s.id='__janki_congrats_glass';"
+            "s.textContent='" + css + "';"
+            "if(document.head)document.head.appendChild(s);})();")
 
 
 def _congrats_font_js(cfg) -> str:
@@ -2560,7 +2597,7 @@ def _ensure_congrats_glass(*_):
     if not GLASS or not cfg.get("enabled", True):
         return
     try:
-        mw.web.eval(_CONGRATS_GLASS_JS)
+        mw.web.eval(_congrats_glass_js(cfg))
         mw.web.eval(_congrats_font_js(cfg))
     except Exception:
         pass
