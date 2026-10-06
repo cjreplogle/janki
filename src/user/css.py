@@ -67,15 +67,24 @@ def _arm_launch_go():
     opened from the tray). The page's web view can't tell reliably, so we do."""
     from aqt.qt import QObject, QEvent
 
-    def go(delay=220):
-        def _run():
-            try:
-                if mw.isVisible() and mw.web is not None:
-                    _LAUNCH_FADE["fired"] = True     # later renders: normal behaviour
-                    mw.web.eval("window.jkLaunchGo&&window.jkLaunchGo()")
-            except Exception:
-                pass
-        QTimer.singleShot(delay, _run)
+    # Debounced: Anki + Janki's startup redraw the deck list 2–3 times within half a
+    # second. Firing on the first one meant the next redraw replaced the fading page
+    # at full opacity (it popped in). Every held render / load restarts this timer;
+    # the fade starts once the list has been quiet for a moment.
+    t = QTimer(mw)
+    t.setSingleShot(True)
+
+    def _run():
+        try:
+            if mw.isVisible() and mw.web is not None:
+                _LAUNCH_FADE["fired"] = True     # later renders: normal behaviour
+                mw.web.eval("window.jkLaunchGo&&window.jkLaunchGo()")
+        except Exception:
+            pass
+    t.timeout.connect(_run)
+
+    def go(delay=350):
+        t.start(max(delay, 350))
 
     try:
         mw.web.loadFinished.connect(_launch_loaded)
@@ -98,10 +107,12 @@ def _arm_launch_go():
 
 
 def _launch_loaded(ok=True):
-    try:
-        mw.web.loadFinished.disconnect(_launch_loaded)
-    except Exception:
-        pass
+    if _LAUNCH_FADE.get("fired"):
+        try:
+            mw.web.loadFinished.disconnect(_launch_loaded)
+        except Exception:
+            pass
+        return
     g = _LAUNCH_FADE.get("go")
     if g and mw.isVisible():
         g(160)
@@ -1214,11 +1225,15 @@ def _build_css(cfg, context):
                 "@media (prefers-reduced-motion: reduce){html.jk-launch body{opacity:1;}"
                 "html.jk-launch.jk-go body{animation:none!important;}}</style>"
                 "<script>(function(){var h=document.documentElement;"
+                # a reload of this same page after the fade (the post-launch glass
+                # reload) must not hide it again
+                "try{if(sessionStorage.getItem('jkLaunchDone'))return;}catch(e){}"
                 "h.classList.add('jk-launch');"
                 "try{sessionStorage.setItem('glassFadeToken','%s');}catch(e){}"
                 # started from Python once the main window is really on screen
                 "window.jkLaunchGo=function(){requestAnimationFrame(function(){"
-                "requestAnimationFrame(function(){h.classList.add('jk-go');});});};"
+                "requestAnimationFrame(function(){h.classList.add('jk-go');"
+                "try{sessionStorage.setItem('jkLaunchDone','1');}catch(e){}});});};"
                 "setTimeout(function(){h.classList.add('jk-go');},6000);"   # never stuck
                 "})();</script>\n" % hud._menu_fade_token)
             if not _LAUNCH_FADE["done"]:
