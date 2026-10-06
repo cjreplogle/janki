@@ -840,6 +840,11 @@ def _motion_css(context) -> str:
             "  transition: opacity .25s ease, color .25s ease, transform .25s %(e)s; }\n"
             "html body td.opts a:hover img { transform: rotate(35deg); }\n"
             "html body a.collapse:hover { opacity:.75; }\n"
+            # The deck's hover pill (which takes pointer events, and reaches 7–13 px
+            # left of the name) sat ON TOP of +/− — clicks there opened the deck. Lift
+            # +/− above it and give it a slightly bigger target (no layout change).
+            "html body a.collapse { position:relative; z-index:2;\n"
+            "  padding:4px 6px; margin:-4px -6px; }\n"
         )
     if isinstance(context, TopToolbar):
         rules += (
