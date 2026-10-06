@@ -281,7 +281,7 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         "try{" + (pre or "") + "}catch(_){}" + mutate +
         "if(!el||P.first==null)return;"
         "var last=el.getBoundingClientRect().top;"
-        "var dy=(P.first-last)+(" + str(int(offset_px)) + ");"
+        "var dy=(P.first-last)+(window.__jkFlipOff||0);"
         "if(Math.abs(dy)<1)return;"
         "try{el.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
         "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
@@ -291,12 +291,28 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
     )
 
     def after_arm(_r=None):
+        # Compensate by how far the web view REALLY moved on screen (toolbar height
+        # + the layout margin/spacing that Focus also zeroes), measured, not assumed:
+        # the card keeps its exact global position, then glides.
+        try:
+            y0 = web.mapToGlobal(web.rect().topLeft()).y()
+        except Exception:
+            y0 = None
         try:
             collapse()
         except Exception as e:
             log("focus collapse: %s" % e)
+        off = int(offset_px)
         try:
-            web.eval(apply)
+            cw = mw.centralWidget()
+            if cw is not None and cw.layout() is not None:
+                cw.layout().activate()           # geometry settles now, synchronously
+            if y0 is not None:
+                off = y0 - web.mapToGlobal(web.rect().topLeft()).y()
+        except Exception:
+            pass
+        try:
+            web.eval("window.__jkFlipOff=%d;" % off + apply)
         except Exception:
             pass
     try:
@@ -682,12 +698,11 @@ def _focus_set_hidden(hidden: bool) -> None:
                                _collapse)
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
 
-            # late safety net only (layout is idempotent; no slide if already placed)
+            # late safety net: layout only — re-centring here caused a late twitch
             def _settle():
                 if not _focus_hidden:
                     return
                 _reclaim_central_layout()
-                _focus_apply_card(True, 0)
             QTimer.singleShot(450, _settle)
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
