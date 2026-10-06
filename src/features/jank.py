@@ -781,4 +781,18 @@ def packager_dialog(parent=None) -> None:
             except Exception:
                 pass
         QTimer.singleShot(0, _front)
-    dlg.exec()
+
+    # macOS re-shows the PARENT's minimise/zoom buttons while a child dialog is up
+    # (Settings is close-only; they landed over its "General" tab) — re-hide them
+    def _parent_close_only():
+        try:
+            if _glass is not None and parent is not None:
+                _glass.hide_titlebar_extras(parent.window())
+        except Exception:
+            pass
+    QTimer.singleShot(50, _parent_close_only)
+    try:
+        dlg.exec()
+    finally:
+        _parent_close_only()
+        QTimer.singleShot(50, _parent_close_only)
