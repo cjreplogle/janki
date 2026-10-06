@@ -6534,14 +6534,36 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
         combo.addItem(name, did)
     row.addWidget(combo, 1)
     lay.addLayout(row)
-    tag_map = find_tag_map(path)
-    from aqt.qt import QCheckBox
-    use_map = QCheckBox("Use tag map: %s" % os.path.basename(tag_map)) if tag_map else None
-    if use_map is not None:
-        use_map.setChecked(True)
-        use_map.setToolTip("Questions listed in the CSV go exactly where it says (deck + "
-                           "tag); anything it doesn't cover falls back to matching.")
-        lay.addWidget(use_map)
+    tag_map = [find_tag_map(path)]
+    from aqt.qt import QCheckBox, QPushButton
+    mrow = QHBoxLayout()
+    use_map = QCheckBox()
+    use_map.setToolTip("Questions listed in the CSV go exactly where it says (deck + "
+                       "tag); anything it doesn't cover falls back to matching.")
+
+    def _label():
+        if tag_map[0]:
+            use_map.setText("Use tag map: %s" % os.path.basename(tag_map[0]))
+            use_map.setEnabled(True)
+        else:
+            use_map.setText("No tag map (.csv: Q, deck, tag, Stem)")
+            use_map.setChecked(False)
+            use_map.setEnabled(False)
+    use_map.setChecked(bool(tag_map[0]))
+    _label()
+    pick = QPushButton("Choose tag map…")
+
+    def _pick():
+        p, _ = QFileDialog.getOpenFileName(dlg, "Choose tag map", os.path.dirname(path),
+                                           "CSV (*.csv)")
+        if p:
+            tag_map[0] = p
+            use_map.setChecked(True)
+            _label()
+    pick.clicked.connect(_pick)
+    mrow.addWidget(use_map, 1)
+    mrow.addWidget(pick)
+    lay.addLayout(mrow)
     hint = QLabel("Each question's “Lecture:” header is matched to a subdeck name; matched "
                   "questions land in the same subdeck path under Practice and link to "
                   "those cards' tags.")
@@ -6549,7 +6571,7 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     hint.setStyleSheet("color: gray; font-size: 11px;")
     lay.addWidget(hint)
     bb = QDialogButtonBox()
-    bb.addButton("Create & import", QDialogButtonBox.ButtonRole.AcceptRole)
+    bb.addButton("Create && import", QDialogButtonBox.ButtonRole.AcceptRole)
     bb.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
     bb.accepted.connect(dlg.accept)
     bb.rejected.connect(dlg.reject)
@@ -6559,10 +6581,10 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     map_did = combo.currentData() or 0
     mapped = None
     from_map = 0
-    if use_map is not None and use_map.isChecked():
+    if tag_map[0] and use_map.isChecked():
         try:
             root_nm = mw.col.decks.name(map_did) if map_did else None
-            from_map = apply_tag_map(qs, tag_map, root_nm)
+            from_map = apply_tag_map(qs, tag_map[0], root_nm)
         except Exception as e:
             showWarning("Couldn't read the tag map:\n\n%s" % e)
     if map_did:
