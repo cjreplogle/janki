@@ -510,7 +510,8 @@ def _steps():
                   "today's cards.<br>Shortcut: <b>%s</b>." % _k("lectures")),
         dict(target=("toolbar", "Calendar"), title="Calendar", enter=_open_calendar,
              try_=("Reopen the Calendar", _open_calendar),
-             detect=_calendar_open, done_msg="Click a class to study it — or carry on.",
+             # no detect: the step opens the Calendar itself, so "is it open?" would
+             # pass at once and the tour would skip ahead before you'd read it
              leave=_back_to_decks,
              text="Your week of classes from your lecture calendar: dress codes along the "
                   "top, a ★ on mandatory sessions. Click a class to study its cards, pull "
