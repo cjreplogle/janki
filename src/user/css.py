@@ -58,6 +58,9 @@ DEFAULT_UI_FONT = "Lora"
 _RETIRED_FONTS = {"Anthropic Serif Text"}     # removed options → the default (Lora)
 
 
+_LAUNCH_FADE = {"done": False}   # first deck list of the session gets the launch fade
+
+
 def ui_font_label(cfg=None):
     lbl = (cfg or _cfg()).get("card_font", DEFAULT_UI_FONT)
     return DEFAULT_UI_FONT if lbl in _RETIRED_FONTS else lbl
@@ -1148,7 +1151,34 @@ def _build_css(cfg, context):
         # whole (self-adapting: measures actual clipping, no magic px threshold).
         if cfg.get("amboss_qbank_autohide", True):
             parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
-        parts.append(fade_in)
+        if not _LAUNCH_FADE["done"]:
+            # FIRST deck list of the session: Anki usually renders it before the window
+            # is on screen, so the normal .15s fade played unseen and the list just
+            # appeared. Hold it invisible and fade it in once the page is actually
+            # visible (Chromium's visibilityState follows the window); a timer
+            # guarantees it can never stay hidden.
+            _LAUNCH_FADE["done"] = True
+            parts.append(
+                "<style>html.jk-launch body{opacity:0;animation:none!important;}"
+                "html.jk-launch.jk-go body{animation:jkLaunchIn .45s ease-out both!important;}"
+                "@keyframes jkLaunchIn{from{opacity:0;transform:translateY(4px)}"
+                "to{opacity:1;transform:none}}"
+                "@media (prefers-reduced-motion: reduce){html.jk-launch body{opacity:1;}"
+                "html.jk-launch.jk-go body{animation:none!important;}}</style>"
+                "<script>(function(){var h=document.documentElement;"
+                "h.classList.add('jk-launch');"
+                "try{sessionStorage.setItem('glassFadeToken','%s');}catch(e){}"
+                "var gone=false;function go(){if(gone)return;gone=true;"
+                "requestAnimationFrame(function(){requestAnimationFrame(function(){"
+                "h.classList.add('jk-go');});});}"
+                "if(document.visibilityState==='visible'){"
+                "setTimeout(go,120);}"           # visible already: let the window settle
+                "else{document.addEventListener('visibilitychange',function(){"
+                "if(document.visibilityState==='visible')go();});}"
+                "setTimeout(go,2500);"           # never stay hidden
+                "})();</script>\n" % hud._menu_fade_token)
+        else:
+            parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
             and screens.get("bottom_bar", True):
         parts.append("<style>\nbody #outer {\n" + props + "  margin:4px 0;\n}\n</style>\n")
