@@ -71,7 +71,9 @@ def _on_content(web_content, context):
     try:
         from aqt.reviewer import ReviewerBottomBar
         if isinstance(context, ReviewerBottomBar):
-            web_content.head += _BAR_JS
+            # body, not head: the script watches document.body (null in <head>), and
+            # that error stopped it before its key listener was attached
+            web_content.body += _BAR_JS
     except Exception as e:
         log("review keys bar: %s" % e)
 
