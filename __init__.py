@@ -727,6 +727,8 @@ def _startup():
         try:
             from .src.features import zxcv
             zxcv.install()
+            from .src.features import tag_export
+            tag_export.install()
         except Exception as _zx_exc:
             log("zxcv: %s" % _zx_exc)
         # Windows: register .jank / .qb / .rp with Anki once (per-user, no admin), so
