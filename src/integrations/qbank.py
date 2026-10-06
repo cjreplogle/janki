@@ -1602,7 +1602,7 @@ func columnOrder(_ items: [OCRBox]) -> [String] {
         + columnOrder(Array(rows[b.b...]))
 }
 
-func ocr(_ path: String) -> [String] {
+func ocr(_ path: String, _ outBoxes: inout [[Any]]) -> [String] {
     guard let img = NSImage(contentsOfFile: path),
           let tiff = img.tiffRepresentation,
           let bmp = NSBitmapImageRep(data: tiff),
@@ -1619,6 +1619,9 @@ func ocr(_ path: String) -> [String] {
         boxes.append(OCRBox(y: bb.origin.y, h: bb.height, minX: bb.minX, maxX: bb.maxX, s: t.string))
     }
     if boxes.isEmpty { return [] }
+    // every line's box, top-left origin, as fractions of the image: [text, x0, y0, x1, y1]
+    outBoxes = boxes.map { [$0.s, Double($0.minX), Double(1 - $0.y - $0.h),
+                            Double($0.maxX), Double(1 - $0.y)] }
     // Detect a vertical gutter in the central region that no text box spans, so
     // side-by-side (two-question) slides are read a full column at a time instead
     // of interleaving the columns row by row (which scrambles both questions).
@@ -1695,7 +1698,9 @@ if args.count >= 4 && args[1] == "--crop" {
     // several of these processes at once (a single throttled process is pinned
     // to a couple of cores; multiple processes spread across the machine).
     for path in args.dropFirst() {
-        let obj: [String: Any] = ["path": path, "lines": ocr(path)]
+        var bx: [[Any]] = []
+        let lines = ocr(path, &bx)
+        let obj: [String: Any] = ["path": path, "lines": lines, "boxes": bx]
         if let d = try? JSONSerialization.data(withJSONObject: obj),
            let s = String(data: d, encoding: .utf8) { print(s); fflush(stdout) }
     }
@@ -1761,6 +1766,9 @@ def _boost_thread_qos():
         pass
 
 
+_OCR_BOXES = {}          # image path → [[text, x0, y0, x1, y1], …] from the last OCR run
+
+
 def _ocr_images(paths, progress=None):
     """Return {path: [lines]} using macOS Vision. Runs several helper processes in
     parallel and streams their combined output so `progress(done, total, path)`
@@ -1802,6 +1810,7 @@ def _ocr_images(paths, progress=None):
                     try:
                         o = json.loads(line.decode("utf-8", "ignore"))
                         out[o["path"]] = o.get("lines", [])
+                        _OCR_BOXES[o["path"]] = o.get("boxes", [])
                     except Exception:
                         continue
                     done += 1
@@ -1830,6 +1839,33 @@ def _crop_figure(src):
     return src
 
 
+_PPTX_HIGHLIGHTS = {}    # temp image path → [(x0, y0, x1, y1) fractions of the image]
+
+
+def _xfrm(blk):
+    m = re.search(r'<a:off x="(-?\d+)" y="(-?\d+)"\s*/>\s*<a:ext cx="(\d+)" cy="(\d+)"', blk)
+    return tuple(int(v) for v in m.groups()) if m else None
+
+
+def _pptx_highlights(z, sx):
+    """Answer-reveal boxes on a slide: shapes (no picture) that an animation brings in
+    or takes away — EOB banks put the question in as a screenshot and reveal the right
+    choice with a highlight box. → [(x, y, w, h)] in slide EMUs."""
+    xml = z.read(sx).decode("utf-8", "ignore")
+    if "<p:timing" not in xml:
+        return []
+    animated = set(re.findall(r'spid="(\d+)"', xml.split("<p:timing", 1)[1]))
+    out = []
+    for sp in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
+        sid = re.search(r'<p:cNvPr id="(\d+)"', sp)
+        if not sid or sid.group(1) not in animated or "<p:ph" in sp:
+            continue
+        r = _xfrm(sp)
+        if r and r[2] > 0 and r[3] > 0:
+            out.append(r)
+    return out
+
+
 def _pptx_slide_pics(z, names, sx):
     """→ [(arc, (cx, cy)), …] for the <p:pic> images on one slide, in order."""
     rels_name = "ppt/slides/_rels/" + sx.rsplit("/", 1)[-1] + ".rels"
@@ -1851,7 +1887,33 @@ def _pptx_slide_pics(z, names, sx):
         arc = os.path.normpath(os.path.join("ppt/slides", tgt)).replace("\\", "/")
         if arc in names:
             out.append((arc, (int(ext.group(1)), int(ext.group(2)))))
+            _PIC_PLACE[(sx, len(out) - 1)] = (_xfrm(blk), re.search(
+                r'<a:srcRect([^/]*)/>', blk))
     return out
+
+
+_PIC_PLACE = {}
+
+
+def _rect_on_pic(hl, place):
+    """A slide-space highlight → (x0, y0, x1, y1) fractions of the picture's image,
+    or None when it doesn't sit on the picture."""
+    xf, src = place
+    if not xf or not xf[2] or not xf[3]:
+        return None
+    px, py, pw, ph = xf
+    crop = {"l": 0, "t": 0, "r": 0, "b": 0}
+    if src:
+        for k, v in re.findall(r'\b([ltrb])="(-?\d+)"', src.group(1)):
+            crop[k] = int(v) / 100000.0
+    fx0, fx1 = (hl[0] - px) / pw, (hl[0] + hl[2] - px) / pw
+    fy0, fy1 = (hl[1] - py) / ph, (hl[1] + hl[3] - py) / ph
+    if fx1 <= 0 or fx0 >= 1 or fy1 <= 0 or fy0 >= 1:
+        return None
+    sx_ = 1 - crop["l"] - crop["r"]
+    sy_ = 1 - crop["t"] - crop["b"]
+    return (crop["l"] + max(0, fx0) * sx_, crop["t"] + max(0, fy0) * sy_,
+            crop["l"] + min(1, fx1) * sx_, crop["t"] + min(1, fy1) * sy_)
 
 
 def _pptx_native_paragraphs(z, sx):
@@ -1920,7 +1982,10 @@ def _pptx_content_images(pptx_path, tmpdir):
     slide_xmls = sorted(
         [n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)],
         key=lambda n: int(re.search(r"(\d+)", n.rsplit("/", 1)[-1]).group(1)))
+    _PIC_PLACE.clear()
+    _PPTX_HIGHLIGHTS.clear()
     per_slide = [_pptx_slide_pics(z, names, sx) for sx in slide_xmls]
+    per_hl = [_pptx_highlights(z, sx) for sx in slide_xmls]
     per_text = [_pptx_native_paragraphs(z, sx) for sx in slide_xmls]
 
     # Topics = native paragraphs that recur across slides (a title slide repeats
@@ -1961,7 +2026,7 @@ def _pptx_content_images(pptx_path, tmpdir):
                 category = t if re.search(r"[A-Za-z]", t) else ""
         elif full in topics:               # (decks without title placeholders)
             category = full
-        for arc, dims in pics:
+        for pi, (arc, dims) in enumerate(pics):
             if arc in chrome or dims == _PPTX_LOGO_DIMS:
                 continue
             if arc not in extracted:
@@ -1970,6 +2035,10 @@ def _pptx_content_images(pptx_path, tmpdir):
                 with open(fp, "wb") as f:
                     f.write(z.read(arc))
                 extracted[arc] = fp
+            for hl in per_hl[sid]:
+                r = _rect_on_pic(hl, _PIC_PLACE.get((slide_xmls[sid], pi), (None, None)))
+                if r:
+                    _PPTX_HIGHLIGHTS.setdefault(extracted[arc], []).append(r)
             ordered.append((extracted[arc], category, sid))
     z.close()
     return ordered
@@ -1982,7 +2051,7 @@ def _pptx_content_images(pptx_path, tmpdir):
 #                                        dropped by OCR, so the letter is just a
 #                                        standalone A–E token
 #   "N. Correct: <rationale> (X)"        letter in trailing parens
-_RE_P_ANS = re.compile(r"(?i)\bthe answer is\s*\(?([A-F])\b")
+_RE_P_ANS = re.compile(r"(?i)\b(?:the|correct) answer is\s*\(?([A-F])\b")
 _RE_P_ANS_BRS = re.compile(r"^\s*(\d{1,3})[\.\)]\s+([A-F])(?:[\.\):]\s*|\s+)(\S.*)$")
 _RE_P_ANS_COR = re.compile(r"(?i)^\s*(\d{1,3})?[\.\)]?\s*correct\b.*?\(([A-F])\)")
 _RE_P_NUM = re.compile(r"^\s*(\d{1,3})[\.\)]\s+(\S.*)$")
@@ -2452,6 +2521,78 @@ def _fix_t_cells(line: str) -> str:
     return _RE_T_HELPER.sub("Th", _RE_T_CELL.sub("T", line))
 
 
+# A radio button before a choice reads as "O A) …" / "OB) …" / "0 C) …" (exam-software
+# screenshots) — drop it so the choice letter leads the line.
+_RE_RADIO = re.compile(r"^\s*[O0o○◯◦●•·›»©®@Qq]\s?[LlI|]?(?=\(?[A-F][\)\.:](?:\s|$))")
+
+
+# Exam-software screenshots (NBME/UWorld-style "Item: 2 of 48" screens, Medbullets-
+# style "QID: 442" cards) carry UI around the question: toolbar words, the left
+# question-number sidebar ("10", "• 13"), "Review Topic" links. Recognised by
+# their markers and stripped so the question parses like a plain slide.
+_RE_EXAM_MARK = re.compile(r"(?i)^\s*(?:item:?\s*\d+\s+of\s+\d+|[QD]ID:?\s*\d+)")
+_RE_EXAM_UI = re.compile(
+    r"(?i)^\s*(?:[•·O0o©®@]?\s*\d{1,3}|[•·]|[A-Z]{1,4}(?:\s+[A-Z])?|p?\s*mark|previous|next|"
+    r"lab values|notes|calculator|explanations?|(?:[SO]\s+)?(?:O\s*)?lock|suspend|pause|end\s*block|review topic|figures?:.*|[QD]ID:?.*|"
+    r"item:?\s*\d+\s+of\s+\d+|.*\block\s+suspend\b.*)\s*$")
+# (sidebar numbers only after a space — "IL-1"/"IL-6" keep theirs)
+_RE_EXAM_TAIL = re.compile(r"(?:\s+[•·]?\s*\d{1,2}\b)+\s*$|\s+Explanations\b.*$")
+_RE_EXAM_FOOT = re.compile(r"(?i)\s*(?:\b[SO]\s+)*(?:\bO?\s*Lock\s+)?Suspend\s+Pause\s+End\s+Block.*$")
+_RE_NUM_CHOICE = re.compile(r"^\s*([1-6])\.\s*[•·O0o©®@]?\s+(\S.*)$")
+
+
+def _clean_exam_ui(lines):
+    if not any(_RE_EXAM_MARK.match(l) for l in lines):
+        return lines
+    item_screen = any(re.match(r"(?i)^\s*item:?\s*\d", l) for l in lines)
+    out = []
+    for l in lines:
+        l = _RE_EXAM_FOOT.sub("", l)
+        if _RE_EXAM_UI.match(l):
+            continue
+        # "(M1.IM.21) A 55-year-old…" / "11.PA.66) A 3-year-old…" — the card's id
+        l = re.sub(r"^\s*\(?[A-Z0-9]{1,3}\.[A-Z]{2}\.\d+\)\s*", "", l)
+        # a choice line's stray sidebar numbers ("C. Ketogenic diet • 14")
+        if item_screen and _RE_P_CHO.match(_RE_RADIO.sub("", l)):
+            l = _RE_EXAM_TAIL.sub("", l)
+        else:
+            l = re.sub(r"\s*[•·]\s*Review Topic\s*$", "", l)
+        if l.strip():
+            out.append(l)
+    # Numbered choices "1. • Natural killer cells" … → "A) …" (only a 1,2,3… run)
+    nums = [i for i, l in enumerate(out) if _RE_NUM_CHOICE.match(l)]
+    run = []
+    for i in nums:
+        if int(_RE_NUM_CHOICE.match(out[i]).group(1)) == len(run) + 1:
+            run.append(i)
+    if len(run) >= 2:
+        for k, i in enumerate(run):
+            out[i] = "%s) %s" % (chr(65 + k), _RE_NUM_CHOICE.match(out[i]).group(2))
+    return out
+
+
+def _merge_split_slides(blocks):
+    """One question as TWO screenshots on a slide: the stem (often with a figure or
+    table) and, below it, the choices — the highlighted one. Read them as one image:
+    the stem's lines first. The stem image is remembered as the question's prefix."""
+    out = []
+    for b in blocks:
+        p, lines, c, sid = b
+        if (out and out[-1][3] == sid and p in _PPTX_HIGHLIGHTS
+                and out[-1][0] not in _PPTX_HIGHLIGHTS and lines
+                and (_RE_P_CHO.match(lines[0]) or _RE_P_CHO0.match(lines[0]))
+                and not _extract_questions(out[-1][1])):
+            prev = out.pop()
+            _SPLIT_PREFIX[p] = prev[0]
+            out.append((p, list(prev[1]) + list(lines), c, sid))
+        else:
+            out.append(b)
+    return out
+
+
+_SPLIT_PREFIX = {}       # choices image → the stem image merged in front of it
+
+
 def _parse_ocr_blocks(blocks):
     """blocks = [(path, [lines], category, slide_id), …] in slide order →
     (questions, n_detected). A slide that yields questions (stem + ≥2 choices) is
@@ -2461,8 +2602,10 @@ def _parse_ocr_blocks(blocks):
     are numberless, so global matching is unsafe). Figures on a question's slide
     are attached to that question; a question whose text references a figure but
     has no separate figure image keeps its own screenshot (embedded graph/table)."""
-    blocks = [(p, [_fix_t_cells(l) for l in lines], c, sid)
+    blocks = [(p, [_RE_RADIO.sub("", _fix_t_cells(l)) for l in _clean_exam_ui(lines)], c, sid)
               for p, lines, c, sid in blocks]
+    _SPLIT_PREFIX.clear()
+    blocks = _merge_split_slides(blocks)
     questions = []          # every question (with choices), in slide order
     answers = []            # (n_seen_before, num, letter, rat, category)
     slide_figs = {}         # slide_id → [figure image paths]
@@ -2498,6 +2641,10 @@ def _parse_ocr_blocks(blocks):
                 if key in seen_stems:       # skip a repeated question panel
                     continue
                 seen_stems.add(key)
+                if n == 0 and pending and path in _PPTX_HIGHLIGHTS:
+                    pending = None          # a highlight-reveal slide holds its whole stem
+                if n == 0 and path in _SPLIT_PREFIX:
+                    q["_slide_prefix"] = [_SPLIT_PREFIX[path]]
                 if n == 0 and pending:      # opening text was on the prior image
                     q["stem"] = _join(pending[0], q["stem"])
                     if q["_num"] is None:
@@ -2562,7 +2709,11 @@ def _parse_ocr_blocks(blocks):
             nums = [l for l in lines if _RE_P_STD.match(l)]
             pnum = int(_RE_P_STD.match(nums[0]).group(1)) if nums else None
             body = " ".join(l for l in lines if not _RE_P_STD.match(l)).strip()
-            if body[:1].isupper() or body[:1].isdigit():
+            if path in _PPTX_HIGHLIGHTS:
+                # a highlight-reveal slide is a whole question on its own (its choices
+                # just didn't read) — never glue it onto the next slide's question
+                pending = None
+            elif body[:1].isupper() or body[:1].isdigit():
                 pending = (_join(pending[0], body) if pending else body,
                            (pending[1] if pending and pending[1] else pnum),
                            (pending[2] if pending else []) + [path])
@@ -2653,6 +2804,24 @@ def _parse_ocr_blocks(blocks):
             q["stem"] = _join(text, q["stem"])
             done.add(n)
 
+    # Highlight-reveal banks: no answer key, the right choice is covered by an
+    # animated box on the question's own screenshot. Bind the choice under the box;
+    # the slide right after (its explanation) becomes the answer slide.
+    # The box beats a text-parsed key: an explanation slide can read like "N. X …"
+    # and bind the wrong letter.
+    for q in questions:
+        idx = _highlighted_choice(q, _PPTX_HIGHLIGHTS.get(q.get("_src"), []),
+                                  _OCR_BOXES.get(q.get("_src"), []))
+        if idx is None:
+            continue
+        if q["answer"] is not None and q["answer"] != idx:
+            q["explanation"] = ""           # that key's rationale was for another choice
+            q.pop("_ans_slide_src", None)
+        q["answer"] = idx
+        nxt = slide_figs.get(q["_slide"] + 1)
+        if nxt and not q.get("_ans_slide_src"):
+            q["_ans_slide_src"] = nxt[0]
+
     for q in questions:
         _fix_ploidy(q)
 
@@ -2685,6 +2854,57 @@ def _parse_ocr_blocks(blocks):
         q["id"] = "x%d" % (len(incomplete) + 1)
         incomplete.append(q)
     return good, len(questions), incomplete
+
+
+def _highlighted_choice(q, rects, boxes):
+    """Index of the choice whose OCR line the highlight box covers most, or None.
+    Each OCR line is matched to a choice by its text (or its leading letter); the box
+    can straddle two lines, so the one nearest the box's centre wins."""
+    if not rects or not boxes or len(q.get("choices") or []) < 2:
+        return None
+    import difflib
+
+    def norm(t):
+        m = _RE_P_CHO.match(_RE_RADIO.sub("", t))
+        t = m.group(2) if m else t
+        return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+    choices = [norm(c) for c in q["choices"]]
+
+    def which(t):
+        n = norm(t)
+        best, score = None, 0.0
+        for i, c in enumerate(choices):
+            if not c or not n:
+                continue
+            r = difflib.SequenceMatcher(None, n, c).ratio()
+            if n in c or c in n:
+                r = max(r, 0.85)
+            if r > score:
+                best, score = i, r
+        if score >= 0.6:
+            return best
+        m = _RE_P_CHO.match(_RE_RADIO.sub("", t.strip()))
+        if m and 0 <= ord(m.group(1).upper()) - 65 < len(choices):
+            return ord(m.group(1).upper()) - 65
+        return None
+
+    for x0, y0, x1, y1 in rects:
+        best, dist = None, 1e9
+        cy = (y0 + y1) / 2
+        for t, bx0, by0, bx1, by1 in boxes:
+            if bx1 <= x0 or bx0 >= x1 or by1 <= by0:
+                continue
+            if (min(y1, by1) - max(y0, by0)) / (by1 - by0) < 0.3:
+                continue
+            dd = abs((by0 + by1) / 2 - cy)
+            if dd >= dist:
+                continue
+            i = which(t)
+            if i is not None:
+                best, dist = i, dd
+        if best is not None:
+            return best
+    return None
 
 
 def _shrink_image_bytes(path, max_w=1400, quality=80):
