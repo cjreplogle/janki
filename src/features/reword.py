@@ -2214,7 +2214,8 @@ def _rp_deck_count(deck_ids) -> int:
     seen = set()
     for did in deck_ids or []:
         try:
-            seen.update(mw.col.decks.cids(int(did), children=True))
+            # own cards only: callers list every selected subdeck themselves
+            seen.update(mw.col.decks.cids(int(did), children=False))
         except Exception:
             try:
                 seen.update(mw.col.find_cards("did:%d" % int(did)))
@@ -2529,7 +2530,10 @@ def copy_rephrase_prompt_dialog(on_done=None, parent=None):
     def _selected_dids():
         if cb_all.isChecked():
             return [d for _n, dids in decks for d in dids]
-        return [d for cb, dids in deck_cbs if cb.isChecked() for d in dids]
+        # fully ticked only: a partly-ticked parent (isChecked() is True for it) would
+        # otherwise pull in its whole tree — each ticked subdeck is listed on its own
+        return [d for cb, dids in deck_cbs
+                if cb.checkState() == Qt.CheckState.Checked for d in dids]
 
     def _refresh(*_a):
         on = cb_all.isChecked()
