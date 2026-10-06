@@ -603,18 +603,9 @@ _DECK_DROPDOWN_JS = "(function(){\n if(window.matchMedia&&matchMedia('(prefers-r
    while(w.firstChild) td.insertBefore(w.firstChild,w); w.remove();
    td.style.paddingTop=''; td.style.paddingBottom='';});}
  function run(rows,open,done){
-   // Windows: the page often renders in software, where animating every cell's
-   // height + padding (layout work each frame) stutters — fade/slide the rows
-   // instead (opacity + transform only, no relayout)
-   if(/Windows/.test(navigator.userAgent)){
-     rows.forEach(function(tr,i){
-       var a=open?[{opacity:0,transform:'translateY(-4px)'},{opacity:1,transform:'none'}]
-                 :[{opacity:1},{opacity:0}];
-       tr.animate(a,{duration:open?DUR:Math.round(DUR*0.6),easing:EASE,
-                     delay:open?Math.min(i,8)*12:0,fill:open?'backwards':'forwards'});});
-     setTimeout(function(){if(done) done();},(open?DUR+120:Math.round(DUR*0.6))+20);
-     return;
-   }
+   // Windows: no fold animation — instant (animating rows stuttered/looked off with
+   // software rendering, and the page redraws on every +/− anyway)
+   if(/Windows/.test(navigator.userAgent)){if(done) done();return;}
    var ws=[], fill=open?'none':'forwards';
    rows.forEach(function(tr){ws=ws.concat(wrap(tr));});
    ws.forEach(function(w){
