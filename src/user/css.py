@@ -1087,6 +1087,11 @@ def _build_css(cfg, context):
             parts.append("<style>html body a.deck.jk-kb{background:rgba(255,255,255,.12);"
                          "border-radius:6px;box-shadow:0 0 0 4px rgba(255,255,255,.12);}"
                          "</style>\n")
+        # Anki keeps the gear showing on the "current" deck (the last one opened or
+        # collapsed) even when the mouse is elsewhere — only the hovered / arrow-key
+        # selected row shows it
+        parts.append("<style>html body tr.deck.current:not(:hover):not(.jk-kb-row) .gears"
+                     "{visibility:hidden!important;}</style>\n")
         parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}"
                      "html body a.deck:focus,html body a.deck:focus-visible{outline:none!important;}</style>"
                      "<script>" + _DECK_KEYS_JS + "</script>\n")
