@@ -1968,16 +1968,20 @@ def _build() -> "QWidget":
                 pass
             return False
 
+    # the filter is held HERE, not on snd_box: the destroyed() cleanup runs after the
+    # panel's C++ object is gone, and touching snd_box then raised RuntimeError
+    _outside = {"f": None}
+
     def _watch_outside(on):
-        from aqt.qt import QApplication
-        f = getattr(snd_box, "_jk_outside", None)
         try:
+            from aqt.qt import QApplication
+            f = _outside["f"]
             if on and f is None:
-                f = snd_box._jk_outside = _Outside(snd_box)
+                f = _outside["f"] = _Outside()
                 QApplication.instance().installEventFilter(f)
             elif not on and f is not None:
+                _outside["f"] = None
                 QApplication.instance().removeEventFilter(f)
-                snd_box._jk_outside = None
         except Exception:
             pass
     snd_box.destroyed.connect(lambda *_: _watch_outside(False))

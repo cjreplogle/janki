@@ -573,6 +573,23 @@ class _Tour(QWidget):
     def _check(self):
         """Did the user do this step's thing? Show a ✓; move on — right away for
         in-window features, after the window it opened is closed for dialogs."""
+        # A modal alert (an error box, a confirmation) must be reachable: the tour
+        # kept raising itself over it, so the alert sat underneath while blocking the
+        # tour. Step aside while one is open; come back when it closes.
+        try:
+            from aqt.qt import QApplication
+            modal = QApplication.activeModalWidget()
+            if modal is not None and modal is not self and modal.window() is not self:
+                if self.isVisible():
+                    self._jk_hid_for_modal = True
+                    self.hide()
+                return
+            if getattr(self, "_jk_hid_for_modal", False):
+                self._jk_hid_for_modal = False
+                self.show()
+                self._lift()
+        except Exception:
+            pass
         if not (0 <= self.i < len(self.steps)):
             return
         st = self.steps[self.i]

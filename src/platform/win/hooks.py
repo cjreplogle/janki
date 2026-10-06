@@ -16,6 +16,7 @@ Rules that keep a low-level hook alive and safe:
   * the hook is removed on aboutToQuit, before interpreter teardown.
 """
 import ctypes
+import time
 import threading
 from ctypes import wintypes
 
@@ -142,13 +143,18 @@ def _handle(down, kc):
         return False
     if down:
         if kc == _hk.leader_kc:
+            if not keytap._tab_held:
+                keytap._tab_used_combo = False
             keytap._tab_held = True
-            keytap._tab_used_combo = False
+            keytap._tab_last = time.monotonic()   # the first press AND each auto-repeat
             return True
         # A missed Tab release (e.g. the tap was paused when it came) left _tab_held
         # stuck — then every arrow press was swallowed as a Tab+arrow chord and arrow
         # navigation stopped working everywhere. Trust only the physical key state.
-        if keytap._tab_held and not _down(_leader_vk()):
+        # (Not GetAsyncKeyState: this hook swallows the Tab press, so Windows' key
+        # state never sees Tab down and every Tab chord was cancelled. Held Tab keeps
+        # sending auto-repeat downs through the hook — none for 1.5 s = released.)
+        if keytap._tab_held and time.monotonic() - getattr(keytap, "_tab_last", 0) > 1.5:
             keytap._tab_held = False
             keytap._tab_used_combo = False
         canon = _hk.tab_map.get(kc) if keytap._tab_held else None
