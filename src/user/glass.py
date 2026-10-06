@@ -783,6 +783,11 @@ def _reload_all_webviews():
     # the NSApp is inactive (e.g. after minimize or when a floating window like
     # the coherence HUD holds focus). Without this the views reload blank.
     try:
+        # Only when Anki is already the active app: the post-launch reload (2.6 s in,
+        # around when the login sync ends) used to yank focus from whatever app you'd
+        # switched to.
+        if mw.app.applicationState() != Qt.ApplicationState.ApplicationActive:
+            raise StopIteration
         _msg, _cls = _bridge()
         _ns_app = _msg(c_void_p, _cls(b"NSApplication"), b"sharedApplication")
         _msg(c_void_p, _ns_app, b"activateIgnoringOtherApps:", (c_bool,), (True,))
@@ -963,7 +968,7 @@ _focus_guard_hooked = False
 _LAUNCHER_APPS = ("Terminal", "iTerm2", "iTerm", "kitty", "Alacritty", "WezTerm")
 
 
-def install_launch_focus_guard(seconds: float = 25.0) -> None:
+def install_launch_focus_guard(seconds: float = 6.0) -> None:
     """For the first `seconds` after launch, if the LAUNCHER terminal steals focus
     (Janki.app runs Anki from a shell, so Terminal grabs it back and knocks an OLED
     native-fullscreen Space to the desktop), grab focus straight back. Scoped to the
@@ -985,6 +990,9 @@ def install_launch_focus_guard(seconds: float = 25.0) -> None:
                 if st != Qt.ApplicationState.ApplicationInactive:
                     return
                 if _frontmost_app_name() in _LAUNCHER_APPS:
+                    # one-shot: the launcher's steal happens once; a later switch to a
+                    # terminal is the user's choice (it used to be yanked back for 25 s)
+                    globals()["_focus_guard_until"] = 0.0
                     QTimer.singleShot(0, _reclaim_app_focus)
                     QTimer.singleShot(120, _reclaim_app_focus)
             except Exception:
