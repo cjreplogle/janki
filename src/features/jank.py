@@ -568,16 +568,18 @@ def packager_dialog(parent=None) -> None:
             if top in ("Practice",) or top.startswith("Janki Calendar"):
                 continue                       # banks + temporary class decks
             rows.append((nm, int(nid.id)))
+        # a real tree: top-level decks only; ▸ reveals a deck's subdecks
+        node = {}
         for nm, did in sorted(rows, key=lambda r: r[0].lower()):
-            depth = nm.count("::")
             try:
                 n = mw.col.decks.card_count(did, include_subdecks=True)
                 det = "%d card%s" % (n, "" if n == 1 else "s")
             except Exception:
                 det = ""
-            if depth == 0 and any(x.startswith(nm + "::") for x, _d in rows):
+            if any(x.startswith(nm + "::") for x, _d in rows):
                 det += (" · " if det else "") + "with subdecks"
-            _leaf(g_decks, "    " * depth + nm.split("::")[-1], det, ("deck", (did, nm)))
+            parent = node.get(nm.rsplit("::", 1)[0]) if "::" in nm else None
+            node[nm] = _leaf(parent or g_decks, nm.split("::")[-1], det, ("deck", (did, nm)))
         if rows:
             opt_sched = QTreeWidgetItem(["Include review history (scheduling)",
                                          "off: recipients start the cards fresh"])
@@ -592,19 +594,28 @@ def packager_dialog(parent=None) -> None:
         log("jank decks: %s" % exc)
     g_disk = _group("Added from disk")
     tree.expandAll()
+    for i in range(g_decks.childCount()):        # decks start collapsed (subdecks on ▸)
+        def _collapse(it):
+            it.setExpanded(False)
+            for j in range(it.childCount()):
+                _collapse(it.child(j))
+        _collapse(g_decks.child(i))
 
     count = QLabel("")
     count.setStyleSheet("color:#9aa0aa;")
 
     def _selected():
         sel = []
-        for gi in range(tree.topLevelItemCount()):
-            g = tree.topLevelItem(gi)
-            for ci in range(g.childCount()):
-                it = g.child(ci)
-                d = it.data(0, ROLE)
-                if d and it.checkState(0) == Qt.CheckState.Checked:
+
+        def walk(it):                              # nested (deck → subdecks) too
+            for ci in range(it.childCount()):
+                c = it.child(ci)
+                d = c.data(0, ROLE)
+                if d and c.checkState(0) == Qt.CheckState.Checked:
                     sel.append(d)
+                walk(c)
+        for gi in range(tree.topLevelItemCount()):
+            walk(tree.topLevelItem(gi))
         return sel
 
     def _refresh(*_a):
