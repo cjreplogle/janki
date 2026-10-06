@@ -561,20 +561,31 @@ def _detail_html(e):
         _cc = _counts_cache.get(_count_key(m)) or _counts_last.get(m.get("key"))
         if _cc:                              # study buttons keep their numbers too
             QTimer.singleShot(0, lambda c=_cc: _set_study_counts(c[3] - c[2], c[3]))
+        # the study buttons carry their numbers from the start (cache) — a redraw used
+        # to bring them back bare until a recount landed
+        if _cc:
+            _act, _all = _cc[3] - _cc[2], _cc[3]
+            act_lbl = "Study active cards (%d)" % _act
+            all_lbl = "Study all cards (%d)" % _all
+            _none_sus = _all > 0 and _all == _act
+        else:
+            act_lbl, all_lbl, _none_sus = "Study active cards", "Study all cards", False
+        sus_cmd = "suspend" if _none_sus else "unsuspend"
+        sus_lbl = ("Suspend" if _none_sus else "Unsuspend") + " cards for this lecture"
         body = ("<div id='jkd-counts' class='jkd-counts' data-k='%s'>%s</div>"
                 % (html.escape(str(m.get("key")), quote=True),
                    _counts_html(_cc) if _cc else "… cards") +   # recount: corner chip only
                 "<div class='jkd-sws'>%s</div>"
                 "<div class='jkd-studies'>"
                 "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
-                "Study active cards</button>"
+                + act_lbl + "</button>"
                 "<button class='jkd-study jkd-prac' onclick=\"pycmd('janki:cal:det:practice')\">"
                 "Practice</button></div>"
                 "<div class='jkd-secs'>"
                 "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
-                "Study all cards</button>"
-                "<button id='jkd-susp' class='jkd-sec' onclick=\"pycmd('janki:cal:det:unsuspend')\">"
-                "Unsuspend cards for this lecture</button></div>"
+                + all_lbl + "</button>"
+                "<button id='jkd-susp' class='jkd-sec' onclick=\"pycmd('janki:cal:det:"
+                + sus_cmd + "')\">" + sus_lbl + "</button></div>"
                 "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
                 "and suspends them again afterwards.</div>"
                 "<div class='jkd-links'><a data-n='%d' onclick=\"jkdTags(this)\">Show %s ▾</a> · "
@@ -1967,22 +1978,33 @@ _JS = """<script>(function(){
      var k=c.getAttribute('data-k');
      var t=c.textContent.trim();
      if(t.charAt(0)!=='…'){if(/[0-9]/.test(t))lastC[k]=c.innerHTML;}   // numbers rendered: remember
-     else if(lastC[k]&&c.innerHTML!==lastC[k])c.innerHTML=lastC[k];});}
+     else if(lastC[k]&&c.innerHTML!==lastC[k])c.innerHTML=lastC[k];});
+   fillA();}
  try{new MutationObserver(function(){fillCounts();})
    .observe(document.body,{childList:true,subtree:true});}catch(x){}
  function applyCounts(){
    if(pendC!=null){var els=document.querySelectorAll('#jkc .jkd-counts[data-k]');
      if(els.length){els.forEach(function(c){c.innerHTML=pendC;lastC[c.getAttribute('data-k')]=pendC;});
        pendC=null;}}
-   var x=document.getElementById('jkd-st-act'),y=document.getElementById('jkd-st-sus');
-   if(x&&y&&pendA){x.textContent='Study active cards ('+pendA[0]+')';
-     y.textContent='Study all cards ('+pendA[1]+')';
-     // nothing left suspended → the button flips to suspending the lecture again
-     var z=document.getElementById('jkd-susp');
-     if(z){var sus=pendA[1]>0&&pendA[1]===pendA[0];
-       z.textContent=sus?'Suspend cards for this lecture':'Unsuspend cards for this lecture';
-       z.setAttribute('onclick',"pycmd('janki:cal:det:"+(sus?'suspend':'unsuspend')+"')");}
-     pendA=null;}}
+   if(pendA&&setA(pendA))pendA=null;}
+ // study-button numbers: every copy (a slide can hold two), remembered per lecture
+ var lastA={};
+ function curK(){var c=document.querySelector('#jkc .jkd-counts[data-k]');
+   return c?c.getAttribute('data-k'):null;}
+ function setA(a){var xs=document.querySelectorAll('#jkc [id=jkd-st-act]');
+   if(!xs.length)return false;
+   xs.forEach(function(x){x.textContent='Study active cards ('+a[0]+')';});
+   document.querySelectorAll('#jkc [id=jkd-st-sus]').forEach(function(y){
+     y.textContent='Study all cards ('+a[1]+')';});
+   // nothing left suspended → the button flips to suspending the lecture again
+   var sus=a[1]>0&&a[1]===a[0];
+   document.querySelectorAll('#jkc [id=jkd-susp]').forEach(function(z){
+     z.textContent=sus?'Suspend cards for this lecture':'Unsuspend cards for this lecture';
+     z.setAttribute('onclick',"pycmd('janki:cal:det:"+(sus?'suspend':'unsuspend')+"')");});
+   var k=curK();if(k)lastA[k]=a;return true;}
+ function fillA(){var k=curK();if(!k||!lastA[k])return;
+   var x=document.querySelector('#jkc [id=jkd-st-act]');
+   if(x&&x.textContent.indexOf('(')<0)setA(lastA[k]);}
  window.jkcCounts=function(h,a,s){if(h!=null)pendC=h;if(a!=null)pendA=[a,s];applyCounts();};
  // Safety net: a class page still showing "…" asks for its counts again (up to 8×)
  var cWatch=null,cTries=0;
