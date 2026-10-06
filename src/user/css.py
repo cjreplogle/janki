@@ -58,64 +58,71 @@ DEFAULT_UI_FONT = "Lora"
 _RETIRED_FONTS = {"Anthropic Serif Text"}     # removed options → the default (Lora)
 
 
-_LAUNCH_FADE = {"done": False}   # first deck list of the session gets the launch fade
+_LAUNCH_FADE = {"done": False}   # first deck list of the session: window fades in
 
 
-def _arm_launch_go():
-    """Start the first deck list's fade once the main window is actually showing:
-    now if it already is (after its page has loaded), else on its first Show (e.g.
-    opened from the tray). The page's web view can't tell reliably, so we do."""
-    from aqt.qt import QObject, QEvent
+def _arm_launch_fade():
+    """First deck list of the session: fade the MAIN WINDOW in once its page has
+    loaded. (Fading the page itself kept losing to the 2–3 deck-list redraws Anki and
+    Janki's startup do right after — each replaced the fading page at full opacity.
+    A window-level fade can't be interrupted by redraws.) Runs before the window is
+    first shown, so it starts transparent with no flash; a timer restores it always."""
+    try:
+        if mw.isVisible() or mw.isFullScreen():
+            return                         # already on screen: don't blink it out
+        mw.setWindowOpacity(0.0)
+    except Exception:
+        return
+    state = {"started": False, "loaded": False}
 
-    # Debounced: Anki + Janki's startup redraw the deck list 2–3 times within half a
-    # second. Firing on the first one meant the next redraw replaced the fading page
-    # at full opacity (it popped in). Every held render / load restarts this timer;
-    # the fade starts once the list has been quiet for a moment.
-    t = QTimer(mw)
-    t.setSingleShot(True)
-
-    def _run():
+    def start():
+        if state["started"]:
+            return
+        state["started"] = True
         try:
-            if mw.isVisible() and mw.web is not None:
-                _LAUNCH_FADE["fired"] = True     # later renders: normal behaviour
-                mw.web.eval("window.jkLaunchGo&&window.jkLaunchGo()")
+            mw.web.loadFinished.disconnect(on_load)
         except Exception:
             pass
-    t.timeout.connect(_run)
+        try:
+            from . import glass as _g
+            _g._fade_window(mw, mw.windowOpacity(), 1.0, 280)
+        except Exception:
+            mw.setWindowOpacity(1.0)
 
-    def go(delay=200):
-        t.start(max(delay, 200))
+    # Event-driven, not timed: fade when BOTH the page has loaded and the window is
+    # showing — whichever happens second triggers it (works the same on any machine).
+    def maybe():
+        if state["loaded"] and mw.isVisible():
+            QTimer.singleShot(0, start)      # after the loaded page's first paint
+
+    def on_load(_ok=True):
+        state["loaded"] = True
+        maybe()
 
     try:
-        mw.web.loadFinished.connect(_launch_loaded)
+        mw.web.loadFinished.connect(on_load)
     except Exception:
         pass
-    _LAUNCH_FADE["go"] = go
-    QTimer.singleShot(8000, lambda: _LAUNCH_FADE.update(fired=True))   # stop holding regardless
-    if mw.isVisible():
-        go(350)                       # window up already: give the page time to load
-        return
 
-    class _ShowOnce(QObject):
+    from aqt.qt import QObject, QEvent
+
+    class _OnShow(QObject):
         def eventFilter(self, obj, ev):
             if ev.type() == QEvent.Type.Show:
                 mw.removeEventFilter(self)
-                go(260)               # first paint of the window, then fade the list
+                maybe()
             return False
-    _LAUNCH_FADE["filter"] = _ShowOnce(mw)
-    mw.installEventFilter(_LAUNCH_FADE["filter"])
+    state["filter"] = _OnShow(mw)
+    mw.installEventFilter(state["filter"])
 
-
-def _launch_loaded(ok=True):
-    if _LAUNCH_FADE.get("fired"):
-        try:
-            mw.web.loadFinished.disconnect(_launch_loaded)
-        except Exception:
-            pass
-        return
-    g = _LAUNCH_FADE.get("go")
-    if g and mw.isVisible():
-        g(160)
+    def safety():
+        if not state["started"] or mw.windowOpacity() < 0.99:
+            state["started"] = True
+            try:
+                mw.setWindowOpacity(1.0)
+            except Exception:
+                pass
+    QTimer.singleShot(2500, safety)          # only a never-stuck-invisible net
 
 
 def ui_font_label(cfg=None):
@@ -1208,42 +1215,10 @@ def _build_css(cfg, context):
         # whole (self-adapting: measures actual clipping, no magic px threshold).
         if cfg.get("amboss_qbank_autohide", True):
             parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
-        if not _LAUNCH_FADE.get("fired"):
-            # FIRST deck list of the session: Anki usually renders it before the window
-            # is on screen, so the normal .15s fade played unseen and the list just
-            # appeared. Hold it invisible and fade it in once the page is actually
-            # visible (Chromium's visibilityState follows the window); a timer
-            # guarantees it can never stay hidden.
-            # (EVERY deck-list render keeps the hold until the fade has started: Janki's
-            # startup redraws the list right after the first render, and that redraw
-            # used to show at once — the "it just appears")
-            parts.append(
-                "<style>html.jk-launch body{opacity:0;animation:none!important;}"
-                "html.jk-launch body{will-change:opacity;}"
-                "html.jk-launch.jk-go body{animation:jkLaunchIn .3s ease-out both!important;}"
-                # opacity only: moving the whole page made it repaint over the glass
-                "@keyframes jkLaunchIn{from{opacity:0}to{opacity:1}}"
-                "@media (prefers-reduced-motion: reduce){html.jk-launch body{opacity:1;}"
-                "html.jk-launch.jk-go body{animation:none!important;}}</style>"
-                "<script>(function(){var h=document.documentElement;"
-                # a reload of this same page after the fade (the post-launch glass
-                # reload) must not hide it again
-                "try{if(sessionStorage.getItem('jkLaunchDone'))return;}catch(e){}"
-                "h.classList.add('jk-launch');"
-                "try{sessionStorage.setItem('glassFadeToken','%s');}catch(e){}"
-                # started from Python once the main window is really on screen
-                "window.jkLaunchGo=function(){requestAnimationFrame(function(){"
-                "h.classList.add('jk-go');"
-                "try{sessionStorage.setItem('jkLaunchDone','1');}catch(e){}});};"
-                "setTimeout(function(){h.classList.add('jk-go');},6000);"   # never stuck
-                "})();</script>\n" % hud._menu_fade_token)
-            if not _LAUNCH_FADE["done"]:
-                _LAUNCH_FADE["done"] = True
-                QTimer.singleShot(0, _arm_launch_go)
-            elif _LAUNCH_FADE.get("go") and mw.isVisible():
-                _LAUNCH_FADE["go"](260)       # a redraw replaced the held page: start it
-        else:
-            parts.append(fade_in)
+        if not _LAUNCH_FADE["done"]:
+            _LAUNCH_FADE["done"] = True
+            _arm_launch_fade()
+        parts.append(fade_in)
     elif isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, ReviewerBottomBar)) \
             and screens.get("bottom_bar", True):
         parts.append("<style>\nbody #outer {\n" + props + "  margin:4px 0;\n}\n</style>\n")
