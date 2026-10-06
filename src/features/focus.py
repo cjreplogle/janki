@@ -267,6 +267,10 @@ def _freeze(on: bool) -> None:
     the card held in place (janki:focus:thaw), or 200 ms at most."""
     try:
         if on:
+            # off by default: un-freezing repaints the whole glass window, which can
+            # itself show one empty frame; the jump was the re-hide race (fixed)
+            if not _cfg().get("focus_freeze", False):
+                return
             if not _frozen["on"]:
                 _frozen["on"] = True
                 mw.setUpdatesEnabled(False)
