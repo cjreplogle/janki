@@ -1,7 +1,8 @@
 """Arrow keys while reviewing: ↑ on the card goes up to the toolbar (on Decks), ↓ goes
 down into the bottom bar — Show Answer, then Again / Hard / Good / Easy — where ←/→
 pick a button and Enter/Space press it; ↑ from the bar returns to the card.
-A long card still scrolls with the arrows: ↑/↓ only leave it at its top/bottom edge.
+The arrows never scroll the card (that made a slightly-long card scroll before moving);
+a long card scrolls with the wheel/trackpad.
 Practice questions keep their own arrow keys (practice_keys) — left alone here."""
 from aqt import gui_hooks, mw
 from aqt.qt import QApplication, QEvent, QObject, Qt
@@ -14,11 +15,11 @@ _CARD_JS = r"""<script>(function(){
    if(e.metaKey||e.ctrlKey||e.altKey||e.shiftKey)return;
    if(document.getElementById('jp-choices'))return;          // practice question
    var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
-   var se=document.scrollingElement||document.documentElement;
-   if(e.key==='ArrowUp'&&se.scrollTop<=0){
-     e.preventDefault();pycmd('janki:sfx:move');pycmd('janki:toolbar');}
-   else if(e.key==='ArrowDown'&&se.scrollTop+innerHeight>=se.scrollHeight-2){
-     e.preventDefault();pycmd('janki:sfx:move');pycmd('janki:rvbottom');}
+   // straight to navigation — the arrows never scroll the card first (wheel/trackpad do)
+   if(e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();
+     pycmd('janki:sfx:move');pycmd('janki:toolbar');}
+   else if(e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();
+     pycmd('janki:sfx:move');pycmd('janki:rvbottom');}
  },true);
 })();</script>"""
 
