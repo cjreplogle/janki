@@ -2278,8 +2278,10 @@ class GlassSettings(QDialog):
                 self.cfg["win_backdrop"] = bd
                 self.cfg["win_glass"] = True
                 mw.addonManager.writeConfig(__name__, self.cfg)
+                # any pick clears a crash-guard failure: while it's set, ALL glass is
+                # off (even the painted Fast looks), so a choice otherwise did nothing
+                _jc.reset_win_glass_failure()
                 if mode == "software":
-                    _jc.reset_win_glass_failure()
                     _pb.install()
                 elif _pb.installed():
                     _pb.uninstall()

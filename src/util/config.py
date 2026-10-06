@@ -37,6 +37,19 @@ def _is_active() -> bool:
 #   GLASS  — window transparency + OLED + the stock-Anki self-heal patch
 # SAFE is kept as a False constant for any legacy reference.
 SAFE = False
+def _win_render_cfg() -> str:
+    """win_render straight from meta.json (this runs before Anki's config API is up)."""
+    try:
+        import json
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                         "meta.json")
+        with open(p, encoding="utf-8") as f:
+            v = str((json.load(f).get("config") or {}).get("win_render", "software")).lower()
+        return "gpu" if v == "gpu" else "software"
+    except Exception:
+        return "software"
+
+
 def _win_glass_gate() -> bool:
     """Windows glass (DWM backdrop) with a crash guard like the Mac self-heal: a
     'pending' marker is written as glass starts and cleared once the launch has run
@@ -57,7 +70,9 @@ def _win_glass_gate() -> bool:
                 preboot.uninstall()
             except Exception:
                 pass
-            return False
+            # Only the See-through hook runs before Anki starts (and so can crash
+            # it); the Fast looks are painted by Janki afterwards and can't — keep them.
+            return _win_render_cfg() == "gpu"
         # win_glass only switches the see-through part (the pre-launch hook); Janki's
         # glass styling (tint, fonts, controls) stays on either way.
         open(pending, "w").close()
