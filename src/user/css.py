@@ -566,7 +566,12 @@ _TOOLBAR_KEYS_JS = r"""(function(){
  function items(){return Array.prototype.filter.call(document.querySelectorAll('a.hitem'),
    function(a){return a.offsetParent!==null;});}
  function cur(){return document.querySelector('a.hitem.jk-tbsel');}
- function sel(a){var c=cur();if(c)c.classList.remove('jk-tbsel');if(a)a.classList.add('jk-tbsel');}
+ // one ring only: the item that had real focus (Decks, after a click) would keep
+ // its :focus-visible ring beside the arrow-key selection — move focus along too
+ function sel(a){var c=cur();if(c)c.classList.remove('jk-tbsel');if(a)a.classList.add('jk-tbsel');
+   var f=document.activeElement;
+   if(a){try{a.focus({preventScroll:true});}catch(x){}}
+   else if(f&&f.classList&&f.classList.contains('hitem')){f.blur();}}
  // start on the page you came from (Decks, or Practice in the Practice view)
  window.jkToolbarEnter=function(id,last){var it=items();if(!it.length)return;
    sel(last?it[it.length-1]:(it.filter(function(a){return a.id===id;})[0]||it[0]));};
@@ -1532,6 +1537,8 @@ def _build_css(cfg, context):
                      # any focus state (programmatic focus doesn't match :focus-visible)
                      "html body a.hitem:focus,html body a.hitem:focus-visible,"
                      "html body .toolbar a:focus{outline:none!important;}"
+                     "html body .toolbar:has(.jk-tbsel) a.hitem:focus-visible:not(.jk-tbsel){"
+                     "border-color:transparent!important;}"
                      "html body a.hitem:focus-visible,html body a.hitem.jk-tbsel{"
                      "border-radius:8px!important;box-shadow:none!important;"
                      "border:2px solid rgba(176,203,246,0.8)!important;"
