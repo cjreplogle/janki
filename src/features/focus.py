@@ -233,8 +233,8 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
         "var first=el.getBoundingClientRect().top;"
         # every other layout change of the toggle runs HERE, in the same task, so the
         # browser can't paint an in-between frame (that was the jump)
-        + ("try{" + pre + "}catch(_){}" if pre else "")
-        + mutate +
+        + mutate
+        + ("try{(function(){" + pre + "})();}catch(_){}" if pre else "") +
         "var last=el.getBoundingClientRect().top;"
         "var dy=(first-last)+(" + str(int(offset_px)) + ");"
         "if(!dy)return;"
@@ -278,7 +278,10 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         "function go(){if(go.done)return;go.done=1;"
         "window.removeEventListener('resize',go);if(t)clearTimeout(t);"
         "var el=document.getElementById('qa')||document.body.firstElementChild;"
-        "try{" + (pre or "") + "}catch(_){}" + mutate +
+        # the Focus CSS FIRST, then the trim/anchor script in ITS OWN function: its
+        # early `return`s (e.g. a plain text card) used to skip the centring CSS, so
+        # the card stayed at the top until a later pass centred it (the jump)
+        + mutate + "try{(function(){" + (pre or "") + "})();}catch(_){}" +
         "if(!el||P.first==null)return;"
         "var last=el.getBoundingClientRect().top;"
         "var dy=(P.first-last)+(window.__jkFlipOff||0);"
@@ -698,11 +701,13 @@ def _focus_set_hidden(hidden: bool) -> None:
                                _collapse)
             _reassert_web_focus()  # keep the reviewer webview focused (see below)
 
-            # late safety net: layout only — re-centring here caused a late twitch
+            # re-assert the centring once everything has settled (slides only if the
+            # card isn't already in place)
             def _settle():
                 if not _focus_hidden:
                     return
                 _reclaim_central_layout()
+                _focus_apply_card(True, 0)
             QTimer.singleShot(450, _settle)
         QTimer.singleShot(_FOCUS_FADE_MS + 20, _after_fade)
     else:
