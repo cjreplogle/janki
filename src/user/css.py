@@ -1502,8 +1502,10 @@ def _build_css(cfg, context):
         if focus._focus_hidden:
             parts.append("<style>\n" + focus._FOCUS_CSS + "\n</style>\n")
     elif isinstance(context, TopToolbar) and screens.get("toolbar", True):
-        parts.append("<style>html body a.hitem.jk-tbsel{background:rgba(255,255,255,.12)!important;"
-                     "border-radius:8px;transform:translateY(-1px);}"
+        # (no transform on the selection: a transformed item gets its own layer, and
+        # inside the frosted island that layer drew as a darker box inside the ring)
+        parts.append("<style>html body .header a.hitem.jk-tbsel,html body a.hitem.jk-tbsel{"
+                     "background:rgba(255,255,255,.12)!important;border-radius:8px!important;}"
                      # keyboard focus ring as a box-shadow on the same 8px rounding (the
                      # default outline's corners didn't match the fill → a box inside it)
                      # any focus state (programmatic focus doesn't match :focus-visible)
