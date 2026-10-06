@@ -1704,15 +1704,35 @@ def _build() -> "QWidget":
 
     def _toggle_levels():
         # floats OVER the tray (not in the layout), so nothing below it moves
-        if snd_box.isVisible():
-            snd_box.hide()
-            return
-        snd_box.setFixedWidth(root.width() - 24)
-        snd_box.adjustSize()
-        y = mute_btn.mapTo(root, mute_btn.rect().bottomLeft()).y() + 6
-        snd_box.move(12, y)
-        snd_box.raise_()
-        snd_box.show()
+        from aqt.qt import QGraphicsOpacityEffect
+        eff = snd_box.graphicsEffect()
+        if eff is None:
+            eff = QGraphicsOpacityEffect(snd_box)
+            snd_box.setGraphicsEffect(eff)
+        old = getattr(snd_box, "_jk_anim", None)
+        if old is not None:
+            old.stop()
+        closing = snd_box.isVisible() and not getattr(snd_box, "_jk_closing", False)
+        snd_box._jk_closing = closing
+        if not closing:
+            snd_box.setFixedWidth(root.width() - 24)
+            snd_box.adjustSize()
+            y = mute_btn.mapTo(root, mute_btn.rect().bottomLeft()).y() + 6
+            snd_box.move(12, y)
+            snd_box.raise_()
+            if not snd_box.isVisible():
+                eff.setOpacity(0.0)
+            snd_box.show()
+        # a short fade in (and out again on close)
+        anim = QPropertyAnimation(eff, b"opacity", snd_box)
+        anim.setDuration(140 if closing else 180)
+        anim.setStartValue(eff.opacity())
+        anim.setEndValue(0.0 if closing else 1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        if closing:
+            anim.finished.connect(lambda: (snd_box.hide(), setattr(snd_box, "_jk_closing", False)))
+        snd_box._jk_anim = anim
+        anim.start()
     mute_btn.customContextMenuRequested.connect(lambda _p: _toggle_levels())
     _sync_mute()
     hrow.addWidget(mute_btn)
