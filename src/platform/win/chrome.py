@@ -11,8 +11,10 @@ from aqt.qt import (QWidget, QHBoxLayout, QPainter, QColor, QEvent, QObject, Qt,
                     QApplication, QRectF, QPointF, QPen, QCursor)
 
 EDGE = 6          # px band along the window edge that resizes
-TOP_GAP = 6       # px breathing room above the caption buttons/toolbar pill (matches
-                  # the #header padding-top in css.py so both sit at the same offset)
+TOP_GAP = 16      # px above the caption buttons/toolbar pill (css.py's #header
+                  # padding-top reads this). The top EDGE px resize; the strip below
+                  # that, above the pill, is bare toolbar → drags the window (it used
+                  # to be all resize zone, so there was nothing to grab up there)
 _lights = None
 _resizer = None
 

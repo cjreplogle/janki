@@ -762,6 +762,14 @@ _DECK_STICKY_JS = r"""(function(){
 # Readability halo for text on glass. Two blurred layers look best but are expensive
 # when the webviews draw in software — which the Windows glass needs (every typewriter
 # frame repaints them) — so Windows gets one tight layer.
+def _win_top_gap() -> int:
+    try:
+        from ..platform.win import chrome as _wc
+        return int(_wc.TOP_GAP)
+    except Exception:
+        return 16
+
+
 def _win_frameless() -> bool:
     try:
         from ..platform.win import preboot
@@ -1505,8 +1513,8 @@ def _build_css(cfg, context):
                 # A few px of breathing room above the pill so it (and the caption
                 # buttons, offset by the same TOP_GAP in chrome.py) don't sit flush
                 # against the window's very top edge.
-                " padding-top:6px !important;"
-                " box-sizing:border-box !important; }\n</style>\n")
+                " padding-top:%dpx !important;"
+                " box-sizing:border-box !important; }\n</style>\n" % _win_top_gap())
         if sys.platform.startswith("win") and _win_frameless():
             # Frameless window: the toolbar's empty space is the title bar.
             parts.append(
