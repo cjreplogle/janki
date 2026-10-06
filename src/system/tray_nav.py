@@ -1317,16 +1317,18 @@ def _build_today_list(parent):
     nav.setSpacing(4)
     prev_b = QPushButton("‹")
     next_b = QPushButton("›")
+    # own compact style (#icon forces 28 px squares)
+    _qss = ("QPushButton{background:transparent;border:none;border-radius:6px;padding:0 6px;"
+            "color:#c9d4e8;text-align:center;}"
+            "QPushButton:hover{background:rgba(255,255,255,0.14);color:#fff;}")
     for b in (prev_b, next_b):
-        b.setObjectName("icon")
-        b.setFixedSize(26, 22)
+        b.setObjectName("dayArrow")
+        b.setFixedSize(24, 18)
+        b.setStyleSheet(_qss.replace("padding:0 6px;", "padding:0 0 2px 0;font-size:15px;"))
     day_lbl = QPushButton()
     day_lbl.setObjectName("dayLbl")              # not #icon: that one is capped at 28 px wide
-    day_lbl.setFixedHeight(22)
-    day_lbl.setStyleSheet("QPushButton{background:transparent;border:none;border-radius:7px;"
-                          "padding:0 6px;font-size:12px;font-weight:600;color:#c9d4e8;"
-                          "text-align:center;}"
-                          "QPushButton:hover{background:rgba(255,255,255,0.14);color:#fff;}")
+    day_lbl.setFixedHeight(18)
+    day_lbl.setStyleSheet(_qss.replace("padding:0 6px;", "padding:0 6px;font-size:11px;font-weight:600;"))
     nav.addWidget(prev_b)
     nav.addWidget(day_lbl, 1)
     nav.addWidget(next_b)
