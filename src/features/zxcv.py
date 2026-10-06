@@ -239,10 +239,31 @@ def _trace_once(*_a) -> None:
         tm.timeout.connect(tick)
         tm.start(30)
 
+        bg_seen, bg_flush = {}, [0.0]
+
         def watchdog():
             dumped = 0.0
             while True:
                 _time.sleep(0.05)
+                # While reviewing, note what any BACKGROUND worker is busy with (it competes
+                # for the GIL with the main thread that also paints the card's animation).
+                try:
+                    if mw.state == "review":
+                        for tid, fr in sys._current_frames().items():
+                            st = traceback.extract_stack(fr)
+                            if tid == main_id or not st or st[-1].name in ("_worker", "wait", "poll", "_run", "_reader", "watchdog"):
+                                continue
+                            sig = " <- ".join("%s:%d %s" % (x.filename.split("/")[-1], x.lineno, x.name)
+                                              for x in reversed(st[-9:]))
+                            if "addons21" in "".join(x.filename for x in st):
+                                bg_seen[sig] = bg_seen.get(sig, 0) + 1
+                    if bg_seen and _time.monotonic() - bg_flush[0] > 3:
+                        bg_flush[0] = _time.monotonic()
+                        _diag("BG busy samples:\n" + "\n".join("  %3d x %s" % (n, k) for k, n in
+                              sorted(bg_seen.items(), key=lambda kv: -kv[1])[:6]))
+                        bg_seen.clear()
+                except Exception:
+                    pass
                 lag = _time.monotonic() - beat[0]
                 if lag < 0.15 or beat[0] == dumped:
                     continue
