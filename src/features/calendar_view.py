@@ -572,26 +572,29 @@ def _detail_html(e):
             act_lbl, all_lbl, _none_sus = "Study active cards", "Study all cards", False
         sus_cmd = "suspend" if _none_sus else "unsuspend"
         sus_lbl = ("Suspend" if _none_sus else "Unsuspend") + " cards for this lecture"
-        body = ("<div id='jkd-counts' class='jkd-counts' data-k='%s'>%s</div>"
-                % (html.escape(str(m.get("key")), quote=True),
-                   _counts_html(_cc) if _cc else "… cards") +   # recount: corner chip only
-                "<div class='jkd-sws'>%s</div>"
-                "<div class='jkd-studies'>"
-                "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
-                + act_lbl + "</button>"
-                "<button class='jkd-study jkd-prac' onclick=\"pycmd('janki:cal:det:practice')\">"
-                "Practice</button></div>"
-                "<div class='jkd-secs'>"
-                "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
-                + all_lbl + "</button>"
-                "<button id='jkd-susp' class='jkd-sec' onclick=\"pycmd('janki:cal:det:"
-                + sus_cmd + "')\">" + sus_lbl + "</button></div>"
-                "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
-                "and suspends them again afterwards.</div>"
-                "<div class='jkd-links'><a data-n='%d' onclick=\"jkdTags(this)\">Show %s ▾</a> · "
-                "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
-                "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>%s</div></div>"
-                % (sw, _tag_count(m), _tags_word(_tag_count(m)), _tags_html(m)))
+        body = (
+            "<div id='jkd-counts' class='jkd-counts' data-k='{k}'>{counts}</div>"
+            "<div class='jkd-sws'>{sw}</div>"
+            "<div class='jkd-studies'>"
+            "<button id='jkd-st-act' class='jkd-study' onclick=\"pycmd('janki:cal:det:study:active')\">"
+            "{act}</button>"
+            "<button class='jkd-study jkd-prac' onclick=\"pycmd('janki:cal:det:practice')\">"
+            "Practice</button></div>"
+            "<div class='jkd-secs'>"
+            "<button id='jkd-st-sus' class='jkd-sec' onclick=\"pycmd('janki:cal:det:study:all')\">"
+            "{all}</button>"
+            "<button id='jkd-susp' class='jkd-sec' onclick=\"pycmd('janki:cal:det:{sus_cmd}')\">"
+            "{sus_lbl}</button></div>"
+            "<div class='jkd-note'>“Study all” unsuspends cards just for the session "
+            "and suspends them again afterwards.</div>"
+            "<div class='jkd-links'><a data-n='{n}' onclick=\"jkdTags(this)\">Show {word} ▾</a> · "
+            "<a onclick=\"pycmd('janki:cal:det:wizard')\">Open in lecture wizard</a></div>"
+            "<div id='jkd-tags' class='jkd-tags'><div class='jkd-tags-in'>{tags}</div></div>"
+        ).format(
+            k=html.escape(str(m.get("key")), quote=True),
+            counts=_counts_html(_cc) if _cc else "… cards",   # recount: corner chip only
+            sw=sw, act=act_lbl, all=all_lbl, sus_cmd=sus_cmd, sus_lbl=sus_lbl,
+            n=_tag_count(m), word=_tags_word(_tag_count(m)), tags=_tags_html(m))
         QTimer.singleShot(0, lambda m=m: _recount(m))
     # Open in LMS whenever the calendar has the event's link — matched or not
     if e.get("url"):
