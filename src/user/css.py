@@ -86,7 +86,7 @@ def _arm_launch_fade():
             pass
         try:
             from . import glass as _g
-            _g._fade_window(mw, mw.windowOpacity(), 1.0, 200)
+            _g._fade_window(mw, mw.windowOpacity(), 1.0, 130)
         except Exception:
             mw.setWindowOpacity(1.0)
 
