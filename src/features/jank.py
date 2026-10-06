@@ -686,6 +686,7 @@ def packager_dialog(parent=None) -> None:
     tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
     tree.setMinimumHeight(230)
+    tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
     v.addWidget(tree, 1)
 
     ROLE = Qt.ItemDataRole.UserRole
@@ -704,6 +705,7 @@ def packager_dialog(parent=None) -> None:
                     | Qt.ItemFlag.ItemIsSelectable)
         it.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         it.setData(0, ROLE, data)
+        it.setToolTip(0, text)
         it.setForeground(1, Qt.GlobalColor.gray)
         group.addChild(it)
         return it
@@ -736,12 +738,14 @@ def packager_dialog(parent=None) -> None:
         g_banks.addChild(opt_matches)
     g_maps = _group("Lecture tag maps")
     for p in src["tagmaps"]:
-        mi = _leaf(g_maps, os.path.basename(p),
-                   os.path.dirname(p).replace(os.path.expanduser("~"), "~"), ("file", p))
+        # (the folder goes in the tooltip: as detail text it widened column 2 until
+        # the lecture names were cut to a few letters)
+        mi = _leaf(g_maps, os.path.basename(p), "", ("file", p))
+        mi.setToolTip(0, p.replace(os.path.expanduser("~"), "~"))
         ents = _tagmap_entries(p)
         if len(ents) > 1:                          # ▸ pick lectures (packs only those)
             mi.setFlags(mi.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-            mi.setText(1, "%d lectures · %s" % (len(ents), mi.text(1)))
+            mi.setText(1, "%d lectures" % len(ents))
             for nm, lines in ents:
                 _leaf(mi, nm, "%d tag%s" % (len(lines), "" if len(lines) == 1 else "s"),
                       ("mapentry", (p, nm, lines)))
@@ -855,8 +859,8 @@ def packager_dialog(parent=None) -> None:
         for p in paths:
             p = os.path.abspath(p)
             if p.lower().endswith(_EXTS) and os.path.isfile(p) and p not in have:
-                _leaf(g_disk, os.path.basename(p),
-                      os.path.dirname(p).replace(os.path.expanduser("~"), "~"), ("file", p), True)
+                it_ = _leaf(g_disk, os.path.basename(p), "", ("file", p), True)
+                it_.setToolTip(0, p.replace(os.path.expanduser("~"), "~"))
         g_disk.setExpanded(True)
         _refresh()
 
