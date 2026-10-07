@@ -110,10 +110,8 @@ _ANIM_JS = (
     "function reveal(el){el.classList.add('jk-in');el.classList.add('jk-vis');"
     "setTimeout(function(){el.classList.remove('jk-in');},650);}"
     # Stagger the first 6 cards; everything after joins the 6th.
-    "function tm(n){try{pycmd('jankiT:'+n);}catch(e){}}"
     "function flush(){var el=q.shift();if(!el){timer=null;return;}reveal(el);shown++;"
-    "if(shown===1)tm('first panel shown');"
-    "if(shown>=6){while(q.length)reveal(q.shift());timer=null;tm('all panels shown');return;}"
+    "if(shown>=6){while(q.length)reveal(q.shift());timer=null;return;}"
     "timer=setTimeout(flush,60);}"
     # Held (loaded in the background / panel closed): cards stay hidden until a replay.
     # Fresh load: a short beat for the graphs to draw; a replay goes on the next frame.
@@ -143,13 +141,7 @@ def _animate(web) -> None:
     try:
         # Loaded while the panel is closed (background preload) → hold the cards hidden
         # until the next open replays them.
-        js = "window.__jkHold=%s;" % ("false" if is_open() else "true") + _ANIM_JS
-        if is_open():
-            # Stats was opened while this (hover-started) load was still running: the
-            # open's replay ran before the page existed, so nothing would ever reveal
-            # the panels (an empty Stats until relaunch). Reveal them now.
-            js += "window.__jkReplay&&window.__jkReplay();"
-        web.eval(js)
+        web.eval("window.__jkHold=%s;" % ("false" if is_open() else "true") + _ANIM_JS)
     except Exception:
         pass
 
@@ -299,22 +291,7 @@ def _apply_rolling(web) -> None:
         log("stats rolling avg: %s" % exc)
 
 
-def _pp(stage):
-    """Stats timing mark → user_files/perf.log (only while user_files/perf_probe exists)."""
-    try:
-        from ..util import perf_probe
-        perf_probe.mark(stage)
-    except Exception:
-        pass
-
-
-_hover_t = None     # when the last hover preload started (perf probe)
-
-
 def _on_bridge_cmd(cmd: str) -> bool:
-    if isinstance(cmd, str) and cmd.startswith("jankiT:"):
-        _pp("page: " + cmd[7:])
-        return False
     # Rolling-average checkbox (in the Reviews graph): persist its state.
     if isinstance(cmd, str) and cmd.startswith("jankiRoll:"):
         try:
@@ -352,7 +329,7 @@ def _build():
     v.setSpacing(0)
     web = StatsWebView(parent=panel)
     web.set_bridge_command(_on_bridge_cmd, panel)
-    web.loadFinished.connect(lambda _ok: (_pp("page loadFinished"), _style_web(_web), _reorder(_web), _apply_rolling(_web), _animate(_web), _apply_mode()))
+    web.loadFinished.connect(lambda _ok: (_style_web(_web), _reorder(_web), _apply_rolling(_web), _animate(_web), _apply_mode()))
     # Deck picker (replaces the page's own hidden deck/collection bar): a button that opens
     # a glass popup of top-level decks; subdecks stay folded until you press their "+".
     from aqt.qt import QHBoxLayout, QPushButton
@@ -384,47 +361,7 @@ def _build():
     except Exception as exc:
         log("stats panel style: %s" % exc)
     _install_layout_guard(panel)
-    _install_cursor_guard(panel, web)
     _panel, _web, globals()["_pick_btn"] = panel, web, btn
-
-
-def _install_cursor_guard(panel, web) -> None:
-    """While the panel is hidden (preloading), the web view must not set the window's
-    cursor: a page loading behind the toolbar kept re-setting it, and the cursor
-    flickered against the toolbar link's hand. Any cursor it sets is cleared again."""
-    try:
-        from aqt.qt import QObject, QEvent, Qt
-
-        class _Guard(QObject):
-            busy = False
-
-            def eventFilter(self, obj, ev):
-                try:
-                    if (ev.type() == QEvent.Type.CursorChange and not panel.isVisible()
-                            and not self.busy
-                            and obj.testAttribute(Qt.WidgetAttribute.WA_SetCursor)):
-                        self.busy = True
-                        try:
-                            obj.unsetCursor()
-                        finally:
-                            self.busy = False
-                except Exception:
-                    pass
-                return False
-
-        g = _Guard(panel)
-        panel._jk_cursor_guard = g
-
-        def attach(w):
-            if w is not None and not getattr(w, "_jk_cg", False):
-                w._jk_cg = True
-                w.installEventFilter(g)
-        attach(web)
-        attach(web.focusProxy())
-        # Chromium creates its render widget lazily (first load): catch it then too
-        web.loadStarted.connect(lambda: attach(web.focusProxy()))
-    except Exception as exc:
-        log("stats cursor guard: %s" % exc)
 
 
 def _deck_label(did) -> str:
@@ -770,9 +707,7 @@ _RESET_JS = ("(function(){var b=document.body;if(b){b.style.transition='';"
 
 
 def open_stats() -> None:
-    _pp("open_stats (after list fade)")
     if _panel is None:
-        _pp("panel not built yet → building")
         _build()
     _collapse_others()
     try:
@@ -784,8 +719,6 @@ def open_stats() -> None:
         pass
     if not _panel.isVisible():
         _panel.show()                            # first open only; afterwards it stays shown
-    global _shown_once
-    _shown_once = True
     try:                                         # undo a previous fade-out on this page
         _web.eval(_RESET_JS)
     except Exception:
@@ -811,121 +744,9 @@ def open_stats() -> None:
     _style_web(_web)
     _web.setFocus()
     _reglass()
-    def _qt_state():
-        try:
-            pg = _web.page()
-            fp = _web.focusProxy()
-            ls = getattr(pg, "lifecycleState", None)
-            _pp("qt: web vis=%s %dx%d max=%d | proxy vis=%s %s | panel vis=%s h=%d max=%d"
-                " | lifecycle=%s visible=%s | main_host h=%d"
-                % (_web.isVisible(), _web.width(), _web.height(), _web.maximumHeight(),
-                   fp.isVisible() if fp else None,
-                   ("%dx%d" % (fp.width(), fp.height())) if fp else "-",
-                   _panel.isVisible(), _panel.height(), _panel.maximumHeight(),
-                   str(ls()).split(".")[-1] if ls else "?",
-                   pg.isVisible() if hasattr(pg, "isVisible") else "?",
-                   _main_host().height()))
-        except Exception as exc:
-            _pp("qt state failed: %s" % exc)
-    try:                       # an open can come up as a bare glass pane: verify what
-        from aqt.qt import QTimer   # Qt actually has for the view (_check_pixels)
-        QTimer.singleShot(700, _check_pixels)
-    except Exception:
-        pass
-    try:                       # perf probe: what the page looks like 1 s after opening
-        from aqt.qt import QTimer
-        QTimer.singleShot(1000, _qt_state)
-        QTimer.singleShot(1000, lambda: _web.eval(
-            "try{var c=document.querySelectorAll('div.container:has(> .position-relative)');"
-            "pycmd('jankiT:1s after open: panels='+c.length+' shown='+"
-            "document.querySelectorAll('div.container.jk-vis').length+' hold='+"
-            "window.__jkHold+' replayFn='+(typeof window.__jkReplay)+' url='+"
-            "location.pathname+' ready='+document.readyState+"
-            "' | invisible='+Array.prototype.filter.call(c,function(x){"
-            "return parseFloat(getComputedStyle(x).opacity)<0.1;}).length+"
-            "' inlineOp='+Array.prototype.map.call(c,function(x){return x.style.opacity||'-';})"
-            ".slice(0,4).join(',')+"
-            "' body='+getComputedStyle(document.body).opacity+'/'+"
-            "(document.body.style.transform||'-')+' scrollY='+scrollY+' innerH='+innerHeight+"
-            "' html='+getComputedStyle(document.documentElement).opacity);}catch(e){}"))
-    except Exception:
-        pass
 
 
 _loaded_key = None
-_shown_once = False      # the stats view has been on screen (see _on_hover_preload)
-
-# Stats sometimes came up as an empty glass pane until relaunch: the page, Qt and
-# Chromium all reported it visible, revealed and producing frames — but nothing reached
-# the screen, and it stayed that way on every later open. So after an open, look at the
-# pixels Qt has for the view; a fully transparent picture = that view is broken →
-# replace it with a freshly built one and open again.
-_rebuilt_at = [0.0]
-
-
-def _transparent(img) -> bool:
-    """True if a grid of samples across the middle of the view is all clear."""
-    try:
-        w, h = img.width(), img.height()
-        if w < 40 or h < 40:
-            return False
-        for fy in (0.25, 0.4, 0.55, 0.7):
-            for fx in (0.2, 0.35, 0.5, 0.65, 0.8):
-                if img.pixelColor(int(w * fx), int(h * fy)).alpha() > 8:
-                    return False
-        return True
-    except Exception:
-        return False
-
-
-def _check_pixels() -> None:
-    if _web is None or not is_open():
-        return
-    try:
-        img = _web.grab().toImage()
-    except Exception as exc:
-        _pp("pixel check failed: %s" % exc)
-        return
-    blank = _transparent(img)
-    _pp("pixel check: %s (%dx%d)" % ("BLANK" if blank else "content", img.width(),
-                                      img.height()))
-    if not blank:
-        return
-    import time
-    if time.monotonic() - _rebuilt_at[0] < 20:
-        _pp("blank again right after a rebuild: leaving it (no loop)")
-        return
-    _rebuilt_at[0] = time.monotonic()
-    _rebuild_and_open()
-
-
-def _rebuild_and_open() -> None:
-    """Swap the broken stats view for a new one, then open Stats in it."""
-    global _panel, _web, _page_ready, _loaded_key
-    old = _panel
-    try:
-        _pp("blank view → rebuilding the Stats panel")
-        close(animate=False)
-    except Exception:
-        pass
-    try:
-        if old is not None:
-            mw.mainLayout.removeWidget(old)
-            _saved_heights.pop(old, None)
-            old.hide()
-            old.deleteLater()
-    except Exception as exc:
-        log("stats rebuild: %s" % exc)
-    _panel = _web = None
-    _page_ready = False
-    _loaded_key = None
-    global _shown_once
-    _shown_once = False
-    try:
-        open_stats()                           # builds + full load + shows
-    except Exception as exc:
-        log("stats reopen after rebuild: %s" % exc)
-
 
 
 def _load_key():
@@ -985,9 +806,6 @@ def _ensure_loaded(force: bool = False) -> bool:
     Returns True if a FULL load was started."""
     global _loaded_key, _page_ready
     key = _load_key()
-    _pp("ensure_loaded: %s" % ("FULL LOAD" if (force or not _page_ready) else
-                               "data refresh" if (key is None or key != _loaded_key)
-                               else "already current"))
     if force or not _page_ready:
         _loaded_key = key
         _page_ready = True
@@ -1186,68 +1004,8 @@ _DROP_CSS_HELD = ("<style>html.glass-fading body{animation:none!important;}"
 _held_drop = False
 
 
-# Hovering the toolbar's Stats link starts loading the (hidden) graphs page, so the
-# click that usually follows finds it ready. Throttled; reuses the opt-in preload path.
-_HOVER_JS = ("<script>(function(){var t=0;document.addEventListener('mouseover',"
-             "function(e){var a=e.target&&e.target.closest&&e.target.closest('#stats');"
-             "if(!a)return;var n=Date.now();if(n-t<2000)return;t=n;"
-             "try{pycmd('janki:stats:hover');}catch(x){}},true);})();</script>")
-
-
-def _on_hover_preload() -> None:
-    # Not while studying (the stats page shares the card's renderer and stalled its
-    # typing) and not if Stats is already up / opening. Only LOADS: creating the web
-    # view under the cursor is what's disruptive, so the panel is prebuilt while idle
-    # (_prebuild_panel); if that hasn't happened yet, the click builds it as before.
-    if is_open() or _opening or getattr(mw, "state", None) in ("review", "overview"):
-        return
-    # Only refresh a page that has already been SHOWN. Loading Stats into a view that
-    # was never on screen (hover / idle prebuild) left it unable to reach the screen
-    # on its first open — a bare glass pane, while the main process spun at ~100 %
-    # CPU — until relaunch. The first open loads while visible, as before 2.8.0.
-    if _panel is None or not _shown_once:
-        return
-    global _hover_t
-    import time as _t
-    _hover_t = _t.perf_counter()
-    try:
-        from ..util import perf_probe
-        perf_probe._w("stats hover → preload (page_ready=%s)" % _page_ready)
-    except Exception:
-        pass
-    _preload()
-
-
-def _prebuild_panel() -> None:
-    """Create the hidden Stats panel + web view (no page load, so no renderer work) a
-    few seconds after launch, while idle — ready for a hover to start loading."""
-    try:
-        if (_panel is None and _cfg().get("stats_in_main", True)
-                and getattr(mw, "col", None) is not None):
-            _build()
-    except Exception as exc:
-        log("stats prebuild: %s" % exc)
-
-
-def _on_js_message(handled, message, context):
-    if message != "janki:stats:hover":
-        return handled
-    try:
-        from aqt.qt import QTimer
-        QTimer.singleShot(0, _on_hover_preload)
-    except Exception as exc:
-        log("stats hover preload: %s" % exc)
-    return (True, None)
-
-
 def _on_will_set_content(web_content, context) -> None:
     global _animate_next_deck, _held_drop
-    try:
-        from aqt.toolbar import TopToolbar
-        if isinstance(context, TopToolbar) and _cfg().get("stats_in_main", True):
-            web_content.head += _HOVER_JS
-    except Exception:
-        pass
     try:
         from aqt.deckbrowser import DeckBrowser
         if _animate_next_deck and isinstance(context, DeckBrowser):
@@ -1264,7 +1022,6 @@ def _on_will_set_content(web_content, context) -> None:
 def close(animate: bool = True) -> None:
     if not is_open():
         return
-    _pp("close() → panels hidden (__jkHide)")
     _collapse(_panel)
     try:
         _web.eval("window.__jkHide&&window.__jkHide();")   # hidden, ready for the next open
@@ -1326,14 +1083,6 @@ def _patched_on_stats(orig):
             if is_open() or _opening:
                 return None
             _opening = True
-            try:
-                import time as _t
-                from ..util import perf_probe
-                perf_probe.begin("stats click (hover preload %s)" % (
-                    "%.0f ms before" % ((_t.perf_counter() - _hover_t) * 1000)
-                    if _hover_t else "none"))
-            except Exception:
-                pass
 
             def _go():
                 global _opening
@@ -1398,8 +1147,8 @@ def _on_main_window_init() -> None:
         from aqt.qt import QTimer
         # Preloading the graphs page costs a whole web renderer (~100–200 MB) for as
         # long as Anki runs; it's built on the first Stats click unless you opt in.
-        # (no idle prebuild / preload: a stats view loaded before it was ever shown
-        # couldn't reach the screen — see _on_hover_preload)
+        if _cfg().get("stats_preload", False):
+            _when_idle(_preload, 6000)           # after launch settles + you pause
     except Exception:
         pass
     try:
@@ -1452,7 +1201,6 @@ def install() -> None:
         gui_hooks.state_did_change.append(_bump_idle)
         gui_hooks.deck_browser_did_render.append(_bump_idle)
         gui_hooks.webview_will_set_content.append(_on_will_set_content)
-        gui_hooks.webview_did_receive_js_message.append(_on_js_message)
         gui_hooks.top_toolbar_did_init_links.append(_wrap_toolbar_links)
     except Exception as exc:
         log("stats embed: %s" % exc)
