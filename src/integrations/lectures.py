@@ -1001,7 +1001,7 @@ def build_lecture_map(families=None):
     """norm_lecture_name -> {'display': str, 'searches': [str, ...]}.
 
     The BASE source is `xlsx_path` (an .xlsx workbook, a single .txt list, or a
-    URL). Any additional .txt files in `txt_paths` are then merged on top — union
+    URL). Any additional maps in `txt_paths` (.txt, .json or more .xlsx) are then merged on top — union
     of tags per lecture, new lectures added — so you can keep one spreadsheet as
     the base and layer extra hand-written .txt lists over it, adding/removing them
     without touching the base.
@@ -1383,9 +1383,11 @@ def use_tag_map_file(fn, day_offset=0, open_after=True):
     """Install `fn` as the lecture→tag map — the file picker's "Choose file…" step, also
     used when a map file is dropped on the main window. Returns True if it loaded."""
     cur = mw.addonManager.getConfig(__name__) or {}
-    # The base slot is reserved for a spreadsheet; a .txt/.json is always a
-    # complementary layer (still resolves on its own with an empty base).
-    if fn.lower().endswith((".txt", ".json")):
+    # The base slot holds the first spreadsheet; a .txt/.json, or another
+    # spreadsheet once a base is set, is added as a layer (maps merge per lecture).
+    base = (cur.get("xlsx_path") or "").strip()
+    if fn.lower().endswith((".txt", ".json")) or (
+            base and base != fn and (_is_url(base) or os.path.exists(_p(base)))):
         extras = list(cur.get("txt_paths") or [])
         if fn not in extras:
             extras.append(fn)
@@ -3020,11 +3022,12 @@ def build_settings_pages():
 
     # Extra .txt/.json tag lists, merged ON TOP of the base file (union of tags
     # per lecture). Add/remove as many as you like without touching the base.
-    txt_lbl = QLabel(".txt/.json:")
+    txt_lbl = QLabel("More maps:")
     g.addWidget(txt_lbl, 2, 0)
     txt_list = QListWidget()
     txt_list.setMaximumHeight(90)
-    txt_list.setToolTip("Additional .txt/.json tag lists merged on top of the base file.")
+    txt_list.setToolTip("More tag maps (.xlsx, .txt or .json) merged with the base "
+                        "file: each lecture gets the tags from every map.")
     for _tp in (cfg.get("txt_paths") or []):
         if (_tp or "").strip():
             txt_list.addItem(_tp)
@@ -3040,11 +3043,14 @@ def build_settings_pages():
         fns, _f = QFileDialog.getOpenFileNames(
             src, "Choose tag map file(s)", os.path.dirname(_p(xlsx_edit.text())) or "",
             "Tag maps (*.xlsx *.xlsm *.txt *.json);;All files (*)")
-        # A spreadsheet is the base map (one slot); .txt/.json files layer on top.
-        sheets = [f for f in fns if f.lower().endswith((".xlsx", ".xlsm"))]
-        if sheets:
-            xlsx_edit.setText(sheets[-1])
-        fns = [f for f in fns if not f.lower().endswith((".xlsx", ".xlsm"))]
+        # The first spreadsheet fills an empty base slot; everything else (more
+        # spreadsheets included) goes in this list and is merged with it.
+        if not xlsx_edit.text().strip():
+            sheets = [f for f in fns if f.lower().endswith((".xlsx", ".xlsm"))]
+            if sheets:
+                xlsx_edit.setText(sheets[0])
+                fns = [f for f in fns if f != sheets[0]]
+        fns = [f for f in fns if f != xlsx_edit.text().strip()]
         existing = {txt_list.item(i).text() for i in range(txt_list.count())}
         for fn in fns:
             if fn and fn not in existing:
