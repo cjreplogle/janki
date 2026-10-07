@@ -436,7 +436,15 @@ def maybe_self_heal(early: bool = False) -> None:
     except Exception:
         pass
     if sys.version_info[:2] != (3, 13):
-        return                         # can't produce matching bytecode
+        # Can't produce matching bytecode, so no glass — and with no glass the add-on
+        # stays dormant (no Janki window/settings changes). This used to be silent,
+        # which read as "Janki does nothing"; say why, once per Python version.
+        if not early:
+            v = "%d.%d" % sys.version_info[:2]
+            _notify_once("py" + v,
+                         "glass needs a newer Anki (this one runs Python %s; glass needs "
+                         "3.13). Update Anki from apps.ankiweb.net, then relaunch." % v)
+        return
     if early and os.environ.get("JANKI_SELFHEAL_RELAUNCHED"):
         # We already patched + re-ran once and the glass still isn't active: don't
         # patch again here; the normal (non-early) pass will prompt instead.
