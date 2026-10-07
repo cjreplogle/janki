@@ -529,6 +529,7 @@ def _make_pomodoro():
                 self._xp.set_progress(0.0)
 
         def stop(self):
+            self._space_filter_on(False)
             self._ticker.stop()
             self._bypass_ticker.stop()
             self._xp.hide()
@@ -598,6 +599,7 @@ def _make_pomodoro():
             if card_timer._card_timer_instance is not None:
                 card_timer._card_timer_instance.stop_card()
             self._on_break     = True
+            self._space_filter_on(True)
             self._elapsed_ms   = 0
             self._sessions    += 1
             self._is_long      = (LONG_AFTER > 0 and self._sessions % LONG_AFTER == 0)
@@ -624,6 +626,9 @@ def _make_pomodoro():
 
         def _end_break(self):
             self._on_break    = False
+            # keep eating Space for a moment: its release (after a hold-to-skip) must
+            # not reach the reviewer and flip the revealed card
+            QTimer.singleShot(1500, lambda: self._space_filter_on(False))
             self._elapsed_ms  = 0
             state._pomo_on_break    = False
             self._bypass_t    = 0.0
@@ -681,6 +686,45 @@ def _make_pomodoro():
                 self._bypass_ticker.stop()
                 self._bypass_t = 0.0
                 self._bs.set_bypass(0.0)
+
+        def _space_filter_on(self, on):
+            """Hold-Space-to-skip without the global key tap. On a Mac where Anki hasn't
+            been granted Input Monitoring / Accessibility, the CGEventTap never starts and
+            a held Space never reached the break. While a break is up (and Anki is in
+            front, as it is then), watch Space through Qt too; repeats are ignored by
+            _on_space, so both paths together don't double-count."""
+            try:
+                from aqt.qt import QApplication, QObject, QEvent
+                app = QApplication.instance()
+                f = getattr(self, "_qt_space", None)
+                if on:
+                    if f is not None:
+                        return
+                    pomo = self
+
+                    class _Space(QObject):
+                        def eventFilter(self, obj, ev):
+                            t = ev.type()
+                            if t not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                                return False
+                            try:
+                                if ev.key() != Qt.Key.Key_Space:
+                                    return False
+                                if ev.isAutoRepeat():
+                                    return True          # held: swallow the repeats
+                                if pomo._on_break:
+                                    pomo._on_space(t == QEvent.Type.KeyPress)
+                                return True              # never reaches the card
+                            except Exception:
+                                return False
+                    self._qt_space = _Space(app)
+                    app.installEventFilter(self._qt_space)
+                elif f is not None:
+                    app.removeEventFilter(f)
+                    f.deleteLater()
+                    self._qt_space = None
+            except Exception:
+                pass
 
         def _bypass_tick(self):
             self._bypass_t += BYPASS_TICK_MS / 1000.0
