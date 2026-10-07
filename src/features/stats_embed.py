@@ -809,8 +809,25 @@ def open_stats() -> None:
     _style_web(_web)
     _web.setFocus()
     _reglass()
+    def _qt_state():
+        try:
+            pg = _web.page()
+            fp = _web.focusProxy()
+            ls = getattr(pg, "lifecycleState", None)
+            _pp("qt: web vis=%s %dx%d max=%d | proxy vis=%s %s | panel vis=%s h=%d max=%d"
+                " | lifecycle=%s visible=%s | main_host h=%d"
+                % (_web.isVisible(), _web.width(), _web.height(), _web.maximumHeight(),
+                   fp.isVisible() if fp else None,
+                   ("%dx%d" % (fp.width(), fp.height())) if fp else "-",
+                   _panel.isVisible(), _panel.height(), _panel.maximumHeight(),
+                   str(ls()).split(".")[-1] if ls else "?",
+                   pg.isVisible() if hasattr(pg, "isVisible") else "?",
+                   _main_host().height()))
+        except Exception as exc:
+            _pp("qt state failed: %s" % exc)
     try:                       # perf probe: what the page looks like 1 s after opening
         from aqt.qt import QTimer
+        QTimer.singleShot(1000, _qt_state)
         QTimer.singleShot(1000, lambda: _web.eval(
             "try{var c=document.querySelectorAll('div.container:has(> .position-relative)');"
             "pycmd('jankiT:1s after open: panels='+c.length+' shown='+"
