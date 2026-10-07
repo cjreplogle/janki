@@ -2934,7 +2934,7 @@ def _open_today_dialog(day_offset=0, auto=False):
 # ----------------------------------------------------------- settings UI -------
 
 def build_settings_pages():
-    """Build the Sources + Behavior panes. Returns (pages, save_fn) where pages is
+    """Build the Sources + Behavior + Calendar panes. Returns (pages, save_fn) where pages is
     [(title, QWidget), ...] and save_fn() writes all fields to config. The host
     settings dialog (GlassSettings) adds these as extra tabs and calls save_fn on
     close, so lecture settings live in the same window as everything else."""
@@ -2944,7 +2944,7 @@ def build_settings_pages():
     )
     cfg = _cfg()
 
-    # ---- Pane 1: Sources (spreadsheet + calendar file/URL) -------------------
+    # ---- Pane 1: Sources (tag-map spreadsheet + layers) ----------------------
     src = QWidget()
     g = QGridLayout(src)
     g.setColumnStretch(1, 1)
@@ -3034,6 +3034,19 @@ def build_settings_pages():
         parent=src, on_map_ready=_add_generated_map, open_after=False))
     g.addWidget(gen_btn, 3, 1, 1, 2)
 
+    # Link to the step-by-step tutorial (tag-map format, calendar, manual mode).
+    help_lbl = QLabel(
+        '<a href="https://cjre.pl/ogle/janki/load">How to use this — tutorial &amp; tag-map format ↗</a>')
+    help_lbl.setOpenExternalLinks(True)
+    help_lbl.setStyleSheet("color: palette(mid);")
+    g.addWidget(help_lbl, 4, 1, 1, 2)
+    g.setRowStretch(5, 1)
+
+    # ---- Calendar section (hosted at the top of Lectures → Calendar) ---------
+    cal = QWidget()
+    g = QGridLayout(cal)
+    g.setContentsMargins(0, 0, 0, 0)
+    g.setColumnStretch(1, 1)
     g.addWidget(QLabel("<b>Calendar</b> (.ics — local file or http(s) URL)"), 4, 0, 1, 3)
     ics_edit = QLineEdit(cfg.get("ics_path", ""))
     ics_edit.setPlaceholderText("~/Downloads/lectures.ics   or   https://…/basic.ics")
@@ -3041,7 +3054,7 @@ def build_settings_pages():
 
     def _pick_ics():
         fn, _f = QFileDialog.getOpenFileName(
-            src, "Choose calendar file", os.path.dirname(_p(ics_edit.text())) or "",
+            cal, "Choose calendar file", os.path.dirname(_p(ics_edit.text())) or "",
             "Calendars (*.ics);;All files (*)")
         if fn:
             ics_edit.setText(fn)
@@ -3094,14 +3107,10 @@ def build_settings_pages():
     today_btn.clicked.connect(lambda: _open_today_dialog())
     g.addWidget(today_btn, 7, 1, 1, 2)
 
-    # Link to the step-by-step tutorial on GitHub (tag-map format, calendar,
-    # manual mode, settings). blob/HEAD resolves to the repo's default branch.
-    help_lbl = QLabel(
-        '<a href="https://cjre.pl/ogle/janki/load">How to use this — tutorial &amp; tag-map format ↗</a>')
-    help_lbl.setOpenExternalLinks(True)
-    help_lbl.setStyleSheet("color: palette(mid);")
-    g.addWidget(help_lbl, 8, 1, 1, 2)
-    g.setRowStretch(9, 1)
+    g.addWidget(QLabel("Timezone:"), 8, 0)
+    tz_edit = QLineEdit(cfg.get("timezone", "America/New_York"))
+    tz_edit.setToolTip("The calendar's times are read in this timezone.")
+    g.addWidget(tz_edit, 8, 1, 1, 2)
 
     # ---- Pane 2: Behavior ----------------------------------------------------
     beh = QWidget()
@@ -3164,10 +3173,7 @@ def build_settings_pages():
     bg.addWidget(coverage, row, 1)
     row += 1
 
-    bg.addWidget(QLabel("Timezone:"), row, 0)
-    tz_edit = QLineEdit(cfg.get("timezone", "America/New_York"))
-    bg.addWidget(tz_edit, row, 1)
-    bg.setRowStretch(row + 1, 1)
+    bg.setRowStretch(row, 1)
 
     def _save():
         # Re-read the CURRENT config and touch only lecture keys, so we never
@@ -3189,7 +3195,9 @@ def build_settings_pages():
         except Exception as e:
             _log("writeConfig failed: %s" % e)
 
-    return [("Sources", src), ("Behavior", beh)], _save
+    # "Calendar" isn't a tab of its own in Settings: it's placed above the source
+    # decks on the Lectures → Calendar subtab.
+    return [("Sources", src), ("Behavior", beh), ("Calendar", cal)], _save
 
 
 def _open_settings_dialog():

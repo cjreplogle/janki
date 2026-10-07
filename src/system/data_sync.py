@@ -8,7 +8,7 @@ receives it downloads the calendar itself (the .ics file is never sent).
 Each item is compressed and encrypted, then stored in its own collection-config key,
 so AnkiWeb carries it with the normal sync and two computers editing different items
 never overwrite each other. The key comes from a passphrase you type on each computer
-(Tools → Janki: Sync passphrase…); only the derived key is kept, locally. AnkiWeb sees
+(Settings → Lectures → Sync); only the derived key is kept, locally. AnkiWeb sees
 random-looking key names (`jk_<hex>`) and ciphertext: no filenames, no contents, and
 change fingerprints are keyed too. Nothing syncs until a passphrase is set.
 
@@ -242,11 +242,13 @@ def _ready(col):
     _KEYS = _keys()
     msg = None
     if _KEYS is None:
-        msg = "Janki sync is waiting for a passphrase (Tools → Janki: Sync passphrase…)."
+        msg = "Janki sync is waiting for a passphrase (Settings → Lectures → Sync)."
     elif not _check(col):
         msg = ("Janki sync: this passphrase doesn't match the one your other computer "
                "used. Calendar data isn't syncing.")
         _KEYS = None
+    if msg:
+        _set_status(msg)
     if msg and not _warned:
         _warned = True
         try:
@@ -287,6 +289,7 @@ def push():
         _save_state(st)
         if n:
             log("data sync: sent %d item(s)" % n)
+        _set_status("Last sync %s — sent %d change(s)." % (time.strftime("%H:%M"), n))
     except Exception as e:
         log("data sync: push: %s" % e)
 
@@ -324,6 +327,8 @@ def pull():
         _save_state(st)
         if got:
             log("data sync: received %s" % ", ".join(got))
+            _set_status("Last sync %s — received %d change(s) from another computer."
+                        % (time.strftime("%H:%M"), len(got)))
             _refresh(got)
     except Exception as e:
         log("data sync: pull: %s" % e)
@@ -357,38 +362,38 @@ def _refresh(got):
     # which run after these (installed first)
 
 
-def ask_passphrase():
-    """Tools → Janki: Sync passphrase… — the same phrase on every computer."""
-    from aqt.qt import QInputDialog, QLineEdit
-    from aqt.utils import tooltip
-    text, ok = QInputDialog.getText(
-        mw, "Janki sync passphrase",
-        "Calendar and lecture data are encrypted before they go to AnkiWeb.\n"
-        "Use the same passphrase on each computer. It never leaves this computer;\n"
-        "if you forget it, set a new one everywhere (data re-uploads on next sync).",
-        QLineEdit.EchoMode.Password)
-    if not ok or not text.strip():
-        return
+def has_key():
+    return _keys() is not None
+
+
+def set_passphrase(text):
+    """Settings → Lectures → Sync: the same phrase on every computer."""
     global _warned
     c = _cfg_raw()
-    c["sync_key"] = derive_key(text.strip())
+    c["sync_key"] = derive_key(text)
     mw.addonManager.writeConfig(__name__, c)
     _warned = False
-    try:
-        _save_state({"_new_key": True})    # resend everything under the new key
-    except Exception:
-        pass
-    tooltip("Janki sync passphrase saved — it takes effect on the next sync.")
+    _save_state({"_new_key": True})        # resend everything under the new key
+    _set_status("Passphrase set — takes effect on the next sync.")
+
+
+_STATUS = ""
+
+
+def _set_status(msg):
+    global _STATUS
+    _STATUS = msg
+
+
+def status():
+    if not _enabled():
+        return "Off."
+    if not has_key():
+        return "Waiting for a passphrase — nothing syncs until one is set."
+    return _STATUS or "Ready — syncs with your next AnkiWeb sync."
 
 
 def install():
-    try:
-        from aqt.qt import QAction
-        act = QAction("Janki: Sync passphrase…", mw)
-        act.triggered.connect(ask_passphrase)
-        mw.form.menuTools.addAction(act)
-    except Exception as e:
-        log("data sync menu: %s" % e)
     try:
         gui_hooks.profile_did_open.append(pull)
         gui_hooks.sync_will_start.append(push)

@@ -259,9 +259,14 @@ class GlassSettings(QDialog):
             lec_page = QWidget(); _lec_outer = QVBoxLayout(lec_page)
             _lec_outer.setContentsMargins(6, 6, 6, 6)   # modest space above the subtabs
             lec_tabs = QTabWidget(); _lec_outer.addWidget(lec_tabs)
+            _cal_sec = None
             for _title, _widget in _pages:
+                if _title == "Calendar":
+                    _cal_sec = _widget
+                    continue
                 lec_tabs.addTab(_widget, _title)
-            lec_tabs.addTab(self._build_lecture_calendar_tab(), "Calendar")
+            lec_tabs.addTab(self._build_lecture_calendar_tab(_cal_sec), "Calendar")
+            lec_tabs.addTab(self._build_lecture_sync_tab(), "Sync")
             tabs.addTab(lec_page, "Lectures")
             if _lsave:
                 self._lecture_savers.append(_lsave)
@@ -3102,13 +3107,77 @@ class GlassSettings(QDialog):
         self._rp_drop_filter = _Drop(self)
         target.installEventFilter(self._rp_drop_filter)
 
-    def _build_lecture_calendar_tab(self):
-        """Lectures → Calendar: which sources the Calendar uses, and which of the decks
-        each source's cards were found in get searched (found automatically)."""
+    def _build_lecture_sync_tab(self):
+        """Lectures → Sync: calendar + lecture setup travel between computers with
+        AnkiWeb sync, encrypted with a passphrase (src/system/data_sync.py)."""
+        from aqt.qt import QWidget, QLineEdit, QPushButton
+        from . import data_sync as _ds
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        on = QCheckBox("Sync calendar and lecture setup between computers")
+        on.setChecked(bool(self.cfg.get("sync_janki_data", True)))
+        lay.addWidget(on)
+        what = QLabel("Rides along with AnkiWeb sync: the calendar URL and settings, "
+                      "calendar colours and class counts, the lecture spreadsheet, "
+                      "source decks, exclusions and aliases. Everything is encrypted "
+                      "first — AnkiWeb can't read the URL, the spreadsheet or even "
+                      "the file names. Decks and cards already sync through Anki.")
+        what.setWordWrap(True)
+        lay.addWidget(what)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Passphrase:"))
+        pw = QLineEdit()
+        pw.setEchoMode(QLineEdit.EchoMode.Password)
+        pw.setPlaceholderText("same on every computer" if not _ds.has_key()
+                              else "set — type a new one to change it")
+        row.addWidget(pw, 1)
+        save_btn = QPushButton("Set")
+        row.addWidget(save_btn)
+        lay.addLayout(row)
+        hint = QLabel("Stays on this computer (only a key made from it is stored). "
+                      "Forgot it? Set a new one on every computer.")
+        hint.setWordWrap(True)
+        hint.setEnabled(False)
+        lay.addWidget(hint)
+        status = QLabel(_ds.status())
+        status.setWordWrap(True)
+        status.setStyleSheet("color: #9cbcf3;")
+        lay.addWidget(status)
+        lay.addStretch(1)
+
+        def set_pw():
+            if not pw.text().strip():
+                return
+            _ds.set_passphrase(pw.text().strip())
+            self.cfg = _cfg_raw_reload(self.cfg)
+            pw.clear()
+            pw.setPlaceholderText("set — type a new one to change it")
+            status.setText(_ds.status())
+        save_btn.clicked.connect(set_pw)
+        pw.returnPressed.connect(set_pw)
+
+        def toggled(v):
+            self.cfg["sync_janki_data"] = bool(v)
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            for w in (pw, save_btn):
+                w.setEnabled(bool(v))
+            status.setText(_ds.status())
+        on.toggled.connect(toggled)
+        for w in (pw, save_btn):
+            w.setEnabled(on.isChecked())
+        return page
+
+    def _build_lecture_calendar_tab(self, cal_section=None):
+        """Lectures → Calendar: the calendar file/URL (from lectures.py) on top, then
+        which sources the Calendar uses and which of the decks each source's cards
+        were found in get searched (found automatically)."""
         from aqt.qt import QWidget
         from ..integrations import lectures as _lec
         page = QWidget()
         lay = QVBoxLayout(page)
+        if cal_section is not None:
+            lay.addWidget(cal_section)
+            lay.addSpacing(10)
         note = QLabel("Sources the Calendar uses, and the decks their cards were found in. "
                       "Untick a source to ignore it; untick a deck to leave it out of "
                       "searches.")
@@ -3913,6 +3982,12 @@ class GlassSettings(QDialog):
 
 
 _settings_instance = None            # the one open settings window (singleton)
+
+
+def _cfg_raw_reload(cur):
+    """Settings' cfg copy after another module wrote config (keeps unsaved-free sync)."""
+    fresh = mw.addonManager.getConfig(__name__) or {}
+    return fresh if fresh else cur
 
 
 def _apply_settings_section(d, section):
