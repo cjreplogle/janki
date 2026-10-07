@@ -788,6 +788,12 @@ def _reload_all_webviews():
         # switched to.
         if mw.app.applicationState() != Qt.ApplicationState.ApplicationActive:
             raise StopIteration
+        # Closed to the menu bar (red X) or minimized: never order the window back on
+        # screen. Natively fronting a window Qt has hidden put the bare glass frame
+        # back with nothing drawn in it (a close in the first seconds after launch
+        # landed right before this reload).
+        if not mw.isVisible() or mw.isMinimized():
+            raise StopIteration
         _msg, _cls = _bridge()
         _ns_app = _msg(c_void_p, _cls(b"NSApplication"), b"sharedApplication")
         _msg(c_void_p, _ns_app, b"activateIgnoringOtherApps:", (c_bool,), (True,))
