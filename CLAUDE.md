@@ -80,7 +80,7 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.8.9** (Windows: **v2.8.9w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.8.10** (Windows: **v2.8.10w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.
