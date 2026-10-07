@@ -511,6 +511,10 @@ def maybe_self_heal(early: bool = False) -> None:
                 where = str(Path(aqt.__file__).resolve().parent)
             except Exception:
                 where = "?"
+            if where == "?" and sys.version_info[:2] < (3, 13):
+                _notify_once("oldanki", "this Anki is too old for glass. Update Anki from "
+                                        "apps.ankiweb.net, then relaunch it twice.")
+                return
             if not where.replace("\\", "/").endswith("/qt/aqt"):
                 _notify_once("layout:" + where,
                              "glass can't be set up for this Anki install (Janki can't "
@@ -630,6 +634,11 @@ def unsupported_reason() -> str:
         f = Path(aqt.__file__).resolve()
         d = f.parent
     except Exception:
+        if sys.version_info[:2] < (3, 13):
+            # older Anki builds pack their code into the app (no files to patch)
+            return ("This Anki is too old for glass (it runs Python %d.%d). Update Anki "
+                    "from apps.ankiweb.net, then relaunch it twice."
+                    % sys.version_info[:2])
         return "Janki couldn't find Anki's files."
     if str(d).replace("\\", "/").endswith("/qt/aqt"):
         return "This Anki runs from source; glass is set up by its own build."
