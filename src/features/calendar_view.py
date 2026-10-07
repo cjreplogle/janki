@@ -43,6 +43,7 @@ def open_calendar():
         _close_detail()
         return
     QTimer.singleShot(700, _prewarm)           # neighbouring weeks, ready for arrows
+    _arm_top()
     try:
         from . import practice, stats_embed
         practice._practice_view = False
@@ -57,6 +58,33 @@ def open_calendar():
         log("calendar open: %s" % e)
         _view = True
         _redraw()
+
+
+# Anki re-applies the deck list's scroll offset when it redraws the page. In a short
+# window the Calendar is taller than the view, so it opened part-scrolled and its gap
+# under the toolbar looked cramped. Opening the Calendar starts at the top (once; later
+# redraws keep whatever scroll you chose). Expires so a missed draw can't fire later.
+_to_top = False
+
+
+def _arm_top():
+    global _to_top
+    _to_top = True
+
+    def _expire():
+        global _to_top
+        _to_top = False
+    QTimer.singleShot(2000, _expire)
+
+
+def _on_deck_render(browser):
+    global _to_top
+    if _to_top and _view:
+        _to_top = False
+        try:
+            browser.web.eval("window.scrollTo(0, 0, 'instant');")
+        except Exception:
+            pass
 
 
 def close():
@@ -2917,6 +2945,7 @@ def install():
     gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1500, _restore_suspended))
     gui_hooks.profile_did_open.append(lambda: QTimer.singleShot(1800, _cleanup_temp))
     gui_hooks.deck_browser_will_render_content.append(_on_render)
+    gui_hooks.deck_browser_did_render.append(_on_deck_render)
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
     gui_hooks.state_did_change.append(_on_state)
     try:
