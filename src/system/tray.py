@@ -367,10 +367,9 @@ def _minimize_to_tray() -> None:
     # reopen-on-activate hook read as "Dock click" — it brought the window straight
     # back (blank until clicked). The close itself must stick; Dock/⌘-Tab still
     # reopen after this short window.
-    try:
-        suppress_reopen(1.5)
-    except Exception:
-        pass
+    # (no timed suppression here any more: the reopen hook only acts on a real return
+    # from another app or a click on the Dock — a 1.5 s pause also ate a quick Dock
+    # click right after the red X, so it took two clicks)
     try:
         _ensure_tray_target()
         _remember_state()
@@ -568,11 +567,16 @@ def _install_reopen_hook() -> None:
                     # Let a possible menu-bar-icon click arm suppression first, then
                     # re-check before restoring.
                     def _maybe():
-                        if mw.isVisible():
-                            return
-                        if time.time() < _suppress_reopen_until:
-                            return
-                        _do_reopen()
+                        why = ("already visible" if mw.isVisible() else
+                               "suppressed (menu-bar icon)"
+                               if time.time() < _suppress_reopen_until else "reopen")
+                        try:
+                            from ..util import perf_probe
+                            perf_probe._w("reopen hook decision: %s" % why)
+                        except Exception:
+                            pass
+                        if why == "reopen":
+                            _do_reopen()
                     QTimer.singleShot(140, _maybe)
                 else:
                     _do_reopen()
