@@ -816,7 +816,14 @@ def open_stats() -> None:
             "pycmd('jankiT:1s after open: panels='+c.length+' shown='+"
             "document.querySelectorAll('div.container.jk-vis').length+' hold='+"
             "window.__jkHold+' replayFn='+(typeof window.__jkReplay)+' url='+"
-            "location.pathname+' ready='+document.readyState);}catch(e){}"))
+            "location.pathname+' ready='+document.readyState+"
+            "' | invisible='+Array.prototype.filter.call(c,function(x){"
+            "return parseFloat(getComputedStyle(x).opacity)<0.1;}).length+"
+            "' inlineOp='+Array.prototype.map.call(c,function(x){return x.style.opacity||'-';})"
+            ".slice(0,4).join(',')+"
+            "' body='+getComputedStyle(document.body).opacity+'/'+"
+            "(document.body.style.transform||'-')+' scrollY='+scrollY+' innerH='+innerHeight+"
+            "' html='+getComputedStyle(document.documentElement).opacity);}catch(e){}"))
     except Exception:
         pass
 
