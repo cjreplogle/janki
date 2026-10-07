@@ -201,18 +201,56 @@ def backdrop_wanted() -> bool:
     return transparency_effects_on() and not is_virtual_machine()
 
 
+applied = {}      # hwnd → the backdrop settings last applied to it
+
+
 def apply(hwnd, material=21, blur=True, tint=(18, 20, 30), dark=True, small_corners=False):
     """Give a top-level window the glass backdrop. blur=False = no backdrop (the
     Janki tint alone, e.g. blur slider at 0 or OLED)."""
+    # Launch stand-in (pre-launch hook) still up behind the main window: until now
+    # the main window had no backdrop, so the stand-in's glass showed through it.
+    # Applying ours on top doubled the tint, and the stand-in closing then flickered
+    # the background. Wait for the star's fade, then swap in one step.
+    splash = getattr(sys, "_janki_splash_hwnd", None)
+    if splash:
+        try:
+            from aqt import mw as _mw
+            is_main = _mw is not None and int(_mw.winId()) == int(hwnd)
+        except Exception:
+            is_main = False
+        if is_main:
+            import time as _t
+            rem = (getattr(sys, "_janki_splash_fade_end", 0) or 0) - _t.time()
+            if rem > 0 or not getattr(sys, "_janki_splash_fade_end", 0):
+                from aqt.qt import QTimer
+                wait = int(rem * 1000) + 10 if rem > 0 else 120
+                QTimer.singleShot(wait, lambda: apply(hwnd, material, blur, tint, dark,
+                                                      small_corners))
+                return
+            _apply(hwnd, material, blur, tint, dark, small_corners)
+            user32.ShowWindowAsync(_hwnd(splash), 0)               # SW_HIDE, same instant
+            user32.PostMessageW(_hwnd(splash), 0x0010, 0, 0)       # then close it
+            sys._janki_splash_hwnd = None
+            return
+    _apply(hwnd, material, blur, tint, dark, small_corners)
+
+
+def _apply(hwnd, material, blur, tint, dark, small_corners):
     blur = blur and backdrop_wanted()
     set_dark(hwnd, dark)
     set_corners(hwnd, small_corners)
     extend_frame(hwnd)
+    rec = {"dark": bool(dark), "corner": CORNER_ROUND_SMALL if small_corners else CORNER_ROUND,
+           "blur": bool(blur), "tint": list(tint)}
     if HAS_SYSTEM_BACKDROP:
         kind = _MATERIAL_TO_BACKDROP.get(int(material), BACKDROP_ACRYLIC) if blur else BACKDROP_NONE
         _set_int(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, kind)
+        rec["backdrop"] = kind
     else:
-        _win10_accent(hwnd, (tint[0], tint[1], tint[2], 0x30) if blur else None)
+        rgba = (tint[0], tint[1], tint[2], 0x30) if blur else None
+        _win10_accent(hwnd, rgba)
+        rec["accent"] = list(rgba) if rgba else None
+    applied[int(hwnd)] = rec      # read by the launch snapshot (the stand-in window replays it)
 
 
 def clear(hwnd):

@@ -64,6 +64,10 @@ _thread = None
 _thread_id = None
 
 
+# Tab counts as released after this long with no Tab repeat and no chord key press
+# (a missed Tab release can't leave chords stuck on for longer).
+TAB_HOLD_S = 3.0
+
 def _down(vk):
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
@@ -154,9 +158,15 @@ def _handle(down, kc):
         # (Not GetAsyncKeyState: this hook swallows the Tab press, so Windows' key
         # state never sees Tab down and every Tab chord was cancelled. Held Tab keeps
         # sending auto-repeat downs through the hook — none for 1.5 s = released.)
-        if keytap._tab_held and time.monotonic() - getattr(keytap, "_tab_last", 0) > 1.5:
+        # Windows stops Tab's auto-repeat as soon as another key goes down, so while
+        # chording (Tab+F, F, F…) no repeats arrive: each chord key press counts as Tab
+        # still held, or the third F slipped through as a plain F (filtered deck).
+        now = time.monotonic()
+        if keytap._tab_held and now - getattr(keytap, "_tab_last", 0) > TAB_HOLD_S:
             keytap._tab_held = False
             keytap._tab_used_combo = False
+        if keytap._tab_held:
+            keytap._tab_last = now
         canon = _hk.tab_map.get(kc) if keytap._tab_held else None
         if canon in _hk.shift_kcs:
             if _down(VK_SHIFT):
@@ -250,7 +260,7 @@ class _QtFallback:
                     # Tab counts as held if either side saw it (the hook may have
                     # caught Tab but missed this key, or the other way round)
                     held = self.tab or (keytap._tab_held and
-                                        time.monotonic() - getattr(keytap, "_tab_last", 0) < 1.5)
+                                        time.monotonic() - getattr(keytap, "_tab_last", 0) < TAB_HOLD_S)
                     if t != QEvent.Type.KeyPress or not held or ev.isAutoRepeat():
                         return False
                     canon = _hk.tab_map.get(kc)

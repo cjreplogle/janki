@@ -1799,7 +1799,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Windows glass draws the webviews in software and re-copies the translucent
         # window every frame, so step every other frame there with twice the
         # characters per step: same typing speed, half the repaints.
-        f"  var JK_FR={2 if _WIN_SOFT else 1};\n"
+        f"  var JK_FR={2 if _WIN_SOFT and os.environ.get('JANKI_SEETHROUGH_GL') != '1' else 1};\n"
         # High-performance text shadows (Windows default): drop the halo while the
         # text types out, so the blur isn't re-rasterized for every revealed step; it
         # returns once the card settles (see body.jk-tw-active in _build_css).
@@ -1814,6 +1814,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    var reveal=function(){ try{ qa.style.visibility='visible'; }catch(e){} };\n"
         "    setTimeout(reveal, 600);\n"   # safety: never leave the card hidden
         "    var observer, animating=false;\n"
+        # gen: bumped on every real card show, so a reveal still running for the
+        # previous side/card stops instead of swallowing the new one. fresh: this
+        # render is a new show (Anki called _showQuestion/_showAnswer), not a re-render.
+        "    var gen=0, fresh=false, docFirst=true;\n"
         # AMBOSS marks terms (span.amboss-marker + underline) async on card show via
         # ambossAddon.tooltip.phraseMarker.mark(phrases). Our reveal fragments then
         # normalizes the DOM, wiping those markers, and AMBOSS never re-fires. So we
@@ -1873,7 +1877,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # (a long stretch of plain text with no inline markup breaking it up) falls
         # back to the old per-char step, scoped to just that one run.
         "    function typeOutStatic(clozeOnly, done){\n"
-        "      var nodes=collect(clozeOnly);\n"
+        "      var g=gen, nodes=collect(clozeOnly);\n"
         "      var totalChars=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!totalChars){ reveal(); done(); return; }\n"
         "      var MS=totalMs(totalChars);\n"
@@ -1908,6 +1912,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        done(); }\n"
         "      var idx=0;\n"
         "      function next(){\n"
+        "        if(g!==gen){ while(idx<holders.length) finishHolder(holders[idx++]);\n"
+        "          for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} } return; }\n"
         "        if(idx>=holders.length){ finishAll(); return; }\n"
         "        var h=holders[idx++];\n"
         "        h.liFirst.forEach(function(li){ try{ li.style.visibility=''; }catch(e){} });\n"
@@ -1934,7 +1940,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # by ELAPSED TIME, not per frame: a fixed count per frame assumed 60 fps and
         # raced / stalled when frames came faster or unevenly
         "        var ci=0, t0=performance.now();\n"
-        "        function step(){ var want=Math.min(spans.length, Math.ceil(spans.length*"
+        "        function step(){ if(g!==gen){ finishHolder(h); next(); return; } var want=Math.min(spans.length, Math.ceil(spans.length*"
         "Math.min(1,(performance.now()-t0)/dur)));\n"
         "          while(ci<want){ spans[ci].style.visibility='visible'; ci++; }\n"
         "          if(ci<spans.length) jkNext(step); else { finishHolder(h); next(); } }\n"
@@ -1942,7 +1948,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      }\n"
         "      next(); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"
-        "      var nodes=collect(clozeOnly);\n"
+        "      var g=gen, nodes=collect(clozeOnly);\n"
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!total){ reveal(); done(); return; }\n"
         "      // duration scales with length at WPM (5 chars/word), clamped.\n"
@@ -1960,7 +1966,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      reveal();   // reveal the now-emptied card (no flash of full text)\n"
         "      var ni=0,ci=0,shown=0,t0=performance.now();\n"
         # characters due by now (elapsed time), not a fixed count per frame
-        "      function step(){ var b=Math.min(total,Math.ceil(total*Math.min(1,"
+        "      function step(){ if(g!==gen){ nodes.forEach(function(x){ x[0].nodeValue=x[1]; });\n"
+        "        liAll.forEach(function(l){ l.style.visibility=''; }); return; } var b=Math.min(total,Math.ceil(total*Math.min(1,"
         "(performance.now()-t0)/MS)))-shown; shown+=Math.max(0,b);\n"
         "        while(b>0 && ni<nodes.length){ var c=nodes[ni], rem=c[1].length-ci, take=Math.min(b,rem);\n"
         "          if(ci===0) showLi(ni);\n"
@@ -2002,7 +2009,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # PREV_HASH = last card Python actually animated (survives a full re-render/
         # new document, unlike window.name). getSig() = same-document/reload guard.
         # Either match → this exact card content already animated → just reveal.
-        "      if(s===PREV_HASH || s===getSig()){ reveal(); return; }\n"
+        "      var isNew=fresh; fresh=false; docFirst=false;\n"
+        "      if(!isNew && (s===PREV_HASH || s===getSig())){ reveal(); return; }\n"
         "      setSig(s); window.__jkAmbPhr=null; jkAmbHook();\n"
         "      // Janki Practice (MCQ) card → reveal instantly and let the template's\n"
         "      // own per-choice / flip animation run. The typewriter head is injected\n"
@@ -2023,7 +2031,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Removes a growing per-tick shadow-blur cost with nothing visibly lost.
         "      if(JK_NOHALO) document.body.classList.add('jk-tw-active');\n"
         "      if(observer) observer.disconnect();\n"
-        "      typeOut(false, function(){ animating=false;\n"
+        "      var g0=gen;\n"
+        "      typeOut(false, function(){ if(g0!==gen) return; animating=false;\n"
         "        if(JK_NOHALO) document.body.classList.remove('jk-tw-active');\n"
         "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }); }\n"
         "    // childList-only + SYNCHRONOUS run: the observer microtask fires before\n"
@@ -2031,6 +2040,15 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    // never shown. Fires only on real card/answer swaps, not image/MathJax.\n"
         "    observer=new MutationObserver(run);\n"
         "    observer.observe(qa,{childList:true});\n"
+        # Every real card show (question or answer) animates, even mid-reveal or when
+        # the text matches the previous card (a relearning card shown again).
+        "    function jkWrap(name){ var o=window[name]; if(typeof o!=='function'||o.__jkw) return;\n"
+        "      var w=function(){ gen++; if(animating){ animating=false;\n"
+        "          if(JK_NOHALO) document.body.classList.remove('jk-tw-active'); }\n"
+        "        fresh=!docFirst; try{ observer.observe(qa,{childList:true}); }catch(e){}\n"
+        "        return o.apply(this, arguments); };\n"
+        "      w.__jkw=1; window[name]=w; }\n"
+        "    jkWrap('_showQuestion'); jkWrap('_showAnswer');\n"
         "    run();\n"
         "  });\n"
         "})();\n"
@@ -2447,6 +2465,12 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         if sys.platform.startswith("win") and isinstance(context, TopToolbar) \
                 and _win_frameless():
             web_content.head += "\n<script>" + _WIN_TOOLBAR_DRAG_JS + "</script>\n"
+            # See-through: Windows sends clicks on fully transparent pixels to the
+            # window behind, so the empty toolbar couldn't be grabbed. A 1/255 tint
+            # (invisible) makes it hit-testable.
+            if _WIN_SOFT:
+                web_content.head += ("\n<style>html{background-color:"
+                                     "rgba(0,0,0,0.004)!important;}</style>\n")
         # Typewriter reveal on the reviewer card (independent of the glass theme).
         # Skip it entirely on Janki Practice (MCQ) cards: they have their own
         # per-choice reveal animation, and the typewriter's hide-then-reveal of

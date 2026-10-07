@@ -6,6 +6,8 @@ itself: Windows-style caption buttons (minimise / maximise / close) at the top-r
 move from the toolbar's empty space (with Aero Snap, via startSystemMove), double-click
 to maximise, and resizing from any edge (startSystemResize).
 """
+import os
+
 from aqt import mw
 from aqt.qt import (QWidget, QHBoxLayout, QPainter, QColor, QEvent, QObject, Qt,
                     QApplication, QRectF, QPointF, QPen, QCursor)
@@ -151,6 +153,35 @@ class _TopStrip(QObject):
         except Exception:
             self._press = None
         return False
+
+
+class _StripFill(QWidget):
+    """Near-transparent fill over the top grab strip (see-through mode only)."""
+
+    def __init__(self, cw):
+        super().__init__(cw)
+        self._cw = cw
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        cw.installEventFilter(self)
+        self._fit()
+        self.show()
+        self.lower()
+
+    def _fit(self):
+        self.setGeometry(0, 0, self._cw.width(), TOP_GAP)
+
+    def eventFilter(self, obj, ev):
+        if obj is self._cw and ev.type() == QEvent.Type.Resize:
+            self._fit()
+        return False
+
+    def paintEvent(self, _ev):
+        from aqt.qt import QPainter, QColor
+        p = QPainter(self)
+        # Blend over (not Source): replacing the pixels cut a see-through bar through
+        # the OLED black layer underneath in fullscreen.
+        p.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        p.end()
 
 
 class _PlaceOnResize(QObject):
@@ -375,6 +406,12 @@ def install():
             lay.setContentsMargins(m.left(), TOP_GAP, m.right(), m.bottom())
             mw._jk_top_strip = _TopStrip(cw)
             cw.installEventFilter(mw._jk_top_strip)
+            if os.environ.get("JANKI_WIN_RENDER") == "software":
+                # See-through: the strip's pixels are fully transparent and Windows
+                # sends clicks there to the window behind. A 1/255 fill (invisible)
+                # makes it grabbable; presses go to the same strip handler.
+                mw._jk_strip_fill = _StripFill(cw)
+                mw._jk_strip_fill.installEventFilter(mw._jk_top_strip)
     except Exception:
         pass
     _lights = CaptionButtons(mw)

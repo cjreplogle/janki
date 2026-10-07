@@ -170,6 +170,11 @@ _FOCUS_CSS = (
     # practice slide button) off the very edge of the screen.
     "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:14px!important;}"
 )
+if sys.platform.startswith("win"):
+    # The frameless window keeps its 14px grab strip above the card in Focus Mode, so
+    # centring inside the web view put the card half that below the window's centre.
+    # Extra bottom padding (= the strip) centres it on the WINDOW instead.
+    _FOCUS_CSS += "body{padding-bottom:26px!important;}"
 
 
 def _focus_chrome():

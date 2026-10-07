@@ -255,6 +255,30 @@ def install_practice_toolbar(links, toolbar):
 _INCOMPLETE_TAG = "Practice::Incomplete"   # same tag as qbank
 
 
+_acc_cache = {"key": None, "counts": {}}
+
+
+def _acc_counts(names):
+    """(suspended, total) per deck id for every deck in `names`, from ONE query. The
+    Practice view asks for many banks per render; a query per row took ~800ms."""
+    key = (id(names), mw.col.mod if mw.col else None)
+    if _acc_cache["key"] == key:
+        return _acc_cache["counts"]
+    dids = [d for d, nm in names.items()
+            if nm == _PRACTICE_PARENT or nm.startswith(_PRACTICE_PARENT + "::")]
+    if not dids:
+        return {}
+    ph = ",".join("?" * len(dids))
+    rows = mw.col.db.all(
+        "select c.did, sum(case when c.queue=-1 then 1 else 0 end), count(*) "
+        "from cards c join notes n on n.id = c.nid "
+        "where c.did in (%s) and n.tags not like ? group by c.did" % ph,
+        *dids, "%% %s %%" % _INCOMPLETE_TAG)
+    counts = {int(d): (su or 0, t or 0) for d, su, t in rows}
+    _acc_cache["key"], _acc_cache["counts"] = key, counts
+    return counts
+
+
 def _acc_pct(did, names):
     """Completion for a bank/subbank (this deck + its descendants): the share of its
     answerable cards you've RETIRED. Binary practice suspends a card when you pick the
@@ -271,16 +295,9 @@ def _acc_pct(did, names):
                if nm == this or nm.startswith(this + "::")]
         if not sub:
             return None
-        ph = ",".join("?" * len(sub))
-        row = mw.col.db.first(
-            "select "
-            "sum(case when c.queue=-1 then 1 else 0 end), count(*) "
-            "from cards c join notes n on n.id = c.nid "
-            "where c.did in (%s) and n.tags not like ?" % ph,
-            *sub, "%% %s %%" % _INCOMPLETE_TAG)
-        suspended, total = (row or [0, 0])
-        suspended = suspended or 0
-        total = total or 0
+        counts = _acc_counts(names)
+        suspended = sum(counts.get(d, (0, 0))[0] for d in sub)
+        total = sum(counts.get(d, (0, 0))[1] for d in sub)
         if not total:
             return None
         return max(0, min(100, int(round(100.0 * suspended / total))))
@@ -372,10 +389,17 @@ def hide_practice_rows(deck_browser, content):
                 out = _filter(dids, children)
             html = out
         else:
-            for did in dids | amb:
-                html = re.sub(
-                    r"<tr[^>]*>(?:(?!</tr>).)*?open:%d\b.*?</tr>" % did,
-                    "", html, flags=re.DOTALL)
+            # One pass over the rows (a per-deck regex over the whole tree took 60-100ms
+            # per deck-list render with many banks).
+            drop = dids | amb
+            if drop:
+                def _keep(m):
+                    row = m.group(0)
+                    for o in re.finditer(r"open:(\d+)\b", row):
+                        if int(o.group(1)) in drop:
+                            return ""
+                    return row
+                html = re.sub(r"<tr[^>]*>.*?</tr>", _keep, html, flags=re.DOTALL)
         content.tree = html
         # The AMBOSS add-on's "Qbank" tile (appended to the deck browser's stats area):
         # shown in the Practice view, hidden from the normal deck list.

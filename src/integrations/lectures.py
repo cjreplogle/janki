@@ -3090,7 +3090,15 @@ def build_settings_pages():
     refresh_btn.clicked.connect(_refresh_now)
 
     def _update_refresh_btn():
-        refresh_btn.setVisible(_is_url(ics_edit.text()))
+        want = _is_url(ics_edit.text())
+        if refresh_btn.parent() is None:
+            # Not in a layout yet: setVisible(True) would show it as its own tiny
+            # top-level window (it flashed when Settings opened). Hide-only until parented;
+            # once added to the page it shows with it.
+            if not want:
+                refresh_btn.hide()
+            return
+        refresh_btn.setVisible(want)
     ics_edit.textChanged.connect(_update_ics_note)
     ics_edit.textChanged.connect(_update_refresh_btn)
     _update_ics_note()

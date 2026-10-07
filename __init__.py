@@ -755,6 +755,215 @@ def _startup():
             QTimer.singleShot(15000, _qb_pw.prewarm_borrow_index)
         except Exception as _zx_exc:
             log("zxcv: %s" % _zx_exc)
+        # Windows: Decks <-> Calendar <-> Practice rewrite the page in place (no reload).
+        if sys.platform.startswith("win"):
+            try:
+                from .src.platform.win import page_swap as _psw
+                _psw.install()
+            except Exception as _ps_exc:
+                log("page swap: %s" % _ps_exc)
+            # Anki on Windows doesn't write bytecode caches, so every launch compiled
+            # all of Janki's source (~2.4 MB) before anything showed. Compile it once in
+            # the background with Anki's own Python; later launches load the .pyc files
+            # (only changed files are rebuilt, e.g. after an update).
+            def _jk_compile():
+                import threading
+
+                def _run():
+                    try:
+                        import compileall
+                        import os as _os
+                        compileall.compile_dir(_os.path.dirname(_os.path.abspath(__file__)),
+                                               quiet=1, rx=__import__("re").compile(
+                                                   r"[\\/](user_files|tools|docs)[\\/]"))
+                        _ok = "done"
+                    except BaseException as _cc_exc:
+                        _ok = "failed: %r" % (_cc_exc,)
+                        log("bytecode compile: %s" % _cc_exc)
+                    try:
+                        from .src.util import perf_probe as _ppc
+                        _ppc._w("bytecode compile %s (dont_write=%s prefix=%s)"
+                                % (_ok, sys.dont_write_bytecode, sys.pycache_prefix))
+                    except Exception:
+                        pass
+                threading.Thread(target=_run, name="janki-pyc", daemon=True).start()
+            QTimer.singleShot(8000, _jk_compile)
+            # Launch snapshot: at quit, save what the main window shows (deck list /
+            # calendar) so next launch's instant stand-in window (pre-launch hook) can
+            # show it until Anki's real window has drawn. Stays local in user_files.
+            def _jk_dwm_applied():
+                """The exact backdrop Janki applied to the main window (dwm.apply)."""
+                try:
+                    from .src.platform.win import dwm as _jdwm
+                    rec = dict(_jdwm.applied.get(int(mw.winId())) or {})
+                    # The live border colour / corners Windows draws for it now.
+                    import ctypes as _ct
+                    for _attr, _key in ((34, "border"), (33, "corner")):
+                        _v = _ct.c_uint(0)
+                        if _ct.windll.dwmapi.DwmGetWindowAttribute(
+                                _ct.c_void_p(int(mw.winId())), _attr, _ct.byref(_v), 4) == 0:
+                            rec[_key] = int(_v.value)
+                    return rec
+                except Exception:
+                    return None
+
+            def _jk_save_icon(uf):
+                """Anki's icon for the stand-in's loading panel (premultiplied BGRA)."""
+                try:
+                    import os as _os
+                    from aqt.qt import QImage, Qt as _Qt
+                    n = int(round(64 * float(mw.devicePixelRatioF())))
+                    im = mw.windowIcon().pixmap(n, n).toImage().scaled(
+                        n, n, _Qt.AspectRatioMode.IgnoreAspectRatio,
+                        _Qt.TransformationMode.SmoothTransformation).convertToFormat(
+                        QImage.Format.Format_ARGB32_Premultiplied)
+                    bits = im.constBits()
+                    bits.setsize(im.sizeInBytes())
+                    if im.bytesPerLine() != n * 4:
+                        return 0
+                    with open(_os.path.join(uf, "launch_icon.raw"), "wb") as _f:
+                        _f.write(bytes(bits))
+                    return n
+                except Exception:
+                    return 0
+
+            def _jk_stall_ms():
+                """When Anki started its browser engine this launch (ms after the process
+                started): one long call that holds Python's lock, so the stand-in's star
+                is timed to finish before it instead of freezing part-way."""
+                try:
+                    from .src.util import boot_timing as _bt3
+                    marks = getattr(sys, "_janki_boot", None) or []
+                    t = next(t for lbl, t in marks if lbl.startswith("AnkiQt.setupStyle"))
+                    start = _bt3._wall_t0 - (_bt3._age_at_t0 or 0.0)
+                    return int((t - start) * 1000)
+                except Exception:
+                    return None
+
+            def _jk_launch_ms():
+                """How long the last launch took to settle (paces the stand-in's bar)."""
+                try:
+                    from .src.util import boot_timing as _bt2
+                    return int(_bt2.last_total_ms or 1900)
+                except Exception:
+                    return 1900
+
+            def _jk_save_launch_snapshot():
+                try:
+                    import json as _json
+                    import os as _os
+                    if getattr(mw, "state", None) != "deckBrowser" or not mw.isVisible() \
+                            or mw.isMinimized() or mw.isFullScreen() or mw.isMaximized():
+                        return
+                    uf = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "user_files")
+                    # Render the window itself (a screen grab came back black where the
+                    # see-through glass is), keeping its alpha: the stand-in window puts
+                    # the same live blur behind it, so the see-through parts match.
+                    from aqt.qt import QImage
+                    shot = mw.grab()
+                    if shot.isNull() or not mw.isActiveWindow():
+                        return
+                    img = shot.toImage().convertToFormat(
+                        QImage.Format.Format_ARGB32_Premultiplied)
+                    # Only the window's empty glass is kept (the most common pixel among
+                    # samples away from the content): the stand-in shows that, and the
+                    # real contents fade into it — no frozen picture of the deck list.
+                    import collections as _co
+                    W, H = img.width(), img.height()
+                    pts = [(int(W * fx), int(H * fy)) for fx in (0.03, 0.25, 0.5, 0.75, 0.97)
+                           for fy in (0.2, 0.5, 0.8, 0.96)]
+                    bg = _co.Counter(img.pixel(x, y) for x, y in pts).most_common(1)[0][0]
+                    # QImage.pixel() is straight alpha; Windows wants it premultiplied.
+                    _a = (bg >> 24) & 255
+                    bg = ((_a << 24) | (((bg >> 16) & 255) * _a // 255 << 16)
+                          | (((bg >> 8) & 255) * _a // 255 << 8) | ((bg & 255) * _a // 255))
+                    raw = _os.path.join(uf, "launch_snapshot.raw")
+                    for _old in ("launch_snapshot.raw", "launch_snapshot.bmp"):
+                        try:
+                            _os.remove(_os.path.join(uf, _old))
+                        except OSError:
+                            pass
+                    # Physical pixels (GetWindowRect): Qt's coordinates are scaled on a
+                    # >100% monitor, which put the stand-in in the wrong place/size.
+                    import ctypes as _ct
+                    from ctypes import wintypes as _wt
+                    _r = _wt.RECT()
+                    _ct.windll.user32.GetWindowRect(_wt.HWND(int(mw.winId())), _ct.byref(_r))
+                    with open(raw[:-4] + ".json", "w", encoding="utf-8") as _f:
+                        _json.dump({"x": _r.left, "y": _r.top, "w": _r.right - _r.left,
+                                    "h": _r.bottom - _r.top, "physical": True,
+                                    "bg_argb": int(bg), "dwm": _jk_dwm_applied(),
+                                    "scale": float(mw.devicePixelRatioF()),
+                                    "icon": _jk_save_icon(uf), "launch_ms": _jk_launch_ms(),
+                                    "trace_end_ms": _jk_stall_ms()}, _f)
+                except Exception as _ss_exc:
+                    log("launch snapshot: %s" % _ss_exc)
+            def _jk_save_launch_geom(*_a):
+                """Keep the stand-in's position = where Anki will reopen: refreshed when
+                the window settles after a move/resize and at quit (the snapshot alone
+                kept an old spot if the window moved after the deck list last drew)."""
+                try:
+                    import json as _json
+                    import os as _os
+                    import ctypes as _ct
+                    from ctypes import wintypes as _wt
+                    if not mw.isVisible() or mw.isMinimized():
+                        return
+                    p_ = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                       "user_files", "launch_snapshot.json")
+                    if not _os.path.isfile(p_):
+                        return
+                    with open(p_, encoding="utf-8") as _f:
+                        d = _json.load(_f)
+                    _r = _wt.RECT()
+                    _ct.windll.user32.GetWindowRect(_wt.HWND(int(mw.winId())), _ct.byref(_r))
+                    geo = {"x": _r.left, "y": _r.top, "w": _r.right - _r.left,
+                           "h": _r.bottom - _r.top}
+                    if all(d.get(k) == v for k, v in geo.items()):
+                        return
+                    d.update(geo)
+                    with open(p_, "w", encoding="utf-8") as _f:
+                        _json.dump(d, _f)
+                except Exception as _sg_exc:
+                    log("launch geom: %s" % _sg_exc)
+            _jk_geom_timer = QTimer(mw)
+            _jk_geom_timer.setSingleShot(True)
+            _jk_geom_timer.setInterval(600)
+            _jk_geom_timer.timeout.connect(_jk_save_launch_geom)
+
+            class _JkGeomWatch(QObject):
+                def eventFilter(self, obj, ev):
+                    if ev.type() in (QEvent.Type.Move, QEvent.Type.Resize,
+                                     QEvent.Type.WindowStateChange):
+                        _jk_geom_timer.start()
+                    return False
+            mw._jk_geom_watch = _JkGeomWatch(mw)
+            mw.installEventFilter(mw._jk_geom_watch)
+            try:
+                gui_hooks.profile_will_close.append(_jk_save_launch_geom)
+            except Exception:
+                pass
+            # Taken a moment after the deck list / calendar draws (quit is too late:
+            # the window is already leaving the page), so it's always current.
+            _jk_snap_timer = QTimer(mw)
+            _jk_snap_timer.setSingleShot(True)
+            _jk_snap_timer.setInterval(2500)
+            _jk_snap_timer.timeout.connect(_jk_save_launch_snapshot)
+            try:
+                gui_hooks.deck_browser_did_render.append(
+                    lambda *_a: _jk_snap_timer.start())
+            except Exception:
+                pass
+            # Settings opens instantly: its window is built ahead of time while idle.
+            try:
+                settings_dialog.schedule_prebuild(2000)
+            except Exception as _sp_exc:
+                log("settings prebuild: %s" % _sp_exc)
+                try:
+                    from .src.util import perf_probe as _ppsp
+                    _ppsp._w("settings: startup prebuild schedule failed %r" % (_sp_exc,))
+                except Exception:
+                    pass
         # Windows: register .jank / .qb / .rp with Anki once (per-user, no admin), so
         # double-clicking one in Explorer imports it — like Open With on the Mac.
         if sys.platform.startswith("win") and not _cfg().get("win_assoc_done", False):

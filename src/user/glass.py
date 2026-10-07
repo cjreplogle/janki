@@ -2777,6 +2777,17 @@ if GLASS and _WIN and os.environ.get("JANKI_WIN_PREBOOT") == "2" \
     except Exception:
         pass
 
+if GLASS and _WIN:
+    # Frameless before Anki first shows the window: done later (at _startup), the
+    # switch rebuilt an already-visible window, so its standard title bar and border
+    # flashed at launch. chrome.install() is idempotent; the later call is a no-op.
+    try:
+        from ..platform.win import preboot as _pb0, chrome as _ch0
+        if _pb0.frameless() and not mw.isVisible():
+            _ch0.install()
+    except Exception as exc:
+        log(f"early frameless: {exc}")
+
 if GLASS:
     AnkiWebView.__init__ = _patched_webview_init
     if _orig_theme_did_change is not None:

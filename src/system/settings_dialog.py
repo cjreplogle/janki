@@ -4080,6 +4080,135 @@ def _apply_settings_section(d, section):
             pass
 
 
+# Settings takes ~0.6 s to build (14 tabs). Build the next one ahead of time while Anki
+# is idle on a menu screen, so opening it only has to show it. A prebuilt dialog is
+# dropped if the config changed since it was built (e.g. a sync brought new settings).
+_prebuilt = None
+_prebuilt_sig = None
+
+
+def _cfg_sig():
+    import json
+    try:
+        c = _cfg_raw()
+        return json.dumps({k: v for k, v in c.items() if not str(k).startswith("last_")},
+                          sort_keys=True, default=str)
+    except Exception:
+        return None
+
+
+def _take_prebuilt():
+    global _prebuilt, _prebuilt_sig
+    d, sig = _prebuilt, _prebuilt_sig
+    _prebuilt = _prebuilt_sig = None
+    if d is None:
+        return None
+    try:
+        now = _cfg_sig()
+        if sig is not None and sig == now:
+            _pnote("settings: prebuilt used")
+            return d
+        try:
+            import json
+            a, b = json.loads(sig or "{}"), json.loads(now or "{}")
+            _pnote("settings: prebuilt dropped, changed keys: %s"
+                   % sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k)))
+        except Exception:
+            pass
+        d.deleteLater()
+    except Exception:
+        pass
+    return None
+
+
+def _pnote(msg):
+    try:
+        from ..util import perf_probe
+        perf_probe._w(msg)
+    except Exception:
+        pass
+
+
+_idle_pos = None
+_idle_misses = 0
+
+
+def schedule_prebuild(ms=20000):
+    from aqt.qt import QTimer
+    QTimer.singleShot(ms, _prebuild)
+
+
+def _user_idle() -> bool:
+    """The pointer hasn't moved since the last check (~1.5 s): the user isn't mid-way
+    through navigating, so a ~0.6 s build won't land on a click (it lagged the Calendar
+    opening right after Settings closed)."""
+    global _idle_pos
+    try:
+        from aqt.qt import QCursor
+        pos = QCursor.pos()
+        pos = (pos.x(), pos.y())
+    except Exception:
+        return True
+    still = pos == _idle_pos
+    _idle_pos = pos
+    return still
+
+
+def _prebuild():
+    global _prebuilt, _prebuilt_sig, _settings_instance
+    if _prebuilt is not None:
+        return
+    # A fade-closed Settings is hidden but never emits finished, so check visibility.
+    cur = _settings_instance
+    if cur is not None:
+        try:
+            if cur.isVisible():
+                schedule_prebuild(2000)      # build the next one once it's closed
+                return
+        except Exception:
+            pass
+        _drop_closed(cur)
+    # Only on a menu screen with no popup up — never mid-review (it's a ~0.6 s hitch).
+    try:
+        from aqt.qt import QApplication
+        if getattr(mw, "state", None) not in ("deckBrowser", "overview")                 or QApplication.activeModalWidget() is not None                 or QApplication.mouseButtons().value:
+            schedule_prebuild(3000)
+            return
+        # Prefer a still pointer (not mid-navigation), but give up waiting after ~4.5 s:
+        # a constantly moving mouse kept it from ever building (Settings opened unbuilt).
+        global _idle_misses
+        if not _user_idle() and _idle_misses < 3:
+            _idle_misses += 1
+            schedule_prebuild(1500)
+            return
+        _idle_misses = 0
+    except Exception as e:
+        _pnote("settings: prebuild check failed %r" % (e,))
+        schedule_prebuild(3000)
+        return
+    try:
+        _pnote("settings: prebuilding")
+        _prebuilt_sig = _cfg_sig()
+        _prebuilt = GlassSettings()
+    except Exception as e:
+        import traceback
+        _pnote("settings: prebuild FAILED %r\n%s" % (e, traceback.format_exc()))
+        _prebuilt = _prebuilt_sig = None
+        log("settings prebuild: %s" % e)
+
+
+def _drop_closed(d):
+    """Free a closed (hidden) Settings window — each open used to leave one behind."""
+    global _settings_instance
+    if _settings_instance is d:
+        _settings_instance = None
+    try:
+        if d is not None and not d.isVisible():
+            d.deleteLater()
+    except Exception:
+        pass
+
+
 def _open_settings(section=None, float_above=False):
     global _settings_instance
     # Singleton: if a settings window is already open, just switch to the requested section
@@ -4094,8 +4223,13 @@ def _open_settings(section=None, float_above=False):
                 return
         except Exception:
             existing = None                       # underlying window was destroyed
-    d = GlassSettings()
+        _drop_closed(existing)
+    d = _take_prebuilt()
+    if d is None:
+        _pnote("settings: no prebuilt, building now")
+        d = GlassSettings()
     _settings_instance = d
+    schedule_prebuild(2000)       # waits while this one is open, then builds the next
     try:
         from ..features import sfx as _sfx
         _sfx.play("settings")
@@ -4106,6 +4240,7 @@ def _open_settings(section=None, float_above=False):
         global _settings_instance
         if _settings_instance is d:
             _settings_instance = None
+        schedule_prebuild(1500)
         try:
             from ..features import sfx as _sfx
             _sfx.play("close")

@@ -10,6 +10,8 @@ _t = {"start": None, "what": ""}
 
 
 def _w(msg):
+    if not _ON:          # diagnostics only while user_files/perf_probe exists
+        return
     try:
         with open(os.path.join(_DIR, "perf.log"), "a", encoding="utf-8") as f:
             f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
