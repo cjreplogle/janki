@@ -65,6 +65,13 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 - Z/X/C/V rating is an app key filter (`features/zxcv.py`), not QShortcuts (ambiguity).
 - Text shadows: Appearance → Text (`text_shadow`: performance [Windows default] / quality / off).
 
+## Lessons (don't repeat)
+- **Never preload Stats in the background / on hover** (tried in 2.8.0–2.8.4): with the
+  software-compositing glass + 120 Hz flag, the Stats web view could stop reaching the
+  screen — an empty pane while the main process spun at ~100 % CPU until relaunch. Qt's
+  own `grab()` still showed content, so it can't be self-detected. Reverted in 2.8.5;
+  Stats loads on the first click of a session (as in 2.7.3).
+
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
