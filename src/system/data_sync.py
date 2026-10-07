@@ -8,7 +8,8 @@ receives it downloads the calendar itself (the .ics file is never sent).
 Each item is compressed and encrypted, then stored in its own collection-config key,
 so AnkiWeb carries it with the normal sync and two computers editing different items
 never overwrite each other. The key comes from a passphrase you type on each computer
-(Settings → Lectures → Sync); only the derived key is kept, locally. AnkiWeb sees
+(Settings → Lectures → Sync); it and the derived key are kept only in this
+computer's add-on config. AnkiWeb sees
 random-looking key names (`jk_<hex>`) and ciphertext: no filenames, no contents, and
 change fingerprints are keyed too. Nothing syncs until a passphrase is set.
 
@@ -377,11 +378,16 @@ def has_key():
     return _keys() is not None
 
 
+def passphrase():
+    return _cfg_raw().get("sync_passphrase") or ""
+
+
 def set_passphrase(text):
     """Settings → Lectures → Sync: the same phrase on every computer."""
     global _warned
     c = _cfg_raw()
     c["sync_key"] = derive_key(text)
+    c["sync_passphrase"] = text          # local only (never in the synced settings)
     mw.addonManager.writeConfig(__name__, c)
     _warned = False
     _save_state({"_new_key": True})        # resend everything under the new key

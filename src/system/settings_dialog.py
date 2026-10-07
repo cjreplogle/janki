@@ -3132,16 +3132,27 @@ class GlassSettings(QDialog):
         lay.addWidget(what)
         row = QHBoxLayout()
         row.addWidget(QLabel("Passphrase:"))
-        pw = QLineEdit()
+        pw = QLineEdit(_ds.passphrase())
         pw.setEchoMode(QLineEdit.EchoMode.Password)
-        pw.setPlaceholderText("same on every computer" if not _ds.has_key()
-                              else "set — type a new one to change it")
+        pw.setPlaceholderText("set earlier — retype it here to show it" if _ds.has_key()
+                              and not _ds.passphrase() else "same on every computer")
         row.addWidget(pw, 1)
+        eye = QPushButton("Show")
+        eye.setCheckable(True)
+
+        def show_pw(v):
+            pw.setEchoMode(QLineEdit.EchoMode.Normal if v else QLineEdit.EchoMode.Password)
+            eye.setText("Hide" if v else "Show")
+        eye.toggled.connect(show_pw)
+        row.addWidget(eye)
         save_btn = QPushButton("Set")
+        save_btn.setEnabled(False)
+        pw.textChanged.connect(lambda t: save_btn.setEnabled(
+            bool(t.strip()) and t.strip() != _ds.passphrase()))
         row.addWidget(save_btn)
         lay.addLayout(row)
-        hint = QLabel("Stays on this computer (only a key made from it is stored). "
-                      "Forgot it? Set a new one on every computer.")
+        hint = QLabel("Stays on this computer — it's never sent to AnkiWeb. "
+                      "Changing it means setting the new one on every computer.")
         hint.setWordWrap(True)
         hint.setEnabled(False)
         lay.addWidget(hint)
@@ -3154,10 +3165,11 @@ class GlassSettings(QDialog):
         def set_pw():
             if not pw.text().strip():
                 return
+            if pw.text().strip() == _ds.passphrase():
+                return
             _ds.set_passphrase(pw.text().strip())
             self.cfg = _cfg_raw_reload(self.cfg)
-            pw.clear()
-            pw.setPlaceholderText("set — type a new one to change it")
+            save_btn.setEnabled(False)
             status.setText(_ds.status())
         save_btn.clicked.connect(set_pw)
         pw.returnPressed.connect(set_pw)
@@ -3165,11 +3177,13 @@ class GlassSettings(QDialog):
         def toggled(v):
             self.cfg["sync_janki_data"] = bool(v)
             mw.addonManager.writeConfig(__name__, self.cfg)
-            for w in (pw, save_btn):
+            for w in (pw, eye):
                 w.setEnabled(bool(v))
+            save_btn.setEnabled(bool(v) and bool(pw.text().strip())
+                                and pw.text().strip() != _ds.passphrase())
             status.setText(_ds.status())
         on.toggled.connect(toggled)
-        for w in (pw, save_btn):
+        for w in (pw, eye):
             w.setEnabled(on.isChecked())
         return page
 
