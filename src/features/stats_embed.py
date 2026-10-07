@@ -143,7 +143,13 @@ def _animate(web) -> None:
     try:
         # Loaded while the panel is closed (background preload) → hold the cards hidden
         # until the next open replays them.
-        web.eval("window.__jkHold=%s;" % ("false" if is_open() else "true") + _ANIM_JS)
+        js = "window.__jkHold=%s;" % ("false" if is_open() else "true") + _ANIM_JS
+        if is_open():
+            # Stats was opened while this (hover-started) load was still running: the
+            # open's replay ran before the page existed, so nothing would ever reveal
+            # the panels (an empty Stats until relaunch). Reveal them now.
+            js += "window.__jkReplay&&window.__jkReplay();"
+        web.eval(js)
     except Exception:
         pass
 
