@@ -135,7 +135,7 @@ def want_button() -> bool:
     import sys
     if sys.platform.startswith("win"):
         return bool(_cfg().get("main_settings_button_win", True))
-    return bool(_cfg().get("main_settings_button", False))
+    return bool(_cfg().get("main_settings_button", True))
 
 
 def _host():
