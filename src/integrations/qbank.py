@@ -6703,7 +6703,7 @@ def _subdeck_roots():
     return sorted(out, key=lambda x: x[0].lower())
 
 
-def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
+def docx_estimate_dialog(on_done=None, path=None, build_deck=True):
     """Pick a .docx, show how many questions it yields, then (on confirm) build a
     .qb next to it and import it. Untagged → matches by text similarity.
     Pass ``path`` to skip the file picker (e.g. a file dropped onto the list)."""
