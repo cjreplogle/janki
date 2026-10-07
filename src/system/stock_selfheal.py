@@ -428,7 +428,19 @@ def maybe_self_heal(early: bool = False) -> None:
         return
     ad = _aqt_dir()
     if ad is None:
-        return                         # source build or not an app bundle
+        # A source build (…/qt/aqt) is expected; anything else is an Anki install whose
+        # files Janki can't patch — say so once instead of silently staying plain.
+        if not early:
+            try:
+                import aqt
+                where = str(Path(aqt.__file__).resolve().parent)
+            except Exception:
+                where = "?"
+            if not where.replace("\\", "/").endswith("/qt/aqt"):
+                _notify_once("layout:" + where,
+                             "glass can't be set up for this Anki install (its files are "
+                             "in %s, not inside Anki.app), so it's off." % where)
+        return
     try:                               # never patch in the safe edition; respect opt-out
         from ..util.config import _cfg, SAFE
         if SAFE or not _cfg().get("stock_selfheal", True):
