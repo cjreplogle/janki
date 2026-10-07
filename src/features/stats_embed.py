@@ -361,7 +361,47 @@ def _build():
     except Exception as exc:
         log("stats panel style: %s" % exc)
     _install_layout_guard(panel)
+    _install_cursor_guard(panel, web)
     _panel, _web, globals()["_pick_btn"] = panel, web, btn
+
+
+def _install_cursor_guard(panel, web) -> None:
+    """While the panel is hidden (preloading), the web view must not set the window's
+    cursor: a page loading behind the toolbar kept re-setting it, and the cursor
+    flickered against the toolbar link's hand. Any cursor it sets is cleared again."""
+    try:
+        from aqt.qt import QObject, QEvent, Qt
+
+        class _Guard(QObject):
+            busy = False
+
+            def eventFilter(self, obj, ev):
+                try:
+                    if (ev.type() == QEvent.Type.CursorChange and not panel.isVisible()
+                            and not self.busy
+                            and obj.testAttribute(Qt.WidgetAttribute.WA_SetCursor)):
+                        self.busy = True
+                        try:
+                            obj.unsetCursor()
+                        finally:
+                            self.busy = False
+                except Exception:
+                    pass
+                return False
+
+        g = _Guard(panel)
+        panel._jk_cursor_guard = g
+
+        def attach(w):
+            if w is not None and not getattr(w, "_jk_cg", False):
+                w._jk_cg = True
+                w.installEventFilter(g)
+        attach(web)
+        attach(web.focusProxy())
+        # Chromium creates its render widget lazily (first load): catch it then too
+        web.loadStarted.connect(lambda: attach(web.focusProxy()))
+    except Exception as exc:
+        log("stats cursor guard: %s" % exc)
 
 
 def _deck_label(did) -> str:
@@ -1004,8 +1044,56 @@ _DROP_CSS_HELD = ("<style>html.glass-fading body{animation:none!important;}"
 _held_drop = False
 
 
+# Hovering the toolbar's Stats link starts loading the (hidden) graphs page, so the
+# click that usually follows finds it ready. Throttled; reuses the opt-in preload path.
+_HOVER_JS = ("<script>(function(){var t=0;document.addEventListener('mouseover',"
+             "function(e){var a=e.target&&e.target.closest&&e.target.closest('#stats');"
+             "if(!a)return;var n=Date.now();if(n-t<2000)return;t=n;"
+             "try{pycmd('janki:stats:hover');}catch(x){}},true);})();</script>")
+
+
+def _on_hover_preload() -> None:
+    # Not while studying (the stats page shares the card's renderer and stalled its
+    # typing) and not if Stats is already up / opening. Only LOADS: creating the web
+    # view under the cursor is what's disruptive, so the panel is prebuilt while idle
+    # (_prebuild_panel); if that hasn't happened yet, the click builds it as before.
+    if is_open() or _opening or getattr(mw, "state", None) in ("review", "overview"):
+        return
+    if _panel is None:
+        return
+    _preload()
+
+
+def _prebuild_panel() -> None:
+    """Create the hidden Stats panel + web view (no page load, so no renderer work) a
+    few seconds after launch, while idle — ready for a hover to start loading."""
+    try:
+        if (_panel is None and _cfg().get("stats_in_main", True)
+                and getattr(mw, "col", None) is not None):
+            _build()
+    except Exception as exc:
+        log("stats prebuild: %s" % exc)
+
+
+def _on_js_message(handled, message, context):
+    if message != "janki:stats:hover":
+        return handled
+    try:
+        from aqt.qt import QTimer
+        QTimer.singleShot(0, _on_hover_preload)
+    except Exception as exc:
+        log("stats hover preload: %s" % exc)
+    return (True, None)
+
+
 def _on_will_set_content(web_content, context) -> None:
     global _animate_next_deck, _held_drop
+    try:
+        from aqt.toolbar import TopToolbar
+        if isinstance(context, TopToolbar) and _cfg().get("stats_in_main", True):
+            web_content.head += _HOVER_JS
+    except Exception:
+        pass
     try:
         from aqt.deckbrowser import DeckBrowser
         if _animate_next_deck and isinstance(context, DeckBrowser):
@@ -1149,6 +1237,8 @@ def _on_main_window_init() -> None:
         # long as Anki runs; it's built on the first Stats click unless you opt in.
         if _cfg().get("stats_preload", False):
             _when_idle(_preload, 6000)           # after launch settles + you pause
+        else:
+            _when_idle(_prebuild_panel, 5000)    # hover preload loads into this
     except Exception:
         pass
     try:
@@ -1201,6 +1291,7 @@ def install() -> None:
         gui_hooks.state_did_change.append(_bump_idle)
         gui_hooks.deck_browser_did_render.append(_bump_idle)
         gui_hooks.webview_will_set_content.append(_on_will_set_content)
+        gui_hooks.webview_did_receive_js_message.append(_on_js_message)
         gui_hooks.top_toolbar_did_init_links.append(_wrap_toolbar_links)
     except Exception as exc:
         log("stats embed: %s" % exc)
