@@ -3141,9 +3141,17 @@ def build_settings_pages():
         fam_cbs[suffix] = cb
     row += (len(TAG_FAMILIES) + 1) // 2
 
-    ak_warn = QLabel("⚠ AnKing auto-load is on. AnKing's tag map is huge, so loading it "
-                     "every launch can take minutes and slow your whole computer. "
-                     "Consider leaving AnKing off here and loading it by hand.")
+    # With AnKing on, the launch auto-load is skipped unless opted in here (its tag
+    # map is huge: minutes of work on every launch). Manual loads always include it.
+    ak_auto_cb = QCheckBox("Auto-load even with AnKing on (slow)")
+    ak_auto_cb.setChecked(bool(cfg.get("auto_load_with_ak", False)))
+    ak_auto_cb.setToolTip("AnKing's tag map is huge, so loading it every launch can take "
+                          "minutes and slow your whole computer. Off: with AnKing on, "
+                          "load today's lectures by hand instead.")
+    bg.addWidget(ak_auto_cb, row, 0, 1, 2)
+    row += 1
+    ak_warn = QLabel("⚠ AnKing's tag map is huge: loading it every launch can take "
+                     "minutes and slow your whole computer.")
     ak_warn.setWordWrap(True)
     ak_warn.setStyleSheet("color:#ff9d8a;")
     bg.addWidget(ak_warn, row, 0, 1, 2)
@@ -3151,7 +3159,10 @@ def build_settings_pages():
 
     def _ak_warn_update(*_a):
         ak = fam_cbs.get("ak")
-        ak_warn.setVisible(bool(auto_cb.isChecked() and ak is not None and ak.isChecked()))
+        ak_on = bool(auto_cb.isChecked() and ak is not None and ak.isChecked())
+        ak_auto_cb.setVisible(ak_on)
+        ak_warn.setVisible(ak_on and ak_auto_cb.isChecked())
+    ak_auto_cb.toggled.connect(_ak_warn_update)
     auto_cb.toggled.connect(_ak_warn_update)
     if "ak" in fam_cbs:
         fam_cbs["ak"].toggled.connect(_ak_warn_update)
@@ -3193,6 +3204,7 @@ def build_settings_pages():
                             if txt_list.item(i).text().strip()]
         cur["ics_path"] = ics_edit.text().strip()
         cur["auto_on_launch"] = auto_cb.isChecked()
+        cur["auto_load_with_ak"] = ak_auto_cb.isChecked()
         for suffix, cb in fam_cbs.items():
             cur["unsuspend_%s" % suffix] = cb.isChecked()
         cur["fuzzy_cutoff"] = float(fuzzy.value())
@@ -3347,13 +3359,9 @@ def _on_profile_open():
     if st.get("last_auto_date") == today:
         return
     st["last_auto_date"] = today
-    if _cfg().get("unsuspend_ak", "ak" in _DEFAULT_ON):
-        try:
-            from aqt.utils import tooltip
-            tooltip("Auto-loading today's lectures with AnKing on — this can be slow. "
-                    "Settings → Lectures to turn AnKing off.", period=7000)
-        except Exception:
-            pass
+    if _cfg().get("unsuspend_ak", "ak" in _DEFAULT_ON) \
+            and not _cfg().get("auto_load_with_ak", False):
+        return      # AnKing on: no slow auto-load unless opted in (Lectures → Behavior)
     _save_state(st)
     QTimer.singleShot(1500, lambda: run_today(interactive=True, auto=True))
 

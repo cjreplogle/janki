@@ -57,7 +57,7 @@ _FILES = {
 _DROPPED = ("ics_cache", "ics_meta", "ics_file")
 # settings that mean the same thing on every computer
 _CFG_PREFIXES = ("calendar_", "unsuspend_", "ak_", "lecture_")
-_CFG_KEYS = ("timezone", "fuzzy_cutoff", "auto_on_launch")
+_CFG_KEYS = ("timezone", "fuzzy_cutoff", "auto_on_launch", "auto_load_with_ak")
 # settings that point at a file on this computer: the file itself is synced
 _PATH_KEYS = {"xlsx": "xlsx_path"}
 
