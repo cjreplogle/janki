@@ -944,11 +944,35 @@ def _build_map_from_source(path, families):
             for ci, val in r.items():
                 if (val or "").strip().lower().startswith("corresponding decks"):
                     anchors.add(ci)
+        # Older AnKing-only sheet layout: (lecture, "Anking") column pairs side by
+        # side, no decks column — the tags sit right next to the title. Anchor one
+        # column LEFT of each "Anking" header so the shared loop below reads the
+        # title (anchor) and its AnKing tags (anchor + 1).
+        ak_only = False
+        if not anchors:
+            ak_cols = {ci for r in rows for ci, val in r.items()
+                       if (val or "").strip().lower() in ("anking", "anking tags")}
+            if ak_cols:
+                ak_only = True
+                anchors = {ci - 1 for ci in ak_cols}   # = the title columns
         if not anchors:
             anchors = {1}
         n_before = len(m)
         for r in rows:
             for c in anchors:
+                if ak_only:
+                    lec = (r.get(c) or "").strip()
+                    if not lec or not re.search(r"[A-Za-z]", lec):
+                        continue
+                    searches = _extract_searches(r.get(c + 1), families, ak_column=True)
+                    key = _norm(lec)
+                    if not searches or not key:
+                        continue
+                    entry = m.setdefault(key, {"display": lec, "searches": []})
+                    for s_ in searches:
+                        if s_ not in entry["searches"]:
+                            entry["searches"].append(s_)
+                    continue
                 lec = (r.get(c - 1) or "").strip()
                 if not lec or lec == "Our Lecture" or lec.startswith("If you see"):
                     continue
