@@ -110,8 +110,10 @@ _ANIM_JS = (
     "function reveal(el){el.classList.add('jk-in');el.classList.add('jk-vis');"
     "setTimeout(function(){el.classList.remove('jk-in');},650);}"
     # Stagger the first 6 cards; everything after joins the 6th.
+    "function tm(n){try{pycmd('jankiT:'+n);}catch(e){}}"
     "function flush(){var el=q.shift();if(!el){timer=null;return;}reveal(el);shown++;"
-    "if(shown>=6){while(q.length)reveal(q.shift());timer=null;return;}"
+    "if(shown===1)tm('first panel shown');"
+    "if(shown>=6){while(q.length)reveal(q.shift());timer=null;tm('all panels shown');return;}"
     "timer=setTimeout(flush,60);}"
     # Held (loaded in the background / panel closed): cards stay hidden until a replay.
     # Fresh load: a short beat for the graphs to draw; a replay goes on the next frame.
@@ -291,7 +293,22 @@ def _apply_rolling(web) -> None:
         log("stats rolling avg: %s" % exc)
 
 
+def _pp(stage):
+    """Stats timing mark → user_files/perf.log (only while user_files/perf_probe exists)."""
+    try:
+        from ..util import perf_probe
+        perf_probe.mark(stage)
+    except Exception:
+        pass
+
+
+_hover_t = None     # when the last hover preload started (perf probe)
+
+
 def _on_bridge_cmd(cmd: str) -> bool:
+    if isinstance(cmd, str) and cmd.startswith("jankiT:"):
+        _pp("page: " + cmd[7:])
+        return False
     # Rolling-average checkbox (in the Reviews graph): persist its state.
     if isinstance(cmd, str) and cmd.startswith("jankiRoll:"):
         try:
@@ -329,7 +346,7 @@ def _build():
     v.setSpacing(0)
     web = StatsWebView(parent=panel)
     web.set_bridge_command(_on_bridge_cmd, panel)
-    web.loadFinished.connect(lambda _ok: (_style_web(_web), _reorder(_web), _apply_rolling(_web), _animate(_web), _apply_mode()))
+    web.loadFinished.connect(lambda _ok: (_pp("page loadFinished"), _style_web(_web), _reorder(_web), _apply_rolling(_web), _animate(_web), _apply_mode()))
     # Deck picker (replaces the page's own hidden deck/collection bar): a button that opens
     # a glass popup of top-level decks; subdecks stay folded until you press their "+".
     from aqt.qt import QHBoxLayout, QPushButton
@@ -747,7 +764,9 @@ _RESET_JS = ("(function(){var b=document.body;if(b){b.style.transition='';"
 
 
 def open_stats() -> None:
+    _pp("open_stats (after list fade)")
     if _panel is None:
+        _pp("panel not built yet → building")
         _build()
     _collapse_others()
     try:
@@ -846,6 +865,9 @@ def _ensure_loaded(force: bool = False) -> bool:
     Returns True if a FULL load was started."""
     global _loaded_key, _page_ready
     key = _load_key()
+    _pp("ensure_loaded: %s" % ("FULL LOAD" if (force or not _page_ready) else
+                               "data refresh" if (key is None or key != _loaded_key)
+                               else "already current"))
     if force or not _page_ready:
         _loaded_key = key
         _page_ready = True
@@ -1061,6 +1083,9 @@ def _on_hover_preload() -> None:
         return
     if _panel is None:
         return
+    global _hover_t
+    import time as _t
+    _hover_t = _t.perf_counter()
     _preload()
 
 
@@ -1171,6 +1196,14 @@ def _patched_on_stats(orig):
             if is_open() or _opening:
                 return None
             _opening = True
+            try:
+                import time as _t
+                from ..util import perf_probe
+                perf_probe.begin("stats click (hover preload %s)" % (
+                    "%.0f ms before" % ((_t.perf_counter() - _hover_t) * 1000)
+                    if _hover_t else "none"))
+            except Exception:
+                pass
 
             def _go():
                 global _opening
