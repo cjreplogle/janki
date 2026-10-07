@@ -264,6 +264,12 @@ class GlassSettings(QDialog):
                 if _title == "Calendar":
                     _cal_sec = _widget
                     continue
+                if _title == "Sources":
+                    # the calendar's sources + their decks go under the tag map
+                    _g = _widget.layout()
+                    _g.setRowStretch(5, 0)
+                    _g.addWidget(self._build_source_decks_section(), 5, 0, 1, 3)
+                    _g.setRowStretch(6, 1)
                 lec_tabs.addTab(_widget, _title)
             lec_tabs.addTab(self._build_lecture_calendar_tab(_cal_sec), "Calendar")
             lec_tabs.addTab(self._build_lecture_sync_tab(), "Sync")
@@ -3168,21 +3174,14 @@ class GlassSettings(QDialog):
         return page
 
     def _build_lecture_calendar_tab(self, cal_section=None):
-        """Lectures → Calendar: the calendar file/URL (from lectures.py) on top, then
-        which sources the Calendar uses and which of the decks each source's cards
-        were found in get searched (found automatically)."""
+        """Lectures → Calendar: the calendar file/URL (from lectures.py) and how
+        closely Practice questions must match a lecture."""
         from aqt.qt import QWidget
-        from ..integrations import lectures as _lec
         page = QWidget()
         lay = QVBoxLayout(page)
         if cal_section is not None:
             lay.addWidget(cal_section)
             lay.addSpacing(10)
-        note = QLabel("Sources the Calendar uses, and the decks their cards were found in. "
-                      "Untick a source to ignore it; untick a deck to leave it out of "
-                      "searches.")
-        note.setWordWrap(True)
-        lay.addWidget(note)
         # Practice button: how closely questions must match the lecture
         from aqt.qt import QComboBox
         pm_row = QHBoxLayout()
@@ -3199,9 +3198,27 @@ class GlassSettings(QDialog):
         pm_row.addWidget(pm)
         pm_row.addStretch(1)
         lay.addLayout(pm_row)
-        body = QVBoxLayout()
-        lay.addLayout(body)
         lay.addStretch(1)
+        return page
+
+    def _build_source_decks_section(self):
+        """Lectures → Sources: which sources the Calendar uses, and which of the decks
+        each source's cards were found in get searched (found automatically). A
+        source's decks stay folded away behind its + button."""
+        from aqt.qt import QWidget, QToolButton
+        from ..integrations import lectures as _lec
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 10, 0, 0)
+        head = QLabel("<b>Sources the Calendar uses</b>")
+        lay.addWidget(head)
+        note = QLabel("Untick a source to ignore it. Press + to see the decks its cards "
+                      "were found in; untick a deck to leave it out of searches.")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        body = QVBoxLayout()
+        body.setSpacing(2)
+        lay.addLayout(body)
         wait = QLabel("Finding where your cards live…")
         body.addWidget(wait)
 
@@ -3227,16 +3244,29 @@ class GlassSettings(QDialog):
             off = set(self.cfg.get("calendar_fams_off") or [])
             skip = self.cfg.get("lecture_source_skip") or {}
             for fam, label in _lec.FAMILY_LABEL.items():
-                src = QCheckBox(label)
+                decks = found.get(fam) or []
+                src = QCheckBox(label if decks else "%s  — no cards found" % label)
                 src.setChecked(fam not in off)
                 f = src.font(); f.setBold(True); src.setFont(f)
-                body.addWidget(src)
-                decks = found.get(fam) or []
+                hrow = QHBoxLayout()
+                hrow.addWidget(src)
+                hrow.addStretch(1)
+                body.addLayout(hrow)
                 boxes = []
-                if not decks:
-                    lb = QLabel("      no cards found for this source")
-                    lb.setEnabled(False)
-                    body.addWidget(lb)
+                if decks:
+                    plus = QToolButton()
+                    plus.setText("+")
+                    plus.setCheckable(True)
+                    plus.setAutoRaise(True)
+                    plus.setFixedWidth(26)
+                    plus.setToolTip("Show the decks this source's cards were found in")
+                    hrow.addWidget(plus)
+
+                    def fold(open_, boxes=boxes, plus=plus):
+                        plus.setText("−" if open_ else "+")
+                        for b in boxes:
+                            b.setVisible(open_)
+                    plus.toggled.connect(fold)
                 for d, n in decks:
                     cb = QCheckBox("%s  (%s cards)" % (d, format(n, ",")))
                     cb.setChecked(d not in (skip.get(fam) or []))
@@ -3244,6 +3274,7 @@ class GlassSettings(QDialog):
                     cb.setStyleSheet("margin-left:22px;")
                     cb.toggled.connect(lambda on, fam=fam, d=d: save_skip(fam, d, on))
                     cb.setEnabled(src.isChecked())
+                    cb.setVisible(False)                 # folded until + is pressed
                     body.addWidget(cb)
                     boxes.append(cb)
 
