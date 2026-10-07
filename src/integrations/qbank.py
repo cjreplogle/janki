@@ -1610,6 +1610,134 @@ def _parse_docx(paras):
     return questions
 
 
+# ---------------------------------------------------------------------------
+# Second .docx layout: Word's AUTOMATIC numbering (numbers/letters aren't in the
+# text) with the answer key at the end:
+#   1. <stem>              (decimal list, level 0)
+#      A. .. E. choices    (a lettered list, any list/level)
+#   …
+#   Answer: C. <choice>    Explanation: <text>      (one per question, in order)
+# ---------------------------------------------------------------------------
+_RE_KEY = re.compile(r"^Answer:\s*([A-Ja-j])\b[\.\)]?\s*(.*)$", re.I)
+_RE_EXPL = re.compile(r"^(?:Explanation|Rationale):\s*(.*)$", re.I)
+
+
+def _docx_paragraphs_num(path):
+    """Like _docx_paragraphs, plus each paragraph's list format: dicts with t, embeds
+    and fmt ('decimal', 'upperLetter', … or None when not a list item)."""
+    z = zipfile.ZipFile(path)
+    xml = z.read("word/document.xml").decode("utf-8", "ignore")
+    fmts = {}
+    try:
+        nb = z.read("word/numbering.xml").decode("utf-8", "ignore")
+        absf = {}
+        for a in re.finditer(r'<w:abstractNum\b[^>]*w:abstractNumId="(\d+)".*?</w:abstractNum>',
+                             nb, re.S):
+            absf[a.group(1)] = dict(re.findall(
+                r'<w:lvl w:ilvl="(\d+)".*?<w:numFmt w:val="([^"]+)"', a.group(0), re.S))
+        for n in re.finditer(r'<w:num w:numId="(\d+)"[^>]*>.*?<w:abstractNumId w:val="(\d+)"',
+                             nb, re.S):
+            fmts[n.group(1)] = absf.get(n.group(2), {})
+    except KeyError:
+        pass
+    out = []
+    for p in re.split(r"</w:p>", xml):
+        embeds = re.findall(r'r:embed="([^"]+)"', p)
+        t = "".join(re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", p))
+        t = (t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+              .replace("&quot;", '"').replace("&#8217;", "’").replace("&apos;", "'"))
+        t = t.replace("\u200b", "").strip()
+        num = re.search(r'<w:numId w:val="(\d+)"', p)
+        lvl = re.search(r'<w:ilvl w:val="(\d+)"', p)
+        fmt = None
+        if num and num.group(1) != "0":
+            fmt = fmts.get(num.group(1), {}).get(lvl.group(1) if lvl else "0", "decimal")
+        if t or embeds:
+            out.append({"t": t, "embeds": embeds, "fmt": fmt})
+    return out
+
+
+def _norm_choice(s):
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _parse_docx_listed(paras):
+    """Questions from the auto-numbered layout above, paired with the end answer key
+    in order. A key line whose choice text names a different choice than its letter
+    follows the text (letters are what Word renumbers; the text is what was meant)."""
+    qs, keys = [], []
+    cur = None
+    in_key = False
+    for p in paras:
+        t, fmt = p["t"], p["fmt"]
+        km = _RE_KEY.match(t) if t else None
+        if km:
+            in_key = True
+            keys.append({"letter": km.group(1).upper(), "text": km.group(2).strip(),
+                         "exp": ""})
+            continue
+        if in_key:
+            if not keys or not t:
+                continue
+            em = _RE_EXPL.match(t)
+            keys[-1]["exp"] = ((keys[-1]["exp"] + " " + (em.group(1) if em else t))
+                               .strip())
+            continue
+        letter = fmt in ("upperLetter", "lowerLetter")
+        if fmt and not letter:                       # numbered → a new question
+            cur = {"stem": t, "choices": [], "embeds": list(p["embeds"])}
+            qs.append(cur)
+            continue
+        if cur is None:
+            continue
+        cur["embeds"] += p["embeds"]
+        if not t:
+            continue
+        if letter:
+            cur["choices"].append(t)
+        elif not cur["choices"]:
+            cur["stem"] += " " + t                   # multi-paragraph stem
+        else:
+            cur["choices"][-1] += " " + t            # wrapped choice
+    out = []
+    for i, (q, k) in enumerate(zip(qs, keys), 1):
+        ch = q["choices"]
+        if not q["stem"] or len(ch) < 2:
+            continue
+        idx = ord(k["letter"]) - 65
+        want = _norm_choice(k["text"])
+        if want and not (0 <= idx < len(ch) and (_norm_choice(ch[idx]).startswith(want)
+                                                  or want.startswith(_norm_choice(ch[idx])))):
+            hits = [j for j, c in enumerate(ch) if _norm_choice(c) == want
+                    or _norm_choice(c).startswith(want) or want.startswith(_norm_choice(c))]
+            if len(hits) == 1:
+                idx = hits[0]
+        if not 0 <= idx < len(ch):
+            continue
+        q2 = {"id": "q%d" % i, "stem": q["stem"], "choices": ch, "answer": idx,
+              "explanation": k["exp"], "lecture": "", "objective": "", "tags": [],
+              "source": "bank"}
+        if q["embeds"]:
+            q2["media_rids"] = list(dict.fromkeys(q["embeds"]))
+        out.append(q2)
+    return out
+
+
+def _parse_any_docx(path):
+    """The typed-numbers layout first; the auto-numbered + answer-key layout if that
+    finds (almost) nothing."""
+    qs = _parse_docx(_docx_paragraphs(path))
+    if len(qs) < 2:
+        try:
+            qs2 = _parse_docx_listed(_docx_paragraphs_num(path))
+        except Exception as e:
+            log("docx listed layout: %s" % e)
+            qs2 = []
+        if len(qs2) > len(qs):
+            qs = qs2
+    return qs
+
+
 def _write_qb(docx_path, qs):
     base = os.path.splitext(os.path.basename(docx_path))[0]
     man = {"qb_format": 1, "id": re.sub(r"[^A-Za-z0-9_.-]", "-", base).lower(),
@@ -6587,7 +6715,7 @@ def docx_estimate_dialog(on_done=None, path=None, build_deck=False):
     if not path:
         return
     try:
-        qs = _parse_docx(_docx_paragraphs(path))
+        qs = _parse_any_docx(path)
     except Exception as e:
         showWarning("Could not read .docx:\n\n%s" % e)
         return
