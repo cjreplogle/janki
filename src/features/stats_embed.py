@@ -312,15 +312,6 @@ _hover_t = None     # when the last hover preload started (perf probe)
 
 
 def _on_bridge_cmd(cmd: str) -> bool:
-    if isinstance(cmd, str) and cmd.startswith("jankiDraw:"):
-        try:
-            att, rest = cmd[10:].split("|", 1)
-            cb = _draw_cb.pop(int(att), None)
-            if cb:
-                cb(rest)
-        except Exception as exc:
-            log("stats draw check: %s" % exc)
-        return False
     if isinstance(cmd, str) and cmd.startswith("jankiT:"):
         _pp("page: " + cmd[7:])
         return False
@@ -834,9 +825,9 @@ def open_stats() -> None:
                    _main_host().height()))
         except Exception as exc:
             _pp("qt state failed: %s" % exc)
-    try:                       # a page Chromium thinks is hidden draws nothing (see
-        from aqt.qt import QTimer   # _check_drawing) — check on every open
-        QTimer.singleShot(600, lambda: _check_drawing(1))
+    try:                       # an open can come up as a bare glass pane: verify what
+        from aqt.qt import QTimer   # Qt actually has for the view (_check_pixels)
+        QTimer.singleShot(700, _check_pixels)
     except Exception:
         pass
     try:                       # perf probe: what the page looks like 1 s after opening
@@ -861,56 +852,75 @@ def open_stats() -> None:
 
 _loaded_key = None
 
-# Stats sometimes came up as an empty glass pane until relaunch: the page reported
-# itself fully revealed, Qt showed the view visible, resizing didn't help — Chromium had
-# stopped producing frames for it (it believed the view hidden; Stats is collapsed to
-# 0 px between opens). So after an open, count animation frames for 300 ms; none =
-# not drawing → toggle the page's visibility to make Chromium show + draw it again.
-_FRAMES_JS = ("(function(a){var n=0,done=false,t0=performance.now();"
-              "function rep(x){if(done)return;done=true;try{pycmd('jankiDraw:'+a+'|'+n+'|'+"
-              "document.visibilityState+(x||''));}catch(e){}}"
-              "function f(){n++;if(performance.now()-t0<300)requestAnimationFrame(f);else rep();}"
-              "requestAnimationFrame(f);setTimeout(function(){rep('|timeout');},900);})(%d);")
-_draw_cb = {}
+# Stats sometimes came up as an empty glass pane until relaunch: the page, Qt and
+# Chromium all reported it visible, revealed and producing frames — but nothing reached
+# the screen, and it stayed that way on every later open. So after an open, look at the
+# pixels Qt has for the view; a fully transparent picture = that view is broken →
+# replace it with a freshly built one and open again.
+_rebuilt_at = [0.0]
 
 
-def _check_drawing(attempt: int) -> None:
+def _transparent(img) -> bool:
+    """True if a grid of samples across the middle of the view is all clear."""
+    try:
+        w, h = img.width(), img.height()
+        if w < 40 or h < 40:
+            return False
+        for fy in (0.25, 0.4, 0.55, 0.7):
+            for fx in (0.2, 0.35, 0.5, 0.65, 0.8):
+                if img.pixelColor(int(w * fx), int(h * fy)).alpha() > 8:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
+def _check_pixels() -> None:
     if _web is None or not is_open():
         return
-
-    def got(res):
-        res = str(res)
-        _pp("drawing check %d: frames|visibility = %s" % (attempt, res))
-        frames = res.split("|")[0]
-        if frames.isdigit() and int(frames) > 0:
-            return
-        if attempt > 2 or not is_open():
-            return
-        try:
-            pg = _web.page()
-            if hasattr(pg, "setVisible"):
-                pg.setVisible(False)
-                pg.setVisible(True)
-            _web.update()
-            _style_web(_web)
-            _web.eval("window.__jkReplay&&window.__jkReplay();")
-            _pp("not drawing → woke the page (visibility toggled)")
-        except Exception as exc:
-            _pp("wake failed: %s" % exc)
-        from aqt.qt import QTimer
-        QTimer.singleShot(500, lambda: _check_drawing(attempt + 1))
-    _draw_cb[attempt] = got
     try:
-        _web.eval(_FRAMES_JS % attempt)          # answers via jankiDraw: (bridge)
+        img = _web.grab().toImage()
     except Exception as exc:
-        _pp("drawing check failed: %s" % exc)
+        _pp("pixel check failed: %s" % exc)
+        return
+    blank = _transparent(img)
+    _pp("pixel check: %s (%dx%d)" % ("BLANK" if blank else "content", img.width(),
+                                      img.height()))
+    if not blank:
+        return
+    import time
+    if time.monotonic() - _rebuilt_at[0] < 20:
+        _pp("blank again right after a rebuild: leaving it (no loop)")
+        return
+    _rebuilt_at[0] = time.monotonic()
+    _rebuild_and_open()
 
-    def no_reply():                              # page not even running its script
-        cb = _draw_cb.pop(attempt, None)
-        if cb:
-            cb("noreply")
-    from aqt.qt import QTimer
-    QTimer.singleShot(1500, no_reply)
+
+def _rebuild_and_open() -> None:
+    """Swap the broken stats view for a new one, then open Stats in it."""
+    global _panel, _web, _page_ready, _loaded_key
+    old = _panel
+    try:
+        _pp("blank view → rebuilding the Stats panel")
+        close(animate=False)
+    except Exception:
+        pass
+    try:
+        if old is not None:
+            mw.mainLayout.removeWidget(old)
+            _saved_heights.pop(old, None)
+            old.hide()
+            old.deleteLater()
+    except Exception as exc:
+        log("stats rebuild: %s" % exc)
+    _panel = _web = None
+    _page_ready = False
+    _loaded_key = None
+    try:
+        open_stats()                           # builds + full load + shows
+    except Exception as exc:
+        log("stats reopen after rebuild: %s" % exc)
+
 
 
 def _load_key():
