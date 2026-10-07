@@ -337,7 +337,64 @@ def _ensure_tray_target() -> None:
         log(f"ensure tray target: {e}")
 
 
+# --- TEMPORARY reopen trace (red-X close sometimes reappears) ----------------------
+# After a red-X close, for 30 s: log app activation changes and, if the main window is
+# shown again, the Python stack that showed it → user_files/reopen_trace.log. Remove
+# once the cause is found.
+_trace = {"t": 0.0, "filter": None}
+
+
+def _tr(msg):
+    import os
+    import time
+    try:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "user_files", "reopen_trace.log")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write("%s +%.2fs %s\n" % (time.strftime("%H:%M:%S"),
+                                        time.time() - _trace["t"], msg))
+    except Exception:
+        pass
+
+
+def _trace_arm():
+    import time
+    _trace["t"] = time.time()
+    _tr("---- red-X close (hide)")
+    if _trace["filter"] is not None:
+        return
+    try:
+        class _ShowTrace(QObject):
+            def eventFilter(self, obj, ev):
+                try:
+                    if (obj is mw and ev.type() == QEvent.Type.Show
+                            and time.time() - _trace["t"] < 30):
+                        import traceback
+                        stack = "".join(traceback.format_stack(limit=14)[:-1])
+                        _tr("main window SHOWN; stack:\n" + stack)
+                except Exception:
+                    pass
+                return False
+
+        f = _ShowTrace(mw)
+        mw.installEventFilter(f)
+        _trace["filter"] = f
+
+        def _st(st):
+            if time.time() - _trace["t"] < 30:
+                _tr("app state → %s (window visible: %s)"
+                    % (str(st).split(".")[-1], mw.isVisible()))
+        mw.app.applicationStateChanged.connect(_st)
+        _trace["st"] = _st
+    except Exception as e:
+        _tr("trace install failed: %s" % e)
+
+
 def _minimize_to_tray() -> None:
+    try:
+        _trace_arm()
+    except Exception:
+        pass
     # Hiding the window can make macOS deactivate and re-activate Anki, which the
     # reopen-on-activate hook read as "Dock click" — it brought the window straight
     # back (blank until clicked). The close itself must stick; Dock/⌘-Tab still
@@ -485,6 +542,7 @@ def suppress_reopen(secs: float = 1.2) -> None:
 
 def _do_reopen() -> None:
     """Restore + repaint the hidden main window."""
+    _tr("reopen hook → restoring window")
     try:
         if mw.isVisible():
             return
