@@ -441,11 +441,25 @@ def unpatch(purge: bool = True) -> int:
 _FMT_MARK = b"_jankiatexit"          # name used by the v5+ snippet (older ones get rebuilt)
 
 
+_upgrade_started = False
+
+
 def _upgrade_patch() -> None:
-    """Running patched, but the files on disk carry an OLDER snippet (patched before
-    this format, e.g. without the 120 Hz flag): quietly rebuild them. Anki already
-    loaded the old code, so this takes effect from the next launch — no prompt, and
-    the stock backups (.janki-orig) are kept as they are."""
+    """Running patched, but the files on disk carry an OLDER snippet: rebuild them in
+    the background. The rebuild downloads + compiles (seconds), and it only matters
+    from the next launch — done on the main thread it froze the window right after it
+    appeared (clicks did nothing for ~5 s). Once per launch."""
+    global _upgrade_started
+    if _upgrade_started:
+        return
+    _upgrade_started = True
+    import threading
+    threading.Thread(target=_upgrade_patch_work, name="janki-glass-upgrade",
+                     daemon=True).start()
+
+
+def _upgrade_patch_work() -> None:
+    """(the old in-place rebuild; see _upgrade_patch)"""
     try:
         ad = _aqt_dir()
         if ad is None or not _files_patched(ad):
@@ -457,7 +471,9 @@ def _upgrade_patch() -> None:
                 dst = _target(ad, name)
                 bak = dst.with_name(dst.name + ".janki-orig")
                 if bak.exists():           # rebuild from the stock copy
-                    dst.write_text(fn(bak.read_text(encoding="utf-8")), encoding="utf-8")
+                    tmp = dst.with_name(dst.name + ".janki-new")
+                    tmp.write_text(fn(bak.read_text(encoding="utf-8")), encoding="utf-8")
+                    os.replace(tmp, dst)   # atomic: a quit mid-write can't corrupt it
             log("self-heal: refreshed the glass patch (%s, source); active next launch."
                 % _PATCH_FMT)
             return
@@ -468,7 +484,9 @@ def _upgrade_patch() -> None:
         for name, src_pyc in built.items():
             dst = ad / (Path(name).stem + ".pyc")
             if dst.with_suffix(".pyc.janki-orig").exists():   # never lose the stock copy
-                shutil.copy2(src_pyc, dst)
+                tmp = dst.with_name(dst.name + ".janki-new")
+                shutil.copy2(src_pyc, tmp)
+                os.replace(tmp, dst)       # atomic: a quit mid-copy can't corrupt Anki
         log("self-heal: refreshed the glass patch (%s); active next launch." % _PATCH_FMT)
     except Exception as exc:
         log("self-heal upgrade: %s" % exc)
