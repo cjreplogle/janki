@@ -29,6 +29,7 @@ import time
 import zlib
 
 from aqt import gui_hooks, mw
+from aqt.qt import QTimer
 
 from ..util.config import _cfg, _cfg_raw, log
 
@@ -236,28 +237,38 @@ def _drop_legacy(col):
 _warned = False
 
 
-def _ready(col):
-    """Load the keys; warn once per session about a missing / mismatched passphrase."""
+def _ready(col, warn=False):
+    """Load the keys. A missing passphrase is silent (Settings → Lectures → Sync shows
+    it); a mismatched one is reported once per session, after a sync, never at launch."""
     global _KEYS, _warned
     _KEYS = _keys()
-    msg = None
     if _KEYS is None:
-        msg = "Janki sync is waiting for a passphrase (Settings → Lectures → Sync)."
-    elif not _check(col):
-        msg = ("Janki sync: this passphrase doesn't match the one your other computer "
-               "used. Calendar data isn't syncing.")
+        _set_status("Waiting for a passphrase — nothing syncs until one is set.")
+        return False
+    if not _check(col):
         _KEYS = None
-    if msg:
-        _set_status(msg)
-    if msg and not _warned:
-        _warned = True
-        try:
-            from aqt.utils import tooltip
-            tooltip(msg, period=6000)
-        except Exception:
-            pass
-        log("data sync: " + msg)
-    return _KEYS is not None
+        msg = ("Janki sync: this passphrase doesn't match your other computer's — "
+               "calendar data isn't syncing. Settings → Lectures → Sync.")
+        _set_status(msg.replace("Janki sync: t", "T"))
+        if warn and not _warned:
+            _warned = True
+            log("data sync: passphrase mismatch")
+            QTimer.singleShot(4000, lambda: _glass_note(msg))
+        return False
+    return True
+
+
+def _glass_note(msg):
+    """A Janki-themed note: Qt's tooltip window, which Janki already draws as a glass
+    pill (glass.install_glass_tooltips). Sits low in the main window; stays while the
+    pointer is over the window, up to 8 s."""
+    try:
+        from aqt.qt import QPoint, QToolTip
+        r = mw.rect()
+        pos = mw.mapToGlobal(QPoint(r.width() // 2 - 180, r.height() - 90))
+        QToolTip.showText(pos, msg, mw, r, 8000)
+    except Exception:
+        pass
 
 
 def push():
@@ -294,13 +305,13 @@ def push():
         log("data sync: push: %s" % e)
 
 
-def pull():
+def pull(warn=False):
     """After a sync / on open: write items edited on another computer to disk."""
     col = getattr(mw, "col", None)
     if not col or not _enabled():
         return
     try:
-        if not _ready(col):
+        if not _ready(col, warn):
             return
         st, local, got = _load_state(), _local(), []
         for name, it in _remote(col).items():
@@ -397,6 +408,6 @@ def install():
     try:
         gui_hooks.profile_did_open.append(pull)
         gui_hooks.sync_will_start.append(push)
-        gui_hooks.sync_did_finish.append(pull)
+        gui_hooks.sync_did_finish.append(lambda: pull(warn=True))
     except Exception as e:
         log("data sync: %s" % e)
