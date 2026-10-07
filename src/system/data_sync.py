@@ -275,9 +275,30 @@ def _glass_note(msg):
         pass
 
 
+_launch_sync = False    # the profile just opened: its auto-sync runs before the deck list
+
+
+def _on_open():
+    global _launch_sync
+    _launch_sync = True
+
+    def later():
+        global _launch_sync
+        _launch_sync = False     # sync-on-open off: don't swallow the first manual push
+        pull()
+    QTimer.singleShot(3000, later)
+
+
 def push():
     """Before a sync: copy items edited on this computer into the collection."""
+    global _launch_sync
     col = getattr(mw, "col", None)
+    if _launch_sync:
+        # Launch sync: Anki draws the first deck list only after it, so don't read
+        # files here (slow on a cold first launch). The quit sync already sent this
+        # computer's edits; anything changed while closed goes with the next sync.
+        _launch_sync = False
+        return
     if not col or not _enabled():
         return
     try:
@@ -415,7 +436,9 @@ def status():
 
 def install():
     try:
-        gui_hooks.profile_did_open.append(pull)
+        # not inline: profile_did_open runs before Anki's first deck list, and the
+        # open-sync's own pull (sync_did_finish) usually covers this anyway
+        gui_hooks.profile_did_open.append(_on_open)
         gui_hooks.sync_will_start.append(push)
         gui_hooks.sync_did_finish.append(lambda: pull(warn=True))
     except Exception as e:

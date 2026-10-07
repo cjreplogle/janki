@@ -2800,9 +2800,13 @@ def _busy_update():
 
 
 def _schedule_prewarm():
-    try:                                             # read the calendar file at once
+    # Read the calendar soon, but after the first deck list: profile_did_open runs
+    # before Anki draws it, and a parse thread started right away competed with that
+    # draw for the GIL and (on a cold first launch of the day) the disk. Opening the
+    # Calendar sooner starts its own load (load_events_bg runs one at a time).
+    try:
         from ..integrations import lectures
-        QTimer.singleShot(0, lambda: lectures.load_events_bg(
+        QTimer.singleShot(2500, lambda: lectures.load_events_bg(
             lambda: QTimer.singleShot(500, prime)))
     except Exception:
         pass
