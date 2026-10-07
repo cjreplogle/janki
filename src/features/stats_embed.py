@@ -784,6 +784,8 @@ def open_stats() -> None:
         pass
     if not _panel.isVisible():
         _panel.show()                            # first open only; afterwards it stays shown
+    global _shown_once
+    _shown_once = True
     try:                                         # undo a previous fade-out on this page
         _web.eval(_RESET_JS)
     except Exception:
@@ -851,6 +853,7 @@ def open_stats() -> None:
 
 
 _loaded_key = None
+_shown_once = False      # the stats view has been on screen (see _on_hover_preload)
 
 # Stats sometimes came up as an empty glass pane until relaunch: the page, Qt and
 # Chromium all reported it visible, revealed and producing frames — but nothing reached
@@ -916,6 +919,8 @@ def _rebuild_and_open() -> None:
     _panel = _web = None
     _page_ready = False
     _loaded_key = None
+    global _shown_once
+    _shown_once = False
     try:
         open_stats()                           # builds + full load + shows
     except Exception as exc:
@@ -1196,7 +1201,11 @@ def _on_hover_preload() -> None:
     # (_prebuild_panel); if that hasn't happened yet, the click builds it as before.
     if is_open() or _opening or getattr(mw, "state", None) in ("review", "overview"):
         return
-    if _panel is None:
+    # Only refresh a page that has already been SHOWN. Loading Stats into a view that
+    # was never on screen (hover / idle prebuild) left it unable to reach the screen
+    # on its first open — a bare glass pane, while the main process spun at ~100 %
+    # CPU — until relaunch. The first open loads while visible, as before 2.8.0.
+    if _panel is None or not _shown_once:
         return
     global _hover_t
     import time as _t
@@ -1389,10 +1398,8 @@ def _on_main_window_init() -> None:
         from aqt.qt import QTimer
         # Preloading the graphs page costs a whole web renderer (~100–200 MB) for as
         # long as Anki runs; it's built on the first Stats click unless you opt in.
-        if _cfg().get("stats_preload", False):
-            _when_idle(_preload, 6000)           # after launch settles + you pause
-        else:
-            _when_idle(_prebuild_panel, 5000)    # hover preload loads into this
+        # (no idle prebuild / preload: a stats view loaded before it was ever shown
+        # couldn't reach the screen — see _on_hover_preload)
     except Exception:
         pass
     try:
