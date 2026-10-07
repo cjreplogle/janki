@@ -1454,7 +1454,13 @@ def _build_today_list(parent):
                 # not matched to lectures yet = no course colours: start matching now
                 # (refresh_classes() redraws these when it's done)
                 st["grey"] = True
-                QTimer.singleShot(0, cv._prewarm)
+                # at most once per 30 s per tray, and never from a refresh_classes()
+                # redraw: a title whose match never sticks would otherwise loop
+                # (match → redraw → still grey → match …) and burn the CPU
+                now = time.monotonic()
+                if not fade and now - st.get("kicked", 0.0) > 30:
+                    st["kicked"] = now
+                    QTimer.singleShot(0, cv._prewarm)
             dv = _DayView(holder, evs, lectures, cv, is_today=st["off"] == 0)
             hv.addWidget(dv)
             if fade and holder.isVisible():
