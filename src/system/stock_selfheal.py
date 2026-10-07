@@ -43,7 +43,7 @@ _CACHE = Path.home() / ".janki_stock_cache"
 
 # Bump when the injected patch changes, so a cached .pyc from an older janki isn't
 # reused for the same Anki build.
-_PATCH_FMT = "v3"   # v3: --disable-frame-rate-limit (ProMotion)
+_PATCH_FMT = "v4"   # v3: --disable-frame-rate-limit (ProMotion); v4: rollback of .py too
 
 # Crash-guard sentinels (in $HOME so they survive an Anki reinstall).
 _PENDING = Path.home() / ".janki_glass_pending"
@@ -68,12 +68,13 @@ _INIT_INJECT = (
     "            # Previous patched launch never confirmed stable -> it crashed.\n"
     "            # Restore stock files and boot WITHOUT glass (no lockout).\n"
     "            for _jn in ('__init__', 'main'):\n"
-    "                _jb = _jdir / (_jn + '.pyc.janki-orig')\n"
-    "                if _jb.exists():\n"
-    "                    try:\n"
-    "                        _jsh.copy2(_jb, _jdir / (_jn + '.pyc'))\n"
-    "                    except Exception:\n"
-    "                        pass\n"
+    "                for _jx in ('.pyc', '.py'):\n"
+    "                    _jb = _jdir / (_jn + _jx + '.janki-orig')\n"
+    "                    if _jb.exists():\n"
+    "                        try:\n"
+    "                            _jsh.copy2(_jb, _jdir / (_jn + _jx))\n"
+    "                        except Exception:\n"
+    "                            pass\n"
     "            try:\n"
     "                from anki.buildinfo import buildhash as _jbh\n"
     "            except Exception:\n"
@@ -151,16 +152,40 @@ def _buildhash() -> str:
         return ""
 
 
-def _aqt_dir():
-    """Stock app's aqt dir ONLY if this is a stock .pyc bundle; else None."""
+def _layout():
+    """("pyc", dir): Anki.app with compiled .pyc inside (patched by swapping .pyc).
+    ("src", dir): Anki installed as plain .py files outside the app (e.g. by Anki's
+    launcher into ~/Library/Application Support/AnkiProgramFiles) — patched by editing
+    the .py in place; no download, no compiling, no code signature involved.
+    None: a source checkout (…/qt/aqt) or something we can't patch."""
     try:
         import aqt
         f = Path(aqt.__file__).resolve()
-        if f.suffix != ".pyc" or ".app/Contents/" not in str(f):
-            return None
-        return f.parent
+        d = f.parent
+        if f.suffix == ".pyc" and ".app/Contents/" in str(f):
+            return ("pyc", d)
+        if (f.suffix == ".py" and not str(d).replace("\\", "/").endswith("/qt/aqt")
+                and (d / "main.py").is_file() and os.access(str(d), os.W_OK)
+                and os.access(str(f), os.W_OK)):
+            return ("src", d)
     except Exception:
-        return None
+        pass
+    return None
+
+
+def _aqt_dir():
+    """aqt dir of a stock install Janki can patch (either layout); else None."""
+    lay = _layout()
+    return lay[1] if lay else None
+
+
+def _is_src(ad) -> bool:
+    return (ad / "__init__.py").is_file() and not (ad / "__init__.pyc").is_file()
+
+
+def _target(ad, name: str) -> Path:
+    """The file the patch replaces: aqt/<stem>.pyc (app bundle) or aqt/<name> (.py)."""
+    return ad / name if _is_src(ad) else ad / (Path(name).stem + ".pyc")
 
 
 def _app_root(aqt_dir: Path):
@@ -334,7 +359,7 @@ def _files_patched(ad) -> bool:
     our marker string (not "differs from the backup": after an Anki update the backup is
     from the old version, which would wrongly read as patched)."""
     try:
-        return b"janki_glass_pending" in (ad / "__init__.pyc").read_bytes()
+        return b"janki_glass_pending" in _target(ad, "__init__.py").read_bytes()
     except Exception:
         return False
 
@@ -349,8 +374,8 @@ def patch_state() -> str:
     if os.environ.get("ANKI_GLASS"):
         return "patched"               # running the patched app right now
     for name in _PATCHERS:
-        pyc = ad / (Path(name).stem + ".pyc")
-        bak = pyc.with_suffix(".pyc.janki-orig")
+        pyc = _target(ad, name)
+        bak = pyc.with_name(pyc.name + ".janki-orig")
         if bak.exists() and pyc.exists() and not filecmp.cmp(pyc, bak, shallow=False):
             return "patched"
     return "unpatched"
@@ -367,8 +392,8 @@ def unpatch(purge: bool = True) -> int:
         return 0
     n = 0
     for name in _PATCHERS:
-        pyc = ad / (Path(name).stem + ".pyc")
-        bak = pyc.with_suffix(".pyc.janki-orig")
+        pyc = _target(ad, name)
+        bak = pyc.with_name(pyc.name + ".janki-orig")
         if bak.exists():
             try:
                 shutil.copy2(bak, pyc)
@@ -402,8 +427,17 @@ def _upgrade_patch() -> None:
         ad = _aqt_dir()
         if ad is None or not _files_patched(ad):
             return
-        if _FMT_MARK in (ad / "__init__.pyc").read_bytes():
+        if _FMT_MARK in _target(ad, "__init__.py").read_bytes():
             return                         # already current
+        if _is_src(ad):
+            for name, fn in _PATCHERS.items():
+                dst = _target(ad, name)
+                bak = dst.with_name(dst.name + ".janki-orig")
+                if bak.exists():           # rebuild from the stock copy
+                    dst.write_text(fn(bak.read_text(encoding="utf-8")), encoding="utf-8")
+            log("self-heal: refreshed the glass patch (%s, source); active next launch."
+                % _PATCH_FMT)
+            return
         h = _buildhash()
         if not h or sys.version_info[:2] != (3, 13):
             return
@@ -438,8 +472,8 @@ def maybe_self_heal(early: bool = False) -> None:
                 where = "?"
             if not where.replace("\\", "/").endswith("/qt/aqt"):
                 _notify_once("layout:" + where,
-                             "glass can't be set up for this Anki install (its files are "
-                             "in %s, not inside Anki.app), so it's off." % where)
+                             "glass can't be set up for this Anki install (Janki can't "
+                             "change its files in %s), so it's off." % where)
         return
     try:                               # never patch in the safe edition; respect opt-out
         from ..util.config import _cfg, SAFE
@@ -447,7 +481,8 @@ def maybe_self_heal(early: bool = False) -> None:
             return
     except Exception:
         pass
-    if sys.version_info[:2] != (3, 13):
+    src_mode = _is_src(ad)
+    if not src_mode and sys.version_info[:2] != (3, 13):
         # Can't produce matching bytecode, so no glass — and with no glass the add-on
         # stays dormant (no Janki window/settings changes). This used to be silent,
         # which read as "Janki does nothing"; say why, once per Python version.
@@ -461,7 +496,7 @@ def maybe_self_heal(early: bool = False) -> None:
         # We already patched + re-ran once and the glass still isn't active: don't
         # patch again here; the normal (non-early) pass will prompt instead.
         return
-    h = _buildhash()
+    h = _buildhash() or ("src" if src_mode else "")
     if not h:
         return
     if _files_patched(ad):
@@ -474,6 +509,9 @@ def maybe_self_heal(early: bool = False) -> None:
         # The glass patch crashed on THIS build before — stay plain, don't loop.
         _notify_once(h, "glass couldn't start on this Anki version, so it's off. "
                         "Re-enable it in Janki: Settings to try again.")
+        return
+    if src_mode:
+        _apply_src(ad, h, early)
         return
     try:
         built = {name: _build_pyc(name, h) for name in _PATCHERS}
@@ -499,5 +537,37 @@ def maybe_self_heal(early: bool = False) -> None:
         if early and _relaunch_in_place():
             return                         # (not reached: the process was replaced)
         _prompt_restart()
+    except Exception as exc:
+        _notify_once(h, "couldn't install glass (%s); it's off." % type(exc).__name__)
+
+
+def _apply_src(ad, h: str, early: bool) -> None:
+    """Source layout: patch aqt/__init__.py + main.py in place. The files on disk ARE the
+    installed version (no fetch, any Python). Not patched now = stock (fresh install or
+    an Anki update replaced them), so the backup is refreshed from them first — an old
+    version's backup must never be patched or restored over a newer Anki."""
+    try:
+        patched = {}
+        for name, fn in _PATCHERS.items():
+            dst = _target(ad, name)
+            patched[name] = fn(dst.read_text(encoding="utf-8"))   # raises if anchors moved
+    except Exception as exc:
+        _notify_once(h, "couldn't set up glass for this Anki version (%s); it's off."
+                        % type(exc).__name__)
+        return
+    try:
+        for name, text in patched.items():
+            dst = _target(ad, name)
+            bak = dst.with_name(dst.name + ".janki-orig")
+            shutil.copy2(dst, bak)
+            dst.write_text(text, encoding="utf-8")
+            for stale in (ad / "__pycache__").glob(Path(name).stem + ".*.pyc"):
+                try:
+                    stale.unlink()             # recompiled from the patched source
+                except Exception:
+                    pass
+        clear_failure()
+        log("self-heal: applied glass patch (source layout at %s); restart needed." % ad)
+        _prompt_restart()                      # no in-place re-run for this layout
     except Exception as exc:
         _notify_once(h, "couldn't install glass (%s); it's off." % type(exc).__name__)
