@@ -1817,7 +1817,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # gen: bumped on every real card show, so a reveal still running for the
         # previous side/card stops instead of swallowing the new one. fresh: this
         # render is a new show (Anki called _showQuestion/_showAnswer), not a re-render.
-        "    var gen=0, fresh=false, docFirst=true;\n"
+        "    var gen=0, fresh=false, docFirst=true, curFinish=null;\n"
         # AMBOSS marks terms (span.amboss-marker + underline) async on card show via
         # ambossAddon.tooltip.phraseMarker.mark(phrases). Our reveal fragments then
         # normalizes the DOM, wiping those markers, and AMBOSS never re-fires. So we
@@ -1910,6 +1910,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        if(par){ par.replaceChild(document.createTextNode(h.text), h.el); par.normalize(); } }catch(e){} }\n"
         "      function finishAll(){ for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
         "        done(); }\n"
+        "      curFinish=function(){ gen++; for(var q=0;q<holders.length;q++) finishHolder(holders[q]);\n"
+        "        for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} } };\n"
         "      var idx=0;\n"
         "      function next(){\n"
         "        if(g!==gen){ while(idx<holders.length) finishHolder(holders[idx++]);\n"
@@ -1963,6 +1965,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        p=p.parentNode; } });\n"
         "      function showLi(i){ var a=liFirst.get(i); if(a){ a.forEach(function(l){ l.style.visibility=''; }); liFirst.delete(i); } }\n"
         "      var fin=done; done=function(){ liAll.forEach(function(l){ l.style.visibility=''; }); fin(); };\n"
+        "      curFinish=function(){ gen++; nodes.forEach(function(x){ x[0].nodeValue=x[1]; });\n"
+        "        liAll.forEach(function(l){ l.style.visibility=''; }); };\n"
         "      reveal();   // reveal the now-emptied card (no flash of full text)\n"
         "      var ni=0,ci=0,shown=0,t0=performance.now();\n"
         # characters due by now (elapsed time), not a fixed count per frame
@@ -2032,9 +2036,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      if(JK_NOHALO) document.body.classList.add('jk-tw-active');\n"
         "      if(observer) observer.disconnect();\n"
         "      var g0=gen;\n"
-        "      typeOut(false, function(){ if(g0!==gen) return; animating=false;\n"
+        "      function settle(){ animating=false;\n"
         "        if(JK_NOHALO) document.body.classList.remove('jk-tw-active');\n"
-        "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }); }\n"
+        "        jkAmbRemark(); if(observer) observer.observe(qa,{childList:true}); }\n"
+        "      typeOut(false, function(){ if(g0!==gen) return; settle(); });\n"
+        "      setTimeout(function(){ if(gen===g0 && animating){ if(curFinish) curFinish(); settle(); } },\n"
+        "        MAX_MS/SPEED + 1500); }\n"
         "    // childList-only + SYNCHRONOUS run: the observer microtask fires before\n"
         "    // the browser paints, so emptying the text here means the full text is\n"
         "    // never shown. Fires only on real card/answer swaps, not image/MathJax.\n"

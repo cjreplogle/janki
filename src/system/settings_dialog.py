@@ -2240,10 +2240,7 @@ class GlassSettings(QDialog):
                 mode = self._rm_box.currentData()
                 self.cfg["win_render"] = mode
                 mw.addonManager.writeConfig(__name__, self.cfg)
-                if mode == "software":
-                    _pb.install()
-                else:
-                    _pb.uninstall()                # Fast mode runs without the hook
+                _pb.install()      # both modes: launch stand-in, deferred audio
                 if askUser("Restart Anki now to switch rendering?", parent=self,
                            title="Janki"):
                     _restart_anki(mode == "software")
@@ -2370,10 +2367,7 @@ class GlassSettings(QDialog):
                 # any pick clears a crash-guard failure: while it's set, ALL glass is
                 # off (even the painted Fast looks), so a choice otherwise did nothing
                 _jc.reset_win_glass_failure()
-                if mode == "software":
-                    _pb.install()
-                elif _pb.installed():
-                    _pb.uninstall()
+                _pb.install()      # both modes: launch stand-in, deferred audio
                 if mode != was:
                     _lk_hint_text("Needs a restart.")
                     if askUser("“%s” needs Anki to restart. Restart now?" % _t,

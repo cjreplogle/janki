@@ -954,6 +954,18 @@ def _startup():
                     lambda *_a: _jk_snap_timer.start())
             except Exception:
                 pass
+            # The pre-launch hook in every look (it used to be See-through only): the
+            # instant stand-in window, deferred audio start-up and no menu-bar flash. Takes
+            # effect next launch; skipped after a crash-guard failure.
+            try:
+                import os as _os2
+                from .src.platform.win import preboot as _pbi
+                _failed = _os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)),
+                                         "user_files", "win_glass_failed")
+                if not _os2.path.exists(_failed):
+                    _pbi.install()
+            except Exception as _pi_exc:
+                log("launch hook install: %s" % _pi_exc)
             # Settings opens instantly: its window is built ahead of time while idle.
             try:
                 settings_dialog.schedule_prebuild(2000)
