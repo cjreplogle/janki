@@ -71,6 +71,9 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   screen — an empty pane while the main process spun at ~100 % CPU until relaunch. Qt's
   own `grab()` still showed content, so it can't be self-detected. Reverted in 2.8.5;
   Stats loads on the first click of a session (as in 2.7.3).
+- **Free the Stats view when Stats closes** (2.8.6): a kept, collapsed Stats web view made
+  Chromium's VizCompositorThread spin ~100 % CPU while idle under the 120 Hz flag
+  (`--disable-frame-rate-limit`), even with its page marked hidden. Freed → ~4 %.
 
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).

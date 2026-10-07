@@ -1070,9 +1070,10 @@ def close(animate: bool = True) -> None:
     if animate and not _animate_next_deck:     # a pending re-render animates instead
         drop_in(mw.web)
     _reglass()
-    # EXPERIMENT (idle CPU): once Stats had been opened, Chromium's compositor spun a
-    # full core for the rest of the session. Free the closed Stats view entirely
-    # (next open builds a fresh one, ~0.4 s) to see whether it's what keeps it busy.
+    # Idle CPU: once Stats had been opened, a kept (collapsed, even page-hidden) Stats
+    # view made Chromium's compositor spin a full core for the rest of the session with
+    # the 120 Hz flag (measured ~100 % → ~4 % once freed). So the closed view is freed;
+    # the next open builds a fresh one (~0.4 s). Config stats_free_on_close: false keeps it.
     if _cfg().get("stats_free_on_close", True):
         from aqt.qt import QTimer
         QTimer.singleShot(600, _free_panel)
