@@ -90,6 +90,13 @@ try:
 except Exception as _bgs_exc:
     log("background sync: %s" % _bgs_exc)
 
+# Calendar / lecture files and settings ride along with AnkiWeb sync (data_sync.py).
+try:
+    from .src.system import data_sync as _data_sync
+    _data_sync.install()
+except Exception as _ds_exc:
+    log("data sync: %s" % _ds_exc)
+
 # .jank / .qb / .rp opened from Finder (Open With → Anki) go to Janki's importers.
 try:
     from .src.features import file_open as _file_open

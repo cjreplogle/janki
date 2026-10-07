@@ -24,7 +24,8 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   amboss, mobilecards, canki_server (**shelved**: inert unless `JANKI_CANKI=1`).
 - `src/user/` — css.py (all injected webview CSS/JS: glass, motion, typewriter, deck list),
   glass.py (native glass; Windows `_win_*` paths), hud.py (caption HUD).
-- `src/system/` — settings_dialog, tray, tray_nav (glass tray menu), updater, stock_selfheal (Mac).
+- `src/system/` — settings_dialog, tray, tray_nav (glass tray menu), updater, stock_selfheal (Mac),
+  data_sync (calendar/lecture files + settings ride AnkiWeb sync via `janki_sync:*` collection config).
 - `src/util/` — config (ACTIVE/GLASS gates, `_cfg`), keytap (global keys), hotkeys
   (rebindable; Settings → Hotkeys), bridge (ObjC; **no-op stand-in off macOS**), state.
 - `src/platform/` — `IS_MAC/IS_WIN`, `CAPS`, log paths; `platform/win/`:
