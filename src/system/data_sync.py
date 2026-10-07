@@ -1,8 +1,9 @@
 """Janki's own data rides along with AnkiWeb sync, so the Calendar and lecture setup
 follow you between computers. Decks, cards and scheduling already sync through Anki
 itself; this covers the files Anki doesn't know about (calendar colours, class counts,
-re-suspend list, lecture → deck mapping, exclusions, aliases, the downloaded calendar,
-the lecture spreadsheet) and the calendar/lecture settings.
+re-suspend list, lecture → deck mapping, exclusions, aliases, the lecture spreadsheet)
+and the calendar/lecture settings — including the calendar URL, so a computer that
+receives it downloads the calendar itself (the .ics file is never sent).
 
 Each item is compressed and encrypted, then stored in its own collection-config key,
 so AnkiWeb carries it with the normal sync and two computers editing different items
@@ -48,14 +49,15 @@ _FILES = {
     "source_decks": "user_files/source_decks.json",
     "excluded": "user_files/lecture_excluded.json",
     "aliases": "aliases.json",
-    "ics_cache": "user_files/calendar_cache.ics",
-    "ics_meta": "user_files/calendar_cache.json",
 }
+# no longer sent: the calendar travels as its URL (in "cfg") and each computer downloads
+# it; entries left from earlier versions are removed from the collection
+_DROPPED = ("ics_cache", "ics_meta", "ics_file")
 # settings that mean the same thing on every computer
 _CFG_PREFIXES = ("calendar_", "unsuspend_", "ak_", "lecture_")
 _CFG_KEYS = ("timezone", "fuzzy_cutoff", "auto_on_launch")
 # settings that point at a file on this computer: the file itself is synced
-_PATH_KEYS = {"xlsx": "xlsx_path", "ics_file": "ics_path"}
+_PATH_KEYS = {"xlsx": "xlsx_path"}
 
 
 def _enabled():
@@ -216,7 +218,14 @@ def _check(col):
 
 
 def _drop_legacy(col):
-    for name in _names():
+    if _KEYS:
+        for name in _DROPPED:
+            try:
+                if col.get_config(_cfg_key(_KEYS, name), None) is not None:
+                    col.remove_config(_cfg_key(_KEYS, name))
+            except Exception:
+                pass
+    for name in _names() + list(_DROPPED):
         try:
             if col.get_config(_LEGACY + name, None) is not None:
                 col.remove_config(_LEGACY + name)
@@ -255,8 +264,9 @@ def push():
     if not col or not _enabled():
         return
     try:
+        ok = _ready(col)
         _drop_legacy(col)
-        if not _ready(col):
+        if not ok:
             return
         st, remote, n = _load_state(), _remote(col), 0
         for name, (data, mt) in _local().items():
