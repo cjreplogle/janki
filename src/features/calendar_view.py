@@ -1163,8 +1163,11 @@ def _weak_compute(mode, then=None):
 
 def _atom_plain(a):
     """The lower-case tag pattern of a plain 'tag:…' term, else None."""
-    t = a.strip().strip('"')
-    if t.lower().startswith("tag:") and " " not in t and "(" not in t:
+    a = a.strip()
+    quoted = len(a) > 1 and a[0] == a[-1] == '"'
+    t = a.strip('"')
+    # Inside quotes, parentheses are part of the tag name (AnKing has hundreds).
+    if t.lower().startswith("tag:") and " " not in t and (quoted or "(" not in t):
         return t[4:].lower()
     return None
 

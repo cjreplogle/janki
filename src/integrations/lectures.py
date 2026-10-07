@@ -1076,12 +1076,22 @@ def _atoms(searches):
     out = []
     for s in searches:
         inner = s[1:-1] if s.startswith("(") and s.endswith(")") else None
+        # Quoted terms are split by regex: AnKing tags can hold parentheses
+        # ("T-score_(DEXA)"), which used to stop the split — the whole OR of
+        # hundreds of tags then went through Anki's slow search in one go.
+        if inner and _QUOTED_OR.fullmatch(inner):
+            out.extend(_QUOTED_TAG.findall(inner))
+            continue
         parts = inner.split(" OR ") if inner else None
         if parts and all(p.startswith(('"tag:', "tag:")) and "(" not in p for p in parts):
             out.extend(parts)
         else:
             out.append(s)
     return out
+
+
+_QUOTED_TAG = re.compile(r'"tag:[^"]*"')
+_QUOTED_OR = re.compile(r'"tag:[^"]*"(?: OR "tag:[^"]*")*')
 
 
 # Lecture membership (which cards carry a lecture's tags) only changes when notes are
