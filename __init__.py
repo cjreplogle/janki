@@ -374,6 +374,10 @@ def _startup():
         settings = QAction("Janki: Settings…", mw)
         settings.triggered.connect(lambda: settings_dialog._open_settings())
         mw.form.menuTools.addAction(settings)
+        if sys.platform == "win32":
+            _uninst = QAction("Janki: Uninstall…", mw)
+            _uninst.triggered.connect(lambda: uninstall_janki())
+            mw.form.menuTools.addAction(_uninst)
         # Optional top-right gear → Settings (Appearance → Window). Deferred so the
         # toolbar webview has its final size.
         def _gear():
@@ -1853,3 +1857,58 @@ try:
 except Exception:
     pass
 
+
+
+def _on_delete_addons(_dialog, ids):
+    """Tools → Add-ons → Delete: take out what Janki put outside its own folder (the
+    Windows pre-launch hook in Anki's Python folder), so the delete leaves Anki stock.
+    Without this the hook kept running after the folder was gone."""
+    try:
+        if mw.addonManager.addonFromModule(__name__) not in ids:
+            return
+        if sys.platform == "win32":
+            from .src.platform.win import preboot as _pb
+            _pb.uninstall()
+        log("add-on being deleted: pre-launch hook removed")
+    except Exception as e:
+        log("delete cleanup: %s" % e)
+
+
+try:
+    gui_hooks.addons_dialog_will_delete_addons.append(_on_delete_addons)
+except Exception:
+    pass
+
+
+def uninstall_janki(parent=None):
+    """One-click uninstall (Windows): remove the pre-launch hook from Anki's Python
+    folder, delete the add-on folder, then close Anki so it next starts stock."""
+    from aqt.utils import askUser, showInfo, showWarning
+    if not askUser("Uninstall Janki?\n\nThis removes Janki and everything it added to "
+                   "Anki, then closes Anki. Your cards and decks are not touched.",
+                   parent=parent or mw, title="Uninstall Janki"):
+        return
+    try:
+        if sys.platform == "win32":
+            from .src.platform.win import preboot as _pb
+            _pb.uninstall()
+    except Exception as e:
+        log("uninstall hook: %s" % e)
+    module = mw.addonManager.addonFromModule(__name__)
+    try:
+        mw.addonManager.deleteAddon(module)
+    except Exception as e:
+        log("uninstall delete: %s" % e)
+        # A file in use: switch Janki off so the next start is plain Anki, and the
+        # delete in Tools → Add-ons then goes through.
+        try:
+            mw.addonManager.toggleEnabled(module, enable=False)
+        except Exception:
+            pass
+        showWarning("Janki is switched off but some of its files were in use. Restart "
+                    "Anki, then delete Janki in Tools → Add-ons.", parent=parent or mw,
+                    title="Uninstall Janki")
+        return
+    showInfo("Janki is uninstalled. Anki will now close; open it again for plain Anki.",
+             parent=parent or mw, title="Uninstall Janki")
+    mw.unloadProfileAndExit()

@@ -2474,6 +2474,19 @@ class GlassSettings(QDialog):
             "QPushButton:hover{background-color:#61646b;}")
         self._upd_btn.clicked.connect(lambda: updater.check(interactive=True))
         gen_lay.addWidget(self._upd_btn)
+        if sys.platform == "win32":
+            self._uninst_btn = QPushButton("Uninstall Janki…")
+            self._uninst_btn.setStyleSheet(
+                "QPushButton{background-color:#6e5250;color:white;border:none;"
+                "padding:5px 12px;border-radius:5px;}"
+                "QPushButton:hover{background-color:#7c5d5b;}")
+
+            def _on_uninst():
+                from ... import uninstall_janki
+                self.close()
+                uninstall_janki()
+            self._uninst_btn.clicked.connect(_on_uninst)
+            gen_lay.addWidget(self._uninst_btn)
 
         # --- Documentation --------------------------------------------------
         # Opens the Janki docs (README + guides) on cjre.pl in the browser.

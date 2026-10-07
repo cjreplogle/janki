@@ -55,6 +55,9 @@ patch)"**, restart, then delete the add-on from **Tools → Add-ons**. That rest
 Anki's original files (repairing its signature) and clears everything Janki added,
 so nothing is left behind.
 
+**Windows:** **Tools → Janki: Uninstall…** (also in Settings → General) removes
+Janki and everything it added in one click, then closes Anki.
+
 > To change or disable any feature: **Tools → Janki: Settings…**
 
 

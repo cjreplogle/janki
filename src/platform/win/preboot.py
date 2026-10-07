@@ -59,10 +59,45 @@ def running_mode() -> str:
 
 def _module_text(mode=None) -> str:
     sw = (mode or render_mode()) == "software"
-    return _MODULE % (sw, _FLAGS if sw else _GPU_FLAGS)
+    addon_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))))
+    return _MODULE % (addon_dir, sw, _FLAGS if sw else _GPU_FLAGS)
 
 _MODULE = '''"""Janki glass pre-launch hook (written by the Janki add-on; safe to delete)."""
 import os, sys, time
+
+_ADDON_DIR = %r   # where Janki was installed when this hook was written
+
+
+def _orphaned():
+    """Janki was deleted (Tools > Add-ons) but this hook stayed behind in Anki's Python
+    folder: remove the hook (and undo the ._pth edit) so Anki starts fully stock."""
+    if not _ADDON_DIR or os.path.isdir(_ADDON_DIR):
+        return False
+    here = os.path.dirname(os.path.abspath(__file__))
+    for n in ("janki_win_glass.pth", "janki_preboot.py"):
+        try:
+            os.remove(os.path.join(here, n))
+        except Exception:
+            pass
+    import glob
+    for p in glob.glob(os.path.join(os.path.dirname(sys.executable), "python3*._pth")):
+        bak = p + ".janki-orig"
+        try:
+            if os.path.exists(bak):
+                os.replace(bak, p)
+        except Exception:
+            pass
+    return True
+
+
+class JankiRemoved(Exception):
+    """Raised to stop this hook when Janki is gone (site.py skips the line quietly
+    enough; the files are already deleted, so it happens once)."""
+
+
+if _orphaned():
+    raise JankiRemoved("Janki add-on removed; pre-launch hook deleted itself")
 
 
 def _jlog(msg):
