@@ -756,12 +756,13 @@ def _startup():
         except Exception as _zx_exc:
             log("zxcv: %s" % _zx_exc)
         # Windows: Decks <-> Calendar <-> Practice rewrite the page in place (no reload).
+        # macOS: only the switch into Practice uses it (page_swap._swappable).
+        try:
+            from .src.platform.win import page_swap as _psw
+            _psw.install()
+        except Exception as _ps_exc:
+            log("page swap: %s" % _ps_exc)
         if sys.platform.startswith("win"):
-            try:
-                from .src.platform.win import page_swap as _psw
-                _psw.install()
-            except Exception as _ps_exc:
-                log("page swap: %s" % _ps_exc)
             # Anki on Windows doesn't write bytecode caches, so every launch compiled
             # all of Janki's source (~2.4 MB) before anything showed. Compile it once in
             # the background with Anki's own Python; later launches load the .pyc files

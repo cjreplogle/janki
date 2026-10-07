@@ -1,5 +1,5 @@
-"""Windows: switch between deck-browser pages (Decks ↔ Calendar ↔ Practice) without a
-page load.
+"""Switch between deck-browser pages (Decks ↔ Calendar ↔ Practice) without a page load.
+Windows: every such switch. macOS: only into Practice (see _swappable).
 
 Anki's setHtml navigates the main web view to a fresh document every time, and on
 Windows that navigation is 300-1000ms of blank-ish waiting in the middle of the switch
@@ -36,8 +36,21 @@ _errors_js = ("(function(){var e=window.__jkSwapErr||[];window.__jkSwapErr=[];"
 def _swappable(view) -> bool:
     if view is not getattr(mw, "web", None):
         return False
-    if not _cfg().get("win_page_swap", True):
-        return False
+    import sys
+    if sys.platform.startswith("win"):
+        if not _cfg().get("win_page_swap", True):
+            return False
+    else:
+        # macOS: only the switch INTO Practice (its reload flickered); every other page
+        # still loads normally. Off with config `mac_practice_swap: false`.
+        if not _cfg().get("mac_practice_swap", True):
+            return False
+        try:
+            from ...features import practice
+            if not practice._practice_view:
+                return False
+        except Exception:
+            return False
     if getattr(mw, "state", None) != "deckBrowser" or _last_state != "deckBrowser":
         return False
     try:
