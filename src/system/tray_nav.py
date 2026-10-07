@@ -6,6 +6,7 @@ reach Open Anki / Quit — all styled to match the main window's glass.
 macOS only (needs the native blur/vibrancy). On other platforms the tray keeps its
 plain QMenu (see tray.py)."""
 
+import datetime
 import re
 import sys
 import time
