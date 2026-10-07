@@ -366,7 +366,7 @@ def _week_html():
         % (" on" if mode == k else "", k, k, l)
         for k, l in (("1", "Day"), ("3", "3-day"), ("week", "Week")))
     empty = ("" if evs else
-             "<div class='jkc-empty'>Loading calendar…</div>" if loading else
+             "<div class='jkc-empty jkc-loading'>Loading calendar…</div>" if loading else
              "<div class='jkc-empty'>No classes %s%s.</div>"
              % ("this week" if mode == "week" else "on these days",
                 "" if lectures._cfg().get("ics_path") else
@@ -2059,6 +2059,7 @@ _JS = """<script>(function(){
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
      var wasLoading=!!document.querySelector('#jkc .jkw .jkw-pbar');
+     var calWasLoading=!!root.querySelector('.jkc-loading');   // events not read yet
      lastInner=inner;
      var keep=root.querySelector('.jkc-l');            // the view switch keeps gliding
      root.innerHTML=inner;
@@ -2073,6 +2074,20 @@ _JS = """<script>(function(){
      var wfade=document.querySelector('#jkc .jkw')&&!nowLoading&&
                (dir==='wfade'||(dir==='refresh'&&wasLoading));
      if(document.querySelector('#jkc .jkw')&&(dir==='wfade'||dir==='refresh')&&!wfade)return;
+     // The calendar's events just arrived (was "Loading calendar…"): the classes fade
+     // in, a day at a time, instead of popping into the empty grid.
+     if(dir==='refresh'&&calWasLoading&&!root.querySelector('.jkc-loading')&&
+        !(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)){
+       var cf=[],colsL=Array.prototype.slice.call(root.querySelectorAll('.jkc-col'));
+       root.querySelectorAll('.jkc-ev').forEach(function(ev){if(!ev.animate)return;
+         var c=ev.closest('.jkc-col'),i=c?Math.max(0,colsL.indexOf(c)):0;
+         cf.push(ev.animate(
+           [{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'none'}],
+           {duration:300,delay:i*40,easing:'cubic-bezier(0,0,.2,1)',fill:'backwards'})
+           .finished.catch(function(){}));});
+       if(cf.length){var ca=Promise.all(cf);inDone=ca;
+         ca.then(function(){if(inDone===ca)inDone=null;});}
+       return;}
      if(wfade){
        var fs=[];
        wfadeEls().forEach(function(el){if(el.animate)fs.push(el.animate(

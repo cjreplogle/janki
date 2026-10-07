@@ -1392,7 +1392,7 @@ def _build_today_list(parent):
     v.addStretch(1)
     st = {"off": 0}
 
-    def fill():
+    def fill(fade=False):
         while hv.count():
             w = hv.takeAt(0).widget()
             if w is not None:
@@ -1416,7 +1416,7 @@ def _build_today_list(parent):
                     # also for a hidden prebuilt menu: the next open shows the classes
                     try:
                         if st["off"] == (day - datetime.date.today()).days:
-                            fill()
+                            fill(fade=True)
                     except RuntimeError:
                         pass                     # this menu was closed / rebuilt
                 lectures.load_events_bg(_refill)
@@ -1445,7 +1445,10 @@ def _build_today_list(parent):
         else:
             # A mini day view like the Calendar: hour lines + labels, each class a block
             # at its time in its course colour (outline only); click one to study it.
-            hv.addWidget(_DayView(holder, evs, lectures, cv, is_today=st["off"] == 0))
+            dv = _DayView(holder, evs, lectures, cv, is_today=st["off"] == 0)
+            hv.addWidget(dv)
+            if fade and holder.isVisible():
+                _fade_in(dv)              # classes arrived after "Loading classes…"
 
     def seek(n):
         _class_info_close()
@@ -1461,6 +1464,31 @@ def _build_today_list(parent):
     day_lbl.clicked.connect(lambda _c=False: seek(None))
     fill()
     return box
+
+
+def _fade_in(w, ms=260) -> None:
+    """Fade a freshly added widget in (opacity effect removed afterwards: a lingering
+    effect renders the widget offscreen and softens its text)."""
+    try:
+        from aqt.qt import QGraphicsOpacityEffect, QPropertyAnimation, QEasingCurve
+        eff = QGraphicsOpacityEffect(w)
+        eff.setOpacity(0.0)
+        w.setGraphicsEffect(eff)
+        a = QPropertyAnimation(eff, b"opacity", w)
+        a.setDuration(ms)
+        a.setStartValue(0.0)
+        a.setEndValue(1.0)
+        a.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _done():
+            try:
+                w.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+        a.finished.connect(_done)
+        a.start()
+    except Exception:
+        pass
 
 
 def _study_class(e) -> None:
