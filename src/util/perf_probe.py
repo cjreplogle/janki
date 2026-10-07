@@ -35,11 +35,65 @@ def mark(stage):
         _w("  %-34s +%s" % (stage, _ms(_t["start"])))
 
 
+# --- idle frame hunt: what keeps a page animating while Anki sits idle ---------------
+# Every 15 s, per webview: running animations (with their element) and how many
+# requestAnimationFrame calls it makes per second. With the 120 Hz flag, anything
+# animating while idle renders flat out (the main process sat at 100 % CPU).
+_ANIM_PROBE_JS = (
+    "(function(){try{if(!window.__jkRafN){window.__jkRafN=0;var o=window.requestAnimationFrame;"
+    "window.requestAnimationFrame=function(f){window.__jkRafN++;return o.call(window,f);};}"
+    "window.__jkRaf0=window.__jkRafN;window.__jkRafT=performance.now();"
+    "var a=(document.getAnimations?document.getAnimations():[]).filter(function(x){"
+    "return x.playState==='running';}).slice(0,6).map(function(x){var t=x.effect&&x.effect.target;"
+    "var d=t?(t.tagName.toLowerCase()+(t.id?'#'+t.id:'')+(t.className&&t.className.baseVal===undefined"
+    "?'.'+String(t.className).trim().split(/\\s+/).join('.'):'')):'?';"
+    "return (x.animationName||x.transitionProperty||x.constructor.name)+'@'+d+"
+    "(x.effect&&x.effect.getTiming?' x'+x.effect.getTiming().iterations:'');});"
+    "return a.join(' , ')||'none';}catch(e){return 'err '+e;}})()")
+_RAF_READ_JS = ("(function(){var n=(window.__jkRafN||0)-(window.__jkRaf0||0);"
+                "var s=(performance.now()-(window.__jkRafT||performance.now()))/1000;"
+                "return s>0?Math.round(n/s):0;})()")
+
+
+def _idle_frame_hunt():
+    from aqt import mw
+    from aqt.qt import QTimer
+    views = [("main", getattr(mw, "web", None)),
+             ("toolbar", getattr(getattr(mw, "toolbar", None), "web", None)),
+             ("bottom", getattr(mw, "bottomWeb", None))]
+    try:
+        from ..features import stats_embed
+        views.append(("stats", stats_embed._web))
+    except Exception:
+        pass
+    for name, v in views:
+        if v is None:
+            continue
+        try:
+            def got_anims(res, name=name, v=v):
+                def got_raf(n):
+                    _w("idle-hunt %-7s visible=%s rAF/s=%s anims: %s"
+                       % (name, v.isVisible() and v.height() > 0, n, res))
+                QTimer.singleShot(1000, lambda: v.page().runJavaScript(_RAF_READ_JS, got_raf))
+            v.page().runJavaScript(_ANIM_PROBE_JS, got_anims)
+        except Exception as e:
+            _w("idle-hunt %s failed %r" % (name, e))
+
+
 def install():
     if not _ON:
         return
     from aqt import mw, gui_hooks
     from aqt.deckbrowser import DeckBrowser
+    try:
+        from aqt.qt import QTimer
+        t = QTimer(mw)
+        t.setInterval(15000)
+        t.timeout.connect(_idle_frame_hunt)
+        t.start()
+        mw._jk_idle_hunt = t
+    except Exception as e:
+        _w("idle hunt install failed %r" % e)
 
     # time every webview_will_set_content callback (ours and other add-ons')
     try:
