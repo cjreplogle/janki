@@ -338,6 +338,14 @@ def _ensure_tray_target() -> None:
 
 
 def _minimize_to_tray() -> None:
+    # Hiding the window can make macOS deactivate and re-activate Anki, which the
+    # reopen-on-activate hook read as "Dock click" — it brought the window straight
+    # back (blank until clicked). The close itself must stick; Dock/⌘-Tab still
+    # reopen after this short window.
+    try:
+        suppress_reopen(1.5)
+    except Exception:
+        pass
     try:
         _ensure_tray_target()
         _remember_state()
