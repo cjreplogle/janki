@@ -1401,12 +1401,23 @@ def _build_today_list(parent):
         day_lbl.setText((rel + " · " if rel else "") + d.strftime("%a %b ") + str(d.day))
         day_lbl.setToolTip("" if st["off"] == 0 else "Back to today")
         evs = []
+        loading = False
         try:
             from ..integrations import lectures
             from ..features import calendar_view as cv
             evs, fresh = lectures.events_cached_between(d, d)
             if not fresh:
-                lectures.load_events_bg()
+                # not read yet (or the file changed): say so, and fill in when it lands
+                loading = not lectures._EV_CACHE["events"]
+
+                def _refill(day=d):
+                    # also for a hidden prebuilt menu: the next open shows the classes
+                    try:
+                        if st["off"] == (day - datetime.date.today()).days:
+                            fill()
+                    except RuntimeError:
+                        pass                     # this menu was closed / rebuilt
+                lectures.load_events_bg(_refill)
             dress = []
             for e in evs:                         # dress codes: one line under the day bar
                 if cv._is_allday_kind(e["summary"]):
@@ -1425,7 +1436,8 @@ def _build_today_list(parent):
         except Exception as exc:
             log(f"tray today: {exc}")
         if not evs:
-            lbl = QLabel("No classes today" if st["off"] == 0 else "No classes")
+            lbl = QLabel("Loading classes…" if loading else
+                         "No classes today" if st["off"] == 0 else "No classes")
             lbl.setObjectName("cnt")
             hv.addWidget(lbl)
         else:

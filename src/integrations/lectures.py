@@ -3578,13 +3578,20 @@ def events_cached_between(d0, d1):
 
 
 _EV_LOADING = {"on": False}
+_EV_WAITERS = []           # done() callbacks for the load in flight (each gets called)
 CLOSING = {"on": False}    # Anki is shutting down: start no more background work
 
 
 def load_events_bg(done=None):
-    """Parse (or download) the calendar off the main thread, then call done()."""
+    """Parse (or download) the calendar off the main thread, then call done(). A call
+    while a load is already running waits for that one (its done() used to be dropped,
+    so e.g. the tray stayed on "No classes")."""
     path, key = _ev_key()
-    if not path or _EV_CACHE["key"] == key or _EV_LOADING["on"] or CLOSING["on"]:
+    if not path or _EV_CACHE["key"] == key or CLOSING["on"]:
+        return
+    if done:
+        _EV_WAITERS.append(done)
+    if _EV_LOADING["on"]:
         return
     _EV_LOADING["on"] = True
 
@@ -3597,11 +3604,13 @@ def load_events_bg(done=None):
 
         def back():
             _EV_LOADING["on"] = False
+            waiters = _EV_WAITERS[:]
+            del _EV_WAITERS[:]
             if evs is not None:
                 _EV_CACHE["events"], _EV_CACHE["key"] = evs, key
-                if done:
+                for fn in waiters:
                     try:
-                        done()
+                        fn()
                     except Exception:
                         pass
         mw.taskman.run_on_main(back)
