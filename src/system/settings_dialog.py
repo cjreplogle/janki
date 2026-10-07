@@ -4134,6 +4134,8 @@ _idle_misses = 0
 
 
 def schedule_prebuild(ms=20000):
+    if not sys.platform.startswith("win"):     # Windows only; macOS unchanged
+        return
     from aqt.qt import QTimer
     QTimer.singleShot(ms, _prebuild)
 
