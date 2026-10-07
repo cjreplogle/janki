@@ -5403,6 +5403,10 @@ _CARD_CSS = (
     ".android .jp-slide-btn{left:50%;right:auto;"
     "bottom:calc(env(safe-area-inset-bottom, 0px) + 12px);"
     "transform:translateX(-50%);font-size:13px;padding:5px 12px;}"
+    # phones: the rephrase toggle (#jkrw-btn, centred 30px up) overlapped the slide
+    # button (centred 12px up) — lift it above when both are on the card
+    "body:has(.jp-slide-btn) #jkrw-btn{"
+    "bottom:calc(56px + env(safe-area-inset-bottom, 0px)) !important;}"
     # Phones: the mobile theme (mobilecards) vertically centres every card (#qa margin
     # auto inside a full-height body). A practice question should start at the TOP. Only
     # #qa's margins change: the body keeps its full height, because the theme sets

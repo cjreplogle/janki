@@ -1624,6 +1624,10 @@ def _build_css(cfg, context):
                      "  font-size: 11px !important;\n"
                      "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', "
                      "sans-serif !important;\n}\n"
+                     # both share the bottom-left corner: with a rephrasing on the card,
+                     # the slide button sits just above the rephrase bar instead of on it
+                     "body:has(#jk-rw-bar) .jp-slide-btn {\n"
+                     "  bottom: 44px !important;\n}\n"
                      "</style>\n")
         # Cloze deletions: recolour to a readable blue by default. Many note types
         # (incl. AnKing) colour the active cloze green, which fights the glass; a
