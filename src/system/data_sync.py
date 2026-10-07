@@ -69,9 +69,12 @@ def _enabled():
 def _keys():
     """(enc_key, mac_key) from the stored passphrase key, or None when not set."""
     k = (_cfg_raw().get("sync_key") or "").strip()
-    if len(k) != 64:
+    try:
+        raw = bytes.fromhex(k)            # derive_key gives 64 bytes (128 hex chars)
+    except ValueError:
         return None
-    raw = bytes.fromhex(k)
+    if len(raw) < 32:
+        return None
     return (hmac.new(raw, b"enc", hashlib.sha256).digest(),
             hmac.new(raw, b"mac", hashlib.sha256).digest())
 
