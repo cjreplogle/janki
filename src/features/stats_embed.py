@@ -615,12 +615,41 @@ def is_open() -> bool:
 _saved_heights = {}
 
 
+def _web_views(w):
+    """w itself if it's a web view, plus any nested in it (add-ons may wrap mw.web)."""
+    try:
+        from aqt.qt import QWebEngineView
+        out = [w] if isinstance(w, QWebEngineView) else []
+        return out + list(w.findChildren(QWebEngineView))
+    except Exception:
+        return []
+
+
+def _set_page_visible(w, on: bool) -> None:
+    """A collapsed (0 px) web view still counts as visible, so Chromium kept scheduling
+    frames for it — with the 120 Hz flag (no frame-rate limit) its compositor thread then
+    spun a whole core for as long as Anki ran once Stats had been opened. Tell Chromium a
+    collapsed view is hidden; on expand, visible again (and re-clear the page background,
+    which a visibility change can reset to opaque)."""
+    for v in _web_views(w):
+        try:
+            pg = v.page()
+            if hasattr(pg, "setVisible") and pg.isVisible() != on:
+                pg.setVisible(on)
+            if on and _glass_on():
+                from aqt.qt import QColor, Qt
+                pg.setBackgroundColor(QColor(Qt.GlobalColor.transparent))
+        except Exception as exc:
+            log("stats page visibility: %s" % exc)
+
+
 def _collapse(w) -> None:
     if w is None:
         return
     if w not in _saved_heights:
         _saved_heights[w] = (w.minimumHeight(), w.maximumHeight())
     w.setFixedHeight(0)
+    _set_page_visible(w, False)
 
 
 def _expand(w) -> None:
@@ -629,6 +658,7 @@ def _expand(w) -> None:
     mn, mx = _saved_heights.pop(w, (0, 16777215))
     w.setMinimumHeight(mn)
     w.setMaximumHeight(mx)
+    _set_page_visible(w, True)
 
 
 def _reglass() -> None:
