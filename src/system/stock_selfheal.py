@@ -43,7 +43,7 @@ _CACHE = Path.home() / ".janki_stock_cache"
 
 # Bump when the injected patch changes, so a cached .pyc from an older janki isn't
 # reused for the same Anki build.
-_PATCH_FMT = "v4"   # v3: --disable-frame-rate-limit (ProMotion); v4: rollback of .py too
+_PATCH_FMT = "v5"   # v3: 120 Hz flag; v4: rollback of .py too; v5: atexit clears the marker
 
 # Crash-guard sentinels (in $HOME so they survive an Anki reinstall).
 _PENDING = Path.home() / ".janki_glass_pending"
@@ -90,6 +90,14 @@ _INIT_INJECT = (
     "        else:\n"
     "            try:\n"
     "                _jpend.write_text('1')\n"
+    "            except Exception:\n"
+    "                pass\n"
+    # Any clean exit clears the marker — even one where Janki never loaded (quit at
+    # the profile chooser, add-ons off with Shift, Janki disabled). Only a real crash
+    # skips atexit and leaves it for the next launch's rollback. (_FMT_MARK)
+    "            try:\n"
+    "                import atexit as _jankiatexit\n"
+    "                _jankiatexit.register(lambda: _jpend.unlink(missing_ok=True))\n"
     "            except Exception:\n"
     "                pass\n"
     "            _jos.environ.setdefault('ANKI_GLASS', '1')\n"
@@ -200,7 +208,14 @@ def _app_root(aqt_dir: Path):
 def _fetch(name: str, h: str) -> str:
     req = urllib.request.Request(_RAW.format(h=h, name=name),
                                  headers={"User-Agent": "janki-selfheal"})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    ctx = None
+    try:                     # Anki bundles certifi; Python's default store can be empty
+        import ssl
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    with urllib.request.urlopen(req, timeout=20, context=ctx) as r:
         return r.read().decode("utf-8")
 
 
@@ -415,7 +430,7 @@ def unpatch(purge: bool = True) -> int:
 
 # --- entry point ---------------------------------------------------------------
 
-_FMT_MARK = b"janki_60fps"           # present in v3+ snippets
+_FMT_MARK = b"_jankiatexit"          # name used by the v5+ snippet (older ones get rebuilt)
 
 
 def _upgrade_patch() -> None:

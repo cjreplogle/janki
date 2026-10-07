@@ -249,6 +249,23 @@ def _patch_tooltip():
         QTimer.singleShot(_d, _repoint)
 
 
+def _warn_reduce_transparency():
+    """macOS 'Reduce transparency' (Accessibility → Display) draws every see-through
+    window solid, so the glass can't show however it's set up. Say so once per launch
+    with it on, rather than looking broken."""
+    try:
+        from ctypes import c_bool, c_void_p
+        msg, cls = _bridge()
+        ws = msg(c_void_p, cls(b"NSWorkspace"), b"sharedWorkspace")
+        if ws and msg(c_bool, ws, b"accessibilityDisplayShouldReduceTransparency"):
+            from aqt.utils import tooltip
+            tooltip("Janki: macOS “Reduce transparency” is on, so the glass shows as "
+                    "solid. Turn it off in System Settings → Accessibility → Display.",
+                    period=8000)
+    except Exception as exc:
+        log("reduce transparency check: %s" % exc)
+
+
 def _warn_if_light_mode():
     """Janki's glass tint + text-contrast rescues assume a DARK background; in
     Light appearance mode some card/UI text renders poorly (near-invisible or
@@ -1341,6 +1358,7 @@ def _startup():
                             mw.unloadProfileAndExit()
                     QTimer.singleShot(5000, _ask_restart)
             else:
+                QTimer.singleShot(3000, _warn_reduce_transparency)
                 QTimer.singleShot(4000, stock_selfheal.confirm_glass_ok)
                 # a clean quit isn't a crash (quitting within the first few seconds —
                 # e.g. relaunching quickly — used to trip the guard and drop glass)
