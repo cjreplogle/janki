@@ -2798,6 +2798,11 @@ def _prewarm(back=None):
         QTimer.singleShot(200, prime)
         if _view and getattr(mw, "state", None) == "deckBrowser":
             _swap("refresh")                       # colours/labels now that matches exist
+        try:                                       # the tray's day view too
+            from ..system import tray_nav
+            tray_nav.refresh_classes()
+        except Exception:
+            pass
     step(0)
 
 

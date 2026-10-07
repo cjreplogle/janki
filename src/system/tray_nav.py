@@ -1393,6 +1393,11 @@ def _build_today_list(parent):
     st = {"off": 0}
 
     def fill(fade=False):
+        if fill not in _CLASS_FILLERS:       # refilled when lecture matches land
+            _CLASS_FILLERS.append(fill)
+            del _CLASS_FILLERS[:-6]          # (only the latest few trays matter)
+        fill.st = st
+        st["grey"] = False
         while hv.count():
             w = hv.takeAt(0).widget()
             if w is not None:
@@ -1445,6 +1450,11 @@ def _build_today_list(parent):
         else:
             # A mini day view like the Calendar: hour lines + labels, each class a block
             # at its time in its course colour (outline only); click one to study it.
+            if any(lectures.peek_match(e["summary"]) is lectures._PENDING for e in evs):
+                # not matched to lectures yet = no course colours: start matching now
+                # (refresh_classes() redraws these when it's done)
+                st["grey"] = True
+                QTimer.singleShot(0, cv._prewarm)
             dv = _DayView(holder, evs, lectures, cv, is_today=st["off"] == 0)
             hv.addWidget(dv)
             if fade and holder.isVisible():
@@ -1464,6 +1474,30 @@ def _build_today_list(parent):
     day_lbl.clicked.connect(lambda _c=False: seek(None))
     fill()
     return box
+
+
+_CLASS_FILLERS = []
+
+
+def refresh_classes() -> None:
+    """Lecture matches (= course colours) just landed: redraw the tray's classes —
+    the open tray and the hidden prebuilt one — instead of keeping them grey."""
+    seen = set()
+    for fn in list(_CLASS_FILLERS):
+        if id(fn) in seen:
+            continue
+        seen.add(id(fn))
+        if not getattr(fn, "st", {}).get("grey"):
+            continue                          # already drawn in colour
+        try:
+            fn(fade=True)
+        except RuntimeError:
+            try:
+                _CLASS_FILLERS.remove(fn)     # that tray was closed / rebuilt
+            except ValueError:
+                pass
+        except Exception as exc:
+            log(f"tray class refresh: {exc}")
 
 
 def _fade_in(w, ms=260) -> None:
