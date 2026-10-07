@@ -238,9 +238,17 @@ def _build_pyc(name: str, h: str) -> Path:
     return pyc
 
 
+# Set while Settings' "Apply glass patch" runs: outcomes are collected for its dialog
+# instead of the deduped launch tooltip (a click must always say what happened).
+_MANUAL = {"on": False, "msgs": []}
+
+
 def _notify_once(h: str, msg: str) -> None:
     """Show a single gentle tooltip for a genuinely user-relevant outcome (glass
     couldn't start). Deduped per build so it never nags."""
+    if _MANUAL["on"]:
+        _MANUAL["msgs"].append(msg)
+        return
     try:
         mark = Path.home() / ".janki_selfheal_notified"
         if mark.exists() and mark.read_text(encoding="utf-8").strip() == h:
@@ -513,6 +521,8 @@ def maybe_self_heal(early: bool = False) -> None:
         return
     h = _buildhash() or ("src" if src_mode else "")
     if not h:
+        _notify_once("nobuild", "couldn't read this Anki's build number, so glass can't "
+                                "be set up for it.")
         return
     if _files_patched(ad):
         # Already patched on disk, yet this launch isn't running it: the patch isn't
@@ -538,7 +548,10 @@ def maybe_self_heal(early: bool = False) -> None:
         for name, src_pyc in built.items():
             dst = ad / (Path(name).stem + ".pyc")
             bak = dst.with_suffix(".pyc.janki-orig")
-            if dst.exists() and not bak.exists():
+            # Only reached when the files aren't patched = they're this Anki's stock
+            # files: always refresh the backup (an Anki update left the OLD version's
+            # backup behind, which "Restore stock Anki" would have put back).
+            if dst.exists():
                 shutil.copy2(dst, bak)
             shutil.copy2(src_pyc, dst)
         app = _app_root(ad)
@@ -586,3 +599,37 @@ def _apply_src(ad, h: str, early: bool) -> None:
         _prompt_restart()                      # no in-place re-run for this layout
     except Exception as exc:
         _notify_once(h, "couldn't install glass (%s); it's off." % type(exc).__name__)
+
+
+def unsupported_reason() -> str:
+    """Why glass can't be applied to this Anki ("" when it can) — for Settings."""
+    if sys.platform != "darwin":
+        return ""
+    if _layout() is not None:
+        return ""
+    try:
+        import aqt
+        f = Path(aqt.__file__).resolve()
+        d = f.parent
+    except Exception:
+        return "Janki couldn't find Anki's files."
+    if str(d).replace("\\", "/").endswith("/qt/aqt"):
+        return "This Anki runs from source; glass is set up by its own build."
+    if f.suffix == ".py" and not os.access(str(d), os.W_OK):
+        return ("Anki's files (%s) can't be changed by your Mac account, so the glass "
+                "patch can't be added. Reinstall Anki from your own account." % d)
+    return "Anki's files are laid out in a way Janki can't patch (%s)." % d
+
+
+def apply_now() -> list:
+    """Settings button: try the patch now, ignoring the once-per-version notice
+    limit. Returns what went wrong ([] = applied; the restart prompt is shown)."""
+    clear_failure()
+    _MANUAL["on"], _MANUAL["msgs"] = True, []
+    try:
+        # (patched on disk but not running → maybe_self_heal reports it; never restore a
+        # backup here: after an Anki update it's an OLDER version's file)
+        maybe_self_heal()
+        return list(_MANUAL["msgs"])
+    finally:
+        _MANUAL["on"] = False

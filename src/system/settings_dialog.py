@@ -2081,8 +2081,11 @@ class GlassSettings(QDialog):
         # files, delete backups/cache, and stop the auto-re-patch — the correct way
         # to undo everything before removing the add-on.
         # Patch controls only in the glass edition (the safe edition never patches).
+        # Always shown on macOS: when Janki can't patch this Anki, the button is greyed
+        # out with the reason (it used to vanish, leaving "nothing in Settings").
         _pstate = stock_selfheal.patch_state()
-        if _pstate != "unsupported" and not SAFE:
+        _why_not = stock_selfheal.unsupported_reason()
+        if sys.platform == "darwin" and not SAFE:
             _patch_note = QLabel(
                 "Glass patch: Janki patches Anki's own files so the frosted glass "
                 "can work (originals are backed up). Remove it before uninstalling "
@@ -2098,11 +2101,17 @@ class GlassSettings(QDialog):
                 "padding:5px 12px;border-radius:5px;}"
                 "QPushButton:hover{background-color:#7c5d5b;}")
 
+            _why_lbl = QLabel(_why_not)
+            _why_lbl.setWordWrap(True)
+            _why_lbl.setStyleSheet("color:#ff9d8a;")
+            _why_lbl.setVisible(bool(_why_not))
+
             def _refresh_patch_btn():
                 st = stock_selfheal.patch_state()
                 self._patch_btn.setText(
                     "Restore stock Anki (remove glass patch)" if st == "patched"
                     else "Apply glass patch to Anki")
+                self._patch_btn.setEnabled(st != "unsupported")
 
             def _on_patch_btn():
                 from aqt.qt import QMessageBox
@@ -2141,13 +2150,20 @@ class GlassSettings(QDialog):
                     mw.addonManager.writeConfig(__name__, self.cfg)
                     # Clear any recorded crash for this build so the retry actually
                     # runs (otherwise the crash-guard back-off would skip it).
-                    stock_selfheal.clear_failure()
-                    stock_selfheal.maybe_self_heal()   # fetch+patch+prompt restart
+                    problems = stock_selfheal.apply_now()   # patch + restart prompt
                     _refresh_patch_btn()
+                    if problems:                            # always say what happened
+                        w = QMessageBox(self)
+                        w.setWindowTitle("Glass patch")
+                        w.setText("The glass patch wasn't applied.")
+                        w.setInformativeText("\n\n".join(
+                            p[:1].upper() + p[1:] for p in problems))
+                        w.exec()
 
             _refresh_patch_btn()
             self._patch_btn.clicked.connect(_on_patch_btn)
             gen_lay.addWidget(self._patch_btn)
+            gen_lay.addWidget(_why_lbl)
 
         # --- Windows glass on/off ---------------------------------------------
         # Windows counterpart of the Mac "Apply glass patch" button: installs (or removes)
