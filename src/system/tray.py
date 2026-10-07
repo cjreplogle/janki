@@ -337,7 +337,32 @@ def _ensure_tray_target() -> None:
         log(f"ensure tray target: {e}")
 
 
+_left_since_hide = True    # app went inactive since the window was last hidden
+
+
+def _pointer_on_dock() -> bool:
+    """Is the mouse over the Dock? The Dock is the strip of the screen outside its
+    available area; with an auto-hidden Dock there's no such strip, so the band along
+    the bottom/left/right edge where it slides out counts."""
+    try:
+        from aqt.qt import QCursor, QGuiApplication
+        p = QCursor.pos()
+        scr = QGuiApplication.screenAt(p)
+        if scr is None:
+            return False
+        g, a = scr.geometry(), scr.availableGeometry()
+        if g.contains(p) and not a.contains(p) and p.y() > a.top():
+            return True                      # visible Dock (not the menu bar strip)
+        band = 90
+        return (p.y() >= g.bottom() - band or p.x() <= g.left() + band
+                or p.x() >= g.right() - band)
+    except Exception:
+        return True                          # unsure: behave as before (reopen)
+
+
 def _minimize_to_tray() -> None:
+    global _left_since_hide
+    _left_since_hide = False
     # Hiding the window can make macOS deactivate and re-activate Anki, which the
     # reopen-on-activate hook read as "Dock click" — it brought the window straight
     # back (blank until clicked). The close itself must stick; Dock/⌘-Tab still
@@ -515,10 +540,21 @@ def _install_reopen_hook() -> None:
         import time
 
         def _on_state(st):
+            global _left_since_hide
             try:
+                if st == Qt.ApplicationState.ApplicationInactive:
+                    _left_since_hide = True        # you went to another app
+                    return
                 if st != Qt.ApplicationState.ApplicationActive or mw.isVisible():
                     return
                 if sys.platform == "darwin":
+                    # Only a return FROM another app (Dock click / ⌘-Tab) reopens. After
+                    # a red-X close Anki often re-reported "active" without ever leaving
+                    # (~1.6 s later, from no user action) and the window came back blank.
+                    # A Dock click while Anki is still frontmost never goes inactive, so
+                    # also accept it when the pointer is on the Dock.
+                    if not _left_since_hide and not _pointer_on_dock():
+                        return
                     # Let a possible menu-bar-icon click arm suppression first, then
                     # re-check before restoring.
                     def _maybe():
