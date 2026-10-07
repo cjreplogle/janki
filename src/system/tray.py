@@ -542,6 +542,16 @@ def _install_reopen_hook() -> None:
         def _on_state(st):
             global _left_since_hide
             try:
+                if not mw.isVisible():
+                    try:
+                        from aqt.qt import QCursor
+                        from ..util import perf_probe
+                        p = QCursor.pos()
+                        perf_probe._w("reopen hook: %s left=%s pointer=(%d,%d) on_dock=%s"
+                                      % (str(st).split(".")[-1], _left_since_hide,
+                                         p.x(), p.y(), _pointer_on_dock()))
+                    except Exception:
+                        pass
                 if st == Qt.ApplicationState.ApplicationInactive:
                     _left_since_hide = True        # you went to another app
                     return
