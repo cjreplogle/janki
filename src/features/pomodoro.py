@@ -520,7 +520,13 @@ def _make_pomodoro():
             """Called when leaving the reviewer (deck browser, overview, etc.)."""
             self._in_review = False
             self._xp.hide()
-            self._tint.hide()   # keep state clean (if still pending, the break screen shows on return)
+            self._tint.hide()
+            # Left with a break queued (blue "break due" tint up): drop it and start
+            # the work period over, so re-entering is a fresh timer, not a break.
+            if self._break_pending and not self._on_break:
+                self._break_pending = False
+                self._elapsed_ms = 0
+                self._xp.set_progress(0.0)
 
         def stop(self):
             self._ticker.stop()
