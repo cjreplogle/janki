@@ -2111,7 +2111,8 @@ class GlassSettings(QDialog):
                 self._patch_btn.setText(
                     "Restore stock Anki (remove glass patch)" if st == "patched"
                     else "Apply glass patch to Anki")
-                self._patch_btn.setEnabled(st != "unsupported")
+                self._patch_btn.setEnabled(st != "unsupported"
+                                           and not stock_selfheal.anki_too_old())
 
             def _on_patch_btn():
                 from aqt.qt import QMessageBox

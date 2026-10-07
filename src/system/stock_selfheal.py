@@ -501,6 +501,11 @@ def maybe_self_heal(early: bool = False) -> None:
     if os.environ.get("ANKI_GLASS"):
         _upgrade_patch()               # already patched/active: refresh an old snippet
         return
+    if anki_too_old():
+        if not early:                  # once per Anki version
+            _notify_once("old:" + _anki_version(), too_old_message()[0].lower()
+                         + too_old_message()[1:])
+        return
     ad = _aqt_dir()
     if ad is None:
         # A source build (…/qt/aqt) is expected; anything else is an Anki install whose
@@ -623,10 +628,40 @@ def _apply_src(ad, h: str, early: bool) -> None:
         _notify_once(h, "couldn't install glass (%s); it's off." % type(exc).__name__)
 
 
+def _anki_version() -> str:
+    try:
+        from aqt import appVersion
+        return str(appVersion)
+    except Exception:
+        return "?"
+
+
+def anki_too_old() -> bool:
+    """Glass needs an Anki built on Python 3.13 (older builds pack their code into the app,
+    and their bytecode can't be produced). A source build is never 'too old'."""
+    if sys.version_info[:2] >= (3, 13):
+        return False
+    try:
+        import aqt
+        f = getattr(aqt, "__file__", None)
+        if f and str(Path(f).resolve().parent).replace("\\", "/").endswith("/qt/aqt"):
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def too_old_message() -> str:
+    return ("This Anki (%s) is too old for Janki's glass. Update to the latest Anki from "
+            "apps.ankiweb.net, then relaunch it twice." % _anki_version())
+
+
 def unsupported_reason() -> str:
     """Why glass can't be applied to this Anki ("" when it can) — for Settings."""
     if sys.platform != "darwin":
         return ""
+    if anki_too_old():
+        return too_old_message()
     if _layout() is not None:
         return ""
     try:
