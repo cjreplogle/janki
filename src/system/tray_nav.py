@@ -597,6 +597,7 @@ def _prebuild():
             schedule_prebuild(600)                # still fading out / open: retry
             return
         new = _build()
+        new._jk_day = datetime.date.today()     # its "Today" is this day (see open)
         try:
             new.winId()                           # make the native window now, not on
             _prepare_over_fullscreen(new)          # first show (that was the slow part)
@@ -2549,6 +2550,14 @@ def show_navigator() -> None:
         global _prebuilt
         fresh = _prebuilt                      # built in the background, hidden
         _prebuilt = None
+        if fresh is not None and getattr(fresh, "_jk_day", None) != datetime.date.today():
+            # built before midnight (Anki left in the tray overnight): its "Today" is
+            # yesterday — build a current one instead
+            try:
+                fresh.deleteLater()
+            except Exception:
+                pass
+            fresh = None
         if _nav is not None and _nav is not fresh:
             try:
                 _nav.close(); _nav.deleteLater()
