@@ -3266,6 +3266,7 @@ class GlassSettings(QDialog):
                         plus.setText("−" if open_ else "+")
                         for b in boxes:
                             b.setVisible(open_)
+                        relayout()
                     plus.toggled.connect(fold)
                 for d, n in decks:
                     cb = QCheckBox("%s  (%s cards)" % (d, format(n, ",")))
@@ -3274,8 +3275,8 @@ class GlassSettings(QDialog):
                     cb.setStyleSheet("margin-left:22px;")
                     cb.toggled.connect(lambda on, fam=fam, d=d: save_skip(fam, d, on))
                     cb.setEnabled(src.isChecked())
-                    cb.setVisible(False)                 # folded until + is pressed
                     body.addWidget(cb)
+                    cb.setVisible(False)                 # folded until + is pressed
                     boxes.append(cb)
 
                 def src_toggled(on, fam=fam, boxes=boxes):
@@ -3283,6 +3284,27 @@ class GlassSettings(QDialog):
                     for b in boxes:
                         b.setEnabled(on)
                 src.toggled.connect(src_toggled)
+            relayout()
+
+        def relayout():
+            # rows arrive after the tab was first drawn: lay the whole page out again
+            # (re-opening the subtab did this, which is why it looked fixed then)
+            w = page
+            while w is not None:
+                try:
+                    if w.layout() is not None:
+                        w.layout().invalidate()
+                        w.layout().activate()
+                    w.updateGeometry()
+                    w.update()
+                except Exception:
+                    pass
+                w = w.parentWidget()
+            # then grow / shrink the window to the tab's new height (animated)
+            fit = getattr(self, "_fit_tabs", None)
+            if fit is not None:
+                from aqt.qt import QTimer
+                QTimer.singleShot(0, fit)
 
         def start():
             if getattr(page, "_jk_started", False):
