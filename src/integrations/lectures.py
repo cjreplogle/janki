@@ -586,6 +586,19 @@ def _leaf_key(s):
     return s.replace("&", "and").lower()
 
 
+def _drop_nested(prefixes):
+    """Sorted prefixes minus any already covered by a shorter one in the set (its
+    tag: search matches it as a child)."""
+    ps = set(prefixes)
+    out = []
+    for p in sorted(ps):
+        segs = p.split("::")
+        if any("::".join(segs[:i]) in ps for i in range(1, len(segs))):
+            continue
+        out.append(p)
+    return out
+
+
 def _ak_tag_index():
     """Cached index built ONCE per session from the live collection tag list
     (mw.col.tags.all() is expensive and map-building resolves ~1000 leaves;
@@ -602,21 +615,34 @@ def _ak_tag_index():
         return {}
     by_src_leaf = {}
     by_leaf = {}
+    seen = set()      # (prefix) already indexed — AnKing's tags share long prefixes
+    key_cache = {}    # segment -> _leaf_key (segments repeat across ~100k tags)
     for t in tags:
         if not t.startswith(_AK_PREFIXES):
             continue
         segs = t.split("::")
         src = _norm_source(segs[1]) if len(segs) > 1 else ""
-        for seg in segs:
-            leaf = _leaf_key(seg)
+        # Store the tag CUT at the matching segment, not the full tag: Anki's
+        # `tag:A::B` already matches every A::B::… child, so one prefix replaces
+        # the dozens-to-hundreds of descendant tags a broad AnKing concept has.
+        # Those huge OR searches (one regexp per term over every note) were what
+        # lagged Anki on the AnKing deck.
+        for i, seg in enumerate(segs):
+            leaf = key_cache.get(seg)
+            if leaf is None:
+                leaf = key_cache[seg] = _leaf_key(seg)
             if not leaf:
                 continue
-            by_leaf.setdefault(leaf, set()).add(t)
+            pre = "::".join(segs[:i + 1])
+            if pre in seen:
+                continue
+            seen.add(pre)
+            by_leaf.setdefault(leaf, set()).add(pre)
             if src:
-                by_src_leaf.setdefault((src, leaf), set()).add(t)
+                by_src_leaf.setdefault((src, leaf), set()).add(pre)
     idx = {
-        "by_src_leaf": {k: sorted(v) for k, v in by_src_leaf.items()},
-        "by_leaf": {k: sorted(v) for k, v in by_leaf.items()},
+        "by_src_leaf": {k: _drop_nested(v) for k, v in by_src_leaf.items()},
+        "by_leaf": {k: _drop_nested(v) for k, v in by_leaf.items()},
     }
     _AK_TAG_INDEX["map"] = idx
     return idx
