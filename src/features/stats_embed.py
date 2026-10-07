@@ -1070,6 +1070,37 @@ def close(animate: bool = True) -> None:
     if animate and not _animate_next_deck:     # a pending re-render animates instead
         drop_in(mw.web)
     _reglass()
+    # EXPERIMENT (idle CPU): once Stats had been opened, Chromium's compositor spun a
+    # full core for the rest of the session. Free the closed Stats view entirely
+    # (next open builds a fresh one, ~0.4 s) to see whether it's what keeps it busy.
+    if _cfg().get("stats_free_on_close", True):
+        from aqt.qt import QTimer
+        QTimer.singleShot(600, _free_panel)
+
+
+def _free_panel() -> None:
+    global _panel, _web, _page_ready, _loaded_key
+    if _panel is None or is_open() or _defer_close or _opening:
+        return
+    old = _panel
+    try:
+        mw.mainLayout.removeWidget(old)
+    except Exception:
+        pass
+    _saved_heights.pop(old, None)
+    _panel = _web = None
+    _page_ready = False
+    _loaded_key = None
+    try:
+        old.hide()
+        old.deleteLater()
+    except Exception:
+        pass
+    try:
+        from ..util import perf_probe
+        perf_probe._w("stats view freed after close")
+    except Exception:
+        pass
 
 
 def _on_state_change(new_state=None, *_a) -> None:
