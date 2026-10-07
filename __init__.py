@@ -1386,6 +1386,20 @@ def _startup():
             pass
 
 
+# Anki opens the profile BEFORE main_window_did_init (_startup), so a toast shown as
+# the profile opens (e.g. the lectures' launch notice) came out as Anki's stock
+# tooltip. Swap in the glass toast first thing on profile open; registered before the
+# bundled lectures module's hook so it runs ahead of it. _startup's call is then a
+# no-op re-point (_patch_tooltip is idempotent).
+def _early_tooltip():
+    try:
+        _patch_tooltip()
+    except Exception as _et_exc:
+        log("early tooltip: %s" % _et_exc)
+
+
+gui_hooks.profile_did_open.append(_early_tooltip)
+
 if hasattr(gui_hooks, "main_window_did_init"):
     gui_hooks.main_window_did_init.append(_startup)
 elif hasattr(gui_hooks, "profile_did_open"):

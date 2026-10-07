@@ -3359,9 +3359,15 @@ def _on_profile_open():
     if st.get("last_auto_date") == today:
         return
     st["last_auto_date"] = today
-    if _cfg().get("unsuspend_ak", "ak" in _DEFAULT_ON) \
-            and not _cfg().get("auto_load_with_ak", False):
-        return      # AnKing on: no slow auto-load unless opted in (Lectures → Behavior)
+    if _cfg().get("unsuspend_ak", "ak" in _DEFAULT_ON):
+        if not _cfg().get("auto_load_with_ak", False):
+            return  # AnKing on: no slow auto-load unless opted in (Lectures → Behavior)
+        try:
+            from aqt.utils import tooltip      # Janki's glass toast (patched early)
+            tooltip("Auto-loading today's lectures with AnKing on — this can be slow. "
+                    "Settings → Lectures → Behavior to turn it off.", period=7000)
+        except Exception:
+            pass
     _save_state(st)
     QTimer.singleShot(1500, lambda: run_today(interactive=True, auto=True))
 
