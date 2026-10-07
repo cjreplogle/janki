@@ -809,6 +809,16 @@ def open_stats() -> None:
     _style_web(_web)
     _web.setFocus()
     _reglass()
+    try:                       # perf probe: what the page looks like 1 s after opening
+        from aqt.qt import QTimer
+        QTimer.singleShot(1000, lambda: _web.eval(
+            "try{var c=document.querySelectorAll('div.container:has(> .position-relative)');"
+            "pycmd('jankiT:1s after open: panels='+c.length+' shown='+"
+            "document.querySelectorAll('div.container.jk-vis').length+' hold='+"
+            "window.__jkHold+' replayFn='+(typeof window.__jkReplay)+' url='+"
+            "location.pathname+' ready='+document.readyState);}catch(e){}"))
+    except Exception:
+        pass
 
 
 _loaded_key = None
@@ -1092,6 +1102,11 @@ def _on_hover_preload() -> None:
     global _hover_t
     import time as _t
     _hover_t = _t.perf_counter()
+    try:
+        from ..util import perf_probe
+        perf_probe._w("stats hover → preload (page_ready=%s)" % _page_ready)
+    except Exception:
+        pass
     _preload()
 
 
@@ -1141,6 +1156,7 @@ def _on_will_set_content(web_content, context) -> None:
 def close(animate: bool = True) -> None:
     if not is_open():
         return
+    _pp("close() → panels hidden (__jkHide)")
     _collapse(_panel)
     try:
         _web.eval("window.__jkHide&&window.__jkHide();")   # hidden, ready for the next open
