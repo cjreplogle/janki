@@ -312,6 +312,15 @@ _hover_t = None     # when the last hover preload started (perf probe)
 
 
 def _on_bridge_cmd(cmd: str) -> bool:
+    if isinstance(cmd, str) and cmd.startswith("jankiDraw:"):
+        try:
+            att, rest = cmd[10:].split("|", 1)
+            cb = _draw_cb.pop(int(att), None)
+            if cb:
+                cb(rest)
+        except Exception as exc:
+            log("stats draw check: %s" % exc)
+        return False
     if isinstance(cmd, str) and cmd.startswith("jankiT:"):
         _pp("page: " + cmd[7:])
         return False
@@ -825,6 +834,11 @@ def open_stats() -> None:
                    _main_host().height()))
         except Exception as exc:
             _pp("qt state failed: %s" % exc)
+    try:                       # a page Chromium thinks is hidden draws nothing (see
+        from aqt.qt import QTimer   # _check_drawing) — check on every open
+        QTimer.singleShot(600, lambda: _check_drawing(1))
+    except Exception:
+        pass
     try:                       # perf probe: what the page looks like 1 s after opening
         from aqt.qt import QTimer
         QTimer.singleShot(1000, _qt_state)
@@ -846,6 +860,57 @@ def open_stats() -> None:
 
 
 _loaded_key = None
+
+# Stats sometimes came up as an empty glass pane until relaunch: the page reported
+# itself fully revealed, Qt showed the view visible, resizing didn't help — Chromium had
+# stopped producing frames for it (it believed the view hidden; Stats is collapsed to
+# 0 px between opens). So after an open, count animation frames for 300 ms; none =
+# not drawing → toggle the page's visibility to make Chromium show + draw it again.
+_FRAMES_JS = ("(function(a){var n=0,done=false,t0=performance.now();"
+              "function rep(x){if(done)return;done=true;try{pycmd('jankiDraw:'+a+'|'+n+'|'+"
+              "document.visibilityState+(x||''));}catch(e){}}"
+              "function f(){n++;if(performance.now()-t0<300)requestAnimationFrame(f);else rep();}"
+              "requestAnimationFrame(f);setTimeout(function(){rep('|timeout');},900);})(%d);")
+_draw_cb = {}
+
+
+def _check_drawing(attempt: int) -> None:
+    if _web is None or not is_open():
+        return
+
+    def got(res):
+        res = str(res)
+        _pp("drawing check %d: frames|visibility = %s" % (attempt, res))
+        frames = res.split("|")[0]
+        if frames.isdigit() and int(frames) > 0:
+            return
+        if attempt > 2 or not is_open():
+            return
+        try:
+            pg = _web.page()
+            if hasattr(pg, "setVisible"):
+                pg.setVisible(False)
+                pg.setVisible(True)
+            _web.update()
+            _style_web(_web)
+            _web.eval("window.__jkReplay&&window.__jkReplay();")
+            _pp("not drawing → woke the page (visibility toggled)")
+        except Exception as exc:
+            _pp("wake failed: %s" % exc)
+        from aqt.qt import QTimer
+        QTimer.singleShot(500, lambda: _check_drawing(attempt + 1))
+    _draw_cb[attempt] = got
+    try:
+        _web.eval(_FRAMES_JS % attempt)          # answers via jankiDraw: (bridge)
+    except Exception as exc:
+        _pp("drawing check failed: %s" % exc)
+
+    def no_reply():                              # page not even running its script
+        cb = _draw_cb.pop(attempt, None)
+        if cb:
+            cb("noreply")
+    from aqt.qt import QTimer
+    QTimer.singleShot(1500, no_reply)
 
 
 def _load_key():
