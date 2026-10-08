@@ -1212,17 +1212,126 @@ def _find_base(col, searches):
     for srch in searches:
         by_fam.setdefault(family_of(srch), []).extend(_atoms([srch]))
     out = set()
+    tix = _tag_index(col)
+    cards = _card_index(col)
     for fam, atoms in by_fam.items():
+        # Plain tag terms are matched here against an in-memory tag index (one sorted
+        # list, bisect per tag) instead of Anki's search, which runs a regexp over
+        # every note per term — that was the AnKing lag (hundreds of tags a lecture).
+        plain, rest = [], []
+        for a in atoms:
+            (plain if _atom_plain(a) is not None else rest).append(a)
+        if plain:
+            allow = _deck_ids(col, decks[fam]) if fam in decks else None
+            nids = set()
+            for a in plain:
+                nids |= _atom_nids(tix, _atom_plain(a))
+            for nid in nids:
+                for cid, did, _q in cards["by_nid"].get(nid, ()):
+                    if allow is None or did in allow:
+                        out.add(cid)
         dc = (" " + _deck_clause(decks[fam])) if fam in decks else ""
         # 40 per query: each tag term becomes several SQL nodes (child-tag matching),
         # so 150 could still pass SQLite's depth limit of 1000 on big AnKing lectures
-        for i in range(0, len(atoms), 40):
-            q = " OR ".join("(%s)" % a for a in atoms[i:i + 40])
+        for i in range(0, len(rest), 40):
+            q = " OR ".join("(%s)" % a for a in rest[i:i + 40])
             out.update(col.find_cards("(%s)%s" % (q, dc)))
     out = frozenset(out)
     _FIND_CACHE[key] = out
     while len(_FIND_CACHE) > _FIND_MAX:
         _FIND_CACHE.popitem(last=False)
+    return out
+
+
+# In-memory indexes for tag lookups (see _find_base). Notes' tags are re-read only
+# when notes change; cards (deck, suspended state) when cards change.
+_TAG_IX = {"sig": None, "keys": [], "nids": {}, "cache": {}}
+_CARD_IX = {"sig": None, "by_nid": {}, "queue": {}}
+
+
+def _atom_plain(a):
+    """Lower-case tag of a plain 'tag:…' term, else None. Inside quotes parentheses
+    are part of the tag (AnKing has hundreds)."""
+    a = a.strip()
+    quoted = len(a) > 1 and a[0] == a[-1] == '"'
+    t = a.strip('"')
+    if t.lower().startswith("tag:") and " " not in t and (quoted or "(" not in t) \
+            and "\\" not in t:
+        return t[4:].lower()
+    return None
+
+
+def _tag_index(col):
+    sig = _notes_sig(col)
+    if sig is None or sig != _TAG_IX["sig"]:
+        nids = {}
+        for nid, tags in col.db.all("select id, tags from notes"):
+            for t in (tags or "").split():
+                nids.setdefault(t.lower(), []).append(nid)
+        _TAG_IX.update(sig=sig, keys=sorted(nids), nids=nids, cache={})
+    return _TAG_IX
+
+
+def _card_index(col):
+    try:
+        sig = tuple(col.db.first("select count(), max(mod) from cards") or ())
+    except Exception:
+        sig = None
+    if sig is None or sig != _CARD_IX["sig"]:
+        by_nid, queue = {}, {}
+        for cid, nid, did, q in col.db.all(
+                "select id, nid, case when odid then odid else did end, queue from cards"):
+            by_nid.setdefault(nid, []).append((cid, did, q))
+            queue[cid] = q
+        _CARD_IX.update(sig=sig, by_nid=by_nid, queue=queue)
+    return _CARD_IX
+
+
+def _deck_ids(col, names):
+    ids = set()
+    for name in names:
+        try:
+            did = col.decks.id_for_name(name)
+            if did:
+                ids.update(col.decks.deck_and_child_ids(did))
+        except Exception:
+            pass
+    return ids
+
+
+def _atom_nids(tix, pat):
+    """Note ids for one tag pattern, like Anki's tag: search (the tag + its ::children;
+    '*' wildcards; case-insensitive). '_' is taken literally (Anki treats it as a
+    one-character wildcard — a near-identical match set, much faster)."""
+    hit = tix["cache"].get(pat)
+    if hit is not None:
+        return hit
+    import bisect
+    import fnmatch
+    keys, nids, out = tix["keys"], tix["nids"], set()
+    if "*" in pat or "?" in pat:
+        core = pat.strip("*")
+        if pat.startswith("*") and pat.endswith("*") and "*" not in core and "?" not in core:
+            for k in keys:                       # *leaf* → substring (matches children too)
+                if core in k:
+                    out.update(nids[k])
+        else:
+            star = pat.find("*")
+            head = pat[:star] if star >= 0 else pat
+            lo = bisect.bisect_left(keys, head) if head else 0
+            for k in keys[lo:]:
+                if head and not k.startswith(head):
+                    break
+                if fnmatch.fnmatchcase(k, pat) or fnmatch.fnmatchcase(k, pat + "::*"):
+                    out.update(nids[k])
+    else:
+        lo = bisect.bisect_left(keys, pat)
+        for k in keys[lo:]:
+            if k == pat or k.startswith(pat + "::"):
+                out.update(nids[k])
+            elif not k.startswith(pat):
+                break
+    tix["cache"][pat] = out
     return out
 
 
@@ -1233,6 +1342,9 @@ def find_ids(col, searches, extra=""):
     base = _find_base(col, searches)
     if not extra or not base:
         return set(base)
+    if extra.strip() == "is:suspended":         # the common case: answer from memory
+        q = _card_index(col)["queue"]
+        return {c for c in base if q.get(c) == -1}
     out = set()
     ids = sorted(base)
     for i in range(0, len(ids), 2000):
@@ -2541,7 +2653,7 @@ def _open_today_dialog(day_offset=0, auto=False):
             res = {}
             for s in batch:
                 try:
-                    res[s] = set(col.find_cards("(%s) is:suspended" % s))
+                    res[s] = find_ids(col, [s], "is:suspended")
                 except Exception:
                     res[s] = set()
             return res
