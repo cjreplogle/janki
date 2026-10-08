@@ -79,6 +79,9 @@ pick a glass look in **Settings → General → Window glass**.
     <img src="docs/media/reviewer2.jpg" alt="Reviewer glass" width="48%">
     <img src="docs/media/reviewer3.jpg" alt="Reviewer glass, another card" width="48%">
   </p>
+  <p align="center">
+    <a href="https://youtu.be/2jU0c5a6myo"><img src="https://img.youtube.com/vi/2jU0c5a6myo/hqdefault.jpg" alt="Watch the glass reviewer on YouTube" width="60%"></a>
+  </p>
 - **Focus Mode** (**`Tab+F`**) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen. Also throws in small customizable timer
   which fills over N seconds; when it runs out a red edge-glow flares
