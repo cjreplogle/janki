@@ -325,6 +325,20 @@ def _over_caption(gpos) -> bool:
         return False
 
 
+def _over_button(gpos) -> bool:
+    """Janki's own top-bar buttons (the Settings gear) can sit inside the top resize
+    band: a click on one is a click, not a resize."""
+    try:
+        from ...features import settings_button as _sb
+        b = getattr(_sb, "_btn", None)
+        if b is not None and b.isVisible() and \
+                b.rect().adjusted(-2, -4, 2, 2).contains(b.mapFromGlobal(gpos)):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 class _EdgeResizer(QObject):
     """App-wide: near the main window's edges, show a resize cursor and start a native
     resize on press. Watches all of mw's widgets (the web views eat mouse events)."""
@@ -338,6 +352,8 @@ class _EdgeResizer(QObject):
             e |= Qt.Edge.LeftEdge
         elif g.right() - gpos.x() < EDGE:
             e |= Qt.Edge.RightEdge
+        if _over_button(gpos):
+            return None
         if gpos.y() - g.top() < EDGE and not _over_caption(gpos):
             e |= Qt.Edge.TopEdge
         elif g.bottom() - gpos.y() < EDGE:
