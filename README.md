@@ -1212,10 +1212,25 @@ _Includes v1.5.10: click-to-answer practice cards, back-of-card explanation, LOâ
 
 </details>
 
-## Suggested Add-Ons
+## About Janki
 
-These extra installs help tie together some theming:
-* [Anki Redesign](https://ankiweb.net/shared/info/2119814566) (Some menu animations)
+Janki is an Anki Add-on/Client obsessively built around streamlining your experience as a medical student.
+
+When I first started medical school, I immediately felt inundated with resources. We get **tens of thousands** of cards thrown at us, and are told to do our best over the next two years. AJ, Anking, hUtCH, UWorld, AMBOSS, FirstAid... This app is not a replacement for these wonderful tools. They all have their own things that make them effective. Instead, Janki is something that integrates these distinct systems medical students use into a cohesive centralized platform. Why would you need this? So YOU can spend your time actually studying in a self-structured manner, rather than needing to sift through the other tedious bloat to get there.
+
+The fundamental problem Janki attempts to resolve is simple. Anki is an incredible tool for memorizing a lot of content. **Memorizing is not understanding.** Understanding comes from building complex associations of what concepts mean, and then generalizing said knowledge to new situations. It is through this repeated process in engagement with concepts, review, examination, and clinic, that you refine the skills necessary to make good clinical judgements when your decisions eventually have real consequence.
+
+**So how do we make our systems better?** 
+
+To start, Janki throws in modified sentence structure for your cards in what I have labeled as the **"Rephrase"** system. This allows you to study isolated concepts by throwing them at you in multiple ways. Janki also fundamentally changes how content is presented, going down to even its visual design (serif font family, scroll-reveal card animations). This is all intentional and more than just fluff to look nice. The goal is to force you to reason and understand what the cloze you are recalling means beyond simply "an association" or "an appearance". I integrate AI to produce these structural card variations, while making sure the essential core concepts to be learned are still decided by people. I have scaffolded this to avoid potential mis-skilling. However, I want to try and take more protective measures here, so I will consult other experts regarding how this should be implemented best. 
+
+**Question banks** force the user to reason and apply the concepts they are actively working with in new settings. By mapping questions to cards algorithmically, Janki selectively intersperses practice problems for you to test yourself as you go. This problem solving is what forces you to internalize the meaning and then reapply it as you go through the learning process. Beyond this, I am a very short attention-span person. I have made every effort to make Anki engaging to use and thrown in different mechanisms like Pomodoro/Lockdown mode to keep you reviewing. Anki should look and feel like it was made in 2026, not 2008. 
+
+Janki is not some learning panacea, but, I have already seen it help myself and peers tremendously. Even if you are not a big Anki person, I honestly recommend you try it! I believe it solidly addresses core design limitations of Anki in its current state. I've also had a lot of fun building it. I grew up hacking every video game I played (Mario Kart Wii, CS:GO, Minecraft). I'd take apart electronics for fun and ramshackle them back together. These experiences taught me how to code and understand how computers work. While I've had less time for a lot of the pains that come with managing a large codebase as a medical student, Claude Code has made much of these problems effectively trivial. It's honestly an incredible piece of technology. As someone with the experience to actually be involved with large code projects across multiple domains, it's let me spearhead things I otherwise would never have been able to at this point in my career.
+
+I will **never** charge for something like this. The potential benefit for us students far outweighs my desire to make a quick buck. All I ask is that you share it with a friend if it helps you. Thank you for trying out Janki!
+
+*"I sincerely hope this tool helps you find success."*
 
 ## Support
 
