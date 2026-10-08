@@ -860,12 +860,14 @@ def _weak_start(mode):
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
 _weak_redo = set()      # views to recompute once background matching finishes
+_weak_redo_runs = {}    # mode → redo rounds since the view was opened (capped)
 _weak_fails = {}
 
 
 def open_weak():
     global _detail, _weak
     _detail = WEAK
+    _weak_redo_runs.clear()
     _weak = _weak_cached(_weak_mode)
     try:
         from . import sfx
@@ -970,8 +972,11 @@ def _weak_compute(mode, then=None):
                  for a in lectures._atoms([x])]
         if atoms:
             lecs.append((e, m, atoms))
-    if pending:
-        # older lectures not matched yet: match them, then work this view out again
+    if pending and _weak_redo_runs.get(mode, 0) < 3:
+        # older lectures not matched yet: match them, then work this view out again.
+        # Capped: if matching can't settle them, a forever "Matching older lectures"
+        # spinner kept Chromium redrawing (100 % CPU) and the recompute kept looping.
+        _weak_redo_runs[mode] = _weak_redo_runs.get(mode, 0) + 1
         _weak_redo.add(mode)
         QTimer.singleShot(0, lambda: _prewarm(back=(today - _weak_start(mode)).days + 1))
     other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
@@ -1826,7 +1831,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 @keyframes jkcSpin{to{transform:rotate(360deg);}}
 .jkc-tc{opacity:.75;}
 #jkc .jkd-reload{display:inline-block;width:9px;height:9px;margin-left:4px;vertical-align:1px;border-radius:50%;
-  border:2px solid rgba(156,188,243,.3);border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
+  border:2px solid rgba(156,188,243,.3);border-top-color:#9cbcf3;animation:jkcSpin .8s linear 38;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
@@ -1894,7 +1899,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   transition:width .25s ease;}
 #jkc .jkw-more{display:inline-flex;align-items:center;gap:7px;opacity:.75;font-size:.85em;margin-top:6px;}
 #jkc .jkw-more i{width:10px;height:10px;border-radius:50%;border:2px solid rgba(156,188,243,.3);
-  border-top-color:#9cbcf3;animation:jkcSpin .8s linear infinite;}
+  border-top-color:#9cbcf3;animation:jkcSpin .8s linear 38;}
 #jkc .jkw-grp{max-width:760px;margin:10px auto 0;text-align:left;border-radius:14px;padding:4px 6px 6px;
   background:rgba(255,255,255,.035) !important;border:1px solid rgba(255,255,255,.08);}
 #jkc .jkw-grp summary{list-style:none;cursor:pointer;padding:8px 10px;display:grid;
@@ -2740,6 +2745,16 @@ _pending_tries = 0      # caps background-match → refresh rounds per opening
 _prewarm_back = [14]   # days back the background matching covers (End of block → 56)
 
 
+def _flush_weak_redo():
+    for mode in list(_weak_redo):           # weak areas waiting on these matches
+        _weak_redo.discard(mode)
+        _weak_cache.pop(mode, None)
+        if _view and _detail == WEAK and _weak_mode == mode:
+            _weak_compute(mode)
+        else:
+            QTimer.singleShot(0, lambda m=mode: _weak_compute(m))
+
+
 def _prewarm(back=None):
     """Match the nearby fortnight's classes to lectures in the background, a few at a
     time: each batch is its own short collection job, so a class page's card count (or
@@ -2765,6 +2780,7 @@ def _prewarm(back=None):
             seen.add(title)
             todo.append(title)
     if not todo:
+        _flush_weak_redo()      # nothing left to match: don't leave a view waiting
         return
     _warming = True
     _busy_update()
@@ -2791,13 +2807,7 @@ def _prewarm(back=None):
         global _warming
         _warming = False
         _busy_update()
-        for mode in list(_weak_redo):           # weak areas waiting on these matches
-            _weak_redo.discard(mode)
-            _weak_cache.pop(mode, None)
-            if _view and _detail == WEAK and _weak_mode == mode:
-                _weak_compute(mode)
-            else:
-                QTimer.singleShot(0, lambda m=mode: _weak_compute(m))
+        _flush_weak_redo()
         QTimer.singleShot(200, prime)
         if _view and getattr(mw, "state", None) == "deckBrowser":
             _swap("refresh")                       # colours/labels now that matches exist
