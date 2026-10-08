@@ -68,7 +68,8 @@ Janki now runs on Windows too. However, it does not meet my current performance 
 Download
 **[`janki-windows.ankiaddon`](https://github.com/cjreplogle/janki/releases)**
 
-Some features unavailable. 
+Some features unavailable. New installs start with the **Solid** window (fastest);
+pick a glass look in **Settings → General → Window glass**.
 
 ## Features
 
