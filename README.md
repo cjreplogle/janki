@@ -202,7 +202,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 </details>
 
 <details>
-<summary><b>2.10</b> · 2026-10-08 – 2026-10-13 · 4 releases</summary>
+<summary><b>2.10</b> · 2026-10-08 · 4 releases</summary>
 
 **2.10.3** · 2026-10-13
 
@@ -228,7 +228,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 </details>
 
 <details>
-<summary><b>2.9</b> · 2026-10-07 – 2026-10-08 · 4 releases</summary>
+<summary><b>2.9</b> · 2026-10-07 · 4 releases</summary>
 
 **2.9.3** · 2026-10-08
 
@@ -361,7 +361,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 </details>
 
 <details>
-<summary><b>2.7</b> · 2026-10-06 – 2026-10-07 · 4 releases</summary>
+<summary><b>2.7</b> · 2026-10-06 · 4 releases</summary>
 
 **2.7.3** · 2026-10-07
 
@@ -660,7 +660,7 @@ Windows users: see **2.7.3w** for the Windows rendering rewrite.
 </details>
 
 <details>
-<summary><b>1.9</b> · 2026-09-25 – 2026-09-27 · 5 releases</summary>
+<summary><b>1.9</b> · 2026-09-25 · 5 releases</summary>
 
 **1.9.4** · 2026-09-27
 
@@ -793,7 +793,7 @@ Re-import a bank's .pptx to pick up these fixes. Question IDs are positional, so
 </details>
 
 <details>
-<summary><b>1.7</b> · 2026-09-23 – 2026-09-25 · 7 releases</summary>
+<summary><b>1.7</b> · 2026-09-23 · 7 releases</summary>
 
 **1.7.6** · 2026-09-25
 
@@ -902,7 +902,7 @@ _Mobile display is a first cut — if a card misbehaves on a device, use Remove 
 </details>
 
 <details>
-<summary><b>1.6</b> · 2026-09-08 – 2026-09-22 · 7 releases</summary>
+<summary><b>1.6</b> · 2026-09-08 · 7 releases</summary>
 
 **1.6.6** · 2026-09-22
 
@@ -935,7 +935,7 @@ _Mobile display is a first cut — if a card misbehaves on a device, use Remove 
 </details>
 
 <details>
-<summary><b>1.5</b> · 2026-09-03 – 2026-09-07 · 15 releases</summary>
+<summary><b>1.5</b> · 2026-09-03 · 15 releases</summary>
 
 **1.5.12** · 2026-09-07
 
@@ -1000,7 +1000,7 @@ _Mobile display is a first cut — if a card misbehaves on a device, use Remove 
 </details>
 
 <details>
-<summary><b>1.4</b> · 2026-08-26 – 2026-08-29 · 5 releases</summary>
+<summary><b>1.4</b> · 2026-08-26 · 5 releases</summary>
 
 **1.4.4** · 2026-08-29
 
@@ -1025,7 +1025,7 @@ _Mobile display is a first cut — if a card misbehaves on a device, use Remove 
 </details>
 
 <details>
-<summary><b>1.3</b> · 2026-08-25 – 2026-08-26 · 9 releases</summary>
+<summary><b>1.3</b> · 2026-08-25 · 9 releases</summary>
 
 **1.3.8** · 2026-08-26
 
@@ -1092,7 +1092,7 @@ _Mobile display is a first cut — if a card misbehaves on a device, use Remove 
 </details>
 
 <details>
-<summary><b>1.0</b> · 2026-08-19 – 2026-08-20 · 2 releases</summary>
+<summary><b>1.0</b> · 2026-08-19 · 2 releases</summary>
 
 **1.0.1** · 2026-08-20
 
