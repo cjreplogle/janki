@@ -8,7 +8,7 @@ import sys
 
 from aqt import mw
 from aqt.qt import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
-                    QStackedWidget, QTimer, Qt, QCheckBox, QFileDialog)
+                    QStackedWidget, QTimer, Qt, QCheckBox, QFileDialog, QLineEdit)
 
 from ..util.config import _cfg, _cfg_raw, log
 
@@ -70,6 +70,94 @@ def _welcome_page():
               "mode, card timers, practice questions, lecture loading and more.<br><br>"
               "This quick setup takes about a minute. You can skip anything and change "
               "it later in Janki Settings (the gear on the main screen)."))
+
+
+SETUP_URL = "https://cjre.pl/ogle/janki/setup"
+
+
+def _calendar_page():
+    """Your class calendar (an .ics file or a calendar-feed link) — what the Calendar,
+    Load Lectures and Study Progress are built on, so it's the first real step."""
+    status = _status()
+    class _Edit(QLineEdit):
+        # Enter checks the calendar here — and isn't passed on to the dialog's default
+        # button (Next), which would skip past the result.
+        def keyPressEvent(self, ev):
+            if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                _use()
+                ev.accept()
+                return
+            super().keyPressEvent(ev)
+
+    edit = _Edit(str(_cfg().get("ics_path", "") or ""))
+    edit.setPlaceholderText("Paste your calendar link (https://…) or choose an .ics file")
+    browse = QPushButton("Browse…")
+    use = QPushButton("Use this calendar")
+    use.setAutoDefault(False)
+    browse.setAutoDefault(False)
+
+    def _pick():
+        fn, _f = QFileDialog.getOpenFileName(_dlg, "Choose your calendar file", "",
+                                             "Calendars (*.ics);;All files (*)")
+        if fn:
+            edit.setText(fn)
+            _use()
+
+    def _use():
+        path = edit.text().strip()
+        if not path:
+            status.setStyleSheet("color:#ff9d8a;font-weight:600;")
+            status.setText("Paste a link or choose a file first.")
+            return
+        status.setStyleSheet("color:#9cbcf3;font-weight:600;")
+        status.setText("Checking your calendar…")
+        use.setEnabled(False)
+        from ..integrations import lectures
+
+        def check():
+            return lectures._parse_ics_all(path)     # off the main thread: may download
+
+        def done(fut):
+            use.setEnabled(True)
+            try:
+                days = fut.result() or {}
+            except Exception:
+                days = {}
+            if not days:
+                status.setStyleSheet("color:#ff9d8a;font-weight:600;")
+                status.setText("⚠ No events found there. Check the link (it should end in "
+                               "the calendar export, often “.ics” or “?export”) or the file.")
+                return
+            try:
+                c = _cfg_raw()
+                c["ics_path"] = path
+                mw.addonManager.writeConfig(__name__, c)
+                lectures._ics_reset()
+                lectures.load_events_bg()
+            except Exception as e:
+                log("onboarding calendar: %s" % e)
+            status.setStyleSheet("color:#8fd18f;font-weight:600;")
+            status.setText("✓ Calendar set — classes on %d days." % len(days))
+        mw.taskman.run_in_background(check, done)
+
+    browse.clicked.connect(_pick)
+    use.clicked.connect(_use)
+    row = QHBoxLayout()
+    row.addWidget(edit, 1)
+    row.addWidget(browse)
+    row2 = QHBoxLayout()
+    row2.addWidget(use)
+    row2.addStretch()
+    return _page(
+        _title("Your class calendar"),
+        _body("Add your lecture calendar so Janki knows what's on each day — it powers "
+              "the Calendar, <b>Load Lectures</b> and Study Progress. Paste your "
+              "school's calendar-feed link (it updates itself) or choose a downloaded "
+              "<b>.ics</b> file. You can skip this and add it later in Settings → "
+              "Lectures → Calendar.<br><br>"
+              "Not sure where to find it? <a href='%s' style='color:#6ab0ff;'>Step-by-step "
+              "setup guide ↗</a>" % SETUP_URL),
+        row, row2, status)
 
 
 def _hotkeys_page():
@@ -239,7 +327,8 @@ def show() -> None:
             outer.setContentsMargins(m.left() + 6, 34, m.right() + 6, m.bottom())
         stack = QStackedWidget()
         hk_page, hk_timer = _hotkeys_page()
-        pages = [_welcome_page(), hk_page, _controller_page(), _lectures_page(), _done_page()]
+        pages = [_welcome_page(), _calendar_page(), _lectures_page(), hk_page,
+                 _controller_page(), _done_page()]
         for p in pages:
             stack.addWidget(p)
         outer.addWidget(stack, 1)
@@ -332,8 +421,9 @@ def _tour_pages():
         ("Today's lectures",
          "If your course has a spreadsheet matching lectures to Anki tags, <b>Load "
          "Lectures</b> (main screen) unsuspends exactly today's cards. Drop the "
-         "spreadsheet on the window to set it up; add your calendar for automatic "
-         "days. Details in Settings → Lectures."),
+         "spreadsheet on the window to set it up; add your calendar (a link or .ics file) "
+         "in Settings → Lectures → Calendar for automatic days. Setup guide: "
+         "cjre.pl/ogle/janki/setup"),
         ("Card rephrasing",
          "See the same card worded differently so you learn the idea, not the "
          "sentence. Press <b>Tab+R</b> while reviewing to switch versions. Import "

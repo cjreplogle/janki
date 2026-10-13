@@ -2471,8 +2471,23 @@ class GlassSettings(QDialog):
             self.close()                       # the tour runs on the main window
             _QTt.singleShot(150, onboarding.show_tour)
         self._tour_btn.clicked.connect(_open_tour)
+        # The first-launch setup window again (calendar, hotkeys, controller, lectures).
+        self._setup_btn = QPushButton("Janki setup…")
+        self._setup_btn.setToolTip("Run the first-launch setup again: calendar, background "
+                                   "hotkeys, controller and lecture map.")
+        self._setup_btn.setStyleSheet(self._tour_btn.styleSheet())
+
+        def _open_setup():
+            from ..features import onboarding
+            from aqt.qt import QTimer as _QTs
+            self.close()
+            _QTs.singleShot(150, onboarding.show)
+        self._setup_btn.clicked.connect(_open_setup)
         gen_lay.addSpacing(8)                  # gap in the layout, not a QSS margin
-        gen_lay.addWidget(self._tour_btn)
+        _tour_row = QHBoxLayout()
+        _tour_row.addWidget(self._tour_btn, 1)     # side by side, sharing the width
+        _tour_row.addWidget(self._setup_btn, 1)
+        gen_lay.addLayout(_tour_row)
 
         # --- Updates --------------------------------------------------------
         # Janki auto-checks on launch; this is the manual trigger (moved here from
