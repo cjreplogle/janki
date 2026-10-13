@@ -154,7 +154,7 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
-<details open>
+<details>
 <summary><b>2.11</b> · 2026-10-13 · 3 releases</summary>
 
 **2.11.2** · 2026-10-13
