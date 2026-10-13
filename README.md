@@ -36,10 +36,6 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 > On Windows, new installs start with the fastest **Solid** window; pick a glass look
 > in **Settings → General → Window glass** (the see-through look asks for one restart).
 
-**From source (devs):** copy the files into Anki's add-ons folder as `janki`
-(`~/Library/Application Support/Anki2/addons21/` on macOS,
-`%APPDATA%\Anki2\addons21\` on Windows).
-
 ### Uninstall
 - **macOS:** **Tools → Janki: Settings… → General → "Restore stock Anki (remove glass
   patch)"**, restart, then delete the add-on from **Tools → Add-ons**. That restores
