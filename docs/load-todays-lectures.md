@@ -1,96 +1,75 @@
 # Load Today's Lectures
 
-*Unsuspend the Anki cards for today's lectures, offline, in one click.*
+*Unsuspend today's lecture cards, offline, in one click.*
 
-It matches your schedule to your cards and **unsuspends** the ones for today's
-lectures. Everything runs **locally** — nothing is uploaded, and a calendar is
-optional. Adds **Tools → Load today's lectures** (in the full Janki add-on or the
+Janki matches your class schedule to your cards and **unsuspends** today's. It all
+runs **locally**. Open it from **Tools → Load today's lectures** (full Janki or the
 standalone `load-todays-lectures.ankiaddon`).
 
+A calendar is optional: with one, today's lectures are picked for you (and can load
+automatically each day); without one, you tick them yourself.
+
 ---
 
-## 1. Make/download a tag map
+## Find a tag map
 
-A **tag map** says which tag(s) belong to each lecture. This can be read as a 
-`.txt`, `.json`, and `.xlsx`. Easiest form to make is a `.txt` and file: 
-separate lectures with a line of `====`, put the lecture name between two
-rules, then list its tags (lines starting with `#`, `tag:`, or `deck:`). 
-`#AK…` tags match on their **last segment** (the concept), so they 
-keep working across deck versions.
+A **tag map** lists the tags or decks for each lecture. Your class may already share
+one (Janki testers: see the [setup page](https://cjre.pl/ogle/janki/setup/)), or make
+your own:
+
+<details>
+<summary><b>Spreadsheet (.xlsx)</b>, recommended</summary>
+
+One sheet per course. Each block of lectures has a **Corresponding Decks/Tags**
+header; Janki reads the columns around it:
+
+| Lecture | Corresponding Decks/Tags | AnKing |
+|---|---|---|
+| Amino Acid Disorders | `deck:"AJ::Biochem::Amino acids"` | `#AK_Step1_v12::Biochem::Amino_acids` |
+
+Blocks can sit side by side (e.g. one per biweekly).
+
+</details>
+
+<details>
+<summary><b>Text file (.txt)</b></summary>
+
+Lecture name between two `====` lines, then its tags (`#…`, `tag:…` or `deck:…`):
 
 ```text
-========================================
-<lecture_name>
-========================================
-<lecture_tag1>
-<lecture_tag2>
-<lecture_tag3>
+====================
+Amino Acid Disorders
+====================
+#AK_Step1_v12::Biochem::Amino_acids
+deck:"AJ::Biochem::Amino acids"
 ```
 
-<!-- ![A tag map in a text editor](images/tag-map.png) -->
+</details>
 
----
+<details>
+<summary><b>JSON (.json)</b></summary>
 
-## 2. First run
+```json
+{ "Amino Acid Disorders": ["#AK_Step1_v12::Biochem::Amino_acids"] }
+```
 
-**Tools → Load today's lectures** → click **Choose file…** and pick your map.
-It's saved for next time.
+</details>
 
-<p align="center"><img src="images/menu.png" alt="Tools → Load today's lectures" width="60%"></p>
-
-<p align="center"><img src="images/first-run.png" alt="First run — choose your tag map" width="60%"></p>
-
----
-
-## 3. Pick and apply
-
-The **Lectures** window opens.
-
-**With a calendar** — today's events are pre-matched; use **◀ Prev / Today /
-Next ▶** to change day, **Use** to include a row, and the **Matched lecture**
-dropdown to fix a wrong guess (`~` = fuzzy auto-guess).
-
-<p align="center"><img src="images/lectures-calendar.png" alt="Lectures window with a calendar" width="60%"></p>
-
-**Without a calendar** — every lecture is listed; just tick what you want. Use
-**➕ Import calendar…** (an `.ics` file *or* URL) to switch to day mode.
-
-<p align="center"><img src="images/lectures-manual.png" alt="Lectures window, manual mode" width="60%"></p>
-
-Also: **+** on a row opens its tags to enable/disable individual ones; **Apply**
-unsuspends; **Re-suspend day** undoes the shown day. The amber ⚠ and the **Exact
-matches only** checkbox are explained under Settings.
+`#AK…` tags match on their last part, so maps keep working across AnKing versions.
 
 ---
 
 ## Settings
 
-**Tools → Janki: Settings… → Lectures** (standalone: **… → Settings…**).
+**Tools → Janki: Settings… → Lectures**
 
-- **Base file** + extra **`.txt/.json`** lists (merged on top of the base).
-- **Calendar** — optional `.ics` file or URL.
-- **Run automatically on launch** — once/day, silently loads today (needs a
-  calendar).
-- **Exact matches only** — a checkbox by the amber ⚠ in the Lectures window. By
-  default an `#AK` concept with no exact tag in your collection is matched
-  loosely (`tag:*concept*`); tick this to use exact tags only.
+- **Sources**: your tag map, extra `.txt/.json` maps, and which decks to search.
+- **Behavior**: daily auto-load and matching options (defaults are fine).
+- **Calendar**: an `.ics` file or URL, and your timezone.
+- **Sync**: carry your lecture setup between computers (encrypted).
 
-<p align="center"><img src="images/settings.png" alt="Settings → Lectures: Sources" width="60%"></p>
+<p align="center"><img src="images/settings-sources.png" alt="Settings → Lectures → Sources" width="60%"></p>
 
-**Tools → Janki: Settings… → Behavior** (standalone: **… → Settings…**).
-- Lots of other controls to the search algorithm parameters here. Avoid touching
-  unless you know what you are doing.
+<p align="center"><img src="images/settings-calendar.png" alt="Settings → Lectures → Calendar" width="60%"></p>
 
----
-
-### `.json` format
-
-Object (lecture → tag(s)) or a list of `{name, tags}` objects — same tag syntax
-as `.txt`:
-
-```json
-{ "<lecture>": ["<tag>"] }
-```
-
-*Your schedule and collection stay on your machine; the network is only touched
-if you give it an `http(s)` calendar URL.*
+*Everything stays on your machine; the network is only used for a calendar URL or Sync.*
