@@ -252,3 +252,35 @@ def install_key_routing_log():
         _w("key routing log installed")
     except Exception as e:
         _w("key routing log failed %r" % e)
+
+
+# --- quit timeline (perf probe only): where the seconds go between Quit and exit ---
+def install_quit_timeline():
+    if not _ON:
+        return
+    try:
+        import atexit
+        from aqt import mw, gui_hooks
+        from aqt.main import AnkiQt
+        t0 = {"t": None}
+
+        def mark(what):
+            now = time.perf_counter()
+            if t0["t"] is None:
+                t0["t"] = now
+            _w("quit: %-28s +%dms" % (what, (now - t0["t"]) * 1000))
+
+        orig = AnkiQt.unloadProfileAndExit
+
+        def unloadProfileAndExit(self, *a, **k):
+            mark("quit asked")
+            return orig(self, *a, **k)
+        AnkiQt.unloadProfileAndExit = unloadProfileAndExit
+        gui_hooks.profile_will_close.append(lambda: t0["t"] is not None and mark("profile closing"))
+        gui_hooks.sync_will_start.append(lambda: t0["t"] is not None and mark("sync start"))
+        gui_hooks.sync_did_finish.append(lambda: t0["t"] is not None and mark("sync done"))
+        mw.app.aboutToQuit.connect(lambda: mark("Qt aboutToQuit"))
+        atexit.register(lambda: mark("python exit"))
+        _w("quit timeline installed")
+    except Exception as e:
+        _w("quit timeline failed %r" % e)

@@ -1498,6 +1498,7 @@ try:
         from aqt.qt import QTimer as _PQT
         gui_hooks.profile_did_open.append(lambda: _PQT.singleShot(4000, _perf_probe.install))
         gui_hooks.profile_did_open.append(_perf_probe.install_key_routing_log)
+        gui_hooks.profile_did_open.append(_perf_probe.install_quit_timeline)
 except Exception:
     pass
 

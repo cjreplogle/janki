@@ -1284,6 +1284,25 @@ def _borrow_rows(col):
     return out
 
 
+# Anki quitting: stop a borrow-index build in progress. It runs on Anki's task pool, and
+# Python waits for those threads before the app can exit — a build started ~15 s after
+# launch kept Anki open 3-4 s after Quit. (It's rebuilt when next needed.)
+_BORROW_QUIT = [False]
+
+
+def _borrow_stop(*_a):
+    _BORROW_QUIT[0] = True
+
+
+try:
+    from aqt import gui_hooks as _bq_gh
+    _bq_gh.profile_will_close.append(_borrow_stop)
+    # a profile switch also closes the profile: the next one may build again
+    _bq_gh.profile_did_open.append(lambda: _BORROW_QUIT.__setitem__(0, False))
+except Exception:
+    pass
+
+
 def build_borrow_index(col=None, raw=None):
     """Build the tagged-card similarity index from `raw` rows (see _borrow_rows).
 
@@ -1298,6 +1317,8 @@ def build_borrow_index(col=None, raw=None):
     toks = []
     for k, (nid, ts, flds) in enumerate(raw):
         if k % 40 == 39:
+            if _BORROW_QUIT[0]:
+                raise RuntimeError("quitting")       # see _BORROW_QUIT
             time.sleep(0.002)                        # let the main thread paint
         tk = set(_ct_tokens(flds.replace("\x1f", " ")))
         if tk:
@@ -1314,6 +1335,8 @@ def build_borrow_index(col=None, raw=None):
     inv = {}
     for k, (nid, ts, tk) in enumerate(toks):
         if k % 200 == 199:
+            if _BORROW_QUIT[0]:
+                raise RuntimeError("quitting")
             time.sleep(0.001)
         i = len(nids)
         nids.append(nid)
