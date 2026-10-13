@@ -426,7 +426,10 @@ def _practice_remote_pick(kc: int) -> bool:
         if n < 0 or n > 3:
             return False
         web = getattr(r, "web", None) or mw.web
-        web.eval("if(window.jankiPickVisible)window.jankiPickVisible(%d);" % n)
+        # A choice highlighted with the d-pad → any face button presses THAT one (like
+        # Enter); with nothing highlighted, A/B/C/D pick by position as before.
+        web.eval("if(!(window.jankiPickHighlighted&&window.jankiPickHighlighted())"
+                 "&&window.jankiPickVisible)window.jankiPickVisible(%d);" % n)
         _gtap_log(f"practice remote pick choice {n} (kc={kc})")
         return True
     except Exception as e:

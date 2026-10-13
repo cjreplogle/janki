@@ -129,7 +129,28 @@ _TPL = (
     "      sp.style.cssText='height:calc(76px + env(safe-area-inset-bottom));pointer-events:none;';\n"
     "      document.body.appendChild(sp);\n"
     "      var iv=setInterval(function(){if(!home||!document.body.contains(home)){\n"
-    "        clearInterval(iv);if(btn.parentNode)btn.remove();if(sp.parentNode)sp.remove();}},400);}\n"
+    "        clearInterval(iv);if(btn.parentNode)btn.remove();if(sp.parentNode)sp.remove();return;}\n"
+    "        avoid();},400);\n"
+    "      avoid();setTimeout(avoid,60);setTimeout(avoid,500);\n"
+    "      try{addEventListener('resize',avoid);}catch(e){}}\n"
+    # Other buttons pinned to the screen (the Practice "show original slide" button,
+    # a note type's own floating hint/resource buttons…) could sit right where this
+    # one floats. Find any fixed button it overlaps and lift it clear above them.
+    "    var lift=0;\n"
+    "    function avoid(){if(!btn.parentNode||btn.style.display==='none')return;\n"
+    "      var cand=document.querySelectorAll('button,a,[role=button],[onclick],.jp-slide-btn,input[type=button]');\n"
+    "      var base=btn.getBoundingClientRect(),need=0;\n"
+    "      var top0=base.top+lift,bot0=base.bottom+lift;\n"
+    "      for(var i=0;i<cand.length;i++){var c=cand[i];if(c===btn||btn.contains(c)||c.contains(btn))continue;\n"
+    "        var r=c.getBoundingClientRect();if(!r.width||!r.height)continue;\n"
+    "        var pos='';try{for(var e=c;e&&e!==document.body;e=e.parentElement){var p=getComputedStyle(e).position;\n"
+    "          if(p==='fixed'||p==='sticky'){pos=p;break;}}}catch(x){}\n"
+    "        if(!pos)continue;\n"
+    "        if(r.right<=base.left||r.left>=base.right)continue;\n"
+    "        if(r.bottom<=top0-2||r.top>=bot0+2)continue;\n"
+    "        need=Math.max(need,bot0-r.top+8);}\n"
+    "      if(need!==lift){lift=need;\n"
+    "        btn.style.bottom=need?'calc('+(30+need)+'px + env(safe-area-inset-bottom))':'';}}\n"
     "    var data=null;\n"
     "    try{data=JSON.parse(decodeURIComponent(escape(atob((el.textContent||'').trim()))));}"
     "catch(e){data=null;}\n"
@@ -356,8 +377,23 @@ def apply():
     (models_touched, notes_written). A schema change (new field) means the next sync
     is a one-way full sync."""
     col = mw.col
+    if not col:
+        return (0, 0)
+    reword.purge_practice()
+    # Practice questions baked by an older version: clear their phone copy.
+    try:
+        pm = col.models.by_name("Janki Practice")
+        if pm and FIELD in [f["name"] for f in pm["flds"]]:
+            fi = [f["name"] for f in pm["flds"]].index(FIELD)
+            for nid in col.db.list("select id from notes where mid=?", pm["id"]):
+                n = col.get_note(nid)
+                if n.fields[fi]:
+                    n.fields[fi] = ""
+                    col.update_note(n)
+    except Exception as exc:
+        log(f"reword mobile practice clear: {exc}")
     data = _by_note()
-    if not col or not data:
+    if not data:
         return (0, 0)
     from collections import defaultdict
     by_mid = defaultdict(list)
@@ -366,6 +402,8 @@ def apply():
             note = col.get_note(nid)
         except Exception:
             continue
+        if reword._is_practice(note):
+            continue                     # practice questions are never rephrased
         by_mid[note.mid].append((nid, dd))
 
     nmodels = nnotes = 0

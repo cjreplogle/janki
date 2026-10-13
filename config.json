@@ -78,6 +78,9 @@
   "preview_min_window_width": 900,
   "preview_window_cooldown_s": 1.5,
   "card_zoom": 0.9,
+  "card_zoom_by_deck": {},
+  "fit_images": true,
+  "ak_smart_trim": true,
   "card_timer": true,
   "card_timer_show_bar": true,
   "card_timer_bar_delay_ms": 500,
@@ -181,6 +184,7 @@
   "practice_match": "lenient",
   "lecture_source_skip": {},
   "card_tags_max": 6,
+  "card_tags_show": false,
   "calendar_fams_off": [
     "aj",
     "ak"

@@ -833,7 +833,7 @@ def _apply_card_zoom() -> None:
     web = getattr(mw, "web", None)
     if web is None:
         return
-    z = float(_cfg().get("card_zoom", 1.0))
+    z = _card_zoom()
     # Zoom ONLY #qa (the card content container). The reviewer's <body> carries the
     # class "card", so a ".card" selector zoomed the SCROLL CONTAINER itself — and a
     # zoomed scroll container mis-computes its scroll range in QtWebEngine, clipping
@@ -848,12 +848,108 @@ def _apply_card_zoom() -> None:
         web.eval(js)
     except Exception:
         pass
+    _fit_images(web, z, _deck_zoom_set())
+
+
+# Photos fitted to the window while a deck has no zoom of its own: each photo-sized image
+# (≥ 320×240 natural) is sized to the card's width, capped at ~78 % of the window
+# height, keeping its shape — big ones shrink to fit, smaller photos grow to fill.
+# Icons/small inline images and Image Occlusion are left alone; zooming a deck
+# (Ctrl +/−) turns it off there, so that zoom is exactly what you asked for.
+_FIT_JS = r"""(function(on){
+var M=320,N=240,H=0.78,Z=__Z__;   // #qa is zoomed by Z: size in its units
+function io(im){return im.closest('#image-occlusion-container,.image-occlusion,[id^="io-"]');}
+function fit(){var qa=document.getElementById('qa');if(!qa)return;
+ var W=qa.clientWidth||innerWidth;
+ qa.querySelectorAll('img').forEach(function(im){
+  if(!on||io(im)){if(im.dataset.jkFit){['width','height','max-width','max-height'].forEach(function(p){
+    im.style.removeProperty(p);});delete im.dataset.jkFit;}return;}
+  var nw=im.naturalWidth,nh=im.naturalHeight;
+  if(!nw||!nh){if(!im.dataset.jkFitWait){im.dataset.jkFitWait=1;im.addEventListener('load',fit,{once:true});}return;}
+  if(nw<M&&nh<N)return;
+  // the width of the box the photo sits in (an Extra/hint section can be narrower
+  // than the card), else the card's
+  var box=im.parentElement,bw=0;while(box&&box!==qa&&!bw){var cs=getComputedStyle(box);
+   if(cs.display!=='inline'&&cs.display!=='contents')bw=box.clientWidth;box=box.parentElement;}
+  var w=Math.min(bw||W,W,innerHeight*H/Z*nw/nh);
+  // !important: note types (AnKing's Extra) size their images with their own rules
+  if(im.dataset.jkFit&&im.style.width===Math.floor(w)+'px')return;   // unchanged: no write, no loop
+  im.style.setProperty('width',Math.floor(w)+'px','important');
+  im.style.setProperty('height','auto','important');
+  im.style.setProperty('max-width','100%','important');
+  im.style.setProperty('max-height','none','important');
+  im.dataset.jkFit=1;});}
+fit();setTimeout(fit,120);
+// photos in sections that open later (AnKing's Extra / hint buttons) or load late
+// Fit RIGHT AWAY too (observer callbacks run before the next paint): the back's
+// photos otherwise drew at full size first, Anki scrolled to the answer with those
+// sizes, then the fit resized them — the view jumped when Space showed the answer.
+// Only changes that involve images count: the text reveal makes hundreds of DOM/style
+// changes per card, and fitting on each one held up the answer appearing.
+function hasImg(n){return n&&n.nodeType===1&&(n.tagName==='IMG'||(n.querySelector&&n.querySelector('img')));}
+function relevant(rs){for(var i=0;i<rs.length;i++){var r=rs[i];
+ if(r.type==='childList'){for(var j=0;j<r.addedNodes.length;j++)if(hasImg(r.addedNodes[j]))return true;}
+ else if(r.target&&!(r.target.getAttribute&&r.target.getAttribute('data-jtw'))&&hasImg(r.target))return true;}
+ return false;}
+if(!window.__jkFitMo){window.__jkFitMo=1;var mt;new MutationObserver(function(rs){
+ if(!window.__jkFitOn||!window.__jkFit||!relevant(rs))return;
+ window.__jkFit();clearTimeout(mt);
+ mt=setTimeout(function(){window.__jkFitOn&&window.__jkFit&&window.__jkFit();},60);})
+ .observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});}
+if(!window.__jkFitRs){window.__jkFitRs=1;var t;addEventListener('resize',function(){
+ clearTimeout(t);t=setTimeout(function(){window.__jkFitOn&&fit();},100);});}
+window.__jkFitOn=on;window.__jkFit=fit;
+})(__ON__);"""
+
+
+def _deck_zoom_set() -> bool:
+    k = _zoom_deck_key()
+    return bool(k and k in (_cfg().get("card_zoom_by_deck") or {}))
+
+
+def _fit_images(web, z, custom):
+    on = not custom and bool(_cfg().get("fit_images", True))
+    try:
+        web.eval(_FIT_JS.replace("__ON__", "true" if on else "false")
+                 .replace("__Z__", "%g" % max(0.1, z)))
+    except Exception:
+        pass
+
+
+def _zoom_deck_key():
+    """The current card's home deck (its original deck when studied from a filtered
+    one): zoom is remembered per deck, since decks ship different font sizes."""
+    try:
+        c = mw.reviewer.card
+        if c is not None:
+            return str(c.odid or c.did)
+    except Exception:
+        pass
+    return None
+
+
+def _card_zoom() -> float:
+    cfg = _cfg()
+    k = _zoom_deck_key()
+    per = cfg.get("card_zoom_by_deck") or {}
+    if k and k in per:
+        return float(per[k])
+    return float(cfg.get("card_zoom", 1.0))
 
 
 def _change_card_zoom(delta: float) -> None:
     cfg = _cfg_raw()
-    z = max(0.5, min(3.0, round(float(cfg.get("card_zoom", 1.0)) + delta, 2)))
-    cfg["card_zoom"] = z
+    z = max(0.5, min(3.0, round(_card_zoom() + delta, 2)))
+    k = _zoom_deck_key()
+    if k:
+        per = dict(cfg.get("card_zoom_by_deck") or {})
+        if abs(z - float(cfg.get("card_zoom", 1.0))) < 1e-6:
+            per.pop(k, None)            # back to the default → no entry needed
+        else:
+            per[k] = z
+        cfg["card_zoom_by_deck"] = per
+    else:
+        cfg["card_zoom"] = z
     try:
         mw.addonManager.writeConfig(__name__, cfg)
     except Exception:

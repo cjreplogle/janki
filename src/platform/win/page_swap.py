@@ -77,7 +77,14 @@ def _swap(view, html, context) -> None:
             "(e.filename||'').split('/').pop()+':'+e.lineno);});</script>")
     i = html.find("<head>")
     doc = html[:i + 6] + grab + html[i + 6:] if i >= 0 else grab + html
-    js = ("(function(){document.open();document.write(%s);document.close();})();"
+    # document.open() drops every window/document listener but KEEPS window globals —
+    # including the "already installed" markers Janki's scripts set (window.__jkDeckKeys
+    # …). The rewritten page's scripts then saw their marker, skipped installing, and
+    # were left with no listeners: arrow keys did nothing on the Practice page. Clear
+    # the markers first so every script installs fresh, as on a real load.
+    js = ("(function(){try{Object.getOwnPropertyNames(window).forEach(function(k){"
+          "if(/^__(jk|janki|jp)/.test(k)){try{delete window[k];}catch(e){window[k]=undefined;}}});}"
+          "catch(e){}document.open();document.write(%s);document.close();})();"
           % json.dumps(doc))
 
     def _done(_r=None):

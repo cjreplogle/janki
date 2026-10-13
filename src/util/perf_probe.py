@@ -204,3 +204,51 @@ def install_review():
     except Exception:
         pass
     _w("review probe installed")
+
+
+# --- key routing (perf probe only): which widget each arrow key press is delivered to ---
+def install_key_routing_log():
+    if not _ON:
+        return
+    try:
+        from aqt import mw
+        from aqt.qt import QObject, QEvent, QApplication, Qt
+
+        names = {}
+
+        def who(w):
+            if w is None:
+                return "-"
+            for label, ref in (("main", getattr(mw, "web", None)),
+                               ("toolbar", getattr(getattr(mw, "toolbar", None), "web", None)),
+                               ("bottom", getattr(mw, "bottomWeb", None))):
+                try:
+                    if ref is not None and (w is ref or ref.isAncestorOf(w)):
+                        return label
+                except Exception:
+                    pass
+            return "%s(%s)" % (type(w).__name__, w.objectName() or "")
+
+        arrows = {Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
+                  Qt.Key.Key_Left: "Left", Qt.Key.Key_Right: "Right"}
+
+        class _KeyRoute(QObject):
+            def eventFilter(self, obj, ev):
+                try:
+                    if ev.type() == QEvent.Type.KeyPress and ev.key() in arrows \
+                            and isinstance(obj, QObject) and obj.isWidgetType():
+                        k = (ev.timestamp(), ev.key())
+                        if names.get("last") != k:          # first delivery only
+                            names["last"] = k
+                            _w("key %s → %s (focus %s, state %s)" % (
+                                arrows[ev.key()], who(obj), who(QApplication.focusWidget()),
+                                getattr(mw, "state", "?")))
+                except Exception:
+                    pass
+                return False
+        f = _KeyRoute(mw)
+        QApplication.instance().installEventFilter(f)
+        mw._jk_key_route_log = f
+        _w("key routing log installed")
+    except Exception as e:
+        _w("key routing log failed %r" % e)

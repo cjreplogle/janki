@@ -5666,7 +5666,8 @@ def enforce_slide_btn_style():
             from ..user.css import ui_font_stack
             from ..util.config import _cfg
             _font = ui_font_stack(_cfg())
-            _zoom = float(_cfg().get("card_zoom", 1.0))    # #qa carries this; body button doesn't
+            from ..features import focus as _fz
+            _zoom = _fz._card_zoom()    # #qa carries this; body button doesn't
         except Exception:
             _font = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
             _zoom = 1.0

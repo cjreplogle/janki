@@ -219,12 +219,30 @@ def _patch_tooltip():
                 glass.frost_popup_window(win, corner=10)   # rounded blur behind the pill
         QTimer.singleShot(0, _native_clear)
 
-        def _fade_out():
+        def _alive():
             try:
-                glass._fade_window(win, win.windowOpacity(), 0.0, 220,
-                                   then=lambda: (win.hide(), win.deleteLater()))
+                from aqt.qt import sip
+                return not sip.isdeleted(win)
             except Exception:
+                return True
+
+        def _gone():
+            if _alive():
                 win.hide()
+                win.deleteLater()
+
+        def _fade_out():
+            # The tooltip can already be gone (a newer one replaced it, or its parent
+            # window closed) by the time this timer fires.
+            if not _alive():
+                return
+            try:
+                glass._fade_window(win, win.windowOpacity(), 0.0, 220, then=_gone)
+            except Exception:
+                try:
+                    _gone()
+                except RuntimeError:
+                    pass
         QTimer.singleShot(max(0, period - 220), _fade_out)
 
     _orig = getattr(_aqtu, "_janki_orig_tooltip", None) or _aqtu.tooltip
@@ -357,7 +375,10 @@ def _startup():
         # /_addons/janki/assets/fonts/… (see css.lora_face_css). Safe/no-op if the
         # API is missing.
         try:
-            mw.addonManager.setWebExports(__name__, r"assets/fonts/.*\.(ttf|otf)$")
+            # (+ the sound files, so pages can play navigation sounds themselves — see
+            # sfx.web_player)
+            mw.addonManager.setWebExports(
+                __name__, r"assets/(fonts/.*\.(ttf|otf)|sounds/.*\.wav)$")
         except Exception as _we_exc:
             log("web exports: %s" % _we_exc)
 
@@ -1180,6 +1201,10 @@ def _startup():
             def _on_show_answer_late():
                 if getattr(getattr(mw, "reviewer", None), "state", None) != "answer":
                     return        # already rated past this answer
+                try:
+                    focus._apply_card_zoom()   # fit the back's photos (AnKing Extra…)
+                except Exception:
+                    pass
                 hud.caption_practice_gate()   # keep caption off on the practice back
                 hud._coherence_refresh()
                 css._apply_text_contrast()    # rescue near-black text on dark/OLED bg
@@ -1472,6 +1497,7 @@ try:
     if _perf_probe._ON and hasattr(gui_hooks, "profile_did_open"):
         from aqt.qt import QTimer as _PQT
         gui_hooks.profile_did_open.append(lambda: _PQT.singleShot(4000, _perf_probe.install))
+        gui_hooks.profile_did_open.append(_perf_probe.install_key_routing_log)
 except Exception:
     pass
 

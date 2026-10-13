@@ -985,7 +985,9 @@ def _weak_compute(mode, then=None):
     # 2 ------------------------------------------------------------------------
     def read(col):
         import time as _t
-        data = {"notes": col.db.all("select id, tags from notes"),
+        # the shared tag index (cached until notes change) instead of re-reading and
+        # re-splitting every note's tags on each recompute
+        data = {"tix": lectures._tag_index(col),
                 "cards": col.db.all("select id, nid, queue, type, due, "
                                     "case when odid then odid else did end from cards"),
                 "rev": col.db.all("select cid, ease, count() from revlog where id > ? and "
@@ -1019,14 +1021,9 @@ def _weak_compute(mode, then=None):
         import bisect
         import fnmatch
         import time as _t
-        tag_nids, leech_nids = {}, set()
-        for nid, tags in data["notes"]:
-            for t in (tags or "").split():
-                tl = t.lower()
-                tag_nids.setdefault(tl, []).append(nid)
-                if tl == "leech":
-                    leech_nids.add(nid)
-        keys = sorted(tag_nids)
+        tix = data["tix"]
+        tag_nids, keys = tix["nids"], tix["keys"]
+        leech_nids = set(tag_nids.get("leech", ()))
         nid_cards = {}
         for cid, nid, q, typ, d, did in data["cards"]:
             nid_cards.setdefault(nid, []).append((cid, q, typ, d, did))

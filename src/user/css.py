@@ -558,7 +558,7 @@ _DECK_KEYS_JS = r"""(function(){
    function(r){return r.querySelector('a.deck')&&r.offsetParent!==null;});}
  function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
    return td.textContent.match(/^\xa0*/)[0].length;}
- function sfx(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
+ function sfx(n){try{if(window.__jkPlay&&window.__jkPlay(n))return;pycmd('janki:sfx:'+n);}catch(x){}}
  var hid=null, idle=null;          // remembered row while the highlight is hidden
  var __jkSync=false;
  // Contanki (the remote) and Tab move the browser's focus between deck links: follow
@@ -569,7 +569,14 @@ _DECK_KEYS_JS = r"""(function(){
  function cur(){return document.querySelector('tr.deck.jk-kb-row');}
  function poke(){clearTimeout(idle);idle=setTimeout(function(){var c=cur();
    if(c){hid=c.id;sel(null,true);}},3000);}
+ // A selection made while the page is still dropping in (restore / ↓ from the toolbar
+ // right after a Decks/Practice switch): show the pill already in place so it rides
+ // the page's slide, instead of its own grow animation running out of step with it.
+ var LOADT=Date.now();
+ function instant(){var h=document.documentElement;h.classList.add('jk-kb-instant');
+   requestAnimationFrame(function(){requestAnimationFrame(function(){h.classList.remove('jk-kb-instant');});});}
  function sel(tr,keep){if(!keep)hid=null;var o=cur();
+   if(tr&&Date.now()-LOADT<450)instant();
    document.documentElement.classList.toggle('jk-kbnav',!!tr);if(o){o.classList.remove('jk-kb-row');
    var a=o.querySelector('a.deck');if(a)a.classList.remove('jk-kb');}
    if(!tr)return; tr.classList.add('jk-kb-row');
@@ -586,9 +593,17 @@ _DECK_KEYS_JS = r"""(function(){
    var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
    var k=e.key, rs=rows(); if(!rs.length)return;
    if(!/^(Arrow(Up|Down|Left|Right)|Enter| )$/.test(k))return;
+   // first key on this page: tell Python the keyboard is here now, so a pending
+   // "back to the toolbar" hand-off (after opening it by keyboard) stands down
+   if(!window.__jkKbHere){window.__jkKbHere=1;try{pycmd('janki:kbhere');}catch(x){}}
    var c=cur(), i=c?rs.indexOf(c):-1;
-   if(!c&&hid){var h=document.getElementById(hid);   // first press after idle:
-     if(h){e.preventDefault();sel(h);poke();return;}}   //   just show it again
+   // First press after the highlight idled away: bring it back AND act on the key.
+   // (It used to only re-show it, so the first ↓ after any pause seemed ignored —
+   // which felt like lag.) Enter/Space still just re-show, so they can't open a deck
+   // you couldn't see was selected.
+   if(!c&&hid){var h=document.getElementById(hid);
+     if(h){if(k==='Enter'||k===' '){e.preventDefault();sel(h);poke();return;}
+       sel(h);c=h;i=rs.indexOf(h);}}
    poke();
    if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
      if(!c){sel(start());return;}
@@ -679,9 +694,14 @@ _PAD_NAV_JS = r"""(function(){
    var ps=navigator.getGamepads?navigator.getGamepads():[];
    var mine=document.hasFocus();
    for(var i=0;i<ps.length;i++){var g=ps[i];if(!g)continue;
-     if(!mine){last={};continue;}
      var b=function(n){return !!(g.buttons[n]&&g.buttons[n].pressed);};
      var ax=g.axes||[], x=ax[0]||0, y=ax[1]||0;
+     // Not focused: remember what's held instead of forgetting it. Focus passes
+     // between views (toolbar ↔ deck list) WHILE the d-pad is still down, and a
+     // forgotten state made the newly focused page count that same press again —
+     // one ↓ landed on the second row.
+     if(!mine){last[i+'u']=b(12)||y<-0.5;last[i+'d']=b(13)||y>0.5;last[i+'l']=b(14)||x<-0.5;
+       last[i+'r']=b(15)||x>0.5;last[i+'a']=b(0)||b(1)||b(2)||b(3);held={};continue;}
      edge(i+'u',b(12)||y<-0.5,'ArrowUp');   edge(i+'d',b(13)||y>0.5,'ArrowDown');
      edge(i+'l',b(14)||x<-0.5,'ArrowLeft'); edge(i+'r',b(15)||x>0.5,'ArrowRight');
      edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');}
@@ -690,7 +710,7 @@ _PAD_NAV_JS = r"""(function(){
    // with no controller. Poll at ~60 Hz only while a pad is connected and we have
    // focus; otherwise check once a second.
    var any=false;for(var j=0;j<ps.length;j++){if(ps[j]){any=true;break;}}
-   setTimeout(tick, any&&mine?16:1000);}
+   setTimeout(tick, any?(mine?16:100):1000);}
  window.addEventListener('gamepadconnected',function(){setTimeout(tick,0);});
  tick();
 })();"""
@@ -1075,6 +1095,10 @@ def _build_css(cfg, context):
         "  --canvas-overlay: transparent !important; --frame-bg: transparent !important;\n"
         "  --bs-body-bg: transparent !important; --current-deck: transparent !important;\n"
         "  --window-bg: transparent !important; }\n"
+        # No rubber-band at the top/bottom: with the uncapped frame rate a scroll's
+        # momentum could occasionally overshoot into it — the page flung up past its
+        # top, then sprang back (deck list and reviewer alike).
+        "html, body { overscroll-behavior-y: none !important; }\n"
         # Nuke EVERY element background (keep form controls) so no theme color —\n"
         # navy or otherwise — can paint over the glass.
         "html body *:not(button):not(input):not(select):not(textarea):not(a.deck) {\n"
@@ -1245,9 +1269,43 @@ def _build_css(cfg, context):
         # selected row shows it
         parts.append("<style>html body tr.deck.current:not(:hover):not(.jk-kb-row) .gears"
                      "{visibility:hidden!important;}</style>\n")
+        parts.append("<style>html.jk-kb-instant a.deck,html.jk-kb-instant a.deck::before,"
+                     "html.jk-kb-instant a.deck .jk-dn{transition:none !important;}</style>\n")
         parts.append("<style>html.jk-kbnav a.deck{pointer-events:none;}"
                      "html body a.deck:focus,html body a.deck:focus-visible{outline:none!important;}</style>"
                      "<script>" + _DECK_KEYS_JS + "</script>\n")
+        try:
+            from ..features import sfx as _sfx
+            parts.append(_sfx.web_player())
+        except Exception as _wp_exc:
+            log("web sfx: %s" % _wp_exc)
+        # perf probe only (user_files/perf_probe): time each arrow key on the deck list —
+        # handlers, then the next two frames (≈ when the move is on screen)
+        try:
+            from ..util import perf_probe as _pp
+            if _pp._ON:
+                # immediate, no frame wait: did the page get the key at all, and where
+                parts.append("<script>(function(){if(window.__jkKbRaw)return;window.__jkKbRaw=1;"
+                             "function d(el){if(!el)return '-';var s=el.tagName||'?';if(el.id)s+='#'+el.id;"
+                             "if(el.className&&el.className.toString)s+='.'+el.className.toString().split(' ').slice(0,2).join('.');return s;}"
+                             "addEventListener('keydown',function(e){if(!/^Arrow/.test(e.key))return;"
+                             "var a=document.activeElement;while(a&&a.shadowRoot&&a.shadowRoot.activeElement)a=a.shadowRoot.activeElement;"
+                             "pycmd('janki:perfraw:'+e.key+'|target '+d(e.composedPath?e.composedPath()[0]:e.target)+'|focus '+d(a)+"
+                             "'|deckkeys '+(!!window.__jkDeckKeys)+'|rows '+document.querySelectorAll('tr.deck').length+"
+                             "'|hasFocus '+document.hasFocus());},true);"
+                             "pycmd('janki:perfraw:page loaded|deckkeys '+(!!window.__jkDeckKeys));})();</script>\n")
+                parts.append("<script>(function(){if(window.__jkKbPerf)return;window.__jkKbPerf=1;"
+                             "addEventListener('keydown',function(e){if(!/^Arrow/.test(e.key))return;"
+                             "var t0=performance.now(),q=(t0-e.timeStamp);setTimeout(function(){var t1=performance.now();"
+                             "requestAnimationFrame(function(){requestAnimationFrame(function(){"
+                             "var t2=performance.now();var n=document.getAnimations?document.getAnimations().length:-1;"
+                             "pycmd('janki:perfkb:'+(t1-t0).toFixed(1)+':'+(t2-t0).toFixed(1)+':'+n+':'+"
+                             "document.querySelectorAll('*').length+':'+q.toFixed(1)+':'+(Date.now()-(t2-t0)).toFixed(0)+':'+Date.now()+':'+"
+                             "((document.querySelector('tr.deck.jk-kb-row')||{}).id||'none')+':'+"
+                             "[].filter.call(document.querySelectorAll('tr.deck'),function(r){return r.querySelector('a.deck')&&r.offsetParent!==null;}).length+':'+"
+                             "(document.activeElement?(document.activeElement.tagName+'.'+(document.activeElement.className||'').toString().slice(0,30)):'-'));});});},0);},true);})();</script>\n")
+        except Exception:
+            pass
         # wrap each deck name's text in span.jk-dn — the part that slides on hover
         parts.append("<script>(function(){function w(){document.querySelectorAll('a.deck')"
                      ".forEach(function(a){if(a.querySelector('.jk-dn'))return;"
@@ -1654,16 +1712,39 @@ def _build_css(cfg, context):
         parts.append("<style>\n"
                      "#s2, .timer, .timeOverMsg { display: none !important; }\n"
                      "</style>\n")
+        # Showing the answer: Anki snaps the page so the answer divider (<hr id=answer>)
+        # is at the very top — on a long card that's a sudden jump down. If the divider
+        # is already on screen, stay put; otherwise glide to it instead of snapping.
+        parts.append("<script>(function(){if(window.__jkAnsScroll)return;window.__jkAnsScroll=1;\n"
+                     "var o=Element.prototype.scrollIntoView;\n"
+                     "Element.prototype.scrollIntoView=function(a){\n"
+                     " if(this.id==='answer'&&a===undefined){var r=this.getBoundingClientRect();\n"
+                     "  if(r.top>=0&&r.top<innerHeight*0.8)return;\n"
+                     "  return o.call(this,{behavior:'smooth',block:'start'});}\n"
+                     " return o.apply(this,arguments);};})();</script>\n")
+        # AnKing on desktop shows OnlineMedEd as a banner IMAGE at the top of the card
+        # (.banner-ome) and hides its button (#button-ome, phones only). Swap that: no
+        # banner, and the OnlineMedEd button sits in the bottom row with Sketchy /
+        # Bootcamp / … (it's already there in the template), styled the same.
+        parts.append("<style>html body .banner-ome{display:none !important;}"
+                     "html body #button-ome{display:inline-block !important;}</style>\n")
+        # Card tags (AnKing's tag list) are hidden unless switched on (Appearance).
+        if not cfg.get("card_tags_show", False):
+            parts.append("<style>#tags-container{display:none !important;}</style>\n")
         # Card tags (AnKing #tags-container): its line-height is .45rem, so long
         # tags that wrap onto multiple lines overlap. Give it a real line-height,
         # let items wrap with spacing, and dim it.
         parts.append("<style>\n"
                      "#tags-container {\n"
-                     "  opacity: 0.4 !important;\n"
+                     "  opacity: 0.4 !important; font-size: .68rem !important;\n"
+                     # not typed with the card (they sit apart, pinned to the bottom,
+                     # and popped in on their own); a soft fade once the card is up
+                     "  animation: jkTagsIn .45s ease .25s backwards;\n"
                      "  line-height: 1.5 !important;\n"
                      "  display: flex !important; flex-wrap: wrap !important;\n"
                      "  justify-content: center !important; gap: 2px 6px !important;\n"
                      "  align-items: flex-start !important;\n}\n"
+                     "@keyframes jkTagsIn{from{filter:opacity(0)}to{filter:opacity(1)}}\n"
                      "#tags-container > * {\n"
                      "  line-height: 1.4 !important; white-space: nowrap !important;\n"
                      "  margin: 0 !important; float: none !important; }\n"
@@ -1677,27 +1758,89 @@ def _build_css(cfg, context):
                      "  position: fixed !important; left: 12px !important; right: 12px !important;\n"
                      "  bottom: 6px !important; top: auto !important; z-index: 3 !important;\n"
                      "  max-height: 4.6em !important; overflow: hidden !important;\n"
-                     "  pointer-events: auto !important; transition: opacity .2s ease;\n}\n"
+                     # the bar spans the width, but only the tags themselves take clicks:
+                     # its empty space no longer blocks the card content under it
+                     "  pointer-events: none !important; transition: opacity .2s ease;\n}\n"
+                     "#tags-container > *, #tags-container .jk-tag-more { pointer-events: auto !important; }\n"
                      "#tags-container:hover { opacity: .85 !important; }\n"
+                     # Only once you've scrolled down into the card yourself: out of sight
+                     # (and click-through) at the top, fades in as you scroll down.
+                     "html:not(.jk-tags-scrolled) #tags-container { visibility: hidden !important;\n"
+                     "  pointer-events: none !important; }\n"
+                     "html:not(.jk-tags-scrolled) #tags-container * { pointer-events: none !important; }\n"
                      "#tags-container.jk-tags-open { max-height: 40vh !important;\n"
                      "  overflow-y: auto !important; opacity: .9 !important; }\n"
-                     "#tags-container > .jk-tag-hide { display: none !important; }\n"
-                     "#tags-container .jk-tag-more { cursor: pointer; text-decoration: underline;\n"
-                     "  text-underline-offset: 2px; }\n"
-                     "body { padding-bottom: 5em !important; }\n"
+                     "#tags-container .jk-tag-hide, #tags-container .jk-tag-dup,\n"
+                     "#tags-container.jk-tags-dupbar { display: none !important; }\n"
+                     "#tags-container .jk-tag-more { cursor: pointer; text-decoration: none !important;\n"
+                     "  white-space: nowrap; background: transparent; }\n"
+                     "#tags-container .jk-tag-more:hover { color: #fff !important; }\n"
+                     "body { padding-bottom: var(--jk-tags-h, 5em) !important; }\n"
                      "</style>\n"
                      "<script>(function(){var MAX=%d;\n"
-                     "function cap(){var c=document.getElementById('tags-container');\n"
-                     " if(!c||c.dataset.jkCapped||MAX<=0)return;c.dataset.jkCapped='1';\n"
-                     " var k=[].slice.call(c.children);if(k.length<=MAX)return;\n"
-                     " k.slice(MAX).forEach(function(x){x.classList.add('jk-tag-hide');});\n"
-                     " var m=document.createElement('span');m.className='jk-tag-more';\n"
-                     " m.textContent='+'+(k.length-MAX)+' more';\n"
-                     " m.onclick=function(e){e.stopPropagation();var o=c.classList.toggle('jk-tags-open');\n"
-                     "  k.slice(MAX).forEach(function(x){x.classList.toggle('jk-tag-hide',!o);});\n"
-                     "  m.textContent=o?'show less':'+'+(k.length-MAX)+' more';};c.appendChild(m);}\n"
-                     "new MutationObserver(cap).observe(document.documentElement,{childList:true,subtree:true});\n"
-                     "document.addEventListener('DOMContentLoaded',cap);cap();})();</script>\n"
+                     # The list is filled in by the note type's own script AFTER our first
+                     # look, so this re-runs on every change (it used to lock in on the
+                     # first, still-empty pass and never cap). Tags may sit in a wrapper.
+                     "function items(c){var k=[].slice.call(c.children).filter(function(x){\n"
+                     "  return !x.classList.contains('jk-tag-more');});\n"
+                     " while(k.length===1&&k[0].children.length>1)k=[].slice.call(k[0].children);\n"
+                     " return k;}\n"
+                     # Each tag shows only its last part ("…::05_Pedigrees" → "Pedigrees");
+                     # the full tag is on hover.
+                     "function short(x){if(x.dataset.jkShort)return;var t=(x.textContent||'').trim();\n"
+                     " if(t.indexOf('::')<0)return;x.dataset.jkShort='1';x.title=t;\n"
+                     " var leaf=t.split('::').pop().replace(/^\\d+_/,'').replace(/_/g,' ');\n"
+                     " var w=document.createTreeWalker(x,NodeFilter.SHOW_TEXT,null),n,first=true;\n"
+                     " while(n=w.nextNode()){if(!n.nodeValue.trim())continue;n.nodeValue=first?leaf:'';first=false;}}\n"
+                     # The answer side repeats the front ({{FrontSide}}), so there can be TWO
+                     # #tags-container: show only the last one and cap that one.
+                     "function bars(){return [].slice.call(document.querySelectorAll('[id=\"tags-container\"]'));}\n"
+                     "function cap(){var all=bars();if(!all.length)return;\n"
+                     " var c=all[all.length-1];all.forEach(function(x){if(x!==c)x.classList.add('jk-tags-dupbar');});\n"
+                     " c.classList.remove('jk-tags-dupbar');\n"
+                     " try{var k=items(c);k.forEach(short);\n"
+                     " var seen={};k.forEach(function(x){var t=(x.textContent||'').trim().toLowerCase();\n"
+                     "  if(seen[t])x.classList.add('jk-tag-dup');seen[t]=1;});\n"
+                     " k=k.filter(function(x){return !x.classList.contains('jk-tag-dup');});\n"
+                     " var open=c.classList.contains('jk-tags-open');\n"
+                     " k.forEach(function(x,i){x.classList.toggle('jk-tag-hide',MAX>0&&i>=MAX&&!open);});\n"
+                     " var m=c.querySelector(':scope > .jk-tag-more');\n"
+                     " if(MAX>0&&k.length>MAX){if(!m){m=document.createElement('span');m.className='jk-tag-more';\n"
+                     "   m.onclick=function(e){e.stopPropagation();c.classList.toggle('jk-tags-open');cap();};c.appendChild(m);}\n"
+                     "  m.textContent=open?'show less':'+'+(k.length-MAX)+' more';\n"
+                     # look like the tags beside it (the note type styles those pills):
+                     # same font, size, padding and rounding, in a neutral grey
+                     "  try{var cs=getComputedStyle(k[0]),st=m.style;\n"
+                     "   ['fontFamily','fontSize','fontWeight','lineHeight','padding','borderRadius','borderWidth','letterSpacing']\n"
+                     "   .forEach(function(p){st[p]=cs[p];});\n"
+                     "   st.borderStyle='solid';st.borderColor='rgba(160,160,160,.55)';st.color='rgba(190,190,190,.9)';\n"
+                     "   st.display=cs.display==='inline'?'inline-block':cs.display;st.alignSelf='center';}catch(e){}}\n"
+                     " else if(m)m.remove();}catch(e){}}\n"
+                     # Room under the card = the bar's real height (it grows when "+N more"
+                     # is opened or tags wrap), so the end of the card can always scroll
+                     # clear of it instead of sitting underneath.
+                     "function room(){var all=bars(),c=all[all.length-1];\n"
+                     " var hid=!c||getComputedStyle(c).display==='none';\n"
+                     " document.documentElement.style.setProperty('--jk-tags-h',hid?'0px':(c.getBoundingClientRect().height+14)+'px');\n"
+                     " if(c&&!c.__jkRo&&window.ResizeObserver){c.__jkRo=new ResizeObserver(room);c.__jkRo.observe(c);}}\n"
+                     # The note type rebuilds its tag list with its own script right after
+                     # the card shows (AnKing swaps in <kbd> pills). Changes made while we
+                     # were working used to be ignored, so that rebuild stayed uncapped.
+                     # Now: settle 30 ms after the last change, and pause watching while
+                     # we edit so our own changes don't loop.
+                     "var MO,T=null,ROOT=document.documentElement,OPT={childList:true,subtree:true};\n"
+                     "function run(){T=null;MO.disconnect();try{cap();room();}finally{MO.observe(ROOT,OPT);}}\n"
+                     "MO=new MutationObserver(function(){if(T)clearTimeout(T);T=setTimeout(run,30);});\n"
+                     "MO.observe(ROOT,OPT);document.addEventListener('DOMContentLoaded',run);run();\n"
+                     # shown after a scroll YOU made (wheel / touch / keys / scrollbar), not
+                     # one the page makes on its own; back at the top → hidden again
+                     "var lu=0;['wheel','touchmove','keydown','mousedown'].forEach(function(e){\n"
+                     " addEventListener(e,function(){lu=Date.now();},{passive:true});});\n"
+                     "function sy(){return window.pageYOffset||ROOT.scrollTop||0;}\n"
+                     "addEventListener('scroll',function(){var y=sy();\n"
+                     " if(y<=24)ROOT.classList.remove('jk-tags-scrolled');\n"
+                     " else if(y>40&&Date.now()-lu<1500)ROOT.classList.add('jk-tags-scrolled');},{passive:true});\n"
+                     "})();</script>\n"
                      % _tmax)
         # Focus Mode: while chrome is hidden, hide the card tags AND vertically
         # centre the card in the window. Re-applied on every render so it survives
@@ -1850,6 +1993,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
         "        if(t==='SCRIPT'||t==='STYLE'||t==='TEMPLATE') return true;\n"
         "        if((p.id||'')==='jk-rw-bar') return true;   // reword control bar (toggle + arrow)\n"
+        "        if((p.id||'')==='tags-container') return true;   // card tags: fade in, not typed\n"
         "        if(t.indexOf('AMBOSS')===0) return true;   // AMBOSS custom elements\n"
         "        if(p.classList && (p.classList.contains('MathJax')||\n"
         "            p.classList.contains('MathJax_Preview')||p.classList.contains('mjx-chtml')||\n"
@@ -1871,7 +2015,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "    function outerSig(){ var c=qa.cloneNode(true), cs=c.querySelectorAll('.cloze');\n"
         "      for(var i=0;i<cs.length;i++){ cs[i].textContent=''; }\n"
         "      return (c.textContent||'').replace(/\\s+/g,' ').trim(); }\n"
-        "    function totalMs(total){ return Math.max(MIN_MS,Math.min(MAX_MS,(total/5)/WPM*60000))/SPEED; }\n"
+        # One steady typing rate for every card: the old 2.6 s cap made any card past
+        # ~300 characters type faster than a short one. The cap is now a safety limit
+        # (≥ 4.5 s) that only very long visible text reaches.
+        "    function totalMs(total){ return Math.max(MIN_MS,Math.min(Math.max(MAX_MS,4500),(total/5)/WPM*60000))/SPEED; }\n"
         # WIPE reveal: one holder per text node (no per-char DOM at all), clip-path
         # animated left→right via the Web Animations API — the browser interpolates
         # ONE property per holder declaratively instead of Janki's JS toggling
@@ -1892,7 +2039,6 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      var g=gen, nodes=collect(clozeOnly);\n"
         "      var totalChars=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!totalChars){ reveal(); done(); return; }\n"
-        "      var MS=totalMs(totalChars);\n"
         # EVERY <li> around the text (not just the nearest): a parent item whose text is
         # all in a nested list / child element otherwise kept its bullet from the start
         "      function jkLi(tn){ var out=[], p=tn.parentElement; while(p && p!==qa){\n"
@@ -1917,7 +2063,25 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      holders.forEach(function(h){ h.liFirst=[]; (h.li||[]).forEach(function(li){\n"
         "        if(liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden';\n"
         "          h.liFirst.push(li); } }); });\n"
+        # Pace by VISIBLE text only: whitespace between tags and text in hidden
+        # sections (AnKing's collapsed extras) used to count, which sped the visible
+        # text up and left invisible pauses — speed varied by note type.
+        # …and only text you can actually SEE now: AnKing backs carry sections that are
+        # laid out but invisible (visibility:hidden, zero-size collapses) and long
+        # extras far below the window (opacity is not checked: the card fades in, and a
+        # fading card would read as invisible). Typing those at the steady rate looked like the
+        # reveal suddenly crawling — they now just appear (weight 0).
+        # measured AFTER reveal(): the card is visibility:hidden until then, which the
+        # visibility check would read as "nothing to see" (holders are still clipped)
         "      reveal();\n"
+        "      var VH=innerHeight;\n"
+        "      function seen(el){ var rs=el.getClientRects(); if(!rs.length) return false;\n"
+        "        try{ if(el.checkVisibility && !el.checkVisibility({checkVisibilityCSS:true})) return false; }catch(e){}\n"
+        "        var r=rs[0]; if(r.top>VH) return false;\n"
+        "        for(var i=0;i<rs.length;i++){ if(rs[i].width>0&&rs[i].height>0) return true; } return false; }\n"
+        "      var totalW=0; holders.forEach(function(h){ var vis=seen(h.el);\n"
+        "        h.w=vis ? h.text.replace(/\\s+/g,' ').trim().length : 0; totalW+=h.w; });\n"
+        "      var MS=totalMs(totalW), cumW=0, T0=0;\n"
         "      function finishHolder(h){ try{ var par=h.el.parentNode;\n"
         "        if(par){ par.replaceChild(document.createTextNode(h.text), h.el); par.normalize(); } }catch(e){} }\n"
         "      function finishAll(){ for(var L=0;L<liSeen.length;L++){ try{ liSeen[L].style.visibility=''; }catch(e){} }\n"
@@ -1931,7 +2095,14 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        if(idx>=holders.length){ finishAll(); return; }\n"
         "        var h=holders[idx++];\n"
         "        h.liFirst.forEach(function(li){ try{ li.style.visibility=''; }catch(e){} });\n"
-        "        var dur=Math.max(16, MS*(h.text.length/totalChars));\n"
+        "        if(!T0) T0=performance.now();\n"
+        # nothing visible to type (whitespace / hidden): show it now, no pause
+        "        if(!h.w){ finishHolder(h); next(); return; }\n"
+        # timed against one clock for the whole card, so the gaps between pieces
+        # don't add up on cards with lots of formatting. (T0, not t0: the per-char
+        # fallback below declares its own `var t0`, which hoists over this function
+        # and restarted the clock per piece — each piece then ran longer than the last.)
+        "        cumW+=h.w; var dur=Math.max(16, T0+MS*cumW/totalW-performance.now());\n"
         "        var oneLine=h.el.getClientRects().length<=1;\n"
         "        if(oneLine && typeof h.el.animate==='function'){\n"
         "          var rtl=getComputedStyle(h.el).direction==='rtl';\n"
@@ -2903,7 +3074,34 @@ def _calendar_showing():
         return False
 
 
+_TBKEEP = {"n": 0}     # pending "keyboard back to the toolbar" hand-off (janki:tbkeep)
+
+
 def on_js_message(handled, message, context):
+    if isinstance(message, str) and message.startswith("janki:perfraw:"):
+        try:
+            from ..util import perf_probe as _pp
+            _pp._w("deck raw: " + message[len("janki:perfraw:"):])
+        except Exception:
+            pass
+        return (True, None)
+    if isinstance(message, str) and message.startswith("janki:perfkb:"):
+        try:
+            from ..util import perf_probe as _pp
+            parts_ = message.split(":")[2:]
+            h, f, n, els = parts_[:4]
+            q = parts_[4] if len(parts_) > 4 else "?"
+            kd = parts_[5] if len(parts_) > 5 else "?"
+            drawn = parts_[6] if len(parts_) > 6 else "?"
+            selrow = parts_[7] if len(parts_) > 7 else "?"
+            nrows = parts_[8] if len(parts_) > 8 else "?"
+            act = ":".join(parts_[9:]) if len(parts_) > 9 else "?"
+            _pp._w("deck arrow: key→page %sms, handlers %sms, on screen %sms, animations %s, "
+                   "elements %s, keydown@%s drawn@%s, selected row %s of %s rows, focus %s"
+                   % (q, h, f, n, els, kd, drawn, selrow, nrows, act))
+        except Exception:
+            pass
+        return (True, None)
     if isinstance(message, str) and message.startswith("janki:deckmenu:"):
         try:
             _deck_menu(int(message.rsplit(":", 1)[1]))
@@ -2914,6 +3112,13 @@ def on_js_message(handled, message, context):
         try:
             from ..system import updater as _upd
             _upd.install_available()
+        except Exception:
+            pass
+        return (True, None)
+    if message == "janki:toolbar:practice":      # ↑ off the top of a practice question
+        try:
+            mw.toolbar.web.setFocus()
+            mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter('janki_practice');")
         except Exception:
             pass
         return (True, None)
@@ -2940,7 +3145,11 @@ def on_js_message(handled, message, context):
         except Exception:
             pass
         return (True, None)
+    if message == "janki:kbhere":
+        _TBKEEP["n"] += 1          # keys used on the page: cancel the hand-back
+        return (True, None)
     if message == "janki:deckfocus":
+        _TBKEEP["n"] += 1          # cancels a pending hand-back to the toolbar
         try:
             from ..features import stats_embed as _se
             if _se.is_open() and _se._web is not None:
@@ -2958,7 +3167,15 @@ def on_js_message(handled, message, context):
         tid = message.split(":", 2)[2]
         try:
             from aqt.qt import QTimer
+            _TBKEEP["n"] += 1
+            tok = _TBKEEP["n"]
+
             def _back():
+                # ↓ into the page before this fired (janki:deckfocus bumps the token):
+                # leave the keyboard there. Pulling it back to the toolbar made the next
+                # ↓ re-enter on the first row — a back-and-forth on a quick ↓.
+                if _TBKEEP["n"] != tok:
+                    return
                 try:
                     mw.toolbar.web.setFocus()
                     mw.toolbar.web.eval("window.jkToolbarEnter&&window.jkToolbarEnter(%r);"

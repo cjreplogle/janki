@@ -62,12 +62,20 @@ _JS = r"""<script>(function(){
    ev.preventDefault(); ev.stopPropagation();
    document.documentElement.classList.add('jk-kbnav');
    var c=cur(), i=c?v.indexOf(c):-1, d=(k==='ArrowDown'||k==='ArrowRight')?1:-1;
+   // ↑ above the first answer leaves the choices for the toolbar, on Practice — the
+   // way ↑ on a normal card goes up to the toolbar
+   if(k==='ArrowUp'&&i===0){sel(null);document.documentElement.classList.remove('jk-kbnav');
+     sfx('move');try{pycmd('janki:toolbar:practice');}catch(x){}return;}
    sfx('move'); sel(v[i<0?(d>0?0:v.length-1):Math.max(0,Math.min(v.length-1,i+d))]);
  },true);
  // Python asks this on Enter/Space: pick the highlighted choice if there is one.
  window.jankiPickHighlighted=function(){var c=cur();if(!c||!vis().length)return false;
    sel(null);document.documentElement.classList.remove('jk-kbnav');
    if(c.__jpPick)c.__jpPick();else c.click();return true;};
+ // the d-pad script's Enter (a synthetic key — it never reaches Anki's own Enter
+ // handling): press the highlighted choice
+ window.addEventListener('keydown',function(ev){if(ev.isTrusted||ev.key!=='Enter')return;
+   if(window.jankiPickHighlighted()){ev.preventDefault();ev.stopImmediatePropagation();}},true);
 })();</script>
 <style>html.jk-kbnav .jp-choice{pointer-events:none;}
 #jk-pq-sel{position:absolute;left:0;top:0;pointer-events:none;z-index:50;
@@ -87,7 +95,15 @@ def _is_practice(card):
 def _dpad_js():
     try:
         from ..user import css as _css
-        js = _css._PAD_NAV_JS.replace("edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');", "")
+        # Face buttons don't send Enter here (with remote mode they pick A/B/C/D) —
+        # EXCEPT while a choice is highlighted with the d-pad: then they press it.
+        # Remote mode handles that natively (keytap._practice_remote_pick), so only
+        # add it here when remote mode is off (no double press).
+        from ..util.config import _cfg
+        face = ("" if _cfg().get("practice_remote_mode", False) else
+                "edge(i+'a',(b(0)||b(1)||b(2)||b(3))&&!!document.querySelector"
+                "('.jp-choice.jp-kb'),'Enter');")
+        js = _css._PAD_NAV_JS.replace("edge(i+'a',b(0)||b(1)||b(2)||b(3),'Enter');", face)
         return "<script>" + js + "</script>"
     except Exception:
         return ""

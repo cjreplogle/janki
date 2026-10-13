@@ -93,7 +93,49 @@ def _cfg():
     cfg.setdefault("fuzzy_cutoff", 0.72)
     cfg.setdefault("match_coverage", 0.6)
     cfg.setdefault("ak_exact_only", False)
+    cfg.setdefault("ak_smart_trim", True)
+    if not cfg.get("sources_unified"):
+        _unify_sources(cfg)
     return cfg
+
+
+# One switch per source (Settings → Lectures → Sources). It used to be two lists:
+# "Include … tags" (Behavior; dropped a source from the tag map everywhere) and
+# "Sources the Calendar uses" (hid it on the Calendar only). The switch is the
+# unsuspend_<fam> key; the Calendar's own quick chips (calendar_fams_off) stay a
+# view filter within the sources that are on.
+_SOURCE_GROUP = {"aj": ("aj",), "huc": ("huc",),
+                 "ak": tuple(s for s, _m, _l in TAG_FAMILIES if s not in ("aj", "huc"))}
+
+
+def source_on(fam, cfg=None):
+    cfg = cfg if cfg is not None else _cfg()
+    return bool(cfg.get("unsuspend_%s" % fam, fam in _DEFAULT_ON))
+
+
+def set_source(cfg, fam, on):
+    """Switch a source on/off everywhere (tag map, Calendar, Study Progress, loading).
+    Turning AnKing off also turns off the AnKing-content tag families (FirstAid,
+    Sketchy…); turning it on switches on #AK itself."""
+    for s_ in (_SOURCE_GROUP.get(fam, (fam,)) if not on else (fam,)):
+        cfg["unsuspend_%s" % s_] = bool(on)
+    if on:      # on in Settings → also shown on the Calendar
+        cfg["calendar_fams_off"] = [f for f in (cfg.get("calendar_fams_off") or [])
+                                    if f != fam]
+
+
+def _unify_sources(cfg):
+    """One-time: a source stays on only if it was on in BOTH old lists."""
+    off = set(cfg.get("calendar_fams_off") or [])
+    for fam in ("ak", "huc", "aj"):
+        if fam in off:
+            set_source(cfg, fam, False)
+    cfg["calendar_fams_off"] = sorted(off - {"ak", "huc", "aj"})
+    cfg["sources_unified"] = True
+    try:
+        mw.addonManager.writeConfig(__name__, cfg)
+    except Exception:
+        pass
 
 
 def _enabled_families(cfg=None):
@@ -308,7 +350,7 @@ def _get_map(families):
     txts = tuple((cfg.get("txt_paths") or []))
     key = (base, _src_mtime(base),
            tuple((t, _src_mtime(t)) for t in txts),
-           tuple(families))
+           tuple(families), bool(cfg.get("ak_smart_trim", True)))
     if _MAP_CACHE["key"] != key:
         m = build_lecture_map(families)
         _ak_index_reset()            # the whole-collection tag index is only for the build
@@ -613,6 +655,7 @@ def _ak_tag_index():
         tags = mw.col.tags.all()
     except Exception:
         return {}
+    trim = bool(_cfg().get("ak_smart_trim", True))
     by_src_leaf = {}
     by_leaf = {}
     seen = set()      # (prefix) already indexed — AnKing's tags share long prefixes
@@ -621,6 +664,8 @@ def _ak_tag_index():
         if not t.startswith(_AK_PREFIXES):
             continue
         segs = t.split("::")
+        if trim and len(segs) > 1 and segs[1].lower() in _AK_TRIM_SKIP:
+            continue                 # question-bank IDs / AnKing bookkeeping
         src = _norm_source(segs[1]) if len(segs) > 1 else ""
         # Store the tag CUT at the matching segment, not the full tag: Anki's
         # `tag:A::B` already matches every A::B::… child, so one prefix replaces
@@ -648,6 +693,15 @@ def _ak_tag_index():
     return idx
 
 
+# Smart AnKing trim (Lectures → Behavior): about half of AnKing's tags are question-
+# bank IDs (UWorld/AMBOSS/COMBANK/USMLE-Rx) or AnKing's own bookkeeping, which no
+# lecture concept needs. Skipping them, capping each concept's tags and dropping
+# the wildcard fallback keeps AnKing searches small on slower computers.
+_AK_TRIM_SKIP = {"#uworld", "#amboss", "#combank", "#usmlerx", "!ak_updatetags",
+                 "original_decks", "#resources_by_rotation"}
+_AK_TRIM_CAP = 40
+
+
 def _ak_leaf_search(leaf, source=None):
     """Search fragment for an AnKing (source, leaf): an OR of the EXACT tags that
     have `leaf` as a ::-segment under `source`. When a source is given we use it
@@ -665,6 +719,12 @@ def _ak_leaf_search(leaf, source=None):
     if not tags:
         # No source (or that source has no such leaf) → any-source leaf match.
         tags = idx["by_leaf"].get(key)
+    if tags and _cfg().get("ak_smart_trim", True) and len(tags) > _AK_TRIM_CAP:
+        # Broadest first (a short prefix already covers its children): a concept
+        # that sprawls over hundreds of tags keeps its main ones.
+        tags = sorted(tags, key=lambda t: (t.count("::"), t))[:_AK_TRIM_CAP]
+    if not tags and _cfg().get("ak_smart_trim", True):
+        return None          # no exact tag: skip the slow whole-collection wildcard
     if not tags:
         # Nothing in THIS collection has this leaf as an exact ::-segment — the
         # AnKing deck is likely named/versioned differently here. Match by leaf
@@ -3307,17 +3367,8 @@ def build_settings_pages():
     auto_cb.setChecked(cfg.get("auto_on_launch", True))
     bg.addWidget(auto_cb, 0, 0, 1, 2)
 
-    bg.addWidget(QLabel("<b>Include tags from these decks:</b>"), 1, 0, 1, 2)
-    # One checkbox per spreadsheet tag family, packed two-per-row. Decks not in
-    # the collection ship off; tick one to pull its tags in once it's imported.
-    fam_cbs = {}
-    row = 2
-    for i, (suffix, _match, label) in enumerate(TAG_FAMILIES):
-        cb = QCheckBox("Include %s tags" % label)
-        cb.setChecked(bool(cfg.get("unsuspend_%s" % suffix, suffix in _DEFAULT_ON)))
-        bg.addWidget(cb, row + i // 2, i % 2)
-        fam_cbs[suffix] = cb
-    row += (len(TAG_FAMILIES) + 1) // 2
+    row = 1
+    # Which sources are on lives in Lectures → Sources (one switch per source).
 
     # With AnKing on, the launch auto-load is skipped unless opted in here (its tag
     # map is huge: minutes of work on every launch). Manual loads always include it.
@@ -3336,15 +3387,23 @@ def build_settings_pages():
     row += 1
 
     def _ak_warn_update(*_a):
-        ak = fam_cbs.get("ak")
-        ak_on = bool(auto_cb.isChecked() and ak is not None and ak.isChecked())
+        ak_on = bool(auto_cb.isChecked() and source_on("ak"))
         ak_auto_cb.setVisible(ak_on)
         ak_warn.setVisible(ak_on and ak_auto_cb.isChecked())
     ak_auto_cb.toggled.connect(_ak_warn_update)
     auto_cb.toggled.connect(_ak_warn_update)
-    if "ak" in fam_cbs:
-        fam_cbs["ak"].toggled.connect(_ak_warn_update)
     _ak_warn_update()
+
+    trim_cb = QCheckBox("Smart-trim AnKing tags (faster)")
+    trim_cb.setChecked(bool(cfg.get("ak_smart_trim", True)))
+    trim_cb.setToolTip(
+        "Keeps AnKing searches small so the Calendar, Study Progress and lecture "
+        "loading stay quick on slower computers: skips question-bank ID tags "
+        "(UWorld, AMBOSS, COMBANK, USMLE-Rx) and AnKing's bookkeeping tags, keeps at "
+        "most %d tags per concept (the broadest ones), and drops loose matches. "
+        "May find slightly fewer AnKing cards." % _AK_TRIM_CAP)
+    bg.addWidget(trim_cb, row, 0, 1, 2)
+    row += 1
 
     bg.addWidget(QLabel("Fuzzy match cutoff:"), row, 0)
     fuzzy = QDoubleSpinBox()
@@ -3383,8 +3442,7 @@ def build_settings_pages():
         cur["ics_path"] = ics_edit.text().strip()
         cur["auto_on_launch"] = auto_cb.isChecked()
         cur["auto_load_with_ak"] = ak_auto_cb.isChecked()
-        for suffix, cb in fam_cbs.items():
-            cur["unsuspend_%s" % suffix] = cb.isChecked()
+        cur["ak_smart_trim"] = trim_cb.isChecked()
         cur["fuzzy_cutoff"] = float(fuzzy.value())
         cur["match_coverage"] = float(coverage.value())
         cur["timezone"] = tz_edit.text().strip() or "America/New_York"

@@ -129,11 +129,27 @@ def _make_card_timer():
         while Anki is frontmost, so this never steals focus from another app."""
         if not state._anki_focused:
             return
+        # Only repair a focus the overlay actually took: if another Anki window
+        # (Browse, the editor, Settings, a dialog) is the active one, leave it alone —
+        # forcing the main window key here pulled focus out of those mid-typing.
         try:
-            msg, _cls = _bridge()
+            from aqt.qt import QApplication
+            aw = QApplication.activeWindow()
+            if aw is not None and aw is not mw:
+                return
+        except Exception:
+            pass
+        try:
+            msg, cls = _bridge()
             main = msg(c_void_p, c_void_p(int(mw.winId())), b"window")
             if main and not msg(c_bool, main, b"isKeyWindow"):
-                msg(None, main, b"makeKeyWindow")
+                app = msg(c_void_p, cls("NSApplication"), b"sharedApplication")
+                key = msg(c_void_p, app, b"keyWindow") if app else None
+                _iv = lambda x: int(getattr(x, "value", x) or 0)
+                # nothing key (the overlay knocked it off) → give it back; some other
+                # real window key → it's the user's choice, keep it
+                if not _iv(key):
+                    msg(None, main, b"makeKeyWindow")
         except Exception:
             pass
         try:
@@ -1083,6 +1099,14 @@ def _make_card_timer():
         def _tick(self):
             if not self._active:
                 return
+            # Paused while you're in another app (unless the caption is up — that's
+            # built for studying alongside other apps): time away shouldn't count, so
+            # coming back doesn't land straight on the red flare.
+            try:
+                if not state._anki_focused and not hud._caption_visible():
+                    return
+            except Exception:
+                pass
             self._elapsed += TICK_MS
             p = self._elapsed / self._dur
             self._bar.set_state(min(1.0, p), p >= 1.0)

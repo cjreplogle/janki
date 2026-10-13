@@ -591,6 +591,11 @@ class GlassSettings(QDialog):
 
         # Card tags (e.g. AnKing's tag list) pinned above the answer buttons: how many
         # show before the rest fold behind "+N more".
+        self._tags_show = QCheckBox("Show card tags (e.g. AnKing's)")
+        self._tags_show.setChecked(bool(self.cfg.get("card_tags_show", False)))
+        self._tags_show.setToolTip("The tag list some note types (like AnKing's) print at "
+                                   "the bottom of the card. Hidden by default.")
+        app_text_lay.addWidget(self._tags_show)
         _tg_row = QHBoxLayout()
         _tg_row.addWidget(QLabel("Card tags shown"))
         self._tags_max = QSpinBox()
@@ -606,6 +611,16 @@ class GlassSettings(QDialog):
         _tg_row.addWidget(QLabel("(the rest behind “+N more”; next card)"))
         _tg_row.addStretch(1)
         app_text_lay.addLayout(_tg_row)
+        _tg_w = [w for w in (self._tags_max,)]
+
+        def _tags_show_changed(on):
+            self.cfg["card_tags_show"] = bool(on)
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            for w in _tg_w:
+                w.setEnabled(bool(on))
+        self._tags_show.toggled.connect(_tags_show_changed)
+        for w in _tg_w:
+            w.setEnabled(self._tags_show.isChecked())
 
         # Hover / press motion on the deck list, toolbar and buttons (stands down on its
         # own while the Anki Redesign add-on is enabled, which brings its own).
@@ -3248,9 +3263,10 @@ class GlassSettings(QDialog):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 10, 0, 0)
-        head = QLabel("<b>Sources the Calendar uses</b>")
+        head = QLabel("<b>Sources</b>")
         lay.addWidget(head)
-        note = QLabel("Untick a source to ignore it. Press + to see the decks its cards "
+        note = QLabel("Untick a source to turn it off everywhere: the Calendar, Study "
+                      "Progress and loading lectures. Press + to see the decks its cards "
                       "were found in; untick a deck to leave it out of searches.")
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -3261,9 +3277,7 @@ class GlassSettings(QDialog):
         body.addWidget(wait)
 
         def save_off(fam, on):
-            off = set(self.cfg.get("calendar_fams_off") or [])
-            (off.discard if on else off.add)(fam)
-            self.cfg["calendar_fams_off"] = sorted(off)
+            _lec.set_source(self.cfg, fam, on)
             mw.addonManager.writeConfig(__name__, self.cfg)
 
         def save_skip(fam, deck, on):
@@ -3279,12 +3293,11 @@ class GlassSettings(QDialog):
 
         def fill(found):
             wait.hide()
-            off = set(self.cfg.get("calendar_fams_off") or [])
             skip = self.cfg.get("lecture_source_skip") or {}
             for fam, label in _lec.FAMILY_LABEL.items():
                 decks = found.get(fam) or []
                 src = QCheckBox(label if decks else "%s  — no cards found" % label)
-                src.setChecked(fam not in off)
+                src.setChecked(_lec.source_on(fam, self.cfg))
                 f = src.font(); f.setBold(True); src.setFont(f)
                 hrow = QHBoxLayout()
                 hrow.addWidget(src)

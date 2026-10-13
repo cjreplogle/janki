@@ -279,6 +279,8 @@ def apply(text: str, card, kind) -> str:
         return text
     try:
         note = card.note()
+        if _is_practice(note):
+            return text            # practice questions are never rephrased
         rec = _load().get(_key(note.id, card.ord, side))
         if not rec:
             return text
@@ -567,6 +569,19 @@ def _is_cloze(note) -> bool:
         return int(note.note_type().get("type", 0)) == 1
     except Exception:
         return False
+
+
+def _is_practice(note) -> bool:
+    """Janki Practice question cards are never rephrased (the question must read
+    exactly as written)."""
+    try:
+        return (note.note_type() or {}).get("name") == "Janki Practice"
+    except Exception:
+        return False
+
+
+def _no_reword(note) -> bool:
+    return _is_image_occlusion(note) or _is_practice(note)
 
 
 def _is_image_occlusion(note) -> bool:
@@ -1527,7 +1542,7 @@ def reword_card(card, sides=("q", "a"), n: int = 1) -> int:
         note = card.note()
     except Exception:
         return 0
-    if _is_image_occlusion(note):
+    if _no_reword(note):
         return 0                              # image/mask card — nothing to reword
     is_cloze = _is_cloze(note)
     terms = _cloze_terms(note, card.ord) if is_cloze else []
@@ -2139,7 +2154,7 @@ def _rp_build_items(card_ids=None, deck_id=None, deck_ids=None, limit=0, skip_do
     cloze_notes = set()
     for c in cards:
         note = c.note()
-        if _is_image_occlusion(note):
+        if _no_reword(note):
             continue                          # image/mask cards have nothing to reword
         is_cloze = _is_cloze(note)
         if (is_cloze and not cloze) or (not is_cloze and not basic):
@@ -2970,6 +2985,11 @@ def import_rp_text(raw: str, set_name=None):
             if str(local) != parts[0]:                  # same note, different id on this device
                 parts[0] = str(local)
                 key = ":".join(parts)
+            try:
+                if _is_practice(mw.col.get_note(int(parts[0]))):
+                    _skip("practice question (never rephrased)"); continue
+            except Exception:
+                pass
             if len(parts) == 2 and parts[1] == "n":
                 n_ok = _import_cloze_note(parts[0], variants, store, _skip)
                 if n_ok:
@@ -3421,7 +3441,7 @@ def _prefetch_extract(card, force=False):
     dict (no collection refs) or None. `force` regenerates even if valid variants already
     exist (used to refresh a card after it was viewed); otherwise skips cards already done."""
     note = card.note()
-    if _is_image_occlusion(note):
+    if _no_reword(note):
         return None                           # don't pre-load rewords for image-occlusion cards
     is_cloze = _is_cloze(note)
     terms = _cloze_terms(note, card.ord) if is_cloze else []
@@ -3615,3 +3635,35 @@ def warm_up() -> None:
         mw.taskman.run_in_background(_work, lambda *_a: None, uses_collection=False)
     except Exception:
         pass
+
+
+def purge_practice() -> int:
+    """Delete stored rephrasings of Janki Practice questions (they're never rephrased;
+    any that exist came from before that rule). Returns how many card sides went."""
+    col = getattr(mw, "col", None)
+    if col is None:
+        return 0
+    try:
+        mid = (col.models.by_name("Janki Practice") or {}).get("id")
+        if not mid:
+            return 0
+        pn = {str(n) for n in col.db.list("select id from notes where mid=?", mid)}
+        store = _load()
+        gone = [k for k in list(store) if str(k).split(":")[0] in pn]
+        for k in gone:
+            store.pop(k, None)
+        if gone:
+            _save()
+            log("reword: removed %d practice-question rephrasings" % len(gone))
+        return len(gone)
+    except Exception as exc:
+        log(f"reword purge practice: {exc}")
+        return 0
+
+
+try:
+    from aqt import gui_hooks as _gh
+    from aqt.qt import QTimer as _QT
+    _gh.profile_did_open.append(lambda: _QT.singleShot(6000, purge_practice))
+except Exception:
+    pass

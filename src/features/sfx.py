@@ -116,6 +116,60 @@ def play(name, force=False):
         log("sfx play: %s" % e)
 
 
+def _level(c, name):
+    """Final 0–1 volume for a sound, or None if it wouldn't play (same rules as play)."""
+    vol = int(c.get("sfx_volume", 0))
+    if vol <= 0 or c.get("sfx_muted", False):
+        return None
+    if name in (c.get("sfx_disabled") or []):
+        return None
+    if name in NAV and not c.get("sfx_nav", True):
+        return None
+    if name in REVIEW and not c.get("sfx_review", True):
+        return None
+    try:
+        gain = float((c.get("sfx_gain") or {}).get(name, 100)) / 100.0
+    except Exception:
+        gain = 1.0
+    gain *= _cat_gain(c, name)
+    if name in _IN_REVIEW_SOFT:
+        gain *= 0.5
+    return max(0.0, min(1.0, vol / 100.0 * gain))
+
+
+def web_player(names=("move", "select", "back", "open", "fold", "unfold", "page")) -> str:
+    """A tiny in-page player for navigation sounds (Web Audio), so a key press's sound
+    starts inside the page instead of a round trip to Python's QSoundEffect on Anki's
+    main thread — that round trip held up the redraw, so arrowing through decks
+    lagged only with sounds on. window.__jkPlay(name) returns false when it can't
+    (custom sound set, sounds off, not loaded) and the caller falls back to pycmd."""
+    import json
+    c = _cfg()
+    if _bank() == "custom" or sys.platform.startswith("win"):
+        return ""
+    cfg = {}
+    for n in names:
+        lv = _level(c, n)
+        if lv is None:
+            cfg[n] = None
+        elif os.path.isfile(_path(n)):
+            cfg[n] = {"u": "/_addons/%s/assets/sounds/%s/%s.wav"
+                           % (mw.addonManager.addonFromModule(__name__), _bank(), n),
+                      "v": round(lv, 3)}
+    return ("<script>(function(){var C=%s,ctx=null,buf={},last={};\n"
+            "function ac(){if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return ctx;}\n"
+            "function load(n){var c=C[n];if(!c||buf[n]||!ac())return;buf[n]='…';\n"
+            " fetch(c.u).then(function(r){return r.arrayBuffer();}).then(function(a){return ctx.decodeAudioData(a);})\n"
+            " .then(function(b){buf[n]=b;}).catch(function(){delete buf[n];});}\n"
+            "setTimeout(function(){Object.keys(C).forEach(load);},400);\n"
+            "window.__jkPlay=function(n){if(!(n in C))return false;var c=C[n];if(!c)return true;\n"
+            " var b=buf[n];if(!b||b==='…'||!ac())return false;\n"
+            " var t=performance.now();if(last[n]&&t-last[n]<80)return true;last[n]=t;\n"
+            " try{if(ctx.state==='suspended')ctx.resume();var s=ctx.createBufferSource(),g=ctx.createGain();\n"
+            "  s.buffer=b;g.gain.value=c.v;s.connect(g);g.connect(ctx.destination);s.start();return true;}\n"
+            " catch(e){return false;}};})();</script>\n" % json.dumps(cfg))
+
+
 def loaded():
     """A file finished importing / loading successfully."""
     play("loaded")
