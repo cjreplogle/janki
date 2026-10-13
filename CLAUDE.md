@@ -36,7 +36,7 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   `shell.py` (foreground, Run-key login, file associations, overlays/owned windows),
   `kiosk.py` (lockdown: key blocking, netsh Wi-Fi, WM_CLOSE).
 
-## Windows specifics (beta, 2.1.x)
+## Windows specifics
 - On Windows `ACTIVE=True` always; `GLASS` has a crash guard (`user_files/win_glass_pending`
   → `win_glass_failed`; cleared 4s after start and on clean quit).
 - **See-through glass needs the pre-launch hook** (`preboot.py`): `janki_win_glass.pth`
@@ -85,6 +85,9 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.
   Installs older than 2.1.1 can't see this channel (manual install once).
+- **Also attach `janki-windows.ankiaddon` to the normal (Mac) release** — the website's
+  Windows download is `/releases/latest/download/janki-windows.ankiaddon`, and "latest"
+  skips pre-releases. Safe for the updater (tags compare numerically: `2.11.2` = `2.11.2w`).
 - Local dev checkout: set `"auto_update_check": false` so the updater doesn't overwrite it.
 
 ## Testing without Windows hardware (from the Mac)

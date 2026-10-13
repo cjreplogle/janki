@@ -12,57 +12,42 @@
 
 ## Install
 
-Runs as a plugin on top of Anki. No separate app.
-Two builds — pick one (each link always downloads the latest release):
+Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
+**Windows** (each link always downloads the latest release):
 
-- **[⬇ Download `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)**
-  — the full frosted-glass experience. Adds a small, self-healing, reversible
-  **patch layer** to Anki that enables the transparency (details below). I use this.
-- **[⬇ Download `load-todays-lectures.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/load-todays-lectures.ankiaddon)**
-  — a bare-bones version of the add-on that simply has the
-  [Load today's lectures](docs/load-todays-lectures.md) import functionality.
-  Designed for if you don't care for any of the other features.
+- **[⬇ Download for macOS — `janki.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki.ankiaddon)**
+- **[⬇ Download for Windows — `janki-windows.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/janki-windows.ankiaddon)**
+- **[⬇ Lectures only — `load-todays-lectures.ankiaddon`](https://github.com/cjreplogle/janki/releases/latest/download/load-todays-lectures.ankiaddon)**
+  — a bare-bones add-on with just the [Load today's lectures](docs/load-todays-lectures.md)
+  import, for if you don't care for any of the other features.
 
 1. **Install Anki** (if you haven't yet) from [apps.ankiweb.net](https://apps.ankiweb.net).
 2. **Double-click the downloaded `.ankiaddon`** (Anki opens and installs it), or in Anki:
    **Tools → Add-ons → Install from file…** → pick the file.
-3. **Restart Anki.** On first launch Janki applies a small one-time patch to Anki
-   so the frosted glass can work, then asks you to **quit and reopen once**. Do
-   that, and the glass is on. From then on, just open Anki normally.
+3. **Restart Anki.** A short setup walks you through the rest (your calendar, hotkeys,
+   controller). On macOS, Janki applies a small one-time patch so the frosted glass can
+   work and asks you to **quit and reopen once** — do that and the glass is on.
 
 > [!NOTE]
-> **Why the one-time patch + restart?** True transparency needs a setting applied
+> **Why the one-time patch + restart (macOS)?** True transparency needs a setting applied
 > before Anki starts drawing — something an add-on alone can't do. Janki modifies
 > two of Anki's own files to enable it (backups are kept), and **re-applies
 > automatically after any Anki update**, prompting a quick restart when it does.
+> On Windows, new installs start with the fastest **Solid** window; pick a glass look
+> in **Settings → General → Window glass** (the see-through look asks for one restart).
 
-
-
-**From source (devs):** copy the files into
-`~/Library/Application Support/Anki2/addons21/janki/`.
+**From source (devs):** copy the files into Anki's add-ons folder as `janki`
+(`~/Library/Application Support/Anki2/addons21/` on macOS,
+`%APPDATA%\Anki2\addons21\` on Windows).
 
 ### Uninstall
-Because the glass involves a small patch to Anki's own files, remove it the clean
-way: **Tools → Janki: Settings… → General → "Restore stock Anki (remove glass
-patch)"**, restart, then delete the add-on from **Tools → Add-ons**. That restores
-Anki's original files (repairing its signature) and clears everything Janki added,
-so nothing is left behind.
-
-**Windows:** **Tools → Janki: Uninstall…** (also in Settings → General) removes
-Janki and everything it added in one click, then closes Anki.
+- **macOS:** **Tools → Janki: Settings… → General → "Restore stock Anki (remove glass
+  patch)"**, restart, then delete the add-on from **Tools → Add-ons**. That restores
+  Anki's original files (repairing its signature) and clears everything Janki added.
+- **Windows:** **Tools → Janki: Uninstall…** (also in Settings → General) removes
+  Janki and everything it added in one click, then closes Anki.
 
 > To change or disable any feature: **Tools → Janki: Settings…**
-
-
-### Windows (beta)
-
-Janki now runs on Windows too. However, it does not meet my current performance and quality standards. Using it in its current state will be buggy. If you still feel so inclined, you may try it for yourself below.
-
-Download
-**[`janki-windows.ankiaddon`](https://github.com/cjreplogle/janki/releases)**
-
-Some features unavailable. New installs start with the **Solid** window (fastest);
-pick a glass look in **Settings → General → Window glass**.
 
 ## Features
 
