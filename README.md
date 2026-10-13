@@ -1163,9 +1163,7 @@ device. There may be bugs, issues, or inaccuracies I have not yet identified. In
 application therefore, I cannot be liable for any unintentional damages to user Anki data 
 or glitches. Please only upload content to non-local LLMs with permission.
 
-## License
-
-Licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LICENSE)).
+**License:** Janki is licensed under the **GNU Affero General Public License v3.0** (see [LICENSE](LICENSE)).
 Janki extends [Anki](https://github.com/ankitects/anki), which is also AGPL-3.0; the
 self-heal patches Anki's own files locally at runtime and does not redistribute
 Anki's source.
