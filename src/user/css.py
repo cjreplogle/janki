@@ -480,8 +480,13 @@ def _qbank_fit_js(dbg=False):
     #     sync-status clearing) re-renders the page and resets it to the top, often
     #     TWICE. We remember the user's last position and restore it as content
     #     settles, plus a short watchdog that re-corrects a delayed snap-to-top.
-    "var _py=0,_lu=0,_o=null;var SK='__janki_db_scroll';\n"
-    "function _mu(){_lu=Date.now();}\n"
+    "var _py=0,_lu=0,_o=null,_touched=false,_dh=0;var SK='__janki_db_scroll';\n"
+    # Once you've scrolled this page yourself, the restore-after-render below is off
+    # for good: a late restore timer firing mid-scroll yanked the list back up.
+    "function _mu(){_lu=Date.now();_touched=true;}\n"
+    # No scroll anchoring: Chromium shifting the page as late content (stats, chart)
+    # lays out above you fought the jump-revert below — the list flung up, then back.
+    "try{document.documentElement.style.overflowAnchor='none';}catch(e){}\n"
     "function _sy(){return window.pageYOffset||document.documentElement.scrollTop||0;}\n"
     "['wheel','touchstart','touchmove','keydown','mousedown'].forEach(function(ev){\n"
     "try{window.addEventListener(ev,_mu,{passive:true});}catch(e){}});\n"
@@ -490,14 +495,17 @@ def _qbank_fit_js(dbg=False):
     "function _restore(){if(_o&&_o.y>6){_py=_o.y;window.scrollTo(0,_o.y);}}\n"
     # restore as content settles after a (re-)render, unless the user is scrolling
     "if(_o){[0,80,250,600,1000,1500].forEach(function(ms){setTimeout(function(){\n"
-    "if(Date.now()-_lu>400)_restore();},ms);});}\n"
+    "if(!_touched)_restore();},ms);});}\n"
     # watchdog (~8s): catch a delayed snap-to-top from the sync-status clearing
     "var _n=0,_wd=setInterval(function(){_n++;\n"
-    "if(_o&&_o.y>6&&_sy()<6&&Date.now()-_lu>500)_restore();\n"
+    "if(_o&&_o.y>6&&_sy()<6&&!_touched)_restore();\n"
     "if(_n>40)clearInterval(_wd);},200);\n"
     "try{window.addEventListener('scroll',function(){\n"
-    "var y=_sy();\n"
-    "if(Math.abs(y-_py)>120&&Date.now()-_lu>250){window.scrollTo(0,_py);return;}\n"
+    "var y=_sy(),dh=document.documentElement.scrollHeight,grew=_dh&&dh!==_dh;_dh=dh;\n"
+    # Revert only a real programmatic yank (AMBOSS jumping to its widget): not while
+    # a scroll gesture or its momentum is still going (1 s), and not when the page
+    # just changed height (that's layout settling, not a yank).
+    "if(Math.abs(y-_py)>120&&Date.now()-_lu>1000&&!grew){window.scrollTo(0,_py);return;}\n"
     "_py=y;\n"
     # only a genuine user scroll updates the saved target (programmatic ones don't)
     "if(Date.now()-_lu<300){_o={y:y,t:Date.now()};\n"

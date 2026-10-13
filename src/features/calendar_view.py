@@ -1546,10 +1546,20 @@ def study_event(e, fams=None, which="all"):
         tooltip("Switch on at least one source first.")
         return
     col = mw.col
+    # Practice question cards carry the lecture's tags too. Studying a class gives
+    # just its flashcards unless interspersing is on; the Practice button is the way
+    # to the questions.
+    try:
+        from . import intersperse
+        no_q = not intersperse._enabled()
+    except Exception:
+        no_q = True
+    nq = ' -note:"Janki Practice"' if no_q else ""
     try:
         _restore_suspended()
         _cleanup_temp()
-        sus = _cids(col, q, "is:suspended") if which != "active" else []
+        sus = _cids(col, q, ("is:suspended" + nq) if nq else "is:suspended") \
+            if which != "active" else []
         if sus:
             _save_resuspend(sus)
             col.sched.unsuspend_cards(sus)
@@ -1561,7 +1571,7 @@ def study_event(e, fams=None, which="all"):
             term = _cid_term(_cids(col, q, "-is:suspended -is:buried"))
         else:
             term = _cid_term(_cids(col, q, "-is:buried"))
-        d["terms"] = [[term, 99999, 0]]
+        d["terms"] = [[term + nq, 99999, 0]]
         d["resched"] = True
         col.decks.save(d)
         col.sched.rebuild_filtered_deck(did)
