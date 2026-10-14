@@ -11,7 +11,6 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   print stats or masked text only; copies of the collection go in a temp dir and are deleted.
 - **Don't read the user's `.ics` calendar**; the lecture spreadsheet only minimally.
 - Never bundle copyrighted card content.
-- `docs/windows-port-plan.md` stays uncommitted unless asked.
 - Motion rule (user-confirmed): hovers/animations must never shift layout (transform /
   pseudo-elements only); deck-list slides only on the redraw right after a +/− click.
 - Test with Anki relaunches; the user verifies visuals. Say what was and wasn't tested.
