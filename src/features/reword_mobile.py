@@ -128,7 +128,7 @@ _TPL = (
     "      var sp=document.createElement('div');sp.className='jkrw-spacer';\n"
     "      sp.style.cssText='height:calc(76px + env(safe-area-inset-bottom));pointer-events:none;';\n"
     "      document.body.appendChild(sp);\n"
-    "      var iv=setInterval(function(){if(!home||!document.body.contains(home)){\n"
+    "      var iv=setInterval(function(){if(!home||!document.body.contains(home)||(btn.__inert&&isPrac())){\n"
     "        clearInterval(iv);if(btn.parentNode)btn.remove();if(sp.parentNode)sp.remove();return;}\n"
     "        avoid();},400);\n"
     "      avoid();setTimeout(avoid,60);setTimeout(avoid,500);\n"
@@ -136,6 +136,10 @@ _TPL = (
     # Other buttons pinned to the screen (the Practice "show original slide" button,
     # a note type's own floating hint/resource buttons…) could sit right where this
     # one floats. Find any fixed button it overlaps and lift it clear above them.
+    # Practice questions are never rephrased: no placeholder "Original" on them (it sat on
+    # top of the "Show original slide" button). Their slide button / choices can render
+    # after this runs, so the float's interval re-checks too.
+    "    function isPrac(){return !!document.querySelector('#jp-slide-btn,.jp-choice,.jp-slide');}\n"
     "    var lift=0;\n"
     "    function avoid(){if(!btn.parentNode||btn.style.display==='none')return;\n"
     "      var cand=document.querySelectorAll('button,a,[role=button],[onclick],.jp-slide-btn,input[type=button]');\n"
@@ -181,8 +185,8 @@ _TPL = (
     "    function sset(v){try{(window.__jkrw=window.__jkrw||{})[ck]=v;"
     "sessionStorage.setItem('jkrw:'+ck,String(v));}catch(e){}}\n"
     "    if(!back)sset(0);\n"
-    "    if(!list.length){if(hideOrig){btn.remove();return;}"
-    "btn.textContent='Original';btn.style.opacity='0.3';btn.style.pointerEvents='none';"
+    "    if(!list.length){if(hideOrig||isPrac()){btn.remove();return;}"
+    "btn.__inert=1;btn.textContent='Original';btn.style.opacity='0.3';btn.style.pointerEvents='none';"
     "flt();btn.style.display='';return;}\n"
     "    function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}\n"
     # Escape, colour cloze blanks blue (like real clozes), and keep line breaks.

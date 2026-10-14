@@ -23,7 +23,9 @@ _JS = r"""<script>(function(){
    return Array.prototype.filter.call(document.querySelectorAll('.jp-choice'),
      function(e){return !e.classList.contains('jp-dropped')&&e.offsetParent!==null;});}
  function cur(){return document.querySelector('.jp-choice.jp-kb');}
- function sfx(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
+ // in-page sound first (see sfx.web_player): a pycmd round trip to QSoundEffect
+ // holds up the outline's redraw, which made arrowing through answers lag
+ function sfx(n){try{if(window.__jkPlay&&window.__jkPlay(n))return;pycmd('janki:sfx:'+n);}catch(x){}}
  // One floating outline that glides between choices (transform/size only — the
  // card's layout never moves).
  function ring(){var g=document.getElementById('jk-pq-sel');if(g)return g;
@@ -38,12 +40,25 @@ _JS = r"""<script>(function(){
    var first=!c; e.classList.add('jp-kb');
    var r=e.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)e.scrollIntoView({block:'nearest'});
    place(e,!first); g.style.opacity='1';}
- addEventListener('resize',function(){var c=cur();if(c)place(c,false);});
+ addEventListener('resize',function(){var c=cur();if(c)place(c,false);
+   if(window.__jkPqFollow)window.__jkPqFollow(600);});
  // keep the outline on its answer if the layout shifts (images loading, the choices
  // re-sizing) — re-place without animating
  var ro=window.ResizeObserver?new ResizeObserver(function(){var c=cur();if(c)place(c,false);}):null;
  if(ro){ro.observe(document.body);}
  addEventListener('scroll',function(){var c=cur();if(c)place(c,false);},{passive:true});
+ // Focus Mode on/off slides the card with transforms (no resize, no scroll), so
+ // while anything on the page is transitioning/animating, re-place every frame
+ var until=0,raf=0;
+ function follow(){var c=cur();if(c)place(c,false);
+   raf=performance.now()<until?requestAnimationFrame(follow):0;}
+ function moving(ev){if(ev.target&&ev.target.id==='jk-pq-sel')return;if(!cur())return;
+   until=Math.max(until,performance.now()+900);if(!raf)raf=requestAnimationFrame(follow);}
+ ['transitionrun','transitionend','animationstart','animationend'].forEach(function(n){
+   document.addEventListener(n,moving,true);});
+ // el.animate() (Focus Mode's slide) fires none of those: focus.py calls this instead
+ window.__jkPqFollow=function(ms){if(!cur())return;
+   until=Math.max(until,performance.now()+(ms||900));if(!raf)raf=requestAnimationFrame(follow);};
  // While keys/remote drive the selection, the mouse's own hover highlight is paused so
  // only one answer ever looks selected; real mouse movement hands control back.
  var lastM=null;
@@ -109,9 +124,20 @@ def _dpad_js():
         return ""
 
 
+def _web_sfx():
+    try:
+        from . import sfx as _sfx
+        # the reviewer page outlives each card: load the player once, not per card
+        return _sfx.web_player(("move",)).replace(
+            "<script>(function(){", "<script>(function(){if(window.__jkPlay)return;", 1)
+    except Exception as e:
+        log("practice keys sfx: %s" % e)
+        return ""
+
+
 def _on_card_will_show(text, card, kind):
     if isinstance(kind, str) and kind == "reviewQuestion" and _is_practice(card):
-        return text + _JS + _dpad_js()
+        return text + _web_sfx() + _JS + _dpad_js()
     return text
 
 

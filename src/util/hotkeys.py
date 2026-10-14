@@ -31,7 +31,7 @@ ACTIONS = [
     ("undo",          "Review",        "Undo last rating",                     "tab",    {"kc": 53}),
     ("practice",      "Review",        "Practice question for this card",      "tab",    {"kc": 12}),
     ("reword",        "Review",        "Toggle reworded card",                 "tab",    {"kc": 15}),
-    ("focus_mode",    "Window & focus", "Toggle Focus Mode",                   "tab",    {"kc": 3}),
+    ("focus_mode",    "Window & focus", "Toggle Focus Mode",                   "qt",     {"seq": "F"}),
     ("open_deck",     "Window & focus", "Open last-studied deck",              "tab",    {"kc": 31}),
     ("toggle_window", "Window & focus", "Show / hide Anki (from anywhere)",    "combo",  {"kc": 0, "mods": ["cmd", "opt"]}),
     ("settings",      "Window & focus", "Open Janki Settings",                 "qt",     {"seq": "Ctrl+Alt+S"}),
@@ -43,6 +43,7 @@ ACTIONS = [
     ("lectures",      "Navigation",    "Load today's lectures",                "qt",     {"seq": "Ctrl+L"}),
     ("open_deck_qt",  "Navigation",    "Study the last deck",                  "qt",     {"seq": "Ctrl+O"}),
     ("settings_alt",  "Navigation",    "Open Janki Settings (alternate)",      "qt",     {"seq": "Ctrl+S"}),
+    ("filtered_deck", "Navigation",    "Create filtered deck",                 "qt",     {"seq": "Ctrl+F"}),
     ("caption",       "Caption",       "Toggle caption HUD",                   "tab",    {"kc": 42}),
     ("cap_up",        "Caption",       "Move caption up",                      "tab",    {"kc": 126}),
     ("cap_down",      "Caption",       "Move caption down",                    "tab",    {"kc": 125}),
@@ -208,9 +209,18 @@ def apply():
                           ("_janki_practice_sc", "go_practice"),
                           ("_janki_lectures_sc", "lectures"),
                           ("_janki_open_last_sc", "open_deck_qt"),
-                          ("_janki_settings_sc2", "settings_alt")):
+                          ("_janki_settings_sc2", "settings_alt"),
+                          ("_janki_focus_sc", "focus_mode")):
             sc = getattr(mw, attr, None)
             if sc is not None:
                 sc.setKey(QKeySequence(binding(aid, cfg)["seq"]))
+        # Anki's own Create Filtered Deck action (stock shortcut: plain F, which is
+        # now Focus Mode). Two owners of one key make Qt fire neither.
+        act = getattr(getattr(mw, "form", None), "actionCreateFiltered", None)
+        if act is not None:
+            fseq = binding("filtered_deck", cfg)["seq"]
+            if fseq == binding("focus_mode", cfg)["seq"]:
+                fseq = ""
+            act.setShortcut(QKeySequence(fseq))
     except Exception as exc:
         log("hotkeys apply (qt): %s" % exc)

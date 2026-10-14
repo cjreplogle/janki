@@ -564,6 +564,12 @@ def _startup():
         _open_sc.setContext(Qt.ShortcutContext.WindowShortcut)
         _open_sc.activated.connect(lambda: focus._open_last_deck())
         mw._janki_open_last_sc = _open_sc
+        # F: toggle Focus Mode (main window only, so typing F in other windows and
+        # text fields is untouched). Create Filtered Deck moves to ⌘F in hotkeys.apply().
+        _focus_sc = QShortcut(QKeySequence("F"), mw)
+        _focus_sc.setContext(Qt.ShortcutContext.WindowShortcut)
+        _focus_sc.activated.connect(lambda: focus._toggle_focus_mode())
+        mw._janki_focus_sc = _focus_sc
 
         # ⌘B / Ctrl+B: back one step — Stats → close; review/overview → the deck list,
         # or the Practice view when studying a question bank; Practice view → Decks.

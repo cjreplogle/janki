@@ -245,7 +245,8 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
         "if(!dy)return;"
         "try{el.animate([{transform:'translateY('+dy+'px)'},"
         "{transform:'translateY(0)'}],"
-        "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
+        "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});"
+        "window.__jkPqFollow&&window.__jkPqFollow(" + str(_FOCUS_ANIM_MS + 100) + ");}"
         "catch(e){}})()"
     )
     try:
@@ -360,7 +361,8 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         "var dy=(P.first-last)+(window.__jkFlipOff||0);"
         "if(Math.abs(dy)>=1){"
         "try{el.animate([{transform:'translateY('+dy+'px)'},{transform:'translateY(0)'}],"
-        "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});}"
+        "{duration:" + str(_FOCUS_ANIM_MS) + ",easing:'cubic-bezier(0.645,0.045,0.355,1)'});"
+        "window.__jkPqFollow&&window.__jkPqFollow(" + str(_FOCUS_ANIM_MS + 100) + ");}"
         "catch(e){}}thaw();}"
         "if(window.innerHeight!==P.h)go();"
         "else{window.addEventListener('resize',go);t=setTimeout(go,250);}})()"

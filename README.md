@@ -56,7 +56,7 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
   <p align="center">
     <a href="https://youtu.be/2jU0c5a6myo"><img src="https://img.youtube.com/vi/2jU0c5a6myo/hqdefault.jpg" alt="Watch the glass reviewer on YouTube" width="60%"></a>
   </p>
-- **Focus Mode** (**`Tab+F`**) — hides toolbar/answer bar and centers the card.
+- **Focus Mode** (**`F`**) — hides toolbar/answer bar and centers the card.
   Only has the card contents on screen. Also throws in small customizable timer
   which fills over N seconds; when it runs out a red edge-glow flares
   (a "time to move on" nudge). A green flare denotes a card as finished for the day.
@@ -155,7 +155,14 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.11</b> · 2026-10-13 · 3 releases</summary>
+<summary><b>2.11</b> · 2026-10-13 · 4 releases</summary>
+
+**2.11.3** · 2026-10-14
+
+- **Focus Mode is now just `F`** (was Tab+F). Anki's Create Filtered Deck moves from `F` to **`Cmd+F`**; both are rebindable in Settings → Hotkeys.
+- **Smoother arrow keys on practice questions**: the move sound now plays inside the page instead of holding up the highlight.
+- The practice answer outline now follows the card when Focus Mode turns on or off.
+- AnkiMobile/AnkiDroid: no more greyed-out "Original" button on practice cards (it covered Show original slide).
 
 **2.11.2** · 2026-10-13
 
