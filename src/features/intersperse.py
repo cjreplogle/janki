@@ -706,7 +706,9 @@ _PQ_HOVER_JS = (
     "if(window.__jkPqHoverBound)return;window.__jkPqHoverBound=true;"
     "document.addEventListener('mousemove',function(e){"
     "var b=document.getElementById('jk-pq-bar');if(!b)return;"
-    "var near=(e.clientX>window.innerWidth-290&&e.clientY>window.innerHeight-118);"
+    # the reveal zone follows the button's side (3D cards move it to the bottom-left)
+    "var L=b.getBoundingClientRect().left<window.innerWidth/2;"
+    "var near=((L?e.clientX<290:e.clientX>window.innerWidth-290)&&e.clientY>window.innerHeight-118);"
     "b.style.opacity=near?'1':'0';b.style.pointerEvents=near?'auto':'none';});})();"
 )
 

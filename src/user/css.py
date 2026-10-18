@@ -391,11 +391,65 @@ def _body_rgba(cfg):
 # settling SETTLE ms (kills mount flicker); a 250ms poll drives it since resize
 # events are unreliable here. Reads only geometry, never text.
 # _qbank_fit_js(dbg): when dbg, paints a small live metrics overlay for tuning.
+_QB_NOSCROLL_JS = (
+    "<script>(function(){if(window.__jkQBns)return;window.__jkQBns=1;var ID='amboss-qbank-widget';\n"
+    # The widget scrolls the page itself (focus() / scrollIntoView on its own elements,
+    # often in its shadow DOM) when it's partly off-screen — a jump up right after your
+    # own scroll, which the yank guard below can't tell from you. Swallow those.
+    "function inQB(n){try{while(n){if(n.id===ID)return true;n=n.parentNode||n.host;}}catch(e){}return false;}\n"
+    "try{var _siv=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(){\n"
+    "if(inQB(this))return;return _siv.apply(this,arguments);};\n"
+    "var _fo=HTMLElement.prototype.focus;HTMLElement.prototype.focus=function(o){\n"
+    "if(inQB(this))return _fo.call(this,Object.assign({},o||{},{preventScroll:true}));\n"
+    "return _fo.apply(this,arguments);};\n"
+    "if(Element.prototype.scrollIntoViewIfNeeded){var _sin=Element.prototype.scrollIntoViewIfNeeded;\n"
+    "Element.prototype.scrollIntoViewIfNeeded=function(){if(inQB(this))return;return _sin.apply(this,arguments);};}\n"
+    "}catch(e){}\n"
+    # …and any direct page scroll whose call comes from AMBOSS's own script (window.scrollTo/
+    # scrollBy, element.scrollTo/scrollBy, scrollTop =): checked by the caller's stack.
+    # Wheel/trackpad scroll the PAGE directly, 1:1 with your input. At 120 Hz (no frame-rate
+    # limit) Chromium's own wheel-scroll animation misfires — tiny nudges leapt hundreds of
+    # px (whole page to the top in ~20 ms), over the AMBOSS widget and the deck list alike.
+    # macOS still delivers trackpad momentum as wheel events, so flicks stay smooth. Inner
+    # scrollers that can still move that way (dropdowns, lists) keep the native behaviour.
+    "function innerCan(t,dy){for(var n=t;n&&n!==document.body&&n!==document.documentElement;n=n.parentNode||n.host){\n"
+    "if(n.nodeType!==1)continue;var c=getComputedStyle(n).overflowY;\n"
+    "if((c==='auto'||c==='scroll')&&n.scrollHeight>n.clientHeight+1){\n"
+    "if(dy<0?n.scrollTop>0:n.scrollTop+n.clientHeight<n.scrollHeight-1)return true;}}return false;}\n"
+    "addEventListener('wheel',function(e){if(e.ctrlKey||e.defaultPrevented||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;\n"
+    "var t=e.composedPath?e.composedPath()[0]:e.target;if(innerCan(t,e.deltaY))return;\n"
+    "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
+    "glide(e.deltaY*k);},{passive:false});\n"
+    # Input sets a TARGET; the page eases toward it once per display frame (time constant
+    # ~7 ms, frame-rate independent) — evens out bursty/irregular wheel events without
+    # feeling laggy. Anything else moving the page (keys, scrollbar) resets the target.
+    "var _tg=null,_cur=0,_w=0,_lt=0,_raf=0,TAU=7;\n"
+    # _cur = exact (fractional) position; _w = what the page reports after our write
+    # (rounded to device px) — a different reading means someone else scrolled
+    "function glide(d){var se=document.scrollingElement,mx=se.scrollHeight-se.clientHeight;\n"
+    "if(_tg===null||Math.abs(se.scrollTop-_w)>2){_cur=se.scrollTop;_w=_cur;_tg=_cur;}\n"
+    "_tg=Math.max(0,Math.min(mx,_tg+d));if(!_raf){_lt=performance.now();_raf=requestAnimationFrame(step);}}\n"
+    "function step(t){_raf=0;var se=document.scrollingElement;if(_tg===null)return;\n"
+    "if(Math.abs(se.scrollTop-_w)>2){_tg=null;return;}\n"
+    "var dt=Math.min(64,t-_lt);_lt=t;_cur+=(_tg-_cur)*(1-Math.exp(-dt/TAU));\n"
+    "if(Math.abs(_tg-_cur)<0.3)_cur=_tg;se.scrollTop=_cur;_w=se.scrollTop;\n"
+    "if(_cur!==_tg)_raf=requestAnimationFrame(step);else _tg=null;}\n"
+    "function fromAmb(){try{return /amboss/i.test(new Error().stack||'');}catch(e){return false;}}\n"
+    "try{['scrollTo','scrollBy','scroll'].forEach(function(k){\n"
+    "var w=window[k];if(w)window[k]=function(){if(fromAmb())return;return w.apply(this,arguments);};\n"
+    "var e=Element.prototype[k];if(e)Element.prototype[k]=function(){if(fromAmb())return;return e.apply(this,arguments);};});\n"
+    "var d=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');\n"
+    "if(d&&d.set)Object.defineProperty(Element.prototype,'scrollTop',{get:d.get,set:function(v){if(fromAmb())return;d.set.call(this,v);},configurable:true});\n"
+    "}catch(e){}\n"
+    "})();</script>\n")
+
+
 def _qbank_fit_js(dbg=False):
     return (
     "<script>(function(){\n"
     "var DBG=%s;\n" % ("true" if dbg else "false") +
     "var ID='amboss-qbank-widget';var SID='__janki_qbank_fit';\n"
+
     # Settle is long during the initial mount window (absorbs React's flicker) then
     # ~immediate afterward, so scroll fade-in stays in lockstep with the stats layers
     # (which fade with no settle) instead of trailing them.
@@ -408,7 +462,8 @@ def _qbank_fit_js(dbg=False):
     # visible is deliberate: if a measurement glitches (clip() returns null) the box
     # stays shown rather than getting stuck invisible.
     "s.textContent='#'+ID+'{transition:opacity .15s ease;}'\n"
-    "+'#'+ID+'.jk-qbank-unfit{opacity:0!important;pointer-events:none!important;}';\n"
+    # (fade retired: the bottom-edge blur band softens a clipped box instead)
+    "+'';\n"
     "(document.head||document.documentElement).appendChild(s);}\n"
     # VERTICAL overflow of the box across the host + its light- and shadow-DOM
     # descendants (it renders into a shadow root). ov = how far the box's bottom
@@ -442,7 +497,17 @@ def _qbank_fit_js(dbg=False):
     "return (M.maxB>M.vh+4)?'hide':'show';}\n"
     # Commit a state change only after it has held for SETTLE ms — absorbs the React
     # mount's transient width stages (the open flicker) and any drag jitter.
-    "function tick(){style();var w=want();\n"
+    # Soft bottom edge: when the box runs past the window bottom, its last EDGE px before
+    # the edge dissolve out (mask pinned to the viewport); fully on screen → no mask.
+    "var EDGE=48,_lm='';function edge(){var el=document.getElementById(ID);if(!el)return;\n"
+    "var r=el.getBoundingClientRect(),vh=document.documentElement.clientHeight||innerHeight;\n"
+    # strength ramps in with how far it overflows (0 → full over EDGE px): no pop at the edge
+    "var end=Math.round(vh-r.top),ov=r.height-end,a=Math.round(Math.max(0,1-ov/EDGE)*100)/100;\n"
+    "var m=(ov<=0)?'':'linear-gradient(to bottom,#000 '+(end-EDGE)+'px,rgba(0,0,0,'+a+') '+end+'px)';\n"
+    "if(m!==_lm){_lm=m;el.style.webkitMaskImage=m;el.style.maskImage=m;}}\n"
+    # (the fade is retired, so the expensive whole-widget measuring (want/clip: up to
+    # ~1600 rect reads per tick) no longer runs — at 120 Hz it stalled scrolling)
+    "function tick(){edge();return;var w=want();\n"
     "if(w!==null){\n"
     "if(w===state){pWant=null;}\n"
     "else if(w!==pWant){pWant=w;pSince=Date.now();}\n"
@@ -466,7 +531,7 @@ def _qbank_fit_js(dbg=False):
     "try{window.addEventListener('scroll',sched,{passive:true});}catch(e){}\n"
     # Timed backstops for the async mount + a steady poll (resize events unreliable).
     "[150,400,800,1500,2500].forEach(function(ms){setTimeout(sched,ms);});\n"
-    "setInterval(sched,150);\n"
+    "setInterval(sched,1000);\n"
     "try{if(window.ResizeObserver){new ResizeObserver(sched).observe(document.documentElement);}}catch(e){}\n"
     "try{var mo=new MutationObserver(function(){sched();\n"
     "var el=document.getElementById(ID);\n"
@@ -483,7 +548,9 @@ def _qbank_fit_js(dbg=False):
     "var _py=0,_lu=0,_o=null,_touched=false,_dh=0;var SK='__janki_db_scroll';\n"
     # Once you've scrolled this page yourself, the restore-after-render below is off
     # for good: a late restore timer firing mid-scroll yanked the list back up.
-    "function _mu(){_lu=Date.now();_touched=true;}\n"
+    "function _mu(){_lu=Date.now();_touched=true;}var _md=false;\n"
+    "try{window.addEventListener('mousedown',function(){_md=true;},true);\n"
+    "window.addEventListener('mouseup',function(){_md=false;_lu=Date.now();},true);}catch(e){}\n"
     # No scroll anchoring: Chromium shifting the page as late content (stats, chart)
     # lays out above you fought the jump-revert below — the list flung up, then back.
     "try{document.documentElement.style.overflowAnchor='none';}catch(e){}\n"
@@ -493,19 +560,21 @@ def _qbank_fit_js(dbg=False):
     "try{var _sv=sessionStorage.getItem(SK);if(_sv){var p=JSON.parse(_sv);\n"
     "if(p&&p.y>6&&Date.now()-p.t<120000)_o=p;}}catch(e){}\n"
     "function _restore(){if(_o&&_o.y>6){_py=_o.y;window.scrollTo(0,_o.y);}}\n"
-    # restore as content settles after a (re-)render, unless the user is scrolling
-    "if(_o){[0,80,250,600,1000,1500].forEach(function(ms){setTimeout(function(){\n"
-    "if(!_touched)_restore();},ms);});}\n"
-    # watchdog (~8s): catch a delayed snap-to-top from the sync-status clearing
-    "var _n=0,_wd=setInterval(function(){_n++;\n"
-    "if(_o&&_o.y>6&&_sy()<6&&!_touched)_restore();\n"
-    "if(_n>40)clearInterval(_wd);},200);\n"
+    # (The restore-after-render timers + 8 s watchdog are gone: at 120 Hz they couldn't see
+    # your own scrolling, so reaching the top looked like a reset and threw you back down.
+    # Anki's own redraw keeps the scroll position.)
+
     "try{window.addEventListener('scroll',function(){\n"
     "var y=_sy(),dh=document.documentElement.scrollHeight,grew=_dh&&dh!==_dh;_dh=dh;\n"
     # Revert only a real programmatic yank (AMBOSS jumping to its widget): not while
     # a scroll gesture or its momentum is still going (1 s), and not when the page
     # just changed height (that's layout settling, not a yank).
-    "if(Math.abs(y-_py)>120&&Date.now()-_lu>1000&&!grew){window.scrollTo(0,_py);return;}\n"
+    # Never revert a landing at the very top (that's you reaching it — a long scrollbar drag
+    # or the end of a fling — not AMBOSS), nor anything while a mouse button is held.
+    # (The big-jump revert that used to sit here is gone: at 120 Hz its timing misread your
+    # own scrolls as yanks and threw the page up/down. AMBOSS's yanks are now blocked at the
+    # source instead — _QB_NOSCROLL_JS stops the widget's focus()/scrollIntoView.)
+
     "_py=y;\n"
     # only a genuine user scroll updates the saved target (programmatic ones don't)
     "if(Date.now()-_lu<300){_o={y:y,t:Date.now()};\n"
@@ -1358,8 +1427,11 @@ def _build_css(cfg, context):
         # when the window is too narrow it overflows the viewport and shows a
         # half-clipped box. Fade it out until the window is wide enough to show it
         # whole (self-adapting: measures actual clipping, no magic px threshold).
-        if cfg.get("amboss_qbank_autohide", True):
-            parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
+        # No fade any more: the box's bottom dissolves into the window edge (edge() in
+        # _qbank_fit_js) instead of being sliced off. (A backdrop-filter blur band doesn't
+        # render on the software-composited glass page.)
+        # the script still carries the scroll keeper (undoes AMBOSS's scroll yanks)
+        parts.append(_qbank_fit_js(cfg.get("amboss_qbank_debug", False)))
         if not _LAUNCH_FADE["done"]:
             _LAUNCH_FADE["done"] = True
             _arm_launch_fade()
@@ -2685,6 +2757,9 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             web_content.head += "\n" + _typewriter_head(_cfg(), prev_hash=prev)
         # Review history charts (calendar heatmap + reviews plot) on the deck
         # browser home screen. Optional — hidden via Settings → General.
+        # in <head>, so it's in place before AMBOSS's widget first mounts (and scrolls)
+        if isinstance(context, DeckBrowser):
+            web_content.head = _QB_NOSCROLL_JS + web_content.head
         if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", False):
             web_content.head += "\n" + _stats_head()
         # In the Practice view, relabel the deck browser's bottom "Import File" button
@@ -2704,6 +2779,18 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
                         body = _re.sub(
                             r"<button[^>]*pycmd\(\"%s\"\)[^>]*>.*?</button>" % _cmd,
                             "", body, flags=_re.DOTALL)
+                    # same size + look as the Calendar's "Study Progress" button
+                    body = _re.sub(r"<button(?![^>]*jk-sp)([^>]*>\s*Import Bank)",
+                                   "<button class='jk-sp' style='font-size:1.15em !important;"
+                                   "padding:7px 22px !important;border:0.5px solid rgba(255,255,255,.6) !important;"
+                                   "border-radius:999px !important;font-weight:600 !important;transform:none;'\\1",
+                                   body, count=1)
+                    body = ("<style>body #outer button.jk-sp{transition:background-color .15s ease,"
+                            "border-color .15s ease,box-shadow .15s ease,transform .1s ease !important;}"
+                            "body #outer button.jk-sp:hover{background:rgba(255,255,255,.08) !important;"
+                            "border-color:rgba(255,255,255,.8) !important;"
+                            "box-shadow:inset 0 0 8px rgba(156,188,243,.15) !important;}"
+                            "body #outer button.jk-sp:active{transform:scale(.97) !important;}</style>" + body)
                     web_content.body = body
                 elif not _calendar_showing():          # the Calendar has its own wand
                     # Normal Decks screen: add a "Load Lectures" button that opens the

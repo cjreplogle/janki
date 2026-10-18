@@ -1673,6 +1673,20 @@ try:
 except Exception:
     pass
 
+# What's new: once, on the first launch after an update (also in Settings → General)
+try:
+    from .src.features import whats_new as _whats_new
+    if hasattr(gui_hooks, "profile_did_open"):
+        gui_hooks.profile_did_open.append(_whats_new.check_after_update)
+except Exception as _wn_exc:
+    log("whats_new: %s" % _wn_exc)
+
+try:
+    from .src.features import model3d as _model3d
+    _model3d.install()
+except Exception as _m3_exc:
+    log("model3d: %s" % _m3_exc)
+
 try:
     from .src.features import review_keys as _review_keys
     _review_keys.install()

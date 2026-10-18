@@ -155,7 +155,14 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.11</b> · 2026-10-13 · 4 releases</summary>
+<summary><b>2.11</b> · 2026-10-13 · 5 releases</summary>
+
+**2.11.4** · 2026-10-18
+
+- **What's new**: after an update, the first launch shows what changed (this list). It's also under Settings → General, next to Documentation.
+- **Steadier scrolling in Decks and Practice**: on 120 Hz displays a small scroll could fling the list (sometimes all the way to the top) or jump back. Scrolling now follows your trackpad or wheel exactly, with a light smoothing.
+- **AMBOSS Qbank box**: it no longer fades out when it doesn't fit. When it runs past the bottom of the window it softly fades into the edge instead of being cut off, and it can no longer pull the page around while you scroll.
+- The **Import Bank** button in Practice matches the Study Progress button.
 
 **2.11.3** · 2026-10-14
 

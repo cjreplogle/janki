@@ -18,6 +18,15 @@ from ..user import hud
 _card_timer_instance = None
 
 
+def _is_3d_card():
+    """Janki 3D cards (exploring a model) never get the red time-up flare."""
+    try:
+        c = mw.reviewer.card
+        return c is not None and c.note_type()["name"] == "Janki 3D"
+    except Exception:
+        return False
+
+
 def _make_card_timer():
     """A thin progress bar just under the toolbar that fills over 10–30s (scaled
     by card length). When it fills it turns red — a 'you've lingered' nudge,
@@ -1119,7 +1128,8 @@ def _make_card_timer():
                 # The blue break cue overrides the red pulse — don't show red while a
                 # break is due (tint) or in progress; also honour the on/off setting.
                 if (self._overlay and not state._break_tint_active and not state._pomo_on_break
-                        and bool(_cfg().get("card_timer_red_flare", True))):
+                        and bool(_cfg().get("card_timer_red_flare", True))
+                        and not _is_3d_card()):
                     self._red_wanted = True
                     if not self._amboss_poll.isActive():
                         self._amboss_poll.start()

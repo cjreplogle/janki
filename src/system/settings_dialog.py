@@ -2576,6 +2576,19 @@ class GlassSettings(QDialog):
         _doc_row = QHBoxLayout()
         _doc_row.setContentsMargins(0, 8, 0, 0)
         _doc_row.addWidget(_doc_link)
+        # What's new: this version's release notes (also shown once after each update)
+        _new_link = QLabel('<a href="#" style="color:#6ab0ff; text-decoration:none;">'
+                           '✨ What\'s new</a>')
+        _new_link.setToolTip("Release notes for this version of Janki")
+        def _open_whats_new(_href=None):
+            try:
+                from ..features import whats_new
+                whats_new.show()
+            except Exception as _e:
+                log("whats new: %s" % _e)
+        _new_link.linkActivated.connect(_open_whats_new)
+        _doc_row.addSpacing(14)
+        _doc_row.addWidget(_new_link)
         _doc_row.addStretch()
         gen_lay.addLayout(_doc_row)
 
