@@ -161,6 +161,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 
 - **Undo hiding a deck**: ⌘Z / Ctrl+Z (Edit → Undo) brings a hidden deck back; showing one again from Browse can be undone too.
 - A deck's gear menu offers **Suspend all cards** when nothing in it is suspended (and Unsuspend all when something is). Both can be undone.
+- End of block in Study Progress no longer sticks on "Looking through your lectures…" when the results come in quickly.
 
 **2.11.5** · 2026-10-19
 

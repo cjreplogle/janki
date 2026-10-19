@@ -2132,7 +2132,7 @@ _JS = """<script>(function(){
      if(!c||!document.querySelector('#jkc .jkc-detail'))return;
      if((c.textContent.trim().charAt(0)==='…'||c.querySelector('.jkd-reload'))&&cTries++<8){
        try{pycmd('janki:cal:recount');}catch(x){}tick();}},1200);}}
- var inDone=null, lastInner='';
+ var inDone=null, lastInner='', pendPut=null;
  window.jkcSwap=function(inner,dir){
    // A quiet refresh (matches arrived) never cuts a slide short, and is skipped when
    // nothing changed — replacing the page mid-slide read as a hitch.
@@ -2141,8 +2141,9 @@ _JS = """<script>(function(){
      // wait for the running animation ONCE, then clear the flag it set: outDone is only
      // consumed by some swaps, so left set it made every refresh re-wait on an already
      // finished promise forever (End of block stuck on "Looking through your lectures…")
-     if(outDone||inDone){var w=outDone||inDone;w.then(function(){
-       if(outDone===w)outDone=null;if(inDone===w)inDone=null;jkcSwap(inner,'refresh');});return;}
+     if(outDone||inDone||pendPut){var w=outDone||inDone||pendPut;w.then(function(){
+       if(outDone===w)outDone=null;if(inDone===w)inDone=null;if(pendPut===w)pendPut=null;
+       jkcSwap(inner,'refresh');});return;}
    }
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;
@@ -2217,7 +2218,11 @@ _JS = """<script>(function(){
      var f2=a.finished.catch(function(){});inDone=f2;
      f2.then(function(){if(inDone===f2)inDone=null;});
    }
-   if(outDone){var p=outDone;outDone=null;p.then(put);} else put();
+   // a put queued behind the fade-out is tracked (pendPut): a refresh that arrives in
+   // the meantime must land AFTER it — else the queued "Looking through…" put
+   // overwrote fast End-of-block results and the view stayed on loading
+   if(outDone){var p=outDone;outDone=null;var pp=p.then(put);pendPut=pp;
+     pp.then(function(){if(pendPut===pp)pendPut=null;});} else put();
  };
  // The view switch's pill: placed under the active option, glides when it changes.
  function pill(btn,anim){var p=document.querySelector('#jkc .jkc-pill');if(!p||!btn)return;
