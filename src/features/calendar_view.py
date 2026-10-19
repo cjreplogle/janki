@@ -208,13 +208,15 @@ def _on_app_state(st):
             _swap("refresh")
 
 
-def _swap(direction):
+def _swap(direction, force=False):
     """Replace the days in the open page (no reload): the page's out-slide is already
     running; jkcSwap drops the new days in and slides them from the other side."""
     global _deferred_refresh
     # A background result landing while you're in another app waits for your return:
     # re-rendering the page then could pull keyboard focus from the app you're in.
-    if direction == "refresh" and not _app_active():
+    # (force: a result you asked for — weak areas — is drawn straight away; parked, it
+    # left "Looking through your lectures…" up after you'd switched away to wait.)
+    if direction == "refresh" and not force and not _app_active():
         _deferred_refresh = True
         return
     try:
@@ -853,10 +855,40 @@ _weak_mode = "2w"      # "2w" = past two weeks · "block" = end of block (8 week
 _WEAK_SPAN = {"2w": 2, "block": 8}     # weeks, counting this one, Monday-aligned
 
 
+_END_BLOCK = re.compile(r"\bend\s*(?:-\s*)?(?:of\s*(?:-\s*)?)?block\b|\bEOB\b", re.I)
+
+
+def _block_start():
+    """The day after the most recent past "End of Block" event (a new block has begun), or
+    None. Weak areas then only look at the new block: last block's lectures and biweekly
+    exams drop out, and the new block's biweeklies are listed from the start."""
+    try:
+        from ..integrations import lectures
+        today = datetime.date.today()
+        ds = sorted({e["date"] for e in (lectures._EV_CACHE.get("events") or [])
+                     if e.get("date") and _END_BLOCK.search(e.get("summary") or "")})
+        # an EOB review / exam / retake within a week = one cluster; the block ends on
+        # its LAST day (a review days before the exam mustn't cut the block short)
+        ends, last = [], None
+        for d in ds:
+            if last is not None and (d - last).days <= 7:
+                ends[-1] = d
+            else:
+                ends.append(d)
+            last = d
+        past = [d for d in ends if d < today]
+        return (max(past) + datetime.timedelta(days=1)) if past else None
+    except Exception:
+        return None
+
+
 def _weak_start(mode):
-    """First day of the window: Monday of last week (2w) / 7 weeks before this one."""
+    """First day of the window: Monday of last week (2w) / 7 weeks before this one — but
+    never before the current block began (after an "End of Block")."""
     t = datetime.date.today()
-    return t - datetime.timedelta(days=t.weekday() + 7 * (_WEAK_SPAN[mode] - 1))
+    s0 = t - datetime.timedelta(days=t.weekday() + 7 * (_WEAK_SPAN[mode] - 1))
+    b = _block_start()
+    return max(s0, b) if b else s0
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
 _weak_redo = set()      # views to recompute once background matching finishes
@@ -1129,8 +1161,10 @@ def _weak_compute(mode, then=None):
         memory.relieve_later(1500, "study progress")
         if _weak_mode == mode:
             _weak = rows
-            if _view and _detail == WEAK:
-                _swap("refresh")
+            # the weak page is showing → draw it (the _view flag alone wasn't reliable:
+            # End of block, computed on demand, could stay on "Looking through…")
+            if _detail == WEAK:
+                _swap("refresh", force=True)
         if then and _view:
             QTimer.singleShot(1500, then)
 
@@ -1213,6 +1247,9 @@ def _exam_dates():
             seen.add(e["date"])
             raw.append((e["date"], t))
     raw.sort()
+    b0 = _block_start()                    # a new block began: drop last block's exams
+    if b0:
+        raw = [(d, t) for d, t in raw if d >= b0]
     # one assessment can span days (two parts, a sitting per group): within 3 days = one
     merged = []
     for d, t in raw:
@@ -1332,8 +1369,17 @@ def _weak_html():
         return head + ("<div class='jkd-counts'>Looking through your lectures…</div>"
                        "<div class='jkw-pbar'><i id='jkw-prog'></i></div></div></div>")
     if not _weak:
+        up = ""
+        if _weak_mode == "block":             # a fresh block: still show its exam layout
+            today = datetime.date.today()
+            up = "".join("<details class='jkw-grp'><summary><span class='jkw-gt'>%s "
+                         "<span class='jkw-gx'>· exam %s %d · upcoming</span></span>"
+                         "<span class='jkw-gs'>no lectures yet</span></summary></details>"
+                         % (html.escape(l), d.strftime("%b"), d.day)
+                         for d, l in reversed(_exam_dates()) if d >= today)
         return head + ("<div class='jkd-counts'>No past lectures with cards found — "
-                       "nothing to flag.</div></div></div>")
+                       "nothing to flag.</div>%s</div></div>"
+                       % ("<div class='jkw-list'>%s</div>" % up if up else ""))
     def row(i, r):
         chips = []
         if not r.get("active", r["n"]):
@@ -1375,19 +1421,42 @@ def _weak_html():
     if _weak_mode != "block":
         out = [row(i, r) for i, r in rows[:40]]
         return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
+    try:
+        return _weak_block_html(head, rows, row)
+    except Exception:
+        import traceback
+        log("weak block view failed:\n" + traceback.format_exc())
+        out = [row(i, r) for i, r in rows[:40]]                     # never hang: plain list
+        return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
+
+
+def _weak_block_html(head, rows, row):
+    start = _weak_start(_weak_mode)
     # End of block: one group per biweekly exam (the lectures each exam covers), newest
     # first; open one to see its lectures (still least-studied first). Without exams in
     # the calendar, plain two-week periods.
     exams = _exam_dates()
     groups, meta = {}, {}
+    b0 = _block_start()
     for i, r in rows:
         d = r["e"]["date"]
+        if b0 and d < b0:                   # last block's lecture
+            continue
         if exams:
             k = next((n for n, (ed_, _lbl) in enumerate(exams) if d <= ed_), len(exams))
         else:
             k = max(0, (d - start).days // 14)
         groups.setdefault(k, []).append((i, r))
     out = []
+    # the new block's layout: upcoming biweeklies with no lectures yet still get a row
+    today = datetime.date.today()
+    for k, (ed_, lbl) in enumerate(exams):
+        if k not in groups and ed_ >= today:
+            out.append("<details class='jkw-grp'><summary><span class='jkw-gt'>%s "
+                       "<span class='jkw-gx'>· exam %s %d · upcoming</span></span>"
+                       "<span class='jkw-gs'>no lectures yet</span></summary></details>"
+                       % (html.escape(lbl), ed_.strftime("%b"), ed_.day))
+    out.reverse()                           # latest exam on top, like the groups below
     for k in sorted(groups, reverse=True):
         g = groups[k]
         dates = [r["e"]["date"] for _i, r in g]
@@ -2069,7 +2138,11 @@ _JS = """<script>(function(){
    // nothing changed — replacing the page mid-slide read as a hitch.
    if(dir==='refresh'){
      if(inner===lastInner)return;
-     if(outDone||inDone){var w=outDone||inDone;w.then(function(){jkcSwap(inner,'refresh');});return;}
+     // wait for the running animation ONCE, then clear the flag it set: outDone is only
+     // consumed by some swaps, so left set it made every refresh re-wait on an already
+     // finished promise forever (End of block stuck on "Looking through your lectures…")
+     if(outDone||inDone){var w=outDone||inDone;w.then(function(){
+       if(outDone===w)outDone=null;if(inDone===w)inDone=null;jkcSwap(inner,'refresh');});return;}
    }
    function put(){
      var root=document.getElementById('jkc'); if(!root)return;

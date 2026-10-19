@@ -1131,9 +1131,17 @@ def _make_card_timer():
                         and bool(_cfg().get("card_timer_red_flare", True))
                         and not _is_3d_card()):
                     self._red_wanted = True
-                    if not self._amboss_poll.isActive():
-                        self._amboss_poll.start()
-                    self._poll_amboss_tip()   # decide visibility after checking for a tip
+                    try:
+                        from ..integrations.amboss import amboss_terms_on as _terms
+                        _tips = _terms()
+                    except Exception:
+                        _tips = True
+                    if _tips:              # AMBOSS term pop-ups on → watch for a tip
+                        if not self._amboss_poll.isActive():
+                            self._amboss_poll.start()
+                        self._poll_amboss_tip()   # decide visibility after checking for a tip
+                    else:
+                        self._poll_amboss_tip()   # (no tips possible: just shows the flare)
 
         def _poll_amboss_tip(self):
             # While the red flare should be up, check whether an AMBOSS hover tip is

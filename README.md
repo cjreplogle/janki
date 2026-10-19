@@ -155,7 +155,26 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.11</b> · 2026-10-13 · 5 releases</summary>
+<summary><b>2.11</b> · 2026-10-13 · 6 releases</summary>
+
+**2.11.5** · 2026-10-19
+
+**Smoother scrolling**
+- **Cards and the deck list scroll much more smoothly on 120 Hz screens**: content is painted once and slides, instead of being redrawn every frame (about 31 → 120 fps in testing), and trackpad input is spread evenly across frames so it no longer judders.
+- Cards fade softly into the toolbar and answer buttons at the top and bottom, without slowing scrolling.
+- Shorter coast after a flick; scroll speed slightly reduced.
+- AMBOSS tooltips no longer pop up while the page is moving, and with AMBOSS term pop-ups turned off Janki skips all its AMBOSS term work.
+
+**Decks**
+- **Hide a deck** from the deck list: its gear menu → Hide from deck list. Show it again from Browse (right-click the deck in the sidebar).
+- Unsuspend all / Create subdeck moved to each deck's gear menu; right-clicking a deck now opens or closes its subdecks.
+
+**Calendar**
+- Study Progress starts fresh at each **End of Block**: last block's lectures and biweekly exams drop out and the new block's exams are listed. The End of block view no longer gets stuck loading.
+- Class titles in the tray's Today view sit centred in their boxes (no clipped letters).
+
+**Fixes**
+- No thin dark outline around card images on the glass; the AnKing logo no longer appears huge.
 
 **2.11.4** · 2026-10-18
 

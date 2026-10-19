@@ -394,8 +394,8 @@ def _body_rgba(cfg):
 _QB_NOSCROLL_JS = (
     "<script>(function(){if(window.__jkQBns)return;window.__jkQBns=1;var ID='amboss-qbank-widget';\n"
     # The widget scrolls the page itself (focus() / scrollIntoView on its own elements,
-    # often in its shadow DOM) when it's partly off-screen — a jump up right after your
-    # own scroll, which the yank guard below can't tell from you. Swallow those.
+    # often in its shadow DOM) when it's partly off-screen — a jump right after your own
+    # scroll. Swallow those…
     "function inQB(n){try{while(n){if(n.id===ID)return true;n=n.parentNode||n.host;}}catch(e){}return false;}\n"
     "try{var _siv=Element.prototype.scrollIntoView;Element.prototype.scrollIntoView=function(){\n"
     "if(inQB(this))return;return _siv.apply(this,arguments);};\n"
@@ -407,33 +407,6 @@ _QB_NOSCROLL_JS = (
     "}catch(e){}\n"
     # …and any direct page scroll whose call comes from AMBOSS's own script (window.scrollTo/
     # scrollBy, element.scrollTo/scrollBy, scrollTop =): checked by the caller's stack.
-    # Wheel/trackpad scroll the PAGE directly, 1:1 with your input. At 120 Hz (no frame-rate
-    # limit) Chromium's own wheel-scroll animation misfires — tiny nudges leapt hundreds of
-    # px (whole page to the top in ~20 ms), over the AMBOSS widget and the deck list alike.
-    # macOS still delivers trackpad momentum as wheel events, so flicks stay smooth. Inner
-    # scrollers that can still move that way (dropdowns, lists) keep the native behaviour.
-    "function innerCan(t,dy){for(var n=t;n&&n!==document.body&&n!==document.documentElement;n=n.parentNode||n.host){\n"
-    "if(n.nodeType!==1)continue;var c=getComputedStyle(n).overflowY;\n"
-    "if((c==='auto'||c==='scroll')&&n.scrollHeight>n.clientHeight+1){\n"
-    "if(dy<0?n.scrollTop>0:n.scrollTop+n.clientHeight<n.scrollHeight-1)return true;}}return false;}\n"
-    "addEventListener('wheel',function(e){if(e.ctrlKey||e.defaultPrevented||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;\n"
-    "var t=e.composedPath?e.composedPath()[0]:e.target;if(innerCan(t,e.deltaY))return;\n"
-    "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
-    "glide(e.deltaY*k);},{passive:false});\n"
-    # Input sets a TARGET; the page eases toward it once per display frame (time constant
-    # ~7 ms, frame-rate independent) — evens out bursty/irregular wheel events without
-    # feeling laggy. Anything else moving the page (keys, scrollbar) resets the target.
-    "var _tg=null,_cur=0,_w=0,_lt=0,_raf=0,TAU=7;\n"
-    # _cur = exact (fractional) position; _w = what the page reports after our write
-    # (rounded to device px) — a different reading means someone else scrolled
-    "function glide(d){var se=document.scrollingElement,mx=se.scrollHeight-se.clientHeight;\n"
-    "if(_tg===null||Math.abs(se.scrollTop-_w)>2){_cur=se.scrollTop;_w=_cur;_tg=_cur;}\n"
-    "_tg=Math.max(0,Math.min(mx,_tg+d));if(!_raf){_lt=performance.now();_raf=requestAnimationFrame(step);}}\n"
-    "function step(t){_raf=0;var se=document.scrollingElement;if(_tg===null)return;\n"
-    "if(Math.abs(se.scrollTop-_w)>2){_tg=null;return;}\n"
-    "var dt=Math.min(64,t-_lt);_lt=t;_cur+=(_tg-_cur)*(1-Math.exp(-dt/TAU));\n"
-    "if(Math.abs(_tg-_cur)<0.3)_cur=_tg;se.scrollTop=_cur;_w=se.scrollTop;\n"
-    "if(_cur!==_tg)_raf=requestAnimationFrame(step);else _tg=null;}\n"
     "function fromAmb(){try{return /amboss/i.test(new Error().stack||'');}catch(e){return false;}}\n"
     "try{['scrollTo','scrollBy','scroll'].forEach(function(k){\n"
     "var w=window[k];if(w)window[k]=function(){if(fromAmb())return;return w.apply(this,arguments);};\n"
@@ -441,6 +414,158 @@ _QB_NOSCROLL_JS = (
     "var d=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');\n"
     "if(d&&d.set)Object.defineProperty(Element.prototype,'scrollTop',{get:d.get,set:function(v){if(fromAmb())return;d.set.call(this,v);},configurable:true});\n"
     "}catch(e){}\n"
+    "})();</script>\n")
+
+
+# Wheel/trackpad scroll the PAGE directly (deck list, Practice, cards). At 120 Hz (no
+# frame-rate limit) Chromium's own wheel-scroll animation misfires — tiny nudges leapt
+# hundreds of px, often straight to the top/bottom. Here each step moves the page by the
+# input × SENS, immediately; inner scrollers that can still move that way keep native
+# behaviour. ~/.janki_native_scroll (window.__jkNativeScroll) turns it off for A/B.
+# Cards: the content softly fades out over the last EDGE px at the top/bottom of the card
+# area (where it scrolls under the toolbar / answer buttons) instead of being sliced off.
+# A mask on #qa pinned to the viewport — recomputed on scroll/resize; only the card
+# content is masked, not Janki's floating buttons.
+# Shared "scrolling" signal for lighter effects while the page moves: window.__jkScrolling
+# is true during a scroll and ~150 ms after; a 'jkscrollend' event fires when it settles.
+# Per-frame effects (card edge fade, deck row fade, stats fade) pause on it.
+_SCROLL_STATE_JS = (
+    "<script>(function(){if(window.__jkSS)return;window.__jkSS=1;window.__jkScrolling=false;var T=0;\n"
+    # html.jk-scrolling: hover is ignored while the page moves — text sliding under the
+    # pointer otherwise fires hover tooltips (AMBOSS: ~10 show/hide per second), and each
+    # one repainted the whole card layer mid-scroll. Wheel input still reaches window.
+    "var R=document.documentElement;\n"
+    "addEventListener('scroll',function(){if(!window.__jkScrolling){window.__jkScrolling=true;R.classList.add('jk-scrolling');}clearTimeout(T);\n"
+    "T=setTimeout(function(){window.__jkScrolling=false;R.classList.remove('jk-scrolling');dispatchEvent(new Event('jkscrollend'));},150);},{passive:true,capture:true});\n"
+    "var st=document.createElement('style');st.textContent=\n"
+    # paint once, then slide: the card / deck list on its own composited layer — opacity, not
+    # transform, so position:fixed bits inside cards still pin to the window (with the
+    # CPU-composited glass window Chromium otherwise repaints all visible text every frame)
+    "'html.jk-scrolling body{pointer-events:none!important}#qa,body>center{will-change:opacity}';\n"
+    "(document.head||R).appendChild(st);\n"
+    "})();</script>\n")
+
+
+# Images on cards: a scaled image's outermost pixels only partly cover the screen pixel,
+# and on the see-through glass window those come out DARK — a thin black rim around
+# e.g. white figures. Sample the image's own edge colour (same-origin media only) and
+# draw a 1 px ring of that colour around it: it covers the rim and is invisible.
+_IMG_RIM_JS = (
+    "<script>(function(){if(window.__jkRim)return;window.__jkRim=1;\n"
+    "function fix(im){if(im.__jkRim||!im.complete||!im.naturalWidth||im.naturalWidth<24)return;im.__jkRim=1;\n"
+    "try{var W=im.naturalWidth,H=im.naturalHeight,c=document.createElement('canvas');c.width=W;c.height=H;\n"
+    "var x=c.getContext('2d');x.drawImage(im,0,0);var pts=[[0,0],[W>>1,0],[W-1,0],[0,H>>1],[W-1,H>>1],[0,H-1],[W>>1,H-1],[W-1,H-1]];\n"
+    "var r=0,g=0,b=0,a=0,mx=0,first=null;pts.forEach(function(p){var d=x.getImageData(p[0],p[1],1,1).data;\n"
+    "if(!first)first=d;mx=Math.max(mx,Math.abs(d[0]-first[0])+Math.abs(d[1]-first[1])+Math.abs(d[2]-first[2]));\n"
+    "r+=d[0];g+=d[1];b+=d[2];a+=d[3];});\n"
+    # only for a uniform, opaque edge (a busy or transparent edge would show the ring)
+    "if(mx>60||a<8*250)return;im.style.boxShadow='0 0 0 1px rgb('+(r>>3)+','+(g>>3)+','+(b>>3)+')';}catch(e){}}\n"
+    "function all(){[].forEach.call(document.querySelectorAll('#qa img'),function(im){if(im.complete)fix(im);else im.addEventListener('load',function(){fix(im)},{once:true});});}\n"
+    "try{new MutationObserver(all).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}\n"
+    "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',all);else all();\n"
+    "})();</script>\n")
+
+
+# Cards scroll inside a fixed full-window frame (#jk-sc) that carries a STATIC edge mask:
+# content fades out over EDGE px at the top/bottom, always correct, and since the mask
+# never changes, scrolling repaints nothing. (Earlier tries: a mask on #qa had to be
+# rewritten every frame — the main repaint cost; hiding it while scrolling popped in and
+# out; fixed tint strips looked like dark bands on the glass.) Compatibility: the page's
+# scroll handles (scrollTo, scrollY/pageYOffset, scrollingElement) point at the frame and
+# its scroll events are forwarded to window, so Anki (scrollTo(0,0) on each question,
+# #answer.scrollIntoView) and Janki's features keep working. 3D cards are left alone
+# (their controls sit on the window edges).
+_CARD_FRAME_JS = (
+    "<style>#jk-sc{position:fixed;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:none;outline:none;"
+    "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);"
+    "mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);}"
+    "#jk-sc::-webkit-scrollbar{width:0;height:0}#jk-sc.jk-nofade{-webkit-mask-image:none;mask-image:none}</style>"
+    "<script>(function(){if(window.__jkFrame)return;window.__jkFrame=1;\n"
+    "function setup(){var q=document.getElementById('qa'),E=document.getElementById('jk-sc');\n"
+    # the card page persists across cards: 3D cards (controls on the window edges) get no fade
+    "if(E){E.classList.toggle('jk-nofade',!!document.querySelector('#jk3d'));return;}if(!q)return;\n"
+    "var b=document.body,cs=getComputedStyle(b),F=document.createElement('div');F.id='jk-sc';F.tabIndex=-1;\n"
+    # the frame takes over the body's margin + padding so the card sits exactly where it did
+    "['Top','Right','Bottom','Left'].forEach(function(k){F.style['padding'+k]=(parseFloat(cs['margin'+k])+parseFloat(cs['padding'+k]))+'px';});\n"
+    "b.style.margin='0';b.style.padding='0';\n"
+    "q.parentNode.insertBefore(F,q);F.appendChild(q);\n"
+    "document.documentElement.style.overflow='hidden';\n"
+    # scroll handles → the frame
+    "try{Object.defineProperty(document,'scrollingElement',{get:function(){return F},configurable:true});}catch(e){}\n"
+    "try{Object.defineProperty(window,'scrollY',{get:function(){return F.scrollTop},configurable:true});\n"
+    " Object.defineProperty(window,'pageYOffset',{get:function(){return F.scrollTop},configurable:true});}catch(e){}\n"
+    "var ws=window.scrollTo;window.scrollTo=function(x,y){if(x&&typeof x==='object'){F.scrollTo(x);}else{F.scrollTop=y||0;}};\n"
+    "window.scrollBy=function(x,y){if(x&&typeof x==='object')F.scrollBy(x);else F.scrollTop+=(y||0);};\n"
+    # its scroll events reach window listeners too (tags, scroll state, deck-style fades)
+    "F.addEventListener('scroll',function(){dispatchEvent(new Event('scroll'));},{passive:true});\n"
+    # keyboard scrolling (the frame isn't focused, so do it here) — unless typing / handled
+    "addEventListener('keydown',function(e){if(e.defaultPrevented||e.metaKey||e.ctrlKey||e.altKey)return;\n"
+    " var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;\n"
+    " var h=F.clientHeight,d={ArrowDown:40,ArrowUp:-40,PageDown:h*0.9,PageUp:-h*0.9}[e.key];\n"
+    " if(e.key==='Home')F.scrollTop=0;else if(e.key==='End')F.scrollTop=F.scrollHeight;else if(d)F.scrollTop+=d;else return;\n"
+    " e.preventDefault();});\n"
+    "}\n"
+    "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup);else setup();\n"
+    "try{new MutationObserver(setup).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}\n"
+    "})();</script>\n")
+
+
+_WHEEL_JS = (
+    "<script>(function(){if(window.__jkWheel||window.__jkNativeScroll)return;window.__jkWheel=1;\n"
+    "var SENS=0.72;\n"      # scroll sensitivity: 1 = macOS's own distance
+    "function innerCan(t,dy){var R=document.scrollingElement;for(var n=t;n&&n!==R&&n!==document.body&&n!==document.documentElement;n=n.parentNode||n.host){\n"
+    "if(n.nodeType!==1)continue;var c=getComputedStyle(n).overflowY;\n"
+    "if((c==='auto'||c==='scroll')&&n.scrollHeight>n.clientHeight+1){\n"
+    "if(dy<0?n.scrollTop>0:n.scrollTop+n.clientHeight<n.scrollHeight-1)return true;}}return false;}\n"
+    # Lift-off lurch: macOS opens the momentum with one outsized step (2–4× the ones before
+    # it). Only right after the scroll has been slowing (3+ steps that didn't grow) is such
+    # a step capped near the previous one — a scroll that's speeding UP is left alone.
+    "var _ep=0,_ed=0,_es=0,_et=0;\n"
+    "function despike(d){if(!d)return d;var t=performance.now(),a=Math.abs(d),s=d>0?1:-1;\n"
+    "if(s!==_es||t-_et>90||t<_et){_ep=0;_ed=0;}_es=s;_et=t;\n"
+    "if(_ed>=3&&_ep>2&&a>_ep*2.2)a=_ep*1.1;\n"
+    "_ed=(_ep&&a<=_ep+0.5)?_ed+1:0;_ep=a;return s*a;}\n"
+    # Shorter coast after a flick. Detected by SPEED over a 60 ms window (absorbs macOS's
+    # 0-size events and ~1 ms doubles): a coast = speed 8 % below the gesture's peak and
+    # still falling for 25 ms; steady or rising finger movement never matches. Then the
+    # steps fade out over ~K ms. A push, reversal or pause resets it.
+    "var _q=[],_pk=0,_lv=0,_lup=0,_cs=0,_dir=0,_ct=0,K=180;\n"
+    "function coast(d){var t=performance.now();if(!d)return 0;var s=d>0?1:-1;\n"
+    "if(s!==_dir||t-_ct>90||t<_ct){_q=[];_pk=0;_lv=0;_lup=t;_cs=0;_dir=s;}_ct=t;\n"
+    "_q.push([t,Math.abs(d)]);while(_q.length&&t-_q[0][0]>60)_q.shift();\n"
+    "var v=0;for(var i=0;i<_q.length;i++)v+=_q[i][1];v/=60;\n"
+    "if(v>_lv*1.4||v>=_pk){_lup=t;_cs=0;}if(v>_pk)_pk=v;_lv=v;\n"
+    "if(!_cs&&v<_pk*0.92&&t-_lup>25)_cs=t;\n"
+    "if(!_cs)return d;var o=d*Math.exp(-(t-_cs)/K);return Math.abs(o)<1?0:o;}\n"
+    "addEventListener('wheel',function(e){if(e.ctrlKey||e.defaultPrevented||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;\n"
+    "var t=e.composedPath?e.composedPath()[0]:e.target;if(innerCan(t,e.deltaY))return;\n"
+    "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
+    "var d=coast(despike(e.deltaY*k))*SENS;\n"
+    "if(d)feed(d);},{passive:false});\n"
+    # Resample to the display: macOS delivers trackpad steps only ~56×/s (pairs ~1 ms apart,
+    # then ~18 ms gaps — measured), so applying each step on arrival moved the page in uneven
+    # 10/10/18 ms hops on a 120 Hz screen (judder). Each step is spread evenly over the next
+    # ~6 ms (SPAN) instead — a little movement on EVERY frame for minimal added delay.
+    "var _pend=0,_rate=0,_lf=0,_raf=0,_pos=null,_wr=0,_lev=0,_gap=10;\n"
+    "function feed(d){var se=document.scrollingElement;\n"
+    "if(_pos===null||Math.abs(se.scrollTop-_wr)>2){_pos=se.scrollTop;_wr=_pos;_pend=0;}\n"
+    # SPAN adapts to the input's own rhythm (EMA of the gap between steps, 6–20 ms): spread
+    # each step over exactly the time until the next one → motion on every frame, and never
+    # more delay than one input gap (a fixed 6 ms left frames idle between steps)
+    "var _now=performance.now(),_gp=_now-_lev;if(_gp>=3){_lev=_now;if(_gp<40)_gap=_gap*0.7+_gp*0.3;}\n"
+    "var sp=Math.max(6,Math.min(20,_gap));\n"
+    "_pend+=d;_rate=Math.abs(_pend)/sp;if(!_raf){_lf=_now-8.3;tick();}}\n"
+    # Driven by a plain 8.3 ms timer (120 Hz), NOT requestAnimationFrame: with the
+    # frame-rate limit off, rAF loops spin the page thousands of times a second (measured
+    # ~3000 main frames/s while waiting for a slot) and starve input handling. Each timer
+    # step moves the page once → exactly one frame.
+    "function tick(){_raf=0;var se=document.scrollingElement;\n"
+    "if(Math.abs(se.scrollTop-_wr)>2){_pend=0;_pos=null;return;}\n"   # someone else moved it
+    "var now=performance.now(),dt=Math.min(40,Math.max(1,now-_lf));_lf=now;\n"
+    "var mv=Math.min(Math.abs(_pend),_rate*dt);if(_pend<0)mv=-mv;_pend-=mv;\n"
+    "var mx=se.scrollHeight-se.clientHeight;_pos=Math.max(0,Math.min(mx,_pos+mv));\n"
+    "se.scrollTop=_pos;_wr=se.scrollTop;\n"
+    "if(Math.abs(_pend)>0.05&&_pos>0&&_pos<mx)_raf=setTimeout(tick,8.3);else{_pend=0;}}\n"
     "})();</script>\n")
 
 
@@ -705,10 +830,11 @@ _DECK_KEYS_JS = r"""(function(){
    try{id=sessionStorage.getItem('jkKbSel');on=sessionStorage.getItem('jkKbAct');}catch(x){}
    if(!id||!on||Date.now()-(+on||0)>2500)return;
    var tr=document.getElementById(id); if(tr){sel(tr);poke();}}
- // right-click a deck/bank row → Janki's quick menu (unsuspend / create subdeck)
+ // right-click a deck → expand / collapse its subdecks (same as its +/− link);
+ // a deck without subdecks just ignores it (no browser context menu either way)
  document.addEventListener('contextmenu',function(e){
    var tr=e.target.closest&&e.target.closest('tr.deck'); if(!tr||!tr.id)return;
-   e.preventDefault(); pycmd('janki:deckmenu:'+tr.id);
+   e.preventDefault(); var a=tr.querySelector('a.collapse'); if(a)a.click();
  },true);
  // keep the selection across the redraw an expand/collapse causes
  document.addEventListener('keydown',function(e){
@@ -1863,7 +1989,8 @@ def _build_css(cfg, context):
                      " if(t.indexOf('::')<0)return;x.dataset.jkShort='1';x.title=t;\n"
                      " var leaf=t.split('::').pop().replace(/^\\d+_/,'').replace(/_/g,' ');\n"
                      " var w=document.createTreeWalker(x,NodeFilter.SHOW_TEXT,null),n,first=true;\n"
-                     " while(n=w.nextNode()){if(!n.nodeValue.trim())continue;n.nodeValue=first?leaf:'';first=false;}}\n"
+                     # (only write when different: rewriting identical text still repaints)
+                     " while(n=w.nextNode()){if(!n.nodeValue.trim())continue;var nv=first?leaf:'';if(n.nodeValue!==nv)n.nodeValue=nv;first=false;}}\n"
                      # The answer side repeats the front ({{FrontSide}}), so there can be TWO
                      # #tags-container: show only the last one and cap that one.
                      "function bars(){return [].slice.call(document.querySelectorAll('[id=\"tags-container\"]'));}\n"
@@ -1879,7 +2006,7 @@ def _build_css(cfg, context):
                      " var m=c.querySelector(':scope > .jk-tag-more');\n"
                      " if(MAX>0&&k.length>MAX){if(!m){m=document.createElement('span');m.className='jk-tag-more';\n"
                      "   m.onclick=function(e){e.stopPropagation();c.classList.toggle('jk-tags-open');cap();};c.appendChild(m);}\n"
-                     "  m.textContent=open?'show less':'+'+(k.length-MAX)+' more';\n"
+                     "  var mt=open?'show less':'+'+(k.length-MAX)+' more';if(m.textContent!==mt)m.textContent=mt;\n"
                      # look like the tags beside it (the note type styles those pills):
                      # same font, size, padding and rounding, in a neutral grey
                      "  try{var cs=getComputedStyle(k[0]),st=m.style;\n"
@@ -1893,7 +2020,10 @@ def _build_css(cfg, context):
                      # clear of it instead of sitting underneath.
                      "function room(){var all=bars(),c=all[all.length-1];\n"
                      " var hid=!c||getComputedStyle(c).display==='none';\n"
-                     " document.documentElement.style.setProperty('--jk-tags-h',hid?'0px':(c.getBoundingClientRect().height+14)+'px');\n"
+                     # a root custom property change restyles + repaints the WHOLE page (it ran
+                     # ~12×/s mid-scroll) — only write when the value really changes
+                     " var hv=hid?'0px':(c.getBoundingClientRect().height+14)+'px',rs=document.documentElement.style;\n"
+                     " if(rs.getPropertyValue('--jk-tags-h')!==hv)rs.setProperty('--jk-tags-h',hv);\n"
                      " if(c&&!c.__jkRo&&window.ResizeObserver){c.__jkRo=new ResizeObserver(room);c.__jkRo.observe(c);}}\n"
                      # The note type rebuilds its tag list with its own script right after
                      # the card shows (AnKing swaps in <kbd> pills). Changes made while we
@@ -2760,6 +2890,15 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # in <head>, so it's in place before AMBOSS's widget first mounts (and scrolls)
         if isinstance(context, DeckBrowser):
             web_content.head = _QB_NOSCROLL_JS + web_content.head
+        # 1:1 wheel scrolling on the deck list / Practice AND on cards (same 120 Hz misfire)
+        if isinstance(context, Reviewer):
+            web_content.head = _CARD_FRAME_JS + _IMG_RIM_JS + web_content.head
+        if isinstance(context, (DeckBrowser, Reviewer)):
+            web_content.head = _SCROLL_STATE_JS + _WHEEL_JS + web_content.head
+            # A/B: ~/.janki_native_scroll → Chromium's own scrolling; prepended last so the
+            # flag is set before _WHEEL_JS reads it
+            if os.path.exists(os.path.expanduser("~/.janki_native_scroll")):
+                web_content.head = "<script>window.__jkNativeScroll=1;</script>" + web_content.head
         if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", False):
             web_content.head += "\n" + _stats_head()
         # In the Practice view, relabel the deck browser's bottom "Import File" button
@@ -3119,22 +3258,21 @@ def _congrats_keys(*_):
         pass
 
 
-def _deck_menu(did: int) -> None:
-    """Right-click on a deck row: Unsuspend all cards (deck + subdecks) / Create subdeck."""
-    from aqt.qt import QMenu, QCursor
+def _deck_gear_items(menu, did: int) -> None:
+    """Extra items in each deck row's gear menu (Anki's Rename / Options / Export / Delete):
+    Unsuspend all cards (deck + subdecks) / Create subdeck / Hide from deck list."""
     from aqt.utils import getOnlyText, tooltip
     col = mw.col
     if col is None:
         return
-    d = col.decks.get(did)
+    d = col.decks.get(did, default=False)
     if not d:
         return
     name = d["name"]
-    menu = QMenu(mw)
-    a_uns = menu.addAction("Unsuspend all cards in “%s”" % name.split("::")[-1])
-    a_new = menu.addAction("Create subdeck…")
-    chosen = menu.exec(QCursor.pos())
-    if chosen is a_uns:
+    leaf = name.split("::")[-1]
+    menu.addSeparator()
+
+    def _unsuspend():
         from aqt.operations import CollectionOp
         q = 'deck:"%s" is:suspended' % name.replace('"', '\\"')
 
@@ -3145,13 +3283,23 @@ def _deck_menu(did: int) -> None:
         op2.n = 0
         CollectionOp(parent=mw, op=op2).success(
             lambda _c: tooltip("Unsuspended %d card(s)." % op2.n)).run_in_background()
-    elif chosen is a_new:
+
+    def _subdeck():
         sub = getOnlyText("Name of the new subdeck under “%s”:" % name, parent=mw)
         sub = (sub or "").strip().strip(":")
         if sub:
             col.decks.id("%s::%s" % (name, sub))
             mw.deckBrowser.refresh()
 
+    def _hide():
+        from ..features import hidden_decks
+        hidden_decks.set_hidden(did, True)
+        tooltip("Hidden “%s”. To show it again: Browse → right-click the deck → "
+                "Show in deck list." % leaf, period=4000)
+
+    menu.addAction("Unsuspend all cards in “%s”" % leaf).triggered.connect(lambda _=False: _unsuspend())
+    menu.addAction("Create subdeck…").triggered.connect(lambda _=False: _subdeck())
+    menu.addAction("Hide from deck list").triggered.connect(lambda _=False: _hide())
 
 def _calendar_showing():
     try:
@@ -3188,12 +3336,6 @@ def on_js_message(handled, message, context):
                    % (q, h, f, n, els, kd, drawn, selrow, nrows, act))
         except Exception:
             pass
-        return (True, None)
-    if isinstance(message, str) and message.startswith("janki:deckmenu:"):
-        try:
-            _deck_menu(int(message.rsplit(":", 1)[1]))
-        except Exception as e:
-            log("deck menu: %s" % e)
         return (True, None)
     if message == "janki:update":
         try:

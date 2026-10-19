@@ -1673,6 +1673,13 @@ try:
 except Exception:
     pass
 
+# Hide decks from the deck list (right-click a deck); show again from Browse's sidebar
+try:
+    from .src.features import hidden_decks as _hidden_decks
+    _hidden_decks.install()
+except Exception as _hd_exc:
+    log("hidden_decks: %s" % _hd_exc)
+
 # What's new: once, on the first launch after an update (also in Settings → General)
 try:
     from .src.features import whats_new as _whats_new

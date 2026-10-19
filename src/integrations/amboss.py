@@ -70,6 +70,35 @@ _AMBOSS_FROST_JS = (
 )
 
 
+_TERMS_CACHE = [0.0, True]
+
+
+def amboss_terms_on() -> bool:
+    """True when the AMBOSS add-on is installed, enabled AND showing term pop-ups
+    (its own `enablePopupDefinitions`). With terms off, Janki skips all its term work —
+    underline styling, tooltip frosting and their page watchers, the card timer's tip
+    poll. Cached ~5 s (the setting lives in AMBOSS's meta.json)."""
+    import time as _t
+    now = _t.monotonic()
+    if now - _TERMS_CACHE[0] < 5:
+        return _TERMS_CACHE[1]
+    on = False
+    try:
+        am = mw.addonManager
+        for d in am.allAddons():
+            if "amboss" not in (am.addonName(d) or "").lower():
+                continue
+            if not am.isEnabled(d):
+                continue
+            cfg = am.getConfig(d) or {}
+            on = bool(cfg.get("enablePopupDefinitions", True))
+            break
+    except Exception:
+        on = True                       # unknown → behave as before
+    _TERMS_CACHE[0], _TERMS_CACHE[1] = now, on
+    return on
+
+
 def _amboss_webviews():
     out = []
     try:
@@ -362,7 +391,7 @@ _AMBOSS_TOOLTIP_PROBE_JS = (
 
 def _frost_amboss_tooltip():
     w = getattr(mw, "web", None)
-    if w is None:
+    if w is None or not amboss_terms_on():
         return
     js = (_AMBOSS_TOOLTIP_JS if bool(_cfg().get("amboss_tooltip_frost", True))
           else _AMBOSS_TOOLTIP_OFF_JS)
@@ -494,7 +523,7 @@ def _apply_amboss_underlines(front: bool = True):
     """Show AMBOSS term underlines in every mode; fade them in on the front only
     (instant on the back). Suppressed on practice-bank cards when the user opts in."""
     web = getattr(mw, "web", None)
-    if web is None:
+    if web is None or not amboss_terms_on():
         return
     try:
         if _cfg().get("practice_no_amboss", True) and _is_practice_card():
@@ -512,7 +541,7 @@ def _apply_amboss_underlines(front: bool = True):
 
 
 def _start_amboss_size_watch():
-    if not _cfg().get("amboss_frost", True):
+    if not _cfg().get("amboss_frost", True) or not amboss_terms_on():
         return
     _apply_amboss_narrow_hide()
 

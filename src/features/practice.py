@@ -392,6 +392,11 @@ def hide_practice_rows(deck_browser, content):
             # One pass over the rows (a per-deck regex over the whole tree took 60-100ms
             # per deck-list render with many banks).
             drop = dids | amb
+            try:                                  # decks hidden via right-click → Hide
+                from . import hidden_decks
+                drop = drop | hidden_decks.hidden_with_children()
+            except Exception:
+                pass
             if drop:
                 def _keep(m):
                     row = m.group(0)

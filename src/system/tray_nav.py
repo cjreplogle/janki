@@ -979,14 +979,18 @@ class _DayView(QWidget):
             p.setPen(QColor(240, 242, 248))
             p.setFont(bold)
             star = bool(it["e"].get("mandatory"))
-            tr = r.adjusted(6, 2, -16 if star else -4, -2)
-            p.drawText(tr, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+            # vertically centred, unclipped: short classes are shorter than a line, and
+            # top-aligned + clipped text lost its descenders
+            tr = r.adjusted(6, 0, -16 if star else -4, 0)
+            p.drawText(tr, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                               | Qt.TextFlag.TextDontClip),
                        p.fontMetrics().elidedText(it["e"]["summary"], Qt.TextElideMode.ElideRight,
                                                   int(tr.width())))
             if star:                                        # red ★, top-right like the Calendar
                 p.setPen(QColor(255, 157, 138))
-                p.drawText(r.adjusted(0, 2, -5, 0),
-                           int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop), "★")
+                p.drawText(r.adjusted(0, 0, -5, 0),
+                           int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                               | Qt.TextFlag.TextDontClip), "★")
         now = datetime.datetime.now()                       # the red now-line
         m = now.hour * 60 + now.minute
         if self.is_today and self.lo <= m <= self.hi:

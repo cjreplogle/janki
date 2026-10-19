@@ -74,12 +74,20 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   Chromium's VizCompositorThread spin ~100 % CPU while idle under the 120 Hz flag
   (`--disable-frame-rate-limit`), even with its page marked hidden. Freed → ~4 %.
 
+- **Scrolling on the glass (2.11.5, traced via CDP):** software compositing means the root
+  scroller isn't composited — any paint invalidation during a scroll re-rasters the
+  visible text on the CPU. Never change a mask/style per scroll frame (cards scroll in a
+  fixed `#jk-sc` frame with a STATIC edge mask); give content its own layer with
+  `will-change: opacity` (not transform — breaks position:fixed inside cards). With
+  `--disable-frame-rate-limit`, rAF loops spin thousands of times/s and starve input:
+  drive scroll animation from an 8.3 ms timer, never a self-re-requesting rAF.
+
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.11.4** (Windows: **v2.11.4w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.11.5** (Windows: **v2.11.5w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.

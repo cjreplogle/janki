@@ -861,10 +861,17 @@ def _apply_card_zoom() -> None:
 _FIT_JS = r"""(function(on){
 var M=320,N=240,H=0.78,Z=__Z__;   // #qa is zoomed by Z: size in its units
 function io(im){return im.closest('#image-occlusion-container,.image-occlusion,[id^="io-"]');}
+// logos / badges aren't photos: AnKing's crown logo is a big file shown small (and
+// fitting it blew it up over the card). Skip anything pinned (fixed/absolute) or named
+// like a logo/AnKing badge.
+function badge(im,qa){if(/anking|logo|badge|icon/i.test((im.getAttribute('src')||'')+' '+
+  (im.alt||'')+' '+(im.className||'')+' '+(im.id||'')))return true;
+ for(var n=im;n&&n!==qa;n=n.parentElement){var p=getComputedStyle(n).position;
+  if(p==='fixed'||p==='absolute')return true;}return false;}
 function fit(){var qa=document.getElementById('qa');if(!qa)return;
  var W=qa.clientWidth||innerWidth;
  qa.querySelectorAll('img').forEach(function(im){
-  if(!on||io(im)){if(im.dataset.jkFit){['width','height','max-width','max-height'].forEach(function(p){
+  if(!on||io(im)||badge(im,qa)){if(im.dataset.jkFit){['width','height','max-width','max-height'].forEach(function(p){
     im.style.removeProperty(p);});delete im.dataset.jkFit;}return;}
   var nw=im.naturalWidth,nh=im.naturalHeight;
   if(!nw||!nh){if(!im.dataset.jkFitWait){im.dataset.jkFitWait=1;im.addEventListener('load',fit,{once:true});}return;}
