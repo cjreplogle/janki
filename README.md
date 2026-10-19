@@ -155,7 +155,12 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.11</b> · 2026-10-13 · 6 releases</summary>
+<summary><b>2.11</b> · 2026-10-13 · 7 releases</summary>
+
+**2.11.6** · 2026-10-19
+
+- **Undo hiding a deck**: ⌘Z / Ctrl+Z (Edit → Undo) brings a hidden deck back; showing one again from Browse can be undone too.
+- A deck's gear menu offers **Suspend all cards** when nothing in it is suspended (and Unsuspend all when something is). Both can be undone.
 
 **2.11.5** · 2026-10-19
 

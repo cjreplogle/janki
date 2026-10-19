@@ -3272,17 +3272,25 @@ def _deck_gear_items(menu, did: int) -> None:
     leaf = name.split("::")[-1]
     menu.addSeparator()
 
-    def _unsuspend():
+    dq = 'deck:"%s"' % name.replace('"', '\\"')
+    try:                                     # anything suspended in the deck (+ subdecks)?
+        any_susp = bool(col.find_cards(dq + " is:suspended"))
+    except Exception:
+        any_susp = True
+
+    def _toggle_suspend():
+        # nothing suspended → the item suspends everything instead (both undoable)
         from aqt.operations import CollectionOp
-        q = 'deck:"%s" is:suspended' % name.replace('"', '\\"')
+        q = dq + (" is:suspended" if any_susp else " -is:suspended")
 
         def op2(c):                          # remembers the count for the tooltip
             ids = c.find_cards(q)
             op2.n = len(ids)
-            return c.sched.unsuspend_cards(ids)
+            return c.sched.unsuspend_cards(ids) if any_susp else c.sched.suspend_cards(ids)
         op2.n = 0
         CollectionOp(parent=mw, op=op2).success(
-            lambda _c: tooltip("Unsuspended %d card(s)." % op2.n)).run_in_background()
+            lambda _c: tooltip("%s %d card(s)." % ("Unsuspended" if any_susp else "Suspended",
+                                                   op2.n))).run_in_background()
 
     def _subdeck():
         sub = getOnlyText("Name of the new subdeck under “%s”:" % name, parent=mw)
@@ -3294,10 +3302,14 @@ def _deck_gear_items(menu, did: int) -> None:
     def _hide():
         from ..features import hidden_decks
         hidden_decks.set_hidden(did, True)
-        tooltip("Hidden “%s”. To show it again: Browse → right-click the deck → "
-                "Show in deck list." % leaf, period=4000)
+        from aqt.qt import QKeySequence
+        undo = QKeySequence(QKeySequence.StandardKey.Undo).toString(
+            QKeySequence.SequenceFormat.NativeText)
+        tooltip("Hidden “%s”. %s to undo, or show it again from Browse → right-click the "
+                "deck → Show in deck list." % (leaf, undo or "Undo"), period=4000)
 
-    menu.addAction("Unsuspend all cards in “%s”" % leaf).triggered.connect(lambda _=False: _unsuspend())
+    menu.addAction("%s all cards in “%s”" % ("Unsuspend" if any_susp else "Suspend", leaf)
+                   ).triggered.connect(lambda _=False: _toggle_suspend())
     menu.addAction("Create subdeck…").triggered.connect(lambda _=False: _subdeck())
     menu.addAction("Hide from deck list").triggered.connect(lambda _=False: _hide())
 
