@@ -418,6 +418,15 @@ window.addEventListener('blur',function(){if(src)end();});
 // pointer moves on to another row, hover styles apply instantly.
 // Only THAT row: arrow-key selection uses the same transitions and must keep animating.
 (function(){var first;
+ // where the pointer was just before this page replaced the last one (a right-click
+ // fold doesn't move it, so no mousemove ever says which row it rests on)
+ try{var pp=JSON.parse(sessionStorage.getItem('jkPtr')||'null');
+  if(pp&&Date.now()-pp.t<10000){var el=document.elementFromPoint(pp.x,pp.y),
+   r0=el&&el.closest?el.closest('tr.deck'):null;if(r0){first=r0;r0.classList.add('jk-hov-instant');}}}catch(e){}
+ var pt=0;document.addEventListener('mousemove',function(e){var n=Date.now();if(n-pt<100)return;pt=n;
+  try{sessionStorage.setItem('jkPtr',JSON.stringify({x:e.clientX,y:e.clientY,t:n}));}catch(x){}},{passive:true,capture:true});
+ ['mousedown','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){
+  try{sessionStorage.setItem('jkPtr',JSON.stringify({x:e.clientX,y:e.clientY,t:Date.now()}));}catch(x){}},true);});
  function mm(e){var r=e.target&&e.target.closest?e.target.closest('tr.deck'):null;
   if(first===undefined){first=r;if(r)r.classList.add('jk-hov-instant');return;}
   if(r!==first){if(first)first.classList.remove('jk-hov-instant');
