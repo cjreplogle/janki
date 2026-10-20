@@ -46,6 +46,12 @@ def set_hidden(did: int, hide: bool) -> None:
 def _after_op(changes, handler) -> None:
     """Undo/redo of a Hide Deck step changes only config — redraw the deck list then."""
     try:
+        from . import deck_order
+        if handler is deck_order.QUIET:     # a drag-reorder save: the page already shows it
+            return
+    except Exception:
+        pass
+    try:
         if getattr(changes, "config", False) and not getattr(changes, "study_queues", False):
             _refresh_list()
     except Exception:

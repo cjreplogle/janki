@@ -2262,10 +2262,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # would pop in instantly ahead of its item's text — hide it (once per item;
         # a bullet's text can be split across several holders) until its FIRST
         # holder starts revealing.
-        "      var liSeen=[];\n"
-        "      holders.forEach(function(h){ h.liFirst=[]; (h.li||[]).forEach(function(li){\n"
-        "        if(liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden';\n"
-        "          h.liFirst.push(li); } }); });\n"
+
         # Pace by VISIBLE text only: whitespace between tags and text in hidden
         # sections (AnKing's collapsed extras) used to count, which sped the visible
         # text up and left invisible pauses — speed varied by note type.
@@ -2284,6 +2281,13 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        for(var i=0;i<rs.length;i++){ if(rs[i].width>0&&rs[i].height>0) return true; } return false; }\n"
         "      var totalW=0; holders.forEach(function(h){ var vis=seen(h.el);\n"
         "        h.w=vis ? h.text.replace(/\\s+/g,' ').trim().length : 0; totalW+=h.w; });\n"
+        # …and only THEN hide the bullets: hidden first, every list item's text read as
+        # invisible to seen() (visibility:hidden) and popped in untyped. Same JS turn as
+        # the measuring, so no frame shows the bullets early.
+        "      var liSeen=[];\n"
+        "      holders.forEach(function(h){ h.liFirst=[]; (h.li||[]).forEach(function(li){\n"
+        "        if(liSeen.indexOf(li)<0){ liSeen.push(li); li.style.visibility='hidden';\n"
+        "          h.liFirst.push(li); } }); });\n"
         "      var MS=totalMs(totalW), cumW=0, T0=0;\n"
         "      function finishHolder(h){ try{ var par=h.el.parentNode;\n"
         "        if(par){ par.replaceChild(document.createTextNode(h.text), h.el); par.normalize(); } }catch(e){} }\n"
@@ -3205,6 +3209,46 @@ def _congrats_glass_js(cfg) -> str:
             "var s=document.createElement('style');s.id='__janki_congrats_glass';"
             "s.textContent='" + css + "';"
             "if(document.head)document.head.appendChild(s);})();")
+
+
+def install_congrats_preglass() -> None:
+    """Register a document-creation script on mw.web that makes the congrats page
+    transparent before it paints (a constructed stylesheet can be adopted before <head>
+    exists). Runs on every main-window page; acts only on the congrats URL."""
+    cfg = _cfg()
+    if not GLASS or not cfg.get("enabled", True):
+        return
+    try:
+        try:
+            from aqt.qt import QWebEngineScript
+        except ImportError:
+            from PyQt6.QtWebEngineCore import QWebEngineScript
+        import json
+        page = mw.web.page()
+        for old in page.scripts().find("janki-congrats-preglass"):
+            page.scripts().remove(old)
+        css = (_CONGRATS_GLASS_CSS + "body,body *{text-shadow:" + _text_shadow(cfg) + "!important;}"
+               # entrance: the heading drops in and fades up, the line under it just
+               # after (opacity/transform only — nothing in the layout moves)
+               # starts at .02, not 0: with nothing visible, Chromium holds the new page
+               # back (~0.45 s "paint holding") before drawing it — the hang on opening
+               "@keyframes jkCongIn{from{opacity:.02;transform:translateY(-10px)}"
+               "to{opacity:1;transform:none}}"
+               "body h1,body h2,body h3{animation:jkCongIn .42s cubic-bezier(.2,.8,.2,1) both}"
+               "body p,body ul,body ol{animation:jkCongIn .42s cubic-bezier(.2,.8,.2,1) .09s both}")
+        sc = QWebEngineScript()
+        sc.setName("janki-congrats-preglass")
+        sc.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        sc.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        sc.setRunsOnSubFrames(False)
+        sc.setSourceCode(
+            "(function(){try{if(!/congrats/.test(location.pathname))return;"
+            "var s=new CSSStyleSheet();s.replaceSync(%s);"
+            "document.adoptedStyleSheets=document.adoptedStyleSheets.concat([s]);}catch(e){}})();"
+            % json.dumps(css))
+        page.scripts().insert(sc)
+    except Exception as e:
+        log("congrats preglass: %s" % e)
 
 
 def _congrats_font_js(cfg) -> str:

@@ -155,7 +155,24 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.12</b> · 2026-10-19 · 1 release</summary>
+<summary><b>2.12</b> · 2026-10-19 · 2 releases</summary>
+
+**2.12.1** · 2026-10-20
+
+**Drag decks in the deck list**
+- **Reorder decks by dragging**: press and hold a deck for a moment, then drag; the list slides open where it will land. Open subdecks travel with it. The order syncs and each move can be undone (⌘Z / Ctrl+Z).
+- **Move between levels**: left/right sets the level (the deck's name slides to show it). Sliding a subdeck up out of its parent takes it out to the outer level; nudge right to put it inside the deck above.
+- **Drop into a deck**: hold over another deck's row for a moment, it highlights, and the dragged deck becomes its subdeck. A deck dropped into a collapsed deck opens it so nothing disappears.
+- Clicking a deck opens it reliably again (a slightly wobbly click no longer gets lost).
+- Right-clicking a deck to fold/unfold no longer replays the hover animation.
+
+**Faster, smoother**
+- Removed most of the stutter in the first seconds after launch: lecture map, Practice bank check, sounds and rephrasings now load in the background; a full-window reload only happens if needed.
+- Works around the AMBOSS add-on freezing Anki for 1–2 s after the launch sync (its mobile prompt check now runs in the background).
+- The "Congratulations, you finished this deck" screen no longer flashes dark, and appears ~0.5 s sooner with a soft drop-in.
+
+**Fixes**
+- Bulleted lists type out with the text animation again.
 
 **2.12.0** · 2026-10-19
 

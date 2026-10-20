@@ -661,6 +661,15 @@ def refresh_if_stale() -> int:
         return 0
     n = 0
     css_blk, blk = _css_block(), _tpl_block()
+    # Loading every note type in full (AnKing's are big) cost ~0.4 s on the main thread
+    # each launch. Skip when the blocks match what this collection last got stamped with.
+    import hashlib
+    sig = hashlib.sha1((css_blk + "\x00" + blk).encode("utf-8", "replace")).hexdigest()
+    try:
+        if mw.col.get_config("janki_mobile_block_sig", "") == sig:
+            return 0
+    except Exception:
+        pass
     try:
         for m in mw.col.models.all():
             changed = False
@@ -684,6 +693,10 @@ def refresh_if_stale() -> int:
                 except Exception:
                     mw.col.models.save(m)
                 n += 1
+        try:
+            mw.col.set_config("janki_mobile_block_sig", sig)
+        except Exception:
+            pass
     except Exception as exc:
         log("mobilecards stale refresh: %s" % exc)
     return n

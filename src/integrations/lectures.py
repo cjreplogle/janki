@@ -81,7 +81,12 @@ def _log(msg):
         pass
 
 
+_CFG_HOLD = None     # set while a map build runs: its many per-row _cfg() calls share one read
+
+
 def _cfg():
+    if _CFG_HOLD is not None:
+        return _CFG_HOLD
     cfg = mw.addonManager.getConfig(__name__) or {}
     cfg.setdefault("ics_path", "")
     cfg.setdefault("xlsx_path", "")
@@ -1058,6 +1063,20 @@ def _build_map_from_source(path, families):
 
 
 def build_lecture_map(families=None):
+    """See _build_lecture_map. Reads the add-on config ONCE for the whole build: each
+    _cfg() is a getConfig, i.e. disk reads of meta.json/config.json, and the build asks
+    per spreadsheet row — the ~1.7 s main-thread freeze a few seconds after launch."""
+    global _CFG_HOLD
+    if _CFG_HOLD is not None:
+        return _build_lecture_map(families)
+    _CFG_HOLD = _cfg()
+    try:
+        return _build_lecture_map(families)
+    finally:
+        _CFG_HOLD = None
+
+
+def _build_lecture_map(families=None):
     """norm_lecture_name -> {'display': str, 'searches': [str, ...]}.
 
     The BASE source is `xlsx_path` (an .xlsx workbook, a single .txt list, or a
@@ -3582,7 +3601,11 @@ def _on_profile_open():
     # auto-open setting, so a later manual open is snappy on slow devices. Cached,
     # so it's a no-op if auto-open below already built it.
     if _paths_ready():
-        QTimer.singleShot(4000, _warm_map)
+        # on a background thread: the build (spreadsheet parse + AnKing tag index) is
+        # file reads + collection queries only, and on the main thread it froze the
+        # window ~1 s a few seconds after every launch
+        QTimer.singleShot(4000, lambda: mw.taskman.run_in_background(
+            _warm_map, lambda _f: None))
     # Auto-open only on the FIRST launch of each calendar day. Subsequent
     # launches the same day don't re-pop the dialog (Tools > Load today's
     # lectures still works manually anytime).

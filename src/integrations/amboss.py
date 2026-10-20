@@ -4,7 +4,7 @@ import sys
 from aqt import mw, gui_hooks
 from aqt.qt import QColor, Qt, QTimer
 
-from ..util.config import _cfg
+from ..util.config import _cfg, log
 
 # ---------------------------------------------------------------------------
 # AMBOSS side-panel frost — the AMBOSS add-on (1044112126) embeds a WebView
@@ -739,3 +739,58 @@ def _amboss_widget_trace() -> None:
         except Exception:
             pass
     showInfo("\n".join(lines))
+
+
+# --- AMBOSS mobile opt-in check off the main thread ---------------------------------
+# After the launch sync, the AMBOSS add-on decides whether to offer its mobile prompt by
+# calling its server — synchronously, on Anki's main thread (an SSL handshake + request:
+# the window froze 1.5 s+ every launch). Without touching AMBOSS's files, its
+# MobileSupportController.should_show_opt_in_dialog is wrapped: the first call answers
+# "not now" at once and runs the real check in the background; if that says yes, the
+# prompt is re-triggered on the main thread exactly as AMBOSS would have shown it. If
+# AMBOSS renames any of this, the wrapper simply never installs.
+def _amboss_optin_off_main_thread() -> None:
+    import sys as _sys
+    try:
+        mod = next((m for name, m in list(_sys.modules.items())
+                    if name.endswith(".mobile.controller")
+                    and hasattr(m, "MobileSupportController")), None)
+        if mod is None:
+            return
+        cls = mod.MobileSupportController
+        orig = getattr(cls, "should_show_opt_in_dialog", None)
+        if orig is None or getattr(orig, "_jk_bg", False) \
+                or not hasattr(cls, "maybe_show_opt_in_prompt"):
+            return
+
+        def should_show(self):
+            if getattr(self, "_jk_optin_yes", False):      # the background check said yes
+                self._jk_optin_yes = False
+                return True
+
+            def done(fut):
+                try:
+                    if fut.result():
+                        self._jk_optin_yes = True
+                        self.maybe_show_opt_in_prompt()
+                except Exception as e:
+                    log("amboss opt-in check: %s" % e)
+
+            try:
+                mw.taskman.run_in_background(lambda: orig(self), done, uses_collection=False)
+            except Exception:
+                return orig(self)                           # no task manager: old behaviour
+            return False
+
+        should_show._jk_bg = True
+        cls.should_show_opt_in_dialog = should_show
+    except Exception as e:
+        log("amboss opt-in wrap: %s" % e)
+
+
+try:
+    from aqt import gui_hooks as _gh_optin
+    _gh_optin.profile_did_open.append(_amboss_optin_off_main_thread)
+except Exception:
+    pass
+_amboss_optin_off_main_thread()

@@ -446,9 +446,18 @@ def _startup():
                 qbank.clean_stored_tags()   # repair quote/bracket-damaged bank tags (no-op once clean)
             except Exception as _ct_exc:
                 log("bank tag repair: %s" % _ct_exc)
+            # Scanning every bank's questions is file reads only: off the main thread
+            # (it froze the window ~0.3 s a few seconds after launch). Tagging, if
+            # needed, still runs here.
+            def _ct_done(fut):
+                try:
+                    if fut.result():               # first run / banks from an older Janki
+                        qbank.assign_content_tags()
+                except Exception as _cn_exc:
+                    log("content tags: %s" % _cn_exc)
             try:
-                if qbank.content_tags_missing():   # first run / banks from an older Janki
-                    qbank.assign_content_tags()
+                mw.taskman.run_in_background(qbank.content_tags_missing, _ct_done,
+                                             uses_collection=False)
             except Exception as _cn_exc:
                 log("content tags: %s" % _cn_exc)
             # (The similar-card "borrow" index is built on first need during reviews —
@@ -1265,6 +1274,10 @@ def _startup():
             mw.web.loadFinished.connect(css._congrats_keys)
         except Exception:
             pass
+        # ...and BEFORE its first paint too: loadFinished comes after the page has drawn
+        # once with Anki's opaque background — a one-frame dark flash on opening a
+        # finished deck.
+        css.install_congrats_preglass()
 
         # XP bar: pause when leaving the reviewer.
         # Menu fade: fade when opening a deck (→ overview) or returning from study.
@@ -1334,7 +1347,27 @@ def _startup():
                         return
                 except Exception:
                     pass
-                glass._reload_all_webviews()
+                # Only if some page actually came up opaque: reloading every view on
+                # every launch redrew the whole window ~2.6 s in (a visible hitch).
+                views = [v for v in (getattr(mw, "toolbarWeb", None), getattr(mw, "web", None),
+                                     getattr(mw, "bottomWeb", None)) if v is not None]
+                left = [len(views)]
+                opaque = [False]
+
+                def got(bg):
+                    if bg is not None and str(bg).replace(" ", "") not in (
+                            "rgba(0,0,0,0)", "transparent"):
+                        opaque[0] = True
+                    left[0] -= 1
+                    if left[0] == 0 and opaque[0]:
+                        glass._reload_all_webviews()
+
+                for v in views:
+                    try:
+                        v.evalWithCallback(
+                            "document.body?getComputedStyle(document.body).backgroundColor:null", got)
+                    except Exception:
+                        got(None)
             QTimer.singleShot(2600, _delayed_glass_reload)
             QTimer.singleShot(1000, glass._sync_oled)  # in case we start full-screen
             # Crash-guard: we've reached the add-on, so aqt init + window creation
@@ -1679,6 +1712,19 @@ try:
     _hidden_decks.install()
 except Exception as _hd_exc:
     log("hidden_decks: %s" % _hd_exc)
+
+try:
+    from .src.util import stall_watch as _stall_watch
+    _stall_watch.install()
+except Exception as _sw_exc:
+    log("stall_watch: %s" % _sw_exc)
+
+# Drag decks onto a row's top/bottom edge to reorder the deck list
+try:
+    from .src.features import deck_order as _deck_order
+    _deck_order.install()
+except Exception as _do_exc:
+    log("deck_order: %s" % _do_exc)
 
 # What's new: once, on the first launch after an update (also in Settings → General)
 try:

@@ -3734,9 +3734,17 @@ def warm_up() -> None:
         pass
 
 
-def purge_practice() -> int:
+_PURGED_MARK = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "user_files", "reword_practice_purged")
+
+
+def purge_practice(force: bool = False) -> int:
     """Delete stored rephrasings of Janki Practice questions (they're never rephrased;
-    any that exist came from before that rule). Returns how many card sides went."""
+    any that exist came from before that rule). Returns how many card sides went.
+    The launch call runs ONCE (a marker file): loading the whole store + a note scan
+    every launch froze the window ~0.4 s a few seconds after startup."""
+    if not force and os.path.exists(_PURGED_MARK):
+        return 0
     col = getattr(mw, "col", None)
     if col is None:
         return 0
@@ -3752,6 +3760,10 @@ def purge_practice() -> int:
         if gone:
             _save()
             log("reword: removed %d practice-question rephrasings" % len(gone))
+        try:
+            open(_PURGED_MARK, "w").close()
+        except Exception:
+            pass
         return len(gone)
     except Exception as exc:
         log(f"reword purge practice: {exc}")
@@ -3762,5 +3774,10 @@ try:
     from aqt import gui_hooks as _gh
     from aqt.qt import QTimer as _QT
     _gh.profile_did_open.append(lambda: _QT.singleShot(6000, purge_practice))
+    # Load (and sanitize) the rephrasing store on a background thread a few seconds after
+    # launch, so the FIRST card of a session doesn't stall ~0.4 s doing it.
+    _gh.profile_did_open.append(lambda: _QT.singleShot(
+        5000, lambda: mw.taskman.run_in_background(_load, lambda _f: None,
+                                                   uses_collection=False)))
 except Exception:
     pass

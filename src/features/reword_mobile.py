@@ -383,7 +383,7 @@ def apply():
     col = mw.col
     if not col:
         return (0, 0)
-    reword.purge_practice()
+    reword.purge_practice(force=True)
     # Practice questions baked by an older version: clear their phone copy.
     try:
         pm = col.models.by_name("Janki Practice")

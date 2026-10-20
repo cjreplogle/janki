@@ -232,8 +232,23 @@ def _play_windows(name, c, vol, force):
 
 
 def preload():
-    for n in NAV | REVIEW:
-        _effect(n)
+    """Warm the sound effects a few at a time across event-loop turns. All ~30 in one go
+    (each a QSoundEffect + a config read from disk) froze the window ~0.3 s just after
+    launch."""
+    from aqt.qt import QTimer
+    names = sorted(NAV | REVIEW)
+
+    def step():
+        for _ in range(3):
+            if not names:
+                return
+            try:
+                _effect(names.pop())
+            except Exception:
+                pass
+        QTimer.singleShot(40, step)
+
+    step()
 
 
 def _is_practice(card):

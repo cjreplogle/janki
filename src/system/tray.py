@@ -618,8 +618,11 @@ def _install_close_hook() -> None:
 
 class _TrayFilter(QObject):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        # Gate on the SETTING only (not isVisible — see _ensure_tray_target).
-        if obj is mw and _cfg().get("tray_minimize", False) and not _quitting:
+        # Gate on the SETTING only (not isVisible — see _ensure_tray_target). The event
+        # type is checked FIRST: this filter sees every event on the main window, and
+        # reading the config (disk reads) for each one added up to visible stalls.
+        if obj is mw and event.type() in (QEvent.Type.Close, QEvent.Type.WindowStateChange) \
+                and not _quitting and _cfg().get("tray_minimize", False):
             if event.type() == QEvent.Type.Close:
                 # Red-X → minimize to the menu bar instead of quitting. Anki's
                 # closeEvent (which saves geometry) never runs when we swallow the
