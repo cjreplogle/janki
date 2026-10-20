@@ -155,6 +155,25 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
+<summary><b>2.12</b> · 2026-10-19 · 1 release</summary>
+
+**2.12.0** · 2026-10-19
+
+**Focus Mode**
+- Cards are centred on screen again (the smoother scrolling in 2.11.5 left them at the top).
+- A card that's mostly one big image under a short question is now truly centred instead of pushed down.
+
+**Reworded cards**
+- The back of a reworded card keeps the reworded front you just saw, instead of switching to a different phrasing (or the original) on reveal.
+- You can switch back to the original phrasing from the back of the card too, and the front and back stay on the same version.
+
+**Buttons**
+- The Practice button's label shows right away instead of after the text animation finishes.
+- The Original/Reworded and Practice buttons no longer turn dark on some note types.
+
+</details>
+
+<details>
 <summary><b>2.11</b> · 2026-10-13 · 7 releases</summary>
 
 **2.11.6** · 2026-10-19

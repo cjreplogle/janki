@@ -165,7 +165,10 @@ _FOCUS_CSS = (
     # their side padding from body.card — at narrow widths their text hit the edges.
     "padding-top:12px!important;padding-bottom:12px!important;"
     "overflow-y:auto!important;}"
-    "#qa{margin-top:auto!important;margin-bottom:auto!important;}"
+    # cards now sit inside the scroll frame (#jk-sc, css._CARD_FRAME_JS), not body
+    # directly, so the frame needs the same flex column for #qa's auto margins to centre
+    "#jk-sc{display:flex!important;flex-direction:column!important;}"
+    "#qa{margin-top:auto!important;margin-bottom:auto!important;flex-shrink:0!important;}"
     # The answer bar is hidden here, so lift the bottom-left controls (reword toggle,
     # practice slide button) off the very edge of the screen.
     "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:14px!important;}"
@@ -174,7 +177,7 @@ if sys.platform.startswith("win"):
     # The frameless window keeps its 14px grab strip above the card in Focus Mode, so
     # centring inside the web view put the card half that below the window's centre.
     # Extra bottom padding (= the strip) centres it on the WINDOW instead.
-    _FOCUS_CSS += "body{padding-bottom:26px!important;}"
+    _FOCUS_CSS += "body,#jk-sc{padding-bottom:26px!important;}"
 
 
 def _focus_chrome():
@@ -498,6 +501,10 @@ _CORE_APPLY = (
     "textBot=c2.getBoundingClientRect().bottom;break;}"
     "var extra=allBot-textBot;if(extra<=1)return;"
     "var V=window.innerHeight;var Hall=allBot-allTop;"
+    # the nudge is for a short line of text over a small trailing image; when the image
+    # IS the card (a fitted diagram under a one-line question) it just pushed the whole
+    # thing down off-centre, so true-centre those
+    "if(extra>Hall*0.5)return;"
     "var shift=extra/4;"                                      # half-way text↔all centre
     "var room=(V-Hall)/2;if(room<0)room=0;"                   # never push off-screen
     "if(shift>room)shift=room;if(shift<=0)return;"

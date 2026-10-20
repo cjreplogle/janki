@@ -728,9 +728,11 @@ def practice_button_html(card) -> str:
     btn = (
         '<div id="jk-pq-btn" onclick="pycmd(\'jankipractice:toggle\')" '
         'title="Related practice questions (Tab+Q)" '
-        'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
-        'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
-        'style="cursor:pointer;font-size:14.5px;color:#9fb4d8;opacity:0.55;'
+        'onmouseover="this.style.opacity=1;this.style.setProperty(\'color\',\'#fff\',\'important\');" '
+        'onmouseout="this.style.opacity=0.55;this.style.setProperty(\'color\',\'#9fb4d8\',\'important\');" '
+        'style="cursor:pointer;font-size:14.5px;'
+        'color:#9fb4d8!important;-webkit-text-fill-color:currentColor!important;'
+        'text-shadow:none!important;opacity:0.55;'
         'background:rgba(28,29,33,0.7);border:1px solid rgba(255,255,255,0.2);'
         # no font-family: inherit the page font exactly like the reword toggle does
         'border-radius:8px;padding:4px 12px;user-select:none;">'

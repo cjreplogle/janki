@@ -235,6 +235,7 @@ def _key(note_id, ord_, side: str) -> str:
 # Cards shown (question side) at least once THIS SESSION, and the original-vs-reworded
 # decision made for the current exposure (so the answer side matches its question side).
 _shown_q = set()
+_front_html = {}       # cid -> reworded front HTML last shown (for a back with no reword)
 _orig_exposure = {}
 _shown_day = None      # study day _shown_q belongs to (a new day = a new session)
 
@@ -266,6 +267,48 @@ def _pick(variants, card) -> "str | None":
     return variants[idx]
 
 
+def _front_shown(note, card, cid, cycling, reps) -> "str | None":
+    """The question-side variant this view of the card shows (same choice as apply() makes
+    for side 'q'), or None when the front shows the original / has no usable reword."""
+    rec = _load().get(_key(note.id, card.ord, "q"))
+    if not rec or rec.get("html"):
+        return None
+    try:
+        if rec.get("src") != _hash(_plain(card.question())):
+            return None
+    except Exception:
+        return None
+    qvars = rec.get("variants") or []
+    if not rec.get("html"):
+        _pt = _plain(card.question())
+        qvars = [v for v in qvars if not _rambling(v, _pt)]
+    if not qvars:
+        return None
+    if cycling:
+        idx = _cycle.get(cid, 0)
+        return qvars[(idx - 1) % len(qvars)] if idx > 0 else None
+    return qvars[0] if _peek else _pick(qvars, card)
+
+
+def _join_front(qv: str, av: str, note, ord_) -> str:
+    """Answer variant `av` with its leading copy of the front replaced by `qv`. The front's
+    end is found by matching a stored front variant (as _with_answer_marker does); failing
+    that, by the shown front's line count (rewords keep the line structure)."""
+    al = [ln.strip() for ln in (av or "").split("\n") if ln.strip()]
+    an = [_norm(x) for x in al]
+    head = 0
+    for v in (_load().get(_key(note.id, ord_, "q")) or {}).get("variants") or []:
+        qn = [_norm(x) for x in v.split("\n") if x.strip()]
+        if qn and len(qn) < len(an) and an[:len(qn)] == qn:
+            head = max(head, len(qn))
+    ql = [ln.strip() for ln in qv.split("\n") if ln.strip()]
+    if not head:
+        head = len(ql)
+    if head >= len(al):
+        return av                 # can't tell front from back; leave it as generated
+    return "\n".join(ql + al[head:])
+
+
 # --------------------------------------------------------------------------- display hook
 def apply(text: str, card, kind) -> str:
     """card_will_show transform: swap in a reworded phrasing when one exists and is still
@@ -281,17 +324,26 @@ def apply(text: str, card, kind) -> str:
         note = card.note()
         if _is_practice(note):
             return text            # practice questions are never rephrased
+        if side == "q":
+            _front_html.pop(cid, None)
         rec = _load().get(_key(note.id, card.ord, side))
-        if not rec:
-            return text
-        if rec.get("src") != _hash(_plain(text)):
-            return text            # card was edited since → stale, show original
-        variants = rec.get("variants") or []
-        if not rec.get("html"):    # hide already-stored padded rewords (pre-_rambling)
-            _pt = _plain(text)
-            variants = [v for v in variants if not _rambling(v, _pt)]
+        variants = []
+        if rec and rec.get("src") == _hash(_plain(text)):   # else edited since → stale
+            variants = rec.get("variants") or []
+            if not rec.get("html"):    # hide already-stored padded rewords (pre-_rambling)
+                _pt = _plain(text)
+                variants = [v for v in variants if not _rambling(v, _pt)]
         if not variants:
-            return text            # nothing to reword/toggle to
+            # No reword for the back: still keep the reworded front that was just shown,
+            # rather than flipping it back to the original on reveal.
+            if side == "a" and cid in _front_html:
+                m = re.search(r"""<hr[^>]*id=["']?answer\b[^>]*>""", text or "")
+                if m:
+                    shown = _front_html[cid] + text[m.start():]
+                    if isinstance(kind, str) and "review" in kind.lower():
+                        return _toggleable(shown, text, True)   # can still switch back
+                    return shown
+            return text
         reps = int(getattr(card, "reps", 0) or 0)
         cycling = cid in _cycle
 
@@ -320,6 +372,15 @@ def apply(text: str, card, kind) -> str:
                 variant = variants[0] if _peek else _pick(variants, card)
 
         is_cz = _is_cloze(note)
+
+        # The back opens with the front again, but the back's rewords were generated on their
+        # own, so its copy of the front (and its variant index) needn't match the reworded
+        # front just shown. Rebuild it: the front exactly as displayed + this variant's back.
+        if (variant is not None and side == "a" and not is_cz and not rec.get("html")
+                and re.search(r"""id=["']?answer\b""", text or "")):
+            qv = _front_shown(note, card, cid, cycling, reps)
+            if qv:
+                variant = _join_front(qv, variant, note, card.ord)
 
         # Full-HTML variants (list reorder) already carry the original markup/styling AND images
         # — show them verbatim. Text variants (paraphrase) are rebuilt: re-wrap cloze styling,
@@ -352,6 +413,8 @@ def apply(text: str, card, kind) -> str:
             shown = _disp(variant)
             other = text                      # the alternate is the original
             showing_reworded = True
+            if side == "q":
+                _front_html[cid] = shown
         else:
             shown = text                      # showing the original
             alt_idx = _cycle_last.get(cid, 1)  # the reword the toggle would reveal
@@ -3099,7 +3162,7 @@ _SWAP_JS = (
     # reworded → keep the bar visible; original → re-arm hover-hide but NOT immediately, so the
     # just-clicked button stays until the cursor moves away from the corner
     "if(window.jankiRewordHover&&btn)jankiRewordHover(btn.textContent.trim()==='Original',false);"
-    "if(typeof pycmd!=='undefined')pycmd('jankireword:toggle');"
+    "if(typeof pycmd!=='undefined')pycmd('jankireword:toggle:'+(btn&&btn.textContent.trim()==='Original'?'orig':'rw'));"
     "requestAnimationFrame(function(){qa.style.opacity='1';qa.__jkSwapping=false;});"
     "}catch(e){qa.__jkSwapping=false;}},150);"
     "}catch(e){}};"
@@ -3154,9 +3217,11 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
     button shows only while the reworded side is on screen."""
     toggle = (
         '<div id="jk-rw-toggle" onclick="jankiRewordSwap()" '
-        'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
-        'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
-        'style="cursor:pointer;font-size:14.5px;color:#9fb4d8;opacity:0.55;'
+        'onmouseover="this.style.opacity=1;this.style.setProperty(\'color\',\'#fff\',\'important\');" '
+        'onmouseout="this.style.opacity=0.55;this.style.setProperty(\'color\',\'#9fb4d8\',\'important\');" '
+        'style="cursor:pointer;font-size:14.5px;'
+        'color:#9fb4d8!important;-webkit-text-fill-color:currentColor!important;'
+        'text-shadow:none!important;opacity:0.55;'
         'background:rgba(28,29,33,0.7);border:1px solid rgba(255,255,255,0.2);'
         'border-radius:8px;padding:4px 12px;user-select:none;">' + label + '</div>')
     nxt = ""
@@ -3164,11 +3229,11 @@ def _button_html(label: str, multi: bool = False, showing_reworded: bool = False
         disp = "block" if showing_reworded else "none"
         nxt = (
             '<div id="jk-rw-next" onclick="jankiRewordNext()" title="Next rephrasing" '
-            'onmouseover="this.style.opacity=1;this.style.color=\'#fff\';" '
-            'onmouseout="this.style.opacity=0.55;this.style.color=\'#9fb4d8\';" '
+            'onmouseover="this.style.opacity=1;this.style.setProperty(\'color\',\'#fff\',\'important\');" '
+            'onmouseout="this.style.opacity=0.55;this.style.setProperty(\'color\',\'#9fb4d8\',\'important\');" '
             # starts invisible; the corner mousemove fades it in (see _HOVER_JS)
-            'style="display:%s;cursor:pointer;font:700 17px/1 -apple-system,sans-serif;'
-            'color:#9fb4d8;opacity:0;pointer-events:none;transition:opacity .18s;'
+            'style="display:%s;cursor:pointer;font:700 17px/1 -apple-system,sans-serif!important;'
+            'color:#9fb4d8!important;-webkit-text-fill-color:currentColor!important;opacity:0;pointer-events:none;transition:opacity .18s;'
             'background:rgba(28,29,33,0.7);'
             'border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:4px 13px;'
             'user-select:none;">&#8250;</div>' % disp)
@@ -3259,6 +3324,18 @@ def _inject_live_current() -> None:
         log(f"reword inject live: {exc}")
 
 
+def _auto_idx(card) -> int:
+    """Cycle index (1..N) of the reword _pick() shows for this card right now."""
+    try:
+        note = card.note()
+        rec = _load().get(_key(note.id, card.ord, "q")) or {}
+        n = len(rec.get("variants") or []) or 1
+        reps = int(getattr(card, "reps", 0) or 0)
+        return ((reps - 1) % n if reps > 0 else 0) + 1
+    except Exception:
+        return 1
+
+
 def toggle_cycle(cid) -> None:
     """Flip the card between original (index 0) and its last-shown reword."""
     cid = int(cid)
@@ -3275,11 +3352,31 @@ def on_js_message(handled, message, context):
     content client-side (with the scroll animation); here we only sync Python's cycle state
     so the answer side / Tab+R / Ctrl+Z stay in agreement — NO Python re-render."""
     try:
-        if message == "jankireword:toggle":
+        if message.startswith("jankireword:toggle"):
             r = getattr(mw, "reviewer", None)
             if getattr(mw, "state", None) == "review" and r and getattr(r, "card", None):
                 set_peek(False)
-                toggle_cycle(r.card.id)
+                cid = r.card.id
+                want = message.rpartition(":")[2]          # what the page now shows
+                if want in ("orig", "rw") and cid not in _cycle:
+                    # First toggle of an auto-chosen view: Python has no cycle index yet,
+                    # so seed it from what was showing instead of guessing "original".
+                    if want == "orig":
+                        _cycle_last.setdefault(cid, _auto_idx(r.card))
+                        _cycle[cid] = 0
+                    else:
+                        _cycle[cid] = _cycle_last.get(cid, _auto_idx(r.card))
+                elif want == "orig":
+                    if _cycle.get(cid, 0) > 0:
+                        _cycle_last[cid] = _cycle[cid]
+                    _cycle[cid] = 0
+                elif want == "rw":
+                    if _cycle.get(cid, 0) == 0:
+                        _cycle[cid] = _cycle_last.get(cid, 1)
+                else:
+                    toggle_cycle(cid)
+                if _cycle.get(cid) == 0:      # now on the original: so is the back
+                    _front_html.pop(cid, None)
             return (True, None)
         if message == "jankireword:next":
             # Advance to the next stored reword (wrapping within 1..N, never back to the

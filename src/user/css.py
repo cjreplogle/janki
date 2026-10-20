@@ -2195,6 +2195,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "      while(p && p!==qa){ var t=(p.tagName||'').toUpperCase();\n"
         "        if(t==='SCRIPT'||t==='STYLE'||t==='TEMPLATE') return true;\n"
         "        if((p.id||'')==='jk-rw-bar') return true;   // reword control bar (toggle + arrow)\n"
+        "        if((p.id||'')==='jk-pq-bar'||(p.id||'')==='jp-slide-btn'||(p.classList&&p.classList.contains('jp-slide-btn'))) return true;   // practice slide button\n"
         "        if((p.id||'')==='tags-container') return true;   // card tags: fade in, not typed\n"
         "        if(t.indexOf('AMBOSS')===0) return true;   // AMBOSS custom elements\n"
         "        if(p.classList && (p.classList.contains('MathJax')||\n"
