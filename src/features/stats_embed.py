@@ -734,7 +734,8 @@ def _install_layout_guard(panel) -> None:
 
 
 _RESET_JS = ("(function(){var b=document.body;if(b){b.style.transition='';"
-             "b.style.opacity='';b.style.transform='';}})();")
+             "b.style.opacity='';b.style.transform='';}"
+             "document.documentElement.style.removeProperty('visibility');})();")   # (fade_then from review)
 
 
 def open_stats() -> None:
@@ -897,7 +898,12 @@ def fade_then(fn, web=None, ms: int = 0, to: float = 0.35, sound: str = "page") 
     fade-out is still seen."""
     _page_sfx(sound)
     try:
-        (web or mw.web).eval(_FADE_OUT_JS % to)
+        if web is None and getattr(mw, "state", None) == "review":
+            # a card (its own scroll layer) fading under the page fade left its top
+            # edge behind as a white bar until the next page drew — hide it outright
+            mw.web.eval("document.documentElement.style.setProperty('visibility','hidden','important')")
+        else:
+            (web or mw.web).eval(_FADE_OUT_JS % to)
     except Exception:
         pass
     try:
