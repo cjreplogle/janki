@@ -235,6 +235,11 @@ def preload():
     """Warm the sound effects a few at a time across event-loop turns. All ~30 in one go
     (each a QSoundEffect + a config read from disk) froze the window ~0.3 s just after
     launch."""
+    if sys.platform.startswith("win"):
+        # Windows plays through winsound (below), never QSoundEffect — and merely
+        # importing QtMultimedia popped a "Bad Image" error on some installs (the ARM64
+        # Anki build in a Parallels VM: 0xc000007b)
+        return
     from aqt.qt import QTimer
     names = sorted(NAV | REVIEW)
 

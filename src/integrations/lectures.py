@@ -1494,19 +1494,24 @@ def _save_aliases(raw):
 # -------------------------------------------------------------- state IO -------
 
 def _state_path():
-    return os.path.join(ADDON_DIR, "state.json")
+    # user_files/: Anki keeps it across add-on updates. At the add-on root the file was
+    # wiped by every update, so the day's auto-open (Load today's lectures) came back
+    return os.path.join(ADDON_DIR, "user_files", "state.json")
 
 
 def _load_state():
-    try:
-        with open(_state_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    for p in (_state_path(), os.path.join(ADDON_DIR, "state.json")):   # (old place)
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
 
 def _save_state(d):
     try:
+        os.makedirs(os.path.dirname(_state_path()), exist_ok=True)
         with open(_state_path(), "w", encoding="utf-8") as f:
             json.dump(d, f)
     except Exception as e:

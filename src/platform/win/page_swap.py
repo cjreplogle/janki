@@ -84,7 +84,13 @@ def _swap(view, html, context) -> None:
     # the markers first so every script installs fresh, as on a real load.
     js = ("(function(){try{Object.getOwnPropertyNames(window).forEach(function(k){"
           "if(/^__(jk|janki|jp)/.test(k)){try{delete window[k];}catch(e){window[k]=undefined;}}});}"
-          "catch(e){}document.open();document.write(%s);document.close();})();"
+          # …and stop the old page's timers and frame loops: document.open() keeps
+          # them, so each switch stacked another copy of every loop (gamepad poll,
+          # edge fade…) and Windows got slower the more you switched
+          "catch(e){}try{var t=setTimeout(function(){},0);for(var i=0;i<=t;i++){"
+          "clearTimeout(i);clearInterval(i);}var r=requestAnimationFrame(function(){});"
+          "for(var j=0;j<=r;j++)cancelAnimationFrame(j);}catch(e){}"
+          "document.open();document.write(%s);document.close();})();"
           % json.dumps(doc))
 
     def _done(_r=None):

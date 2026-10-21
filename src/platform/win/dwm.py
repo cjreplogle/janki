@@ -153,8 +153,8 @@ def _safe_q(k, name):
 
 def backdrop_mode() -> str:
     try:
-        from aqt import mw
-        c = mw.addonManager.getConfig(__name__) or {}
+        from ...util.config import _cfg_raw  # cached per event-loop pass (a raw
+        c = _cfg_raw() or {}                 # getConfig re-read meta.json: ~0.1 s in a VM)
         m = "off" if c.get("disable_animations") or c.get("glass_enabled", True) is False else str(c.get("win_backdrop", "auto")).lower()
     except Exception:
         m = "auto"
@@ -187,8 +187,8 @@ def backdrop_wanted() -> bool:
     """Config win_backdrop: "on" / "off" / "auto" (default: on unless transparency effects
     are off or this is a virtual machine)."""
     try:
-        from aqt import mw
-        c = mw.addonManager.getConfig(__name__) or {}
+        from ...util.config import _cfg_raw
+        c = _cfg_raw() or {}
         mode = "off" if c.get("disable_animations") or c.get("glass_enabled", True) is False else str(c.get("win_backdrop", "auto")).lower()
     except Exception:
         mode = "auto"

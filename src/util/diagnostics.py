@@ -67,6 +67,20 @@ def _frontmost() -> str:
         return "frontmost? %s" % exc
 
 
+def _who():
+    """Which Python code caused this (a Janki or Anki call), or that none did — then
+    Windows / another app minimised or hid the window. For 'it randomly minimises'."""
+    import traceback
+    fr = [f for f in traceback.extract_stack()[:-3]
+          if "diagnostics.py" not in f.filename]
+    mine = [f for f in fr if ("janki" in f.filename or "aqt" in f.filename)
+            and f.name not in ("run", "_run", "main", "<module>")]   # (the event loop)
+    if not mine:
+        return "  [by: outside Python — Windows/OS or another app]"
+    return "  [by: %s]" % " < ".join("%s:%d %s" % (f.filename.replace("\\", "/").split("/")[-1],
+                                                   f.lineno, f.name) for f in mine[-4:][::-1])
+
+
 class _FocusWatch(QObject):
     def eventFilter(self, obj, ev):
         try:
@@ -79,9 +93,9 @@ class _FocusWatch(QObject):
             elif t == QEvent.Type.WindowStateChange:
                 flog("mw WindowStateChange fs=%s min=%s max=%s visible=%s"
                      % (mw.isFullScreen(), mw.isMinimized(), mw.isMaximized(),
-                        mw.isVisible()))
+                        mw.isVisible()) + _who())
             elif t == QEvent.Type.Hide:
-                flog("mw Hide")
+                flog("mw Hide" + _who())
             elif t == QEvent.Type.Show:
                 flog("mw Show fs=%s" % mw.isFullScreen())
         except Exception:

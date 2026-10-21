@@ -191,6 +191,7 @@ class _PlaceOnResize(QObject):
             for b in _lights.findChildren(_CapButton):
                 b.update()
         if ev.type() == QEvent.Type.WindowStateChange:
+            _cover_state_change()
             sync_fullscreen()
             _keep_lights_on_top()
             try:                       # OLED black in fullscreen / maximised
@@ -203,6 +204,122 @@ class _PlaceOnResize(QObject):
 
 
 _lights_timer = None
+
+
+_cover = {"gen": 0, "snap": None}
+
+
+def _hold_snapshot():
+    """□ clicked: a picture of the window as it is on screen (the real pixels, glass
+    included) stays up in its place while the real window is hidden and changes size;
+    it fades out as the window fades back in."""
+    try:
+        from aqt.qt import QLabel, Qt
+        _drop_snapshot(0)
+        geo = mw.frameGeometry()
+        scr = mw.screen()
+        sg = scr.geometry()
+        pix = scr.grabWindow(0, geo.x() - sg.x(), geo.y() - sg.y(), geo.width(), geo.height())
+        lab = QLabel(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+                     | Qt.WindowType.WindowStaysOnTopHint
+                     | Qt.WindowType.WindowDoesNotAcceptFocus)
+        lab.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        lab.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lab.setPixmap(pix)
+        lab.setScaledContents(True)
+        lab.setGeometry(geo)
+        lab.show()
+        _cover["snap"] = lab
+        from aqt.qt import QTimer           # never left up: gone after 2 s regardless
+        QTimer.singleShot(2000, lambda: _cover.get("snap") is lab and _drop_snapshot(0))
+    except Exception:
+        _cover["snap"] = None
+
+
+def _drop_snapshot(ms):
+    lab = _cover.get("snap")
+    _cover["snap"] = None
+    if lab is None:
+        return
+    try:
+        if ms <= 0:
+            lab.close(); lab.deleteLater()
+            return
+        from aqt.qt import QPropertyAnimation
+        anim = QPropertyAnimation(lab, b"windowOpacity", lab)
+        anim.setDuration(ms)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.finished.connect(lambda: (lab.close(), lab.deleteLater()))
+        anim.start()
+    except Exception:
+        try:
+            lab.close()
+        except Exception:
+            pass
+
+
+def _cover_state_change():
+    """Entering/leaving fullscreen or maximised: Windows resizes the window first, the
+    web views re-lay out later (~0.8 s in the VM) and the OLED black layer switches
+    separately — the page sat squeezed to one side, or on a black box. Hide the window
+    until the page has the new size and the black layer matches, then fade it in
+    (1.5 s cap)."""
+    try:
+        from aqt.qt import QTimer
+        from ...util.keytap import _fade_window
+        from ...user import glass as _g
+    except Exception:
+        return
+    _cover["gen"] += 1
+    gen = _cover["gen"]
+    mw.setWindowOpacity(0.0)
+    tries = {"n": 0}
+
+    def done():
+        if gen == _cover["gen"]:
+            if _cover.get("snap") is not None:
+                # picture up: swap straight to the real window under it, then remove
+                # the picture (a crossfade showed both windows; a zoom looked janky)
+                def swap():
+                    if gen != _cover["gen"]:
+                        return
+                    mw.setWindowOpacity(1.0)
+                    QTimer.singleShot(40, lambda: _drop_snapshot(0))
+                QTimer.singleShot(50, swap)
+            else:
+                QTimer.singleShot(50, lambda: gen == _cover["gen"] and
+                                  _fade_window(mw, 0.0, 1.0, 120))
+
+    def check():
+        if gen != _cover["gen"]:
+            return
+        tries["n"] += 1
+        if tries["n"] > 37:                       # ~1.5 s: show it anyway
+            return done()
+        try:
+            filled = mw.isFullScreen() or mw.isMaximized()
+            want = bool(_g._cfg().get("oled_fullscreen", False)) and filled
+            if _g.GLASS and want != _g._oled_active:
+                return QTimer.singleShot(40, check)
+            web = mw.web
+            z = web.zoomFactor() or 1.0
+            W, H = web.width() / z, web.height() / z
+
+            def got(v):
+                if gen != _cover["gen"]:
+                    return
+                try:
+                    w, h = (float(x) for x in str(v).split(","))
+                    if abs(w - W) <= 2 and abs(h - H) <= 2:
+                        return done()
+                except Exception:
+                    pass
+                QTimer.singleShot(40, check)
+            web.evalWithCallback("innerWidth+','+innerHeight", got)
+        except Exception:
+            done()
+    QTimer.singleShot(40, check)
 
 
 def _keep_lights_on_top():
@@ -262,20 +379,25 @@ def sync_fullscreen():
 def toggle_maximize():
     """□: fullscreen → back to a normal window (a way out of fullscreen); maximized →
     normal; normal → maximized."""
-    if mw.isFullScreen() or mw.isMaximized():
-        mw.showNormal()
-    elif _windowed_fullscreen():
-        mw.showFullScreen()        # borderless, covers the taskbar too
-    else:
-        mw.showMaximized()
+    def change():
+        mw.setWindowOpacity(0.0)   # …then the window hides BEFORE the change
+        if mw.isFullScreen() or mw.isMaximized():
+            mw.showNormal()
+        elif _windowed_fullscreen():
+            mw.showFullScreen()    # borderless, covers the taskbar too
+        else:
+            mw.showMaximized()
+    _hold_snapshot()               # the old look stays up while it changes — once
+    from aqt.qt import QTimer      # it's on screen (hidden at once, it blinked out)
+    QTimer.singleShot(40, change)
 
 
 def _windowed_fullscreen() -> bool:
     """Config win_windowed_fullscreen: □ fills the whole screen (taskbar included)
     instead of maximising — a borderless window, not exclusive fullscreen."""
     try:
-        return bool((mw.addonManager.getConfig(__name__) or {}).get(
-            "win_windowed_fullscreen", True))
+        from ...util.config import _cfg_raw
+        return bool((_cfg_raw() or {}).get("win_windowed_fullscreen", True))
     except Exception:
         return False
 

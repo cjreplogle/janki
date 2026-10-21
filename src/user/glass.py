@@ -141,7 +141,10 @@ def _win_apply_main():
         _win_bg_apply_safe()
     else:
         import re
-        mw.setStyleSheet(re.sub(r"/\*janki-win-bgimg\*/[^\n]*\n?", "", mw.styleSheet() or ""))
+        cur = mw.styleSheet() or ""
+        new = re.sub(r"/\*janki-win-bgimg\*/[^\n]*\n?", "", cur)
+        if new != cur:   # re-setting even an identical sheet re-polishes the whole
+            mw.setStyleSheet(new)   # window (150–400 ms each, several per fullscreen switch)
         _win_glass_window(mw, sel="QMainWindow")
     _clear_existing_webviews()
 

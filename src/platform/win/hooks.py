@@ -102,7 +102,11 @@ def _leader_vk():
 def _handle(down, kc):
     """Mirror of keytap's CGEventTap callback. Returns True to swallow the key."""
     kb = keytap._key_bridge
-    if down and kc == _hk.toggle_kc and (_mods_flags() & _hk.MOD_MASK) == _hk.toggle_flags:
+    # (not with AltGr — right Alt: Windows reports it as Ctrl+Alt, so on many keyboard
+    # layouts typing an AltGr letter (AltGr+A = ą, á…) hid Anki: the window "randomly"
+    # minimised)
+    if down and kc == _hk.toggle_kc and (_mods_flags() & _hk.MOD_MASK) == _hk.toggle_flags \
+            and not _down(0xA5):            # VK_RMENU
         kb.toggle_window.emit()
         return True
     if state._lockdown_on and kc == 49:

@@ -1632,8 +1632,9 @@ def _build_css(cfg, context):
             "  background: rgba(0,0,0,0.28) !important;\n"
             "  border: none !important;\n"
             # (a soft 3px dark shadow smudged into a muddy halo on the glass; a tight
-            # 1px edge + faint top highlight reads as a button without the haze)
-            "  box-shadow: 0 0.5px 1px rgba(0,0,0,0.35), inset 0 0.5px 0 rgba(255,255,255,0.06) !important; }\n"
+            # 1px edge reads as a button without the haze. No light top highlight: on
+            # the black fullscreen background it was all that showed — stray outlines)
+            "  box-shadow: 0 0.5px 1px rgba(0,0,0,0.35) !important; }\n"
             "body #outer button:hover, body button:hover {\n"
             "  background: rgba(0,0,0,0.40) !important; }\n"
             # Keyboard focus: a ring drawn as box-shadow (follows the button's own

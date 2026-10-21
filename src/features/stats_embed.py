@@ -1052,6 +1052,13 @@ def _on_will_set_content(web_content, context) -> None:
                 web_content.head += _DROP_CSS_HELD
             else:
                 web_content.head += _DROP_CSS
+            from ..platform import IS_WIN
+            if IS_WIN:
+                # Windows: opacity only, and quicker — moving the whole page (the
+                # 6 px drop) redraws all of it each frame, which stuttered there
+                web_content.head += ("<style>@keyframes jkDrop{from{opacity:.35}to{opacity:1}}"
+                                     "@keyframes jkDropH{from{opacity:.35}to{opacity:1}}"
+                                     "html{animation-duration:.2s!important}</style>")
     except Exception:
         pass
 
@@ -1548,6 +1555,38 @@ def _strip_btn_css():
             % (d["fs"], d["lh"], d["ff"], d["fw"]))
 
 
+def _strip_probe():
+    """TEMP diagnostics: when the bottom strip's buttons are missing after launch (seen
+    once on the Mac, not reproduced), record why to ~/.janki_strip_probe.txt."""
+    web = getattr(mw, "bottomWeb", None)
+    if web is None:
+        return
+    js = ("(function(){var b=document.body;if(!b)return 'nobody';var c=getComputedStyle(b);"
+          "var q=b.querySelector('button');var o={url:location.href.slice(-40),bodyOp:c.opacity,"
+          "bodyVis:c.visibility,disp:c.display,html:b.innerHTML.length,"
+          "anims:b.getAnimations().map(function(a){return a.animationName||'waapi';}).join(','),"
+          "ih:innerHeight,iw:innerWidth,htmlCls:document.documentElement.className};"
+          "if(q){var r=q.getBoundingClientRect(),qc=getComputedStyle(q);o.btn=[r.top,r.bottom,r.width,"
+          "qc.opacity,qc.visibility,qc.display,q.textContent.trim()].join('|');}"
+          "return JSON.stringify(o);})()")
+
+    def got(v):
+        try:
+            d = json.loads(v) if v and v.startswith("{") else {}
+            btn = (d.get("btn") or "").split("|")
+            ok = (web.isVisible() and d.get("bodyOp") == "1" and d.get("bodyVis") == "visible"
+                  and len(btn) > 4 and btn[3] == "1" and btn[4] == "visible")
+            if ok:
+                return                      # only a broken strip is worth recording
+            with open(os.path.expanduser("~/.janki_strip_probe.txt"), "a") as f:
+                f.write("%s state=%s visible=%s geo=%s %s\n" % (
+                    __import__("time").strftime("%H:%M:%S"), mw.state, web.isVisible(),
+                    web.geometry().getRect(), v))
+        except Exception:
+            pass
+    web.evalWithCallback(js, got)
+
+
 def _fit_bottom_on_load():
     """Refit the main bottom strip whenever a new strip page finishes loading."""
     try:
@@ -1582,6 +1621,8 @@ def _fit_bottom_on_load():
         QTimer.singleShot(150, lambda: _fit_bottom(web))
         QTimer.singleShot(600, lambda: _fit_bottom(web))
         QTimer.singleShot(700, lambda: _note_strip_button(web))
+        for _d in (3000, 8000):
+            QTimer.singleShot(_d, _strip_probe)
     except Exception as exc:
         log("bottom fit: %s" % exc)
 

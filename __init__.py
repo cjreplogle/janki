@@ -1729,6 +1729,8 @@ except Exception as _hd_exc:
 try:
     from .src.util import stall_watch as _stall_watch
     _stall_watch.install()
+    from .src.util import fps_probe as _fps_probe     # ~/.janki_fps: frame-rate meter
+    gui_hooks.profile_did_open.append(lambda: _fps_probe.install())
 except Exception as _sw_exc:
     log("stall_watch: %s" % _sw_exc)
 
