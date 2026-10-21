@@ -3566,10 +3566,22 @@ def run_today(interactive=True, auto=False):
             box["n"] = len(ids)
             return col.sched.unsuspend_cards(ids)
 
-        CollectionOp(parent=mw, op=op).success(
-            lambda _c: (_lec_sfx("loaded"),
-                        tooltip("Janki Lectures: unsuspended %d cards for today." % box.get("n", 0)))
-        ).run_in_background()
+        # QueryOp, not CollectionOp: a CollectionOp always shows Anki's "Processing…"
+        # bar, which popped up on launch while the search ran. The op still makes an
+        # undo step; the views are told about its changes as a CollectionOp would.
+        from aqt.operations import QueryOp
+
+        def _ok(changes):
+            try:
+                from aqt import gui_hooks as _gh
+                _gh.operation_did_execute(changes, None)
+                mw.update_undo_actions()
+            except Exception:
+                pass
+            _lec_sfx("loaded")
+            tooltip("Janki Lectures: unsuspended %d cards for today." % box.get("n", 0))
+
+        QueryOp(parent=mw, op=op, success=_ok).run_in_background()
     except Exception as e:
         _log("run_today error: %s\n%s" % (e, traceback.format_exc()))
         if interactive:

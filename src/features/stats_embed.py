@@ -12,6 +12,7 @@ references and crashed on the next open). Shift+Stats still opens Anki's legacy 
 """
 
 import json
+import os
 
 from aqt import mw, gui_hooks
 
@@ -1015,11 +1016,17 @@ def animate_next_deck_render() -> None:
 # Starts at the level the outgoing page faded to (.35), so the switch is one continuous
 # dip instead of fade-out → blank → fade-in; the generic page fade stands down for it
 # (the two multiplied back to a blank first frame).
+# Held on its first frame until the page has actually painted (two rAFs): started at
+# style time, its first ~100 ms ran while the Calendar was still laying out, so the
+# fade-in visibly jumped ahead instead of easing in.
 _DROP_CSS = ("<style>html.glass-fading body{animation:none!important;}"
              "@media (prefers-reduced-motion: no-preference){html{animation:"
-             "jkDrop .32s cubic-bezier(.2,.8,.2,1) both;}}"
+             "jkDrop .32s cubic-bezier(.2,.8,.2,1) both;}"
+             "html:not(.jk-drop-go){animation-play-state:paused;}}"
              "@keyframes jkDrop{from{opacity:.35;transform:translateY(-6px);}"
-             "to{opacity:1;transform:none;}}</style>")
+             "to{opacity:1;transform:none;}}</style>"
+             "<script>(function(){var d=document.documentElement,g=function(){d.classList.add('jk-drop-go');};"
+             "requestAnimationFrame(function(){requestAnimationFrame(g);});setTimeout(g,250);})();</script>")
 
 
 # Leaving Stats: the new page loads BEHIND the stats panel, so its drop-in waits,
@@ -1201,6 +1208,8 @@ def _bump_idle(*_a) -> None:
 
 
 def _on_main_window_init() -> None:
+    _fit_bottom_on_load()
+    _trace_progress()
     # The toolbar's Stats link calls mw.onStats at click time; the "T" shortcut was bound
     # when the window was built, so rebind it to the patched handler as well.
     orig = mw.onStats
@@ -1239,6 +1248,28 @@ def _wrap_toolbar_links(links, toolbar) -> None:
             return
 
         def _decks(*a, **k):
+            # the page sound on EVERY Decks click (it only played leaving Calendar,
+            # Practice or Stats; from an overview or a review it was silent). Those
+            # paths play it again a moment later, which sfx.play merges into one.
+            _page_sfx("page")
+            if getattr(mw, "state", None) == "review":
+                # Card fades out, then the deck list builds. In 3 steps, not a smooth
+                # fade: on the software-drawn glass every frame of a whole-page fade
+                # (a big image especially) is a full redraw, and a continuous one
+                # uncapped at 120 Hz hung; 3 frames cost next to nothing.
+                try:
+                    mw.web.eval("(function(){var d=document.documentElement;"
+                                "if(d.animate&&!(window.matchMedia&&matchMedia("
+                                "'(prefers-reduced-motion: reduce)').matches))"
+                                "d.animate([{opacity:1},{opacity:0}],{duration:90,"
+                                "easing:'steps(3,jump-end)',fill:'forwards'});})()")
+                    # …and the switch waits for it: building the deck list holds the
+                    # thread that draws frames, which froze the fade half-way
+                    from aqt.qt import QTimer
+                    QTimer.singleShot(90, lambda: cur(*a, **k))
+                    return None
+                except Exception:
+                    pass
             if is_open():
                 animate_next_deck_render()
                 close_soon()                  # stats fades out while the list builds
@@ -1252,11 +1283,565 @@ def _wrap_toolbar_links(links, toolbar) -> None:
         log("stats decks wrap: %s" % exc)
 
 
+# Starting a study session: the page on screen fades out fast, then the first card
+# fades in over the empty window (user/css.py, first_card_fade). Short, so the gap
+# between the two stays small.
+STUDY_FADE_JS = ("(function(){try{if(window.matchMedia&&matchMedia('(prefers-reduced-motion: "
+                 "reduce)').matches)return;var b=document.body;if(!b)return;"
+                 "b.style.transition='opacity .08s ease-out';b.style.opacity='0';}catch(e){}})();")
+STUDY_FADE_MS = 80
+
+
+def study_fade_then(fn) -> None:
+    try:
+        mw.web.eval(STUDY_FADE_JS)
+    except Exception:
+        fn()
+        return
+    from aqt.qt import QTimer
+    QTimer.singleShot(STUDY_FADE_MS, fn)
+
+
+_PROF_FLAG = os.path.expanduser("~/.janki_studyprof")
+
+
+def _profiled_study(fn):
+    """Diagnostics (only while ~/.janki_studyprof exists): profile the switch into review
+    up to the first card's show, written to ~/.janki_studyprof.txt."""
+    if not os.path.exists(_PROF_FLAG):
+        return fn()
+    import cProfile, pstats, io, time
+    pr, t0, ts = cProfile.Profile(), time.perf_counter(), []
+
+    def shown(*_a):
+        ts.append(time.perf_counter())
+    gui_hooks.reviewer_did_show_question.append(shown)
+    pr.enable()
+    try:
+        fn()
+    finally:
+        pr.disable()
+        t1 = time.perf_counter()
+        try:
+            gui_hooks.reviewer_did_show_question.remove(shown)
+        except Exception:
+            pass
+        out = io.StringIO()
+        st = pstats.Stats(pr, stream=out)
+        st.sort_stats("cumulative").print_stats(50)
+        st.print_callers("_build_lecture_map|_get_map|match_event")
+        with open(_PROF_FLAG + ".txt", "a") as f:
+            f.write("switch call %.0f ms, question shown at %s ms\n\n" % (
+                (t1 - t0) * 1000, ["%.0f" % ((t - t0) * 1000) for t in ts]))
+            f.write(out.getvalue())
+
+
+def _wrap_overview_study():
+    """Study Now on a deck's overview (click, or Enter on the focused button) fades the
+    overview out first. Overview.show() binds _linkHandler fresh each time, so the class
+    patch reaches the existing overview too."""
+    from aqt.overview import Overview
+    if getattr(Overview, "_jk_study_fade", False):
+        return
+    Overview._jk_study_fade = True
+    o_link = Overview._linkHandler
+    pending = [False]
+
+    def later(fn, hide=True):
+        if pending[0]:
+            return                               # a second press before the switch
+        pending[0] = True
+
+        def go():
+            pending[0] = False
+            try:
+                import time as _tt
+                from ..user.css import _prof_note
+                _prof_note("py: switch start %d" % (_tt.time() * 1000))
+            except Exception:
+                pass
+            if getattr(mw, "state", None) == "overview":
+                _profiled_study(fn)
+            # the hide must not outlive the overview: a page swapped in place (no
+            # reload) kept it, and the first card stayed invisible until the 3 s safety
+            try:
+                mw.web.eval("document.body&&document.body.style.removeProperty('visibility')")
+            except Exception:
+                pass
+        # the page already hid itself on the click (user/css.py, _OVERVIEW_KEYS_JS);
+        # this covers a Study that came another way. Then switch straight away.
+        if hide:
+            try:
+                mw.web.eval("document.body&&document.body.style.setProperty("
+                            "'visibility','hidden','important')")
+            except Exception:
+                pass
+        from aqt.qt import QTimer
+        QTimer.singleShot(0, go)
+
+    def link(self, url):
+        fading = url == "jkstudy"          # the page is fading itself out (css.py)
+        if fading:
+            url = "study"
+        if url == "study":
+            try:
+                import time as _tt
+                from ..user.css import _prof_note
+                _prof_note("py: study received %d" % (_tt.time() * 1000))
+            except Exception:
+                pass
+            if not pending[0]:
+                _page_sfx("open")             # same sound by click or key, as from the Calendar
+            return later(lambda: o_link(self, url), hide=not fading)
+        return o_link(self, url)
+    Overview._linkHandler = link
+
+
+_IMG_SRC_RE = None
+
+
+def _preload_next_cards(*_a) -> None:
+    """On a deck's overview, load + decode the images of the next few cards in the
+    background. Anki holds each card back until its images load (and the first
+    card of a session found none cached), so Study Now's first card can show at once.
+    Read-only: the queue is only peeked (get_queued_cards is idempotent)."""
+    global _IMG_SRC_RE
+    import re
+    if _IMG_SRC_RE is None:
+        _IMG_SRC_RE = re.compile(r"""<img[^>]+?src\s*=\s*["']([^"']+)["']""", re.I)
+
+    def op(col):
+        urls = []
+        for qc in col.sched.get_queued_cards(fetch_limit=3).cards:
+            try:
+                html = col.get_card(qc.card.id).question()
+            except Exception:
+                continue
+            for u in _IMG_SRC_RE.findall(html):
+                if u not in urls and not u.startswith("data:"):
+                    urls.append(u)
+        return urls[:12]
+
+    def done(urls):
+        try:
+            from ..user.css import _prof_note
+            _prof_note("overview preload: %d image(s)" % len(urls or []))
+        except Exception:
+            pass
+        if not urls or getattr(mw, "state", None) != "overview":
+            return
+        try:
+            mw.web.eval("(function(U){window.__jkPre=window.__jkPre||[];U.forEach(function(u){"
+                        "var i=new Image();i.decoding='async';i.src=u;window.__jkPre.push(i);"
+                        "if(i.decode)i.decode().catch(function(){});});})(%s);" % json.dumps(urls))
+        except Exception:
+            pass
+    # The review page's own scripts/styles, fetched into the cache now: the first
+    # review after launch spent ~0.8 s loading its page before the card could show.
+    try:
+        base = mw.serverURL() + "_anki/"
+        mw.web.eval("(function(U){U.forEach(function(u){try{fetch(u,{cache:'force-cache'})"
+                    ".catch(function(){});}catch(e){}});})(%s);" % json.dumps(
+                        [base + p for p in ("js/reviewer.js", "css/reviewer.css",
+                                            "js/reviewer-bottom.js", "css/reviewer-bottom.css",
+                                            "css/toolbar-bottom.css", "js/vendor/jquery.min.js")]))
+    except Exception:
+        pass
+    # …and compiled: a cold first review spent ~0.4 s compiling Anki's 500 KB
+    # reviewer.js. Run it once in a hidden throwaway frame (its own window, so the
+    # overview is untouched); the browser keeps the compiled code for this session's
+    # review page. Once per launch.
+    if not getattr(mw, "_jk_rv_warm", False):
+        mw._jk_rv_warm = True
+        try:
+            mw.web.eval(
+                "(function(u){try{var f=document.createElement('iframe');"
+                "f.setAttribute('aria-hidden','true');f.tabIndex=-1;"
+                "f.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px;visibility:hidden';"
+                "f.srcdoc='<script src=\"'+u+'\"><\\/script>';"
+                "f.onload=function(){setTimeout(function(){f.remove();},300);};"
+                "document.body.appendChild(f);}catch(e){}})(%s);"
+                % json.dumps(mw.serverURL() + "_anki/js/reviewer.js"))
+        except Exception:
+            mw._jk_rv_warm = False
+    # main thread: rendering runs other add-ons' card hooks, which may touch the GUI
+    # (3 renders, a few ms, after the overview has drawn)
+    if getattr(mw, "state", None) != "overview" or getattr(mw, "col", None) is None:
+        return
+    try:
+        done(op(mw.col))
+    except Exception as exc:
+        log("preload next cards: %s" % exc)
+
+
+_FIT_JS = ("(function(){var b=document.body;if(!b)return 0;"
+           # deck/overview strips are a flex row centred in a body of height:100%, so
+           # anything measured from the page (Anki's offsetHeight, element edges) follows
+           # the strip's CURRENT height and never shrinks. Size from the buttons instead.
+           "if(getComputedStyle(b).display!=='flex')return -1;"
+           "var m=0;b.querySelectorAll('button').forEach(function(e){"
+           "var r=e.getBoundingClientRect();if(r.height>m)m=r.height;});"
+           "return m?Math.ceil(m+42):0;})()")
+
+
+def _fit_bottom(web):
+    """Size the bottom strip to its buttons (Anki's own measure can't shrink, and often
+    reads the previous strip). Only the newest measure applies. Then tells the page
+    (__jkShow, set by a swap after a review) once it has the new size."""
+    gen = getattr(web, "_jk_fit_gen", 0) + 1
+    web._jk_fit_gen = gen
+
+    def _set(h, gen=gen):
+        if gen != web._jk_fit_gen:
+            return
+        if h == -1:                       # not a deck/overview strip: Anki's measure
+            web.evalWithCallback("document.documentElement.offsetHeight",
+                                 lambda v: v and gen == web._jk_fit_gen and web.setFixedHeight(int(v)))
+            return
+        if h:
+            web.setFixedHeight(int(h))
+            web.eval("(function(H){var n=0;(function go(){"
+                     "if(innerHeight!==H&&n++<20)return requestAnimationFrame(go);"
+                     "window.__jkShow&&window.__jkShow();})();})(%d)" % int(h))
+    try:
+        web.evalWithCallback(_FIT_JS, _set)
+    except Exception:
+        pass
+
+
+_BTN_LOOK_JS = ("(function(){var b=document.querySelector('body button:not(.jk-sp)');"
+                # a strip already carrying the copied look must not be measured again
+                "if(!b||document.getElementById('jk-strip-rev')||"
+                "getComputedStyle(document.body).display!=='flex')return null;"
+                "var c=getComputedStyle(b);return JSON.stringify({fs:c.fontSize,lh:c.lineHeight,"
+                "ff:c.fontFamily,fw:c.fontWeight,h:b.getBoundingClientRect().height,"
+                "bs:c.boxSizing});})()")
+
+
+def _note_strip_button(web):
+    """Remember how a button looks on a fresh deck/overview strip, so buttons moved into
+    the Show Answer bar's page (after a review) can match it exactly — that page's own
+    sheets made them shorter."""
+    if getattr(web, "_jk_rev_page", False):
+        return
+
+    def got(v):
+        try:
+            if v:
+                mw._jk_strip_btn = json.loads(v)
+        except Exception:
+            pass
+    try:
+        web.evalWithCallback(_BTN_LOOK_JS, got)
+    except Exception:
+        pass
+
+
+def _strip_btn_css():
+    d = getattr(mw, "_jk_strip_btn", None)
+    if not d:
+        return ""
+    return ("<style>html body button:not(.jk-sp){font-size:%s!important;line-height:%s!important;"
+            "font-family:%s!important;font-weight:%s!important;}</style>"
+            # (no height: a measured border-box height set as a content-box height
+            # added the padding again on every copy — buttons grew each time)
+            % (d["fs"], d["lh"], d["ff"], d["fw"]))
+
+
+def _fit_bottom_on_load():
+    """Refit the main bottom strip whenever a new strip page finishes loading."""
+    try:
+        from aqt.qt import QTimer
+        web = mw.bottomWeb
+        if getattr(web, "_jk_fit_hooked", False):
+            return
+        web._jk_fit_hooked = True
+        def _loaded(ok, web=web):
+            _fit_bottom(web)
+            QTimer.singleShot(200, lambda: _note_strip_button(web))
+            QTimer.singleShot(150, lambda: _fit_bottom(web))   # after webfonts settle
+        web.loadFinished.connect(_loaded)
+        web.adjustHeightToFit = lambda web=web: _fit_bottom(web)
+        std = web.stdHtml
+
+        def stdHtml(*a, web=web, **k):
+            web._jk_bar_ctx = None        # any new page: no in-place swaps until our draw
+            return std(*a, **k)
+        web.stdHtml = stdHtml
+        # …and its buttons were built before Janki's hooks too (no Load Lectures)
+        def _redraw_launch_strip():
+            try:
+                if mw.state == "deckBrowser":
+                    mw.deckBrowser._drawButtons()
+            except Exception:
+                pass
+        QTimer.singleShot(0, _redraw_launch_strip)
+        # the launch deck list's strip loaded BEFORE this hook existed (main window
+        # init comes after the first render), so it kept Anki's misfit height
+        _fit_bottom(web)
+        QTimer.singleShot(150, lambda: _fit_bottom(web))
+        QTimer.singleShot(600, lambda: _fit_bottom(web))
+        QTimer.singleShot(700, lambda: _note_strip_button(web))
+    except Exception as exc:
+        log("bottom fit: %s" % exc)
+
+
+def _note_bottom_page(web_content, context):
+    """Any new bottom-strip page not built by our draw (the Show Answer bar) ends
+    in-place swaps: swapping deck buttons into it left the Show Answer bar on the
+    deck list. (Reliable for every page load, unlike wrapping the view's stdHtml.)"""
+    try:
+        from aqt.reviewer import ReviewerBottomBar
+        if isinstance(context, ReviewerBottomBar):
+            mw.bottomWeb._jk_bar_ctx = None
+            mw.bottomWeb._jk_rev_page = True
+        else:
+            # only other STRIP pages count: the deck list's own page (mw.web) also
+            # passes through here, just before its strip is drawn, and cleared the flag
+            from aqt.deckbrowser import DeckBrowserBottomBar
+            from aqt.overview import OverviewBottomBar
+            from aqt.toolbar import BottomToolbar
+            if isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar, BottomToolbar)):
+                mw.bottomWeb._jk_rev_page = False
+    except Exception:
+        pass
+
+
+# Leaving review: a fresh deck/overview strip page takes ~0.5 s to load, so its buttons
+# came well after the page above. Instead the buttons go straight into the Show Answer
+# bar's page, with this style giving them the deck strip's layout (same rules as
+# user/css.py's deck/overview strip, prefixed to outrank the reviewer bar's own).
+_STRIP_IN_REVIEW_CSS = (
+    "<style>html,html body{overflow:hidden!important;margin:0!important;}html{height:100%!important;}"
+    "html body{display:flex!important;justify-content:center!important;align-items:flex-end!important;"
+    "gap:6px!important;height:100%!important;padding:0 0 18px 0!important;box-sizing:border-box!important;"
+    "visibility:visible!important;}"
+    "html body #outer,html body #header,html body #header tbody,html body #header tr,"
+    "html body #header td,html body #innertable,html body #innertable tbody,html body #innertable tr,"
+    "html body #innertable td,html body #middle,html body #middle center,html body #middle table,"
+    "html body #middle tbody,html body #middle tr,html body #middle td{display:contents!important;}"
+    "html body button{padding:6px 14px!important;min-width:0!important;white-space:nowrap!important;}"
+    "</style>")
+
+
+def _leave_review_bar(new_state, old_state):
+    """Leaving review: the next strip takes ~0.5 s to load, and until then the Show
+    Answer bar stayed up on the deck list. Hide it at once."""
+    if old_state != "review" or new_state == "review":
+        return
+    try:
+        # hidden at once, not faded: the deck list renders on the main thread right
+        # after this, which froze a fade at ~30 % for a third of a second (recording)
+        mw.bottomWeb.eval("document.body&&document.body.style.setProperty("
+                          "'visibility','hidden','important')")
+    except Exception:
+        pass
+
+
+def _dedupe_bottom_draws():
+    """Bottom strip (Get Shared… / Study Progress / Options…): Anki rebuilds it as a
+    whole new page on every draw, which takes ~0.5 s on the glass window — the buttons
+    vanished and came back half a second after the page above had switched. When the
+    strip's context type is unchanged (same head/CSS), swap just its buttons in place
+    (instant, with a short fade-in); identical redraws are skipped."""
+    import time
+    from aqt.toolbar import BottomBar
+    if getattr(BottomBar.draw, "_jk_dedupe", False):
+        return
+    orig = BottomBar.draw
+    last = {"web": None, "ctx": None, "buf": None, "t": 0.0}
+
+    def draw(self, buf="", web_context=None, link_handler=None):
+        ctx = type(web_context).__name__ if web_context is not None else None
+        # the deck list and overview strips get the same styling (css.py), so moving
+        # between them swaps buttons in place instead of reloading the strip
+        if ctx in ("DeckBrowserBottomBar", "OverviewBottomBar"):
+            ctx = "strip"        # Practice too: its relabel is applied to swaps (_swap_html)
+        now = time.monotonic()
+        # the strip's current page must be one OUR draw built with this context; the
+        # reviewer (and others) load the strip with stdHtml directly, and swapping
+        # buttons into that page (Show Answer bar, hidden until a card shows) made
+        # them never appear
+        same_page = (ctx is not None and getattr(self.web, "_jk_bar_ctx", None) == ctx
+                     and last["web"] is self.web and last["ctx"] == ctx)
+        # compare what would be SHOWN: Decks and Practice get the same raw buttons from
+        # Anki and differ only by our transform, so a Decks strip was "identical" to the
+        # Practice one and the switch was skipped
+        key = _swap_html(self, buf, web_context)
+        # same buttons already showing: nothing to do (expanding/collapsing a deck
+        # redraws the deck list and its strip; the swap made the buttons flicker)
+        if same_page and key == last["buf"]:
+            if link_handler is not None:          # still route clicks to the newest handler
+                try:
+                    self.web.set_bridge_command(link_handler, web_context)
+                except Exception:
+                    pass
+            return
+        # (never DURING review: a late overview redraw — its counts arrive
+        # asynchronously — swapped Options… over a freshly loaded Show Answer bar)
+        if getattr(mw, "state", None) == "review" and self.web is mw.bottomWeb:
+            return
+        review_page = (ctx == "strip" and link_handler is not None and self.web is mw.bottomWeb
+                       and getattr(self.web, "_jk_bar_ctx", None) is None
+                       and getattr(self.web, "_jk_rev_page", False))
+        if (review_page or same_page) and link_handler is not None:
+            try:
+                self.web.set_bridge_command(link_handler, web_context)
+                if review_page:
+                    self.web.eval("window.__jkBtnCss=%s" % json.dumps(_strip_btn_css()))
+                self.web.eval(_SWAP_JS % (json.dumps(key), "true" if review_page else "false"))
+                if review_page:
+                    self.web._jk_bar_ctx = ctx
+                    self.web._jk_rev_page = False
+                last.update(web=self.web, ctx=ctx, buf=key, t=now)
+                return
+            except Exception as exc:
+                log("strip swap: %s" % exc)
+        last.update(web=self.web, ctx=ctx, buf=key, t=now)
+        r = orig(self, buf=buf, web_context=web_context, link_handler=link_handler)
+        self.web._jk_bar_ctx = ctx        # set after orig: its stdHtml clears it
+        return r
+    draw._jk_dedupe = True
+    BottomBar.draw = draw
+
+
+def _trace_progress():
+    """Diagnostics (only while ~/.janki_studyprof exists): log who opens Anki's
+    progress window ("Processing…") to ~/.janki_studyprof.txt with a short stack."""
+    if not os.path.exists(_PROF_FLAG):
+        return
+    import traceback
+
+    def note(what):
+        try:
+            st = "".join(traceback.format_stack(limit=12)[:-2])
+            with open(_PROF_FLAG + ".txt", "a") as f:
+                f.write("== progress: %s\n%s\n" % (what, st))
+        except Exception:
+            pass
+    try:
+        pm = mw.progress
+        orig_start = pm.start
+
+        def start(*a, **k):
+            note("progress.start label=%r" % (k.get("label"),))
+            return orig_start(*a, **k)
+        pm.start = start
+        tm = mw.taskman
+        orig_wp = tm.with_progress
+
+        def with_progress(*a, **k):
+            note("taskman.with_progress label=%r" % (k.get("label"),))
+            return orig_wp(*a, **k)
+        tm.with_progress = with_progress
+    except Exception as exc:
+        log("progress trace: %s" % exc)
+
+
+def _swap_html(bar, buf, web_context):
+    """What a fresh strip page would hold: the hook-added buttons too (Load Lectures),
+    which a page swap otherwise skipped."""
+    html = bar._centerBody % buf
+    try:
+        from aqt.deckbrowser import DeckBrowserBottomBar
+        if isinstance(web_context, DeckBrowserBottomBar):
+            from ..user.css import deck_strip_extras, practice_strip
+            from . import practice
+            html = practice_strip(html) if getattr(practice, "_practice_view", False) \
+                else deck_strip_extras(html)
+    except Exception:
+        pass
+    return html
+
+
+# Swap new buttons into the strip page already on screen and fade them in (100 ms).
+# rev: the page is the Show Answer bar's (just back from a review) — it gets the deck
+# strip's stylesheet and layout, and stays hidden until resized to the new buttons
+# (_fit_bottom → __jkShow; 0.4 s safety), or they showed clipped for a frame.
+_SWAP_JS = (
+    "(function(h,rev){var b=document.body;if(!b)return;"
+    "var M=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;"
+    "function fade(){if(!M&&b.animate)b.animate([{opacity:0},{opacity:1}],{duration:100,easing:'ease-out'});}"
+    "function fit(){try{pycmd('janki:stripfit');}catch(e){}}"
+    "b.getAnimations().forEach(function(a){a.cancel();});"
+    "if(rev){var L=document.querySelector('link[href*=\"reviewer-bottom\"]');"
+    " if(L){var T=document.createElement('link');T.rel='stylesheet';"
+    "  T.href=L.getAttribute('href').replace('reviewer-bottom','toolbar');"
+    "  T.onload=fit;L.parentNode.replaceChild(T,L);}"
+    " var R=document.getElementById('jk-rev-layout');if(R)R.remove();"
+    " document.documentElement.classList.add('jk-bar-on');"
+    # in <head>: later swaps replace the body
+    " var X=document.createElement('div');X.id='jk-strip-rev';X.style.display='none';document.head.appendChild(X);"
+    " X.innerHTML=%s+(window.__jkBtnCss||'');"
+    " b.style.setProperty('visibility','hidden','important');"
+    " window.__jkShow=function(){window.__jkShow=null;b.style.removeProperty('visibility');fade();};"
+    " setTimeout(function(){window.__jkShow&&window.__jkShow();},400);}"
+    "b.innerHTML=h;"
+    "if(!rev){b.style.removeProperty('visibility');fade();fit();}"
+    # (% in the CSS — height:100% — doubled for the per-swap % formatting)
+    "})(%%s,%%s);" % json.dumps(_STRIP_IN_REVIEW_CSS).replace("%", "%%"))
+
+
+def _quiet_deck_open():
+    """Clicking a deck runs Anki's set_current_deck as a CollectionOp, which shows the
+    "Processing…" window if it waits past ~0.5 s. Right after launch it queues behind
+    the collection work started then (traced: deckbrowser.set_current_deck), so the
+    window popped up on the first deck opened. Same op and undo/refresh handling,
+    just no progress window."""
+    from aqt.deckbrowser import DeckBrowser
+    if getattr(DeckBrowser.set_current_deck, "_jk_quiet", False):
+        return
+
+    def set_current_deck(self, deck_id):
+        from aqt.operations import on_op_finished
+        m = self.mw
+
+        def op():
+            return m.col.decks.set_current(deck_id)
+
+        def done(fut):
+            try:
+                res = fut.result()
+            except Exception:
+                return orig(self, deck_id)          # fall back to Anki's own
+            try:
+                m.onOverview()
+            finally:
+                on_op_finished(m, res, self)
+        try:
+            m.taskman.run_in_background(op, done, uses_collection=True)
+        except TypeError:                            # older taskman signature
+            m.taskman.run_in_background(op, done)
+    orig = DeckBrowser.set_current_deck
+    set_current_deck._jk_quiet = True
+    DeckBrowser.set_current_deck = set_current_deck
+
+
 def install() -> None:
     global _installed
     if _installed:
         return
     _installed = True
+    try:
+        _quiet_deck_open()
+    except Exception as exc:
+        log("quiet deck open: %s" % exc)
+    try:
+        _dedupe_bottom_draws()
+        gui_hooks.webview_will_set_content.append(_note_bottom_page)
+        gui_hooks.state_will_change.append(_leave_review_bar)
+    except Exception as exc:
+        log("bottom dedupe: %s" % exc)
+    try:
+        _wrap_overview_study()
+    except Exception as exc:
+        log("study fade: %s" % exc)
+    try:
+        from aqt.qt import QTimer
+        gui_hooks.overview_did_refresh.append(
+            lambda *_a: QTimer.singleShot(120, _preload_next_cards))
+    except Exception as exc:
+        log("preload hook: %s" % exc)
     try:
         gui_hooks.main_window_did_init.append(_on_main_window_init)
         gui_hooks.state_did_change.append(_on_state_change)

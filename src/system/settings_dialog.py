@@ -290,8 +290,8 @@ class GlassSettings(QDialog):
             log("canki settings tab failed: %s" % _e)
         hk_page = QWidget(); hk_lay = QVBoxLayout(hk_page)
         tabs.addTab(hk_page, "Hotkeys")
-        tabs.insertTab(0, gen_page, "General")   # far left; Settings still opens on Appearance
-        tabs.setCurrentWidget(app_page)
+        tabs.insertTab(0, gen_page, "General")   # far left; Settings opens on it
+        tabs.setCurrentWidget(gen_page)
         # The tabs are centred, so the gap to the window's edge is whatever width is
         # left over: on a narrow window or with a larger system font (a friend's Mac
         # had the first tab nearly under the close button) it shrank to nothing. Keep

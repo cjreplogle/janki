@@ -120,10 +120,47 @@ _NO_ANIM = {"ui_animations": False, "typewriter": False, "first_card_fade": Fals
 _NO_GLASS = {"blur_radius": 0, "win_backdrop": "off"}
 
 
+# getConfig re-reads meta.json from disk (~10 ms) and a card show asked ~25 times, so
+# on the main thread one read serves the rest of the event-loop pass; writeConfig
+# clears it. Callers get their own copy, as before.
+_CFG_CACHE = {"c": None}
+
+
+def _cfg_cache_clear(*_a):
+    _CFG_CACHE["c"] = None
+
+
 def _cfg_raw() -> dict:
     """The stored config, without overrides — use this when writing config back."""
-    c = mw.addonManager.getConfig(__name__)
-    return c if c else {}
+    import threading
+    import copy
+    if threading.current_thread() is not threading.main_thread():
+        c = mw.addonManager.getConfig(__name__)
+        return c if c else {}
+    if _CFG_CACHE["c"] is None:
+        c = mw.addonManager.getConfig(__name__)
+        _CFG_CACHE["c"] = c if c else {}
+        try:
+            from aqt.qt import QTimer
+            QTimer.singleShot(0, _cfg_cache_clear)
+        except Exception:
+            _CFG_CACHE["c"] = None
+            return copy.deepcopy(c) if c else {}
+        _wrap_write_config()
+    return copy.deepcopy(_CFG_CACHE["c"])
+
+
+def _wrap_write_config():
+    am = type(mw.addonManager)
+    if getattr(am, "_jk_cfg_wrapped", False):
+        return
+    am._jk_cfg_wrapped = True
+    orig = am.writeConfig
+
+    def writeConfig(self, module, conf):
+        _cfg_cache_clear()
+        return orig(self, module, conf)
+    am.writeConfig = writeConfig
 
 
 def _cfg() -> dict:

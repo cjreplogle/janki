@@ -340,6 +340,16 @@ def _mark_onboarded():
         pass
 
 
+def _warm_review_labels():
+    """Anki builds its review shortcut labels (tr.actions_shortcut_key) when a review
+    starts; the first lookup costs ~0.35 s. Do it once while idle."""
+    try:
+        from aqt.utils import tr
+        tr.actions_shortcut_key(val="1")
+    except Exception:
+        pass
+
+
 def _startup():
     _bt.mark("main window ready → _startup begins")
     _force_dark_mode()
@@ -1071,6 +1081,9 @@ def _startup():
             reword.warm_up()
         except Exception:
             pass
+        # the reword store + Anki's shortcut labels, ready before the first card
+        QTimer.singleShot(5000, reword.preload_store)
+        QTimer.singleShot(6000, _warm_review_labels)
         _bt.mark("reword warm-up")
 
         # Auto-hide the cursor after 10s idle while fullscreen.

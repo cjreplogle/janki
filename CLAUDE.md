@@ -82,12 +82,22 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   `--disable-frame-rate-limit`, rAF loops spin thousands of times/s and starve input:
   drive scroll animation from an 8.3 ms timer, never a self-re-requesting rAF.
 
+- **Study start speed (2026-10-20, measured):** Anki's reviewer holds each card until
+  its fonts (≤800 ms) / images (≤200 ms) load, with a fresh cache per page — Lora is
+  preloaded in the reviewer head, next cards' images on the overview. A cold first
+  review spent ~0.4 s compiling reviewer.js: warmed once per launch in a hidden iframe
+  on the overview. Bottom bars are a separate page that takes ~0.5 s to rebuild: same
+  context type → swap buttons in place (stats_embed `_dedupe_bottom_draws`). mw.web is
+  page-swapped (no reload), so inline body styles survive into the next screen — undo
+  any hide. Hide via `visibility` (CSS entry animations hold opacity). Diagnostics:
+  `~/.janki_studyprof` (profile + page timings), `~/.janki_stallwatch` (ms threshold).
+
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.12.1** (Windows: **v2.12.1w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.12.2** (Windows: **v2.12.2w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.

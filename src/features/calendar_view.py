@@ -48,6 +48,11 @@ def open_calendar():
         from . import practice, stats_embed
         practice._practice_view = False
         _view = True
+        try:
+            from ..util import perf_probe as _pp
+            _pp.begin("open Calendar")
+        except Exception:
+            pass
         if stats_embed.is_open():
             stats_embed.close_soon(sound="calendar")
             _redraw()
@@ -77,8 +82,12 @@ def _arm_top():
     QTimer.singleShot(2000, _expire)
 
 
+_renders = 0          # deck-list renders so far (close() skips a redraw one makes moot)
+
+
 def _on_deck_render(browser):
-    global _to_top
+    global _to_top, _renders
+    _renders += 1
     if _to_top and _view:
         _to_top = False
         try:
@@ -100,7 +109,10 @@ def close():
     except Exception:
         pass
     if was:
-        QTimer.singleShot(0, _redraw_bottom)     # Anki's own buttons back
+        # Anki's own buttons back — unless the page being switched to draws its own
+        # first: Calendar → Practice drew the Decks buttons, then Practice's (flicker)
+        n = _renders
+        QTimer.singleShot(150, lambda: _renders == n and _redraw_bottom())
 
 
 def _redraw():
@@ -406,10 +418,22 @@ def _prime_key():
             tuple(sorted(_fams_off())), datetime.datetime.now().hour)
 
 
+def _reviewing():
+    return getattr(mw, "state", None) == "review"
+
+
+# Background Calendar work that came due while a card was on screen: it waits for the
+# deck list (a page build or a matching batch mid-review froze the first card's reveal)
+_held = {"prime": False, "warm": None}
+
+
 def prime():
     """Build this week's page ahead of the first Calendar click (a few seconds after
     launch): the events are read, matches/colours warmed, and the HTML kept ready."""
     if _closing or _view:
+        return
+    if _reviewing():
+        _held["prime"] = True
         return
     try:
         k = _prime_key()
@@ -841,6 +865,7 @@ def _open_detail(i):
     except Exception:
         pass
     _swap("open")
+    QTimer.singleShot(0, _redraw_bottom)        # Study Progress leaves the class page
 
 
 # ------------------------------------------------------------ weak areas ------
@@ -1514,10 +1539,8 @@ def _close_detail():
         _swap("back")
         return True
     _from_weak = False
-    was_weak = _detail == WEAK
     _detail = None
-    if was_weak:
-        QTimer.singleShot(0, _redraw_bottom)
+    QTimer.singleShot(0, _redraw_bottom)        # back to the grid: Study Progress returns
     try:
         from . import sfx
         sfx.play("back")
@@ -1597,8 +1620,13 @@ def study_event(e, fams=None, which="all"):
     """Study a class's cards (see _study_detail). which: "active" (unsuspended only),
     "suspended" (only suspended — unsuspended for the session, restored after) or "all".
     fams=None → all its sources. Used by the class page and the tray's Today list."""
-    mw._jk_fade_bottom = True          # Show Answer bar fades in (user/css.py)
-    mw._jk_fade_top = True             # …and the top toolbar (_fade_top_bar)
+    # Show Answer bar + top toolbar fade in with the first card (user/css.py,
+    # _fade_top_bar) — not while the card types out: three views animating at once on
+    # the software-drawn glass window made the first card's reveal stutter
+    from ..util.config import _cfg
+    fade = not _cfg().get("typewriter", True)
+    mw._jk_fade_bottom = fade
+    mw._jk_fade_top = fade
     from aqt.utils import tooltip
     from ..integrations import lectures
     m = lectures.match_event(e["summary"])
@@ -1621,9 +1649,41 @@ def study_event(e, fams=None, which="all"):
     except Exception:
         no_q = True
     nq = ' -note:"Janki Practice"' if no_q else ""
+    # The page fades out at once while the study deck is built on a background thread
+    # (collection calls don't hold the main thread, so the fade keeps drawing); the
+    # review starts as soon as both are done. Built on the main thread first, the
+    # build and the fade ran one after the other before the card could show.
+    import time as _t
+    from .stats_embed import STUDY_FADE_JS, STUDY_FADE_MS
+    t0 = _t.monotonic()
     try:
+        mw.web.eval(STUDY_FADE_JS)
+    except Exception:
+        pass
+    try:
+        from . import sfx
+        sfx.play("open")
+    except Exception:
+        pass
+
+    def unfade():
+        try:
+            mw.web.eval("document.body&&(document.body.style.opacity='')")
+        except Exception:
+            pass
+
+    def _pn(what):
+        try:
+            from ..user.css import _prof_note
+            _prof_note("cal study: %-22s +%.0f ms" % (what, (_t.monotonic() - t0) * 1000))
+        except Exception:
+            pass
+
+    def build(col):
+        _pn("build start")
         _restore_suspended()
         _cleanup_temp()
+        _pn("cleanup done")
         sus = _cids(col, q, ("is:suspended" + nq) if nq else "is:suspended") \
             if which != "active" else []
         if sus:
@@ -1637,27 +1697,44 @@ def study_event(e, fams=None, which="all"):
             term = _cid_term(_cids(col, q, "-is:suspended -is:buried"))
         else:
             term = _cid_term(_cids(col, q, "-is:buried"))
+        _pn("searches done")
         d["terms"] = [[term + nq, 99999, 0]]
         d["resched"] = True
         col.decks.save(d)
         col.sched.rebuild_filtered_deck(did)
+        _pn("filtered deck built")
         if not col.decks.cids(did):
             col.decks.remove([did])
             _restore_suspended()
+            return None
+        col.decks.select(did)
+        return did
+
+    def done(did):
+        if did is None:
+            unfade()
             tooltip("No cards found for “%s”." % m["display"])
             return
-        col.decks.select(did)
-        try:
-            from . import sfx
-            sfx.play("open")
-        except Exception:
-            pass
-        close()
-        mw.moveToState("review")
-    except Exception as ex:
+
+        _pn("back on main thread")
+
+        def go():
+            _pn("switch to review")
+            close()
+            mw.moveToState("review")
+            _pn("review state entered")
+        # straight on, even mid-fade: the review page takes ~50 ms to replace this one,
+        # by which time the fade has run out (waiting it out cost up to 40 ms)
+        go()
+
+    def failed(ex):
         _restore_suspended()
+        unfade()
         log("calendar study: %s" % ex)
         tooltip("Couldn't start studying (%s)." % ex)
+
+    from aqt.operations import QueryOp
+    QueryOp(parent=mw, op=build, success=done).failure(failed).run_in_background()
 
 
 def _unsuspend_detail(suspend=False):
@@ -2404,6 +2481,11 @@ def _on_render(deck_browser, content):
         except Exception:
             pass
         return
+    try:
+        from ..util import perf_probe as _pp
+        _pp.mark("calendar content built")
+    except Exception:
+        pass
     QTimer.singleShot(0, _redraw_bottom)
     QTimer.singleShot(300, _busy_update)      # the page reloaded: re-show the chip if busy
     try:
@@ -2761,6 +2843,13 @@ def _on_state(new_state, old_state):
     if new_state == "deckBrowser" and old_state in ("overview", "review"):
         QTimer.singleShot(0, _cleanup_temp)
         QTimer.singleShot(0, _restore_suspended)
+    if new_state != "review":                  # resume what waited out the review
+        w, _held["warm"] = _held["warm"], None
+        if w:
+            QTimer.singleShot(600, w)
+        if _held["prime"]:
+            _held["prime"] = False
+            QTimer.singleShot(800, prime)
 
 
 def install_toolbar(links, toolbar):
@@ -2875,6 +2964,9 @@ def _prewarm(back=None):
         if _closing or k >= len(todo):
             finish()
             return
+        if _reviewing():
+            _held["warm"] = lambda: step(k)
+            return
         batch = todo[k:k + 4]
 
         def op(_col):
@@ -2970,8 +3062,8 @@ def _patch_bottom():
         def draw(self):
             if not _view:
                 return orig(self)
-            # inside Weak areas the bar stays empty (no Identify / Load buttons)
-            buf = "" if _detail == WEAK else (
+            # inside Weak areas or a class page the bar stays empty
+            buf = "" if _detail is not None else (
                 # hover feedback that stays in place (a lift got clipped by the bar's edge)
                 # (#outer / body in the selectors: the glass bottom-bar CSS uses
                 # `body #outer button:hover`, which outranks a bare class)
@@ -2980,13 +3072,12 @@ def _patch_bottom():
                 "box-shadow .15s ease,transform .1s ease !important;}"
                 "body #outer button.jk-sp:hover,body button.jk-sp:hover{"
                 "background:rgba(255,255,255,.08) !important;"
-                "border-color:rgba(255,255,255,.8) !important;"
                 "box-shadow:inset 0 0 8px rgba(156,188,243,.15) !important;}"
                 "body #outer button.jk-sp:active,body button.jk-sp:active{"
                 "background:rgba(255,255,255,.08) !important;"
                 "transform:scale(.97) !important;}</style>"
                 "<button class='jk-sp' style='font-size:1.15em !important;padding:7px 22px !important;"
-                "border:0.5px solid rgba(255,255,255,.6) !important;border-radius:999px !important;"
+                "border:none !important;border-radius:999px !important;"
                 "font-weight:600 !important;transform:none;' "
                 "onclick='pycmd(\"janki:cal:weak\");'>"
                 "Study Progress</button>")
@@ -3002,15 +3093,34 @@ def _patch_bottom():
 
 def _redraw_bottom():
     try:
+        # a hidden strip coming back is shown BEFORE its buttons are drawn: drawn while
+        # hidden, Study Progress's fade-in ran unseen and it just popped in
+        bw0 = getattr(mw, "bottomWeb", None)
+        if bw0 is not None and not bw0.isVisible() and \
+                not (_view and _detail is not None and mw.state == "deckBrowser"):
+            bw0.setVisible(True)
         if getattr(mw, "state", None) == "deckBrowser":
             mw.deckBrowser._drawButtons()
-        # Weak areas has no bottom buttons: drop the whole strip so the list reaches
-        # the window's bottom (an empty bar left a band of dead space)
+        # Weak areas and class pages have no bottom buttons: drop the whole strip so
+        # the page reaches the window's bottom (an empty bar left a band of dead
+        # space). Study Progress fades out first, then the strip goes.
         bw = getattr(mw, "bottomWeb", None)
         if bw is not None:
-            want = not (_view and _detail == WEAK and mw.state == "deckBrowser")
-            if bw.isVisible() != want:
-                bw.setVisible(want)
+            want = not (_view and _detail is not None and mw.state == "deckBrowser")
+            if want and not bw.isVisible():
+                bw.setVisible(True)
+            elif not want and bw.isVisible():
+                try:
+                    bw.eval("(function(){var b=document.body;if(b&&b.animate)"
+                            "b.animate([{opacity:getComputedStyle(b).opacity},{opacity:0}],"
+                            "{duration:80,fill:'forwards'});})()")
+                except Exception:
+                    pass
+
+                def _hide():
+                    if _view and _detail is not None and mw.state == "deckBrowser":
+                        bw.setVisible(False)
+                QTimer.singleShot(90, _hide)
     except Exception:
         pass
 

@@ -50,7 +50,24 @@ _store = None
 _load_failed = False       # the store file exists but couldn't be read → never overwrite it
 
 
+import threading as _threading
+_load_lock = _threading.Lock()
+
+
+def preload_store() -> None:
+    """Read + sanitize the store on a background thread soon after launch: on the first
+    card it cost ~0.6 s of regex checks right before the card could show."""
+    _threading.Thread(target=_load, daemon=True, name="janki-reword-preload").start()
+
+
 def _load() -> dict:
+    if _store is not None:
+        return _store
+    with _load_lock:
+        return _load_locked()
+
+
+def _load_locked() -> dict:
     global _store, _load_failed
     if _store is not None:
         return _store
@@ -61,7 +78,28 @@ def _load() -> dict:
         if not isinstance(_store, dict):
             raise ValueError("store is not a JSON object")
         _load_failed = False
-        _sanitize_store(_store)
+        # The full check is ~14k regex scans (~0.3 s); skip it when this exact file
+        # (same mtime + size) was already checked clean. Any save changes the stamp,
+        # so new or edited variants are always checked once.
+        mark = path + ".clean"
+        try:
+            st = os.stat(path)
+            stamp = "%d %d" % (st.st_mtime_ns, st.st_size)
+        except Exception:
+            stamp = None
+        try:
+            with open(mark, encoding="utf-8") as f:
+                checked = f.read().strip() == stamp
+        except Exception:
+            checked = False
+        if not (stamp and checked):
+            _sanitize_store(_store)
+            try:
+                st = os.stat(path)       # _sanitize_store may have rewritten the file
+                with open(mark, "w", encoding="utf-8") as f:
+                    f.write("%d %d" % (st.st_mtime_ns, st.st_size))
+            except Exception:
+                pass
     except FileNotFoundError:
         _store = {}
     except Exception as exc:
@@ -310,7 +348,24 @@ def _join_front(qv: str, av: str, note, ord_) -> str:
 
 
 # --------------------------------------------------------------------------- display hook
+# AnKing's watermark photo (<a href="…ankingmed…"><img src="_AnKingRound…" id="pic"></a>):
+# Janki strips it from the templates (integrations/mobilecards), but a stored reword can
+# carry its own copy of the card's HTML from before that — rephrased cards showed it.
+_WM_RE = re.compile(
+    r"""\s*<a\b[^>]*ankingmed[^>]*>\s*<img\b[^>]*>\s*</a>"""
+    r"""|<img\b[^>]*\bsrc\s*=\s*["']_AnKingRound[^"']*["'][^>]*>""", re.I | re.S)
+
+
 def apply(text: str, card, kind) -> str:
+    out = _apply(text, card, kind)
+    # only a swapped-in reword is cleaned, and only when the card as rendered now has
+    # no watermark of its own (the original is shown exactly as Anki rendered it)
+    if out is not text and out and not _WM_RE.search(text or ""):
+        out = _WM_RE.sub("", out)
+    return out
+
+
+def _apply(text: str, card, kind) -> str:
     """card_will_show transform: swap in a reworded phrasing when one exists and is still
     valid for the current text. DISPLAY-ONLY — the note/scheduler are untouched, so the
     card answers exactly as the original. Returns `text` unchanged on any miss/disabled."""

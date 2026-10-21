@@ -24,15 +24,20 @@ def install() -> None:
 
     t = QTimer(mw)
     t.timeout.connect(tick)
-    t.start(50)
+    # the flag file may hold a threshold in ms (default 300) for finding short hitches
+    try:
+        lim = max(20, int(open(_FLAG).read().strip() or 300)) / 1000.0
+    except Exception:
+        lim = 0.3
+    t.start(10 if lim < 0.15 else 50)
     mw._jk_stall_timer = t
 
     def watch():
         last_dump = 0.0
         while True:
-            time.sleep(0.1)
+            time.sleep(0.01 if lim < 0.15 else 0.1)
             gap = time.monotonic() - beat[0]
-            if gap > 0.3 and time.monotonic() - last_dump > 0.25:
+            if gap > lim and time.monotonic() - last_dump > max(lim, 0.05):
                 last_dump = time.monotonic()
                 fr = sys._current_frames().get(main_id)
                 try:

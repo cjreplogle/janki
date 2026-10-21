@@ -753,6 +753,9 @@ _DECK_KEYS_JS = r"""(function(){
  function ind(tr){var td=tr.querySelector('td.decktd');if(!td)return 0;
    return td.textContent.match(/^\xa0*/)[0].length;}
  function sfx(n){try{if(window.__jkPlay&&window.__jkPlay(n))return;pycmd('janki:sfx:'+n);}catch(x){}}
+ // a sound for an action that replaces this page (opening a deck) plays in Anki, not
+ // here: the page's own audio is cut off when the next page loads
+ function sfxOut(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
  var hid=null, idle=null;          // remembered row while the highlight is hidden
  var __jkSync=false;
  // Contanki (the remote) and Tab move the browser's focus between deck links: follow
@@ -813,13 +816,14 @@ _DECK_KEYS_JS = r"""(function(){
      for(var j=i-1;j>=0;j--)if(ind(rs[j])<ind(c)){sel(rs[j]);return;} return;}
    if(k==='Enter'||k===' '){e.preventDefault();
      try{sessionStorage.setItem('jkKbOn','1');}catch(x){}
-     sfx('open'); var a=c.querySelector('a.deck'); if(a){window.__jkKbClick=true;a.click();window.__jkKbClick=false;}}
+     sfxOut('select'); var a=c.querySelector('a.deck'); if(a){window.__jkKbClick=true;a.click();window.__jkKbClick=false;}}
  },true);
  // Opening a deck: the list dips to 35% at once, and the overview rises from 35% —
  // one continuous dip instead of fade-out, blank, fade-in.
  document.addEventListener('click',function(e){
    var a=e.target.closest&&e.target.closest('a.deck'); if(!a)return;
-   if(!window.__jkKbClick)sfx('move');          // mouse click on a deck/bank: the nav tick
+   // opening a deck/bank sounds the same by click or key ("select"; Study is "open")
+   if(!window.__jkKbClick)sfxOut('select');
    var b=document.body; if(!b)return;
    b.style.transition='opacity .1s ease-out'; b.style.opacity='0.35';
    setTimeout(function(){b.style.opacity='';},1500);   // safety: never stay dim
@@ -852,7 +856,8 @@ _DECK_KEYS_JS = r"""(function(){
 })();"""
 
 # Bottom-edge fade for the deck list: rows sink out over the last 64px above the
-# button bar instead of being cut off. Per-row opacity from each row's position —
+# button bar instead of being cut off (a row reaches 0 by the time its bottom
+# touches the edge, so no half-visible row is sliced through). Per-row opacity from each row's position —
 # recomputed only on scroll / resize / redraw (rAF-coalesced), so nothing animates at
 # rest. (A CSS mask can't do it: on a scrolling page it scrolls with the content.)
 _DECK_EDGE_FADE_JS = r"""(function(){
@@ -861,7 +866,7 @@ _DECK_EDGE_FADE_JS = r"""(function(){
  function run(){pend=false;var H=window.innerHeight;
    var rs=document.querySelectorAll('tr.deck');
    for(var i=0;i<rs.length;i++){var r=rs[i].getBoundingClientRect();
-     var o=r.top>=H?0:Math.max(0,Math.min(1,(H-(r.top+r.height*0.5))/ZONE));
+     var o=r.bottom>=H-2?0:Math.max(0,Math.min(1,(H-r.bottom)/ZONE));
      o=Math.round(o*20)/20; if(rs[i].__jkeo!==o){rs[i].__jkeo=o;
        rs[i].style.opacity=o===1?'':String(o);}}}
  function sched(){if(!pend){pend=true;requestAnimationFrame(run);}}
@@ -918,8 +923,29 @@ _OVERVIEW_KEYS_JS = r"""(function(){
    if(e.key!==' '&&e.key!=='Enter')return;
    var t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
    if(!document.getElementById('study'))return;       // only when there's something to study
-   e.preventDefault(); pycmd('janki:sfx:select'); pycmd('study');
+   e.preventDefault(); jkStudy();   // its sound plays in Python (stats_embed)
  },true);
+ // Study Now: the overview leaves the screen at once, and only THEN is Python told.
+ // The window is drawn through Anki's main thread, so a hide sent together with the
+ // command wasn't shown until the whole review had loaded — the overview lingered.
+ var jkGoing=false;
+ function jkStudy(){if(jkGoing)return;jkGoing=true;var b=document.body;
+   // The review is requested at once and the overview fades WHILE it loads (~60 ms
+   // until the review page replaces this one): waiting for the fade first left a
+   // blank gap before the card. 'jkstudy' = study without Python's instant hide.
+   // A script animation, since the overview's CSS entry animation holds its opacity.
+   var FD=(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?0:70;
+   try{pycmd('janki:ovbar:hide');}catch(e){}   // its buttons (Options…) leave with it
+   if(b&&FD&&b.animate){try{b.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(4px)'}],
+     {duration:FD,easing:'cubic-bezier(.4,0,.6,1)',fill:'forwards'}).onfinish=function(){
+       b.style.setProperty('visibility','hidden','important');};}catch(e){}}
+   try{pycmd('janki:qatime:'+JSON.stringify({ov_send:Date.now()}));}catch(e){}
+   pycmd(FD?'jkstudy':'study');
+   setTimeout(function(){jkGoing=false;if(b){b.style.removeProperty('visibility');
+     try{b.getAnimations().forEach(function(x){x.cancel();});}catch(e){}}},3000);}   // safety
+ document.addEventListener('click',function(e){
+   var s=e.target.closest&&e.target.closest('#study'); if(!s)return;
+   e.preventDefault(); e.stopImmediatePropagation(); jkStudy();},true);
 })();"""
 
 # Toolbar keyboard/remote nav (entered with ↑ from the top deck): ←/→ move, Enter/
@@ -1579,6 +1605,25 @@ def _build_css(cfg, context):
                 "@keyframes jkBarIn{from{opacity:0;transform:translateY(6px)}"
                 "to{opacity:1;transform:none}}</style>\n"
                 % max(300, int(cfg.get("first_card_fade_ms", 220)) + 150))
+        # A new deck/overview strip page fades in (stats_embed swaps do the same)
+        if isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar)):
+            parts.append("<style>@media (prefers-reduced-motion: no-preference){"
+                         "body{animation:jkBarFade 100ms ease-out both}}"
+                         "@keyframes jkBarFade{from{opacity:0}}</style>\n")
+        # Starting a review: Anki builds this bar at once, but the card waits on its
+        # fonts/images, so Show Answer appeared alone first. Keep the bar hidden until
+        # the card page reports the first card on screen (janki:qashown → jkBarShow);
+        # a safety timer shows it anyway.
+        if isinstance(context, ReviewerBottomBar):
+            parts.append(
+                # …and then fades in at the card's own pace (first_card_fade_ms)
+                "<style>html:not(.jk-bar-on) body{visibility:hidden!important}"
+                "@media (prefers-reduced-motion: no-preference){html.jk-bar-on body{"
+                "animation:jkBarOn %dms cubic-bezier(.2,.8,.2,1) both}}"
+                "@keyframes jkBarOn{from{opacity:0}to{opacity:1}}</style>"
+                "<script>window.jkBarShow=function(){document.documentElement.classList.add('jk-bar-on');};"
+                "setTimeout(window.jkBarShow,1500);</script>\n"
+                % int(cfg.get("first_card_fade_ms", 220)))
         # Bottom buttons: subtle dark fill (slightly darker than the tint) + dark
         # shadow so they read as distinct, visible buttons.
         parts.append(
@@ -1586,7 +1631,9 @@ def _build_css(cfg, context):
             "body #outer button, body button {\n"
             "  background: rgba(0,0,0,0.28) !important;\n"
             "  border: none !important;\n"
-            "  box-shadow: 0 1px 3px rgba(0,0,0,0.45) !important; }\n"
+            # (a soft 3px dark shadow smudged into a muddy halo on the glass; a tight
+            # 1px edge + faint top highlight reads as a button without the haze)
+            "  box-shadow: 0 0.5px 1px rgba(0,0,0,0.35), inset 0 0.5px 0 rgba(255,255,255,0.06) !important; }\n"
             "body #outer button:hover, body button:hover {\n"
             "  background: rgba(0,0,0,0.40) !important; }\n"
             # Keyboard focus: a ring drawn as box-shadow (follows the button's own
@@ -1620,36 +1667,28 @@ def _build_css(cfg, context):
             "</style>\n"
         )
         # Responsive bottom bar layout.
-        if isinstance(context, DeckBrowserBottomBar):
-            # Deck browser uses <center id=outer><table id=header>…</table></center>.
-            # toolbar-bottom.css adds padding:9px to #header which overflows width:100%
-            # and clips on the right, shifting the visual centre rightward.
-            # Nuclear fix: convert the whole thing to a simple flex row.
+        if isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar)):
+            # Deck list: <center id=outer><table id=header>…; overview (Options / Custom
+            # Study / Unbury / Description): #innertable with side cells that shifted the
+            # buttons off centre. Both flatten to one centred flex row of buttons. The
+            # rules cover BOTH markups because the strip swaps buttons in place between
+            # the two screens (stats_embed._dedupe_bottom_draws).
             parts.append(
                 "<style>\n"
+                # html at full height, or body's height:100% is of nothing and the
+                # bottom alignment below never applied (buttons sat at the top)
                 "html, body { overflow:hidden !important; margin:0 !important; padding:0 !important; }\n"
-                "body { display:flex !important; justify-content:center !important;"
-                " align-items:center !important; height:100% !important;"
-                " padding-bottom:18px !important; box-sizing:border-box !important; }\n"
-                "#outer, #header, #header tbody, #header tr, #header td {\n"
-                "  display:contents !important; }\n"
-                "body button { padding:6px 14px !important; min-width:0 !important;"
-                " white-space:nowrap !important; }\n"
-                "</style>\n"
-            )
-        elif isinstance(context, OverviewBottomBar):
-            # Overview bottom bar (Options / Custom Study / Unbury / Description) is
-            # just a row of buttons. The innertable layout centres them within the
-            # middle cell, so asymmetric side cells shift them right. Flatten the
-            # whole table to display:contents so the buttons become direct flex
-            # children of body and centre as one group.
-            parts.append(
-                "<style>\n"
-                "html, body { overflow:hidden !important; margin:0 !important; padding:0 !important; }\n"
+                "html { height:100% !important; }\n"
                 "body { display:flex !important; justify-content:center !important;"
                 " align-items:center !important; gap:6px !important; height:100% !important;"
-                " padding-bottom:18px !important; box-sizing:border-box !important; }\n"
-                "#outer, #innertable, #innertable tbody, #innertable tr, #innertable td,\n"
+                # pinned 18px above the bottom edge: on Show Answer's line (matched from
+                # screenshots; the strip is button + 42px, stats_embed._FIT_JS): anchored to the
+                # bottom, the buttons stay put while the strip resizes — centred, they
+                # showed low for a frame or two after a review, then moved up
+                " align-items:flex-end !important;"
+                " padding:0 0 18px 0 !important; box-sizing:border-box !important; }\n"
+                "#outer, #header, #header tbody, #header tr, #header td,\n"
+                "#innertable, #innertable tbody, #innertable tr, #innertable td,\n"
                 "#middle, #middle center, #middle table, #middle tbody, #middle tr, #middle td {\n"
                 "  display:contents !important; }\n"
                 "body button { padding:6px 14px !important; min-width:0 !important;"
@@ -1663,7 +1702,8 @@ def _build_css(cfg, context):
             # show in equal side cells so #middle stays centred — except on the
             # answer side, where they're hidden so the ease buttons fill.
             parts.append(
-                "<style>\n"
+                # id: dropped when deck buttons move into this page (stats_embed)
+                "<style id=jk-rev-layout>\n"
                 "html, body { overflow-x: hidden !important; }\n"
                 "#outer { width:100% !important; box-sizing:border-box !important;"
                 " padding:2px 6px !important; }\n"
@@ -1783,12 +1823,38 @@ def _build_css(cfg, context):
         parts.append(fade_in.replace('from{opacity:0}', 'from{opacity:.1}')
                      .replace('glassFadeIn .15s', 'glassFadeIn .3s'))
     elif isinstance(context, Reviewer) and screens.get("reviewer", True):
+        # Every note type's @font-face loads Janki's Lora from the media folder, and
+        # Anki's reviewer holds each card back until its fonts load (up to 800 ms), with
+        # a fresh font cache per page — so the first card of every session waited on
+        # Lora. Fetch both files as the page itself loads (same URL + CORS mode as
+        # Anki's own preload, so it reuses this load) and the first card can show sooner.
+        parts.append('<link rel="preload" as="font" crossorigin href="_janki_Lora.ttf">'
+                     '<link rel="preload" as="font" crossorigin href="_janki_Lora-Italic.ttf">\n')
         # No scrollbar on cards (Windows draws one on the right edge — very visible in
         # fullscreen / Focus Mode). Long cards still scroll with wheel/trackpad/keys.
         parts.append("<style>html::-webkit-scrollbar,body::-webkit-scrollbar,"
                      "*::-webkit-scrollbar{width:0!important;height:0!important;"
                      "background:transparent!important;display:none!important;}"
                      "html,body{scrollbar-width:none!important;}</style>\n")
+        # Tell Python when the first card is on screen (Anki sets #qa opacity to 1 once
+        # its fonts/images are in), so the Show Answer bar appears with it.
+        parts.append(
+            "<script>(function(){var T0=performance.now();function arm(){var qa=document.getElementById('qa');if(!qa)return;\n"
+            # …and its images are in: Anki shows the card after at most 200 ms of image
+            # loading, so a big picture could still be loading while the bar was up
+            " var sent=false;function go(){if(sent)return;sent=true;mo.disconnect();var t1=performance.now();\n"
+            "  var ims=[].slice.call(qa.querySelectorAll('img'));\n"
+            "  var ps=ims.map(function(i){return (i.complete?Promise.resolve():new Promise(function(r){i.addEventListener('load',r,{once:true});i.addEventListener('error',r,{once:true});}))"
+            ".then(function(){return i.decode?i.decode().catch(function(){}):null;});});\n"
+            "  Promise.race([Promise.all(ps),new Promise(function(r){setTimeout(r,1200);})]).then(function(){\n"
+            "   requestAnimationFrame(function(){try{pycmd('janki:qashown');\n"
+            "    pycmd('janki:qatime:'+JSON.stringify({page:Math.round(T0),shown:Math.round(t1),imgs:Math.round(performance.now()),n:ims.length,"
+            "cached:ims.filter(function(i){return i.complete;}).length,origin:Math.round(performance.timeOrigin),"
+            "shown_abs:Math.round(performance.timeOrigin+t1)}));}catch(e){}});});}\n"
+            " var mo=new MutationObserver(function(){if(qa.style.opacity==='1'&&qa.childNodes.length)go();});\n"
+            " mo.observe(qa,{attributes:true,attributeFilter:['style']});\n"
+            " if(qa.style.opacity==='1'&&qa.childNodes.length)go();}\n"
+            " if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',arm);else arm();})();</script>\n")
         # Fade the FIRST card in when a study session starts. The reviewer page is
         # rebuilt on every entry to review, and Anki reveals each card by setting
         # #qa's opacity to 1 in one jump; catch that first reveal and animate it in.
@@ -1802,15 +1868,17 @@ def _build_css(cfg, context):
                 "  function arm(){ var qa=document.getElementById('qa'); if(!qa) return;\n"
                 "    var mo=new MutationObserver(function(){\n"
                 "      if(qa.style.opacity==='1'&&qa.childNodes.length){ mo.disconnect();\n"
-                # starts partly visible: the card is there in ~80ms (measured); a fade
-                # from 0 made it feel late
-                "        try{ qa.animate([{opacity:.3},{opacity:1}],"
-                "{duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'}); }catch(e){} } });\n"
+                # a quick 0 → 25 % (first 20 ms of the same total), then the eased rest: the card is on screen
+                # the moment it's ready (from 0 with one easing, its first ~80 ms were
+                # nearly invisible — read as a blank gap)
+                "        try{ qa.animate([{opacity:0,easing:'linear'},"
+                "{opacity:.25,offset:%.3f,easing:'cubic-bezier(.2,.8,.2,1)'},{opacity:1}],"
+                "{duration:%d}); }catch(e){} } });\n"
                 "    mo.observe(qa,{attributes:true,attributeFilter:['style']});\n"
                 "    setTimeout(function(){ mo.disconnect(); }, 8000); }\n"
                 "  if(document.readyState==='loading')"
                 " document.addEventListener('DOMContentLoaded',arm); else arm();\n"
-                "})();</script>\n" % _fd)
+                "})();</script>\n" % (20.0 / max(_fd, 60), max(_fd, 60)))
         # Keep the card fully transparent (its note background is opaque otherwise).
         # The AnKing note types set `.card{background:#D1CFCE}` and, worse,
         # `.night_mode .card{background:#272828!important}` — the night-mode rule
@@ -2309,7 +2377,12 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # don't add up on cards with lots of formatting. (T0, not t0: the per-char
         # fallback below declares its own `var t0`, which hoists over this function
         # and restarted the clock per piece — each piece then ran longer than the last.)
-        "        cumW+=h.w; var dur=Math.max(16, T0+MS*cumW/totalW-performance.now());\n"
+        "        cumW+=h.w; var now=performance.now(), share=MS*h.w/totalW, dur=T0+MS*cumW/totalW-now;\n"
+        # running late (the page froze for a moment — a fresh reviewer page after the
+        # Calendar): slip the schedule instead of catching up, which typed the rest of
+        # the card in one jump
+        "        if(dur<share*0.7){ dur=share*0.7; T0=now+dur-MS*cumW/totalW; }\n"
+        "        dur=Math.max(16,dur);\n"
         "        var oneLine=h.el.getClientRects().length<=1;\n"
         "        if(oneLine && typeof h.el.animate==='function'){\n"
         "          var rtl=getComputedStyle(h.el).direction==='rtl';\n"
@@ -2338,7 +2411,9 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "          if(ci<spans.length) jkNext(step); else { finishHolder(h); next(); } }\n"
         "        jkNext(step);\n"
         "      }\n"
-        "      next(); }\n"
+        # start on the next frame: the card's first paint can land a frame or more
+        # late (a fresh page), and a clock started before it opened the card part-typed
+        "      requestAnimationFrame(function(){ next(); }); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"
         "      var g=gen, nodes=collect(clozeOnly);\n"
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
@@ -2460,6 +2535,64 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
 # global here isn't shared. mw is the one object both instances agree on.
 
 _stats_last_render: float = 0.0
+
+
+def practice_strip(html):
+    """Practice view strip: Import File → Import Bank (styled like Study Progress), no
+    Get Shared / Create Deck. Fresh pages and in-place swaps both use it."""
+    import re as _re
+    body = html.replace("Import File", "Import Bank")
+    # Drop the Get Shared + Create Deck buttons (not relevant to banks).
+    for _cmd in ("shared", "create"):
+        body = _re.sub(
+            r"<button[^>]*pycmd\(&quot;%s&quot;\)[^>]*>.*?</button>" % _cmd,
+            "", body, flags=_re.DOTALL)
+        body = _re.sub(
+            r"<button[^>]*pycmd\(\"%s\"\)[^>]*>.*?</button>" % _cmd,
+            "", body, flags=_re.DOTALL)
+    # same size + look as the Calendar's "Study Progress" button
+    body = _re.sub(r"<button(?![^>]*jk-sp)([^>]*>\s*Import Bank)",
+                   "<button class='jk-sp' style='font-size:1.15em !important;"
+                   "padding:7px 22px !important;border:none !important;"
+                   "border-radius:999px !important;font-weight:600 !important;transform:none;'\\1",
+                   body, count=1)
+    body = ("<style>body #outer button.jk-sp{transition:background-color .15s ease,"
+            "border-color .15s ease,box-shadow .15s ease,transform .1s ease !important;}"
+            "body #outer button.jk-sp:hover{background:rgba(255,255,255,.08) !important;"
+            "box-shadow:inset 0 0 8px rgba(156,188,243,.15) !important;}"
+            "body #outer button.jk-sp:active{transform:scale(.97) !important;}</style>" + body)
+    return body
+
+
+def deck_strip_extras(html):
+    """Normal Decks screen: add a "Load Lectures" button that opens the Load today's
+    lectures wizard (click handled in _on_js_message). Used for a fresh strip page
+    and for buttons swapped into one in place (stats_embed._dedupe_bottom_draws)."""
+    try:
+        from ..features import practice
+        if getattr(practice, "_practice_view", False) or _calendar_showing():
+            return html                          # the Calendar has its own wand
+    except Exception:
+        return html
+    if "janki-load-lectures" in html:
+        return html
+    btn = ("<button title=\"Load today's lectures\" "
+           "onclick='pycmd(\"janki-load-lectures\");'>Load Lectures</button>")
+    # inside the buttons' own cell, not after the strip: appended at the end it only
+    # lined up while the page's flex layout was in force, and could land bottom-left
+    i = html.rfind("</td>")
+    return html[:i] + btn + html[i:] if i >= 0 else html + btn
+
+
+def _prof_note(line):
+    """Diagnostics: append to ~/.janki_studyprof.txt while ~/.janki_studyprof exists."""
+    p = os.path.expanduser("~/.janki_studyprof")
+    if os.path.exists(p):
+        try:
+            with open(p + ".txt", "a") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
 
 
 def _stats_head() -> str:
@@ -2913,35 +3046,10 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             try:
                 from ..features import practice
                 if getattr(practice, "_practice_view", False):
-                    import re as _re
-                    body = web_content.body.replace("Import File", "Import Bank")
-                    # Drop the Get Shared + Create Deck buttons (not relevant to banks).
-                    for _cmd in ("shared", "create"):
-                        body = _re.sub(
-                            r"<button[^>]*pycmd\(&quot;%s&quot;\)[^>]*>.*?</button>" % _cmd,
-                            "", body, flags=_re.DOTALL)
-                        body = _re.sub(
-                            r"<button[^>]*pycmd\(\"%s\"\)[^>]*>.*?</button>" % _cmd,
-                            "", body, flags=_re.DOTALL)
-                    # same size + look as the Calendar's "Study Progress" button
-                    body = _re.sub(r"<button(?![^>]*jk-sp)([^>]*>\s*Import Bank)",
-                                   "<button class='jk-sp' style='font-size:1.15em !important;"
-                                   "padding:7px 22px !important;border:0.5px solid rgba(255,255,255,.6) !important;"
-                                   "border-radius:999px !important;font-weight:600 !important;transform:none;'\\1",
-                                   body, count=1)
-                    body = ("<style>body #outer button.jk-sp{transition:background-color .15s ease,"
-                            "border-color .15s ease,box-shadow .15s ease,transform .1s ease !important;}"
-                            "body #outer button.jk-sp:hover{background:rgba(255,255,255,.08) !important;"
-                            "border-color:rgba(255,255,255,.8) !important;"
-                            "box-shadow:inset 0 0 8px rgba(156,188,243,.15) !important;}"
-                            "body #outer button.jk-sp:active{transform:scale(.97) !important;}</style>" + body)
+                    body = practice_strip(web_content.body)
                     web_content.body = body
-                elif not _calendar_showing():          # the Calendar has its own wand
-                    # Normal Decks screen: add a "Load Lectures" button that opens the
-                    # Load today's lectures wizard (click handled in _on_js_message).
-                    web_content.body += (
-                        "<button title=\"Load today's lectures\" "
-                        "onclick='pycmd(\"janki-load-lectures\");'>Load Lectures</button>")
+                else:
+                    web_content.body = deck_strip_extras(web_content.body)
             except Exception:
                 pass
         # Binary-grade practice: hide the native Again/Hard/Good/Easy buttons from the
@@ -3470,6 +3578,33 @@ def on_js_message(handled, message, context):
                     pass
             if tid in ("decks", "stats", "janki_practice"):   # pages, not dialogs
                 QTimer.singleShot(450, _back)
+        except Exception:
+            pass
+        return (True, None)
+    if message.startswith("janki:qatime:"):
+        _prof_note("review page (ms since page start): " + message[13:])
+        return (True, None)
+    if message == "janki:stripfit":            # bottom strip swapped its buttons
+        try:
+            from ..features import stats_embed
+            stats_embed._fit_bottom(mw.bottomWeb)
+        except Exception:
+            pass
+        return (True, None)
+    if message == "janki:ovbar:hide":
+        try:
+            # a quick fade with the overview (60 ms): the review's bar loads right
+            # behind it, and the strip resizing under a slower one (170 ms) showed its
+            # buttons moving down for a frame
+            mw.bottomWeb.eval("(function(){var b=document.body;if(!b)return;"
+                              "if(b.animate)b.animate([{opacity:1},{opacity:0}],{duration:60,"
+                              "fill:'forwards'});else b.style.setProperty('visibility','hidden','important');})()")
+        except Exception:
+            pass
+        return (True, None)
+    if message == "janki:qashown":
+        try:
+            mw.reviewer.bottom.web.eval("window.jkBarShow&&window.jkBarShow()")
         except Exception:
             pass
         return (True, None)
