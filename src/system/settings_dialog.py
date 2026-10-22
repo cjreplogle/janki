@@ -2090,6 +2090,23 @@ class GlassSettings(QDialog):
         self._amboss.stateChanged.connect(on_amboss)
         app_text_lay.addWidget(self._amboss)          # Appearance → Text
 
+        # Better Manki: restyled muscle cards + focused-first new-card order. Only shown
+        # where it has been set up (a seed in user_files), i.e. the dev collection.
+        from ..features import better_manki
+        if better_manki.available():
+            self._better_manki = QCheckBox("Better Manki (muscle cards: pictures beside "
+                                           "the text, focused cards first)")
+            self._better_manki.setToolTip(
+                "Unchecking restores the Manki muscle cards' original look, deck options "
+                "preset and new-card order. Review history is never changed.")
+            self._better_manki.setChecked(better_manki.is_on())
+
+            def on_better_manki():
+                better_manki.set_enabled(self._better_manki.isChecked())
+
+            self._better_manki.stateChanged.connect(on_better_manki)
+            app_text_lay.addWidget(self._better_manki)    # Appearance → Text
+
         # --- Glass patch / uninstall ----------------------------------------
         # On stock Anki the glass needs a small patch to Anki's own files (applied
         # automatically). This lets you cleanly REMOVE it: restore the original

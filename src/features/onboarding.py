@@ -156,7 +156,7 @@ def _calendar_page():
               "<b>.ics</b> file. You can skip this and add it later in Settings → "
               "Lectures → Calendar.<br><br>"
               "Not sure where to find it? <a href='%s' style='color:#6ab0ff;'>Step-by-step "
-              "setup guide ↗</a>" % SETUP_URL),
+              "setup guide ↗</a> (password: <b>medcat</b>)" % SETUP_URL),
         row, row2, status)
 
 
@@ -423,7 +423,7 @@ def _tour_pages():
          "Lectures</b> (main screen) unsuspends exactly today's cards. Drop the "
          "spreadsheet on the window to set it up; add your calendar (a link or .ics file) "
          "in Settings → Lectures → Calendar for automatic days. Setup guide: "
-         "cjre.pl/ogle/janki/setup"),
+         "cjre.pl/ogle/janki/setup (password: medcat)"),
         ("Card rephrasing",
          "See the same card worded differently so you learn the idea, not the "
          "sentence. Press <b>Tab+R</b> while reviewing to switch versions. Import "

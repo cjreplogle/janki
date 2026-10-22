@@ -1741,6 +1741,14 @@ try:
 except Exception as _do_exc:
     log("deck_order: %s" % _do_exc)
 
+# Better Manki: toggleable restyle + smart new-card order for the Manki muscle cards
+try:
+    from .src.features import better_manki as _better_manki
+    if hasattr(gui_hooks, "profile_did_open"):
+        _better_manki.install()
+except Exception as _bm_exc:
+    log("better_manki: %s" % _bm_exc)
+
 # What's new: once, on the first launch after an update (also in Settings → General)
 try:
     from .src.features import whats_new as _whats_new

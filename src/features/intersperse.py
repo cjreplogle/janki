@@ -730,7 +730,9 @@ def practice_button_html(card) -> str:
         'title="Related practice questions (Tab+Q)" '
         'onmouseover="this.style.opacity=1;this.style.setProperty(\'color\',\'#fff\',\'important\');" '
         'onmouseout="this.style.opacity=0.55;this.style.setProperty(\'color\',\'#9fb4d8\',\'important\');" '
-        'style="cursor:pointer;font-size:14.5px;'
+        # line-height pinned: a note type's `.card { line-height: 1.6em }` (Marlin)
+        # lives on <body> and would otherwise inflate the button
+        'style="cursor:pointer;font-size:14.5px;line-height:1.35!important;'
         'color:#9fb4d8!important;-webkit-text-fill-color:currentColor!important;'
         'text-shadow:none!important;opacity:0.55;'
         'background:rgba(28,29,33,0.7);border:1px solid rgba(255,255,255,0.2);'
