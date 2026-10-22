@@ -160,7 +160,10 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 **2.12.4** · 2026-10-22
 
 **Better Manki**
-- A new option in Settings → Appearance → Text restyles the Manki anatomy cards: the pictures sit on either side of the text so you don't have to scroll. The Manki card back shows just what the card asked you to recall (with "Show all" for the rest). I've also reworked the card-ordering algorithm for Manki decks so the cards shown prioritize focused one-detail cards instead of "recall everything".
+- A new option in Settings → Appearance → Text restyles the Manki anatomy cards:
+  - The pictures sit on either side of the text so you don't have to scroll.
+  - The Manki card back shows just what the card asked you to recall (with "Show all" for the rest).
+  - I've also reworked the card-ordering algorithm for Manki decks so the cards shown prioritize focused one-detail cards instead of "recall everything".
 
 **Everyone**
 - The Practice button in the corner of a card no longer appears oversized on some decks.
