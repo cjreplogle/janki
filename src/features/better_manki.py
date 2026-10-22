@@ -37,7 +37,8 @@ def _snapshot(like: dict) -> dict:
     for mid in like.get("models", {}):
         m = col.models.get(int(mid))
         if m:
-            out["models"][mid] = {"css": m["css"], "afmt": [t["afmt"] for t in m["tmpls"]]}
+            out["models"][mid] = {"css": m["css"], "afmt": [t["afmt"] for t in m["tmpls"]],
+                                  "qfmt": [t["qfmt"] for t in m["tmpls"]]}
     for did in like.get("decks", {}):
         d = col.decks.get(int(did), default=False)
         if d:
@@ -68,6 +69,8 @@ def _apply(snap: dict) -> None:
         m["css"] = v["css"]
         for t, afmt in zip(m["tmpls"], v["afmt"]):
             t["afmt"] = afmt
+        for t, qfmt in zip(m["tmpls"], v.get("qfmt", [])):
+            t["qfmt"] = qfmt
         col.models.update_dict(m)
     for did, conf in snap.get("decks", {}).items():
         d = col.decks.get(int(did), default=False)
