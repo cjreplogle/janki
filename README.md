@@ -155,7 +155,44 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.12</b> · 2026-10-19 · 2 releases</summary>
+<summary><b>2.12</b> · 2026-10-19 · 5 releases</summary>
+
+**2.12.4** · 2026-10-22
+
+**Everyone**
+- The Practice button in the corner of a card no longer appears oversized on some decks.
+- The setup guide link in the first-run setup now shows its password, so you can open it right away.
+
+**2.12.3** · 2026-10-21
+
+**Windows**
+- Fixed an "Anki.exe – Bad Image" error popup a few seconds after launch on some installs.
+- Typing letters with AltGr (e.g. ą, á on many keyboard layouts) no longer hides Anki — it set off the show/hide shortcut.
+- Fullscreen / maximise is clean: the window stays as it was until the new layout is ready (no misaligned frames or black box), and the ~1 s freeze when switching is gone.
+- Switching between Decks, Calendar and Practice no longer slows down over time; the deck list fades in more lightly.
+
+**Everyone**
+- "Load today's lectures" no longer pops up again right after an update.
+- Bottom buttons: no stray outlines on the black fullscreen background.
+- No white strip left on screen when leaving a review for Practice, the Calendar or Stats.
+
+**2.12.2** · 2026-10-21
+
+**Faster, smoother study start**
+- The first card appears sooner, especially the first time after launch (fonts, the review page and the next cards' images are readied while you look at a deck).
+- Study Now: the deck page fades out while the review loads, and the card fades straight in.
+- Studying a class from the Calendar starts as soon as its deck is ready.
+
+**Bottom buttons**
+- Buttons switch in place with a quick fade instead of reloading, and sit level with Show Answer.
+- No jump or delay when you come back from a review; Load Lectures and Import Bank always show.
+- Study Progress steps aside on a class page; Import Bank and Study Progress lost their white outline.
+
+**Fixes**
+- No more "Processing…" bar when opening the first deck after launch or when lectures load.
+- Rephrased cards no longer show the AnKing watermark.
+- Settings opens on the General tab.
+- A review fades out when you click Decks.
 
 **2.12.1** · 2026-10-20
 
