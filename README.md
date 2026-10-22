@@ -159,6 +159,9 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 
 **2.12.4** · 2026-10-22
 
+**Better Manki**
+- A new option in Settings → Appearance → Text restyles the Manki muscle cards: the pictures sit on either side of the text so you don't have to scroll, the back shows just what the card asked (with "Show all" for the rest), and new cards start with the focused one-detail cards instead of "recall everything".
+
 **Everyone**
 - The Practice button in the corner of a card no longer appears oversized on some decks.
 - The setup guide link in the first-run setup now shows its password, so you can open it right away.
