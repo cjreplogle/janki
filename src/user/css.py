@@ -476,7 +476,7 @@ _IMG_RIM_JS = (
 # #answer.scrollIntoView) and Janki's features keep working. 3D cards are left alone
 # (their controls sit on the window edges).
 _CARD_FRAME_JS = (
-    "<style>#jk-sc{position:fixed;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:none;outline:none;"
+    "<style>#jk-sc{position:fixed;inset:0;width:100vw;height:100vh;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;overscroll-behavior:none;outline:none;"
     "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);"
     "mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);}"
     "#jk-sc::-webkit-scrollbar{width:0;height:0}#jk-sc.jk-nofade{-webkit-mask-image:none;mask-image:none}</style>"
@@ -1301,8 +1301,35 @@ def _motion_css(context) -> str:
             "</style>\n")
 
 
+_ONIGIRI_GLASS_CSS = (
+    "<style>\n"
+    "/* janki × Onigiri: let the window glass show through Onigiri's dashboard while\n"
+    "   keeping its layout, cards and colours. Selectors repeat a class to outrank\n"
+    "   Onigiri's theme rules (e.g. `.night-mode .container.modern-main-menu`). */\n"
+    "html:root:root:root:root, html.night-mode.night-mode.night-mode,\n"
+    "html body, html body.night-mode, html body.nightMode,\n"
+    ".container.modern-main-menu.modern-main-menu.modern-main-menu.modern-main-menu,\n"
+    ".main-content.main-content.main-content.main-content {\n"
+    "  background: transparent !important; background-color: transparent !important;\n"
+    "  background-image: none !important; }\n"
+    ".sidebar-left.sidebar-left.sidebar-left.sidebar-left,\n"
+    ".onigiri-sidebar-profile.onigiri-sidebar-profile.onigiri-sidebar-profile {\n"
+    "  background-color: rgba(30, 30, 32, %(a).2f) !important; }\n"
+    "</style>\n"
+)
+
+
 def _build_css(cfg, context):
     if not GLASS or not cfg.get("enabled", True):
+        return ""
+    # Onigiri draws the deck list, overview and top bar: its look wins there. Janki only
+    # (optionally) lets the glass show through its panels.
+    from ..util import compat
+    if compat.onigiri_own_page(context):
+        return ""
+    if compat.onigiri_screen(context):
+        if compat.onigiri_glass():
+            return _ONIGIRI_GLASS_CSS % {"a": cfg.get("onigiri_glass_panel_opacity", 45) / 100}
         return ""
     props = _props(cfg)
     blur = cfg.get("blur_radius", 12)
@@ -1944,10 +1971,21 @@ def _build_css(cfg, context):
                      "</style>\n")
         # Card font = the same system-wide font stack (default bundled Lora).
         # Applied to the card text (kbd/shortcut keys left alone).
-        parts.append("<style>\n"
+        # With Onigiri (Settings → Appearance → Text → "Card font follows Onigiri"), the
+        # card takes Onigiri's main "Text" font instead, so cards match its theming.
+        _card_stack, _card_faces = ui_font_stack(cfg), ""
+        try:
+            from ..util import compat as _cpt
+            if cfg.get("onigiri_card_font", True):
+                _of = _cpt.onigiri_card_font()
+                if _of:
+                    _card_faces, _card_stack = _of
+        except Exception:
+            pass
+        parts.append("<style>\n" + _card_faces +
                      "#qa, .card, #qa *:not(kbd) {\n"
                      "  font-family: %s !important;\n}\n"
-                     "</style>\n" % ui_font_stack(cfg))
+                     "</style>\n" % _card_stack)
         # Practice "Show original slide" button lives on <body> (outside #qa) so the note-type
         # CSS can lag behind the add-on. Force it here to the minimal reword-toggle look
         # (small, sans) with high specificity so it always matches regardless of the deployed
@@ -2988,6 +3026,13 @@ _WIN_TOOLBAR_DRAG_JS = (
 
 def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> None:
     try:
+        # Onigiri's own windows (settings, dialogs) load with no context: recognise them
+        # by their Onigiri resources and leave them untouched (the glass strip erased
+        # its theme previews).
+        from ..util import compat
+        if compat.onigiri_on() and (compat.onigiri_own_page(context) or (
+                context is None and compat.is_onigiri_content(web_content))):
+            return
         css = _build_css(_cfg(), context)
         if css:
             web_content.head += "\n" + css
@@ -3027,18 +3072,21 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # Review history charts (calendar heatmap + reviews plot) on the deck
         # browser home screen. Optional — hidden via Settings → General.
         # in <head>, so it's in place before AMBOSS's widget first mounts (and scrolls)
-        if isinstance(context, DeckBrowser):
+        # Onigiri draws its own deck list/dashboard: leave its scrolling and layout alone.
+        from ..util import compat
+        _db = isinstance(context, DeckBrowser) and not compat.onigiri_screen(context)
+        if _db:
             web_content.head = _QB_NOSCROLL_JS + web_content.head
         # 1:1 wheel scrolling on the deck list / Practice AND on cards (same 120 Hz misfire)
         if isinstance(context, Reviewer):
             web_content.head = _CARD_FRAME_JS + _IMG_RIM_JS + web_content.head
-        if isinstance(context, (DeckBrowser, Reviewer)):
+        if _db or isinstance(context, Reviewer):
             web_content.head = _SCROLL_STATE_JS + _WHEEL_JS + web_content.head
             # A/B: ~/.janki_native_scroll → Chromium's own scrolling; prepended last so the
             # flag is set before _WHEEL_JS reads it
             if os.path.exists(os.path.expanduser("~/.janki_native_scroll")):
                 web_content.head = "<script>window.__jkNativeScroll=1;</script>" + web_content.head
-        if isinstance(context, DeckBrowser) and _cfg().get("deck_stats", False):
+        if _db and _cfg().get("deck_stats", False):
             web_content.head += "\n" + _stats_head()
         # In the Practice view, relabel the deck browser's bottom "Import File" button
         # to "Import Bank" (its click is redirected to the bank importer — see
@@ -3314,7 +3362,13 @@ _CONGRATS_GLASS_CSS = (
 
 def _congrats_glass_js(cfg) -> str:
     css = _CONGRATS_GLASS_CSS + "body,body *{text-shadow:" + _text_shadow(cfg) + "!important;}"
-    return ("(function(){if(document.getElementById('__janki_congrats_glass'))return;"
+    # With Onigiri its dashboard/overview pages load in mw.web too, and this blanket
+    # background strip would erase its icons and heatmap: congrats page only then.
+    from ..util import compat
+    only_congrats = "if(!/congrats/.test(location.pathname))return;" \
+        if compat.onigiri_on() else ""
+    return ("(function(){" + only_congrats +
+            "if(document.getElementById('__janki_congrats_glass'))return;"
             "var s=document.createElement('style');s.id='__janki_congrats_glass';"
             "s.textContent='" + css + "';"
             "if(document.head)document.head.appendChild(s);})();")

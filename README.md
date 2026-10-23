@@ -155,7 +155,24 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.12</b> · 2026-10-19 · 5 releases</summary>
+<summary><b>2.12</b> · 2026-10-19 · 6 releases</summary>
+
+**2.12.5** · 2026-10-23
+
+**Onigiri compatibility**
+- Janki now works alongside the Onigiri add-on while keeping Onigiri's look:
+  - Calendar and Practice open inside Onigiri's own screen in all three themes (Onigiri, Shima, Kome).
+  - "Onigiri Settings" and "Janki Settings" sit side by side in the sidebar or Home menu.
+  - Hide / Suspend / New subdeck in Onigiri's deck menu, and Janki's hidden decks stay hidden.
+  - Reviews keep Janki's card, with Onigiri's top bar; **F** cycles Onigiri's Focus → Flow → Zen.
+  - Right-click the top bar to choose which of its buttons show.
+  - Optional glass behind Onigiri (Settings → Window), and cards can follow Onigiri's font.
+  - Smooth subdeck drop-downs, and Onigiri's Pomodoro replaces Janki's.
+
+**Everyone**
+- New "Auto photo size" option fits card photos (fronts and backs) to the screen.
+- Practice cards no longer briefly narrow when the explanation appears, and the question only moves as far as needed to keep it on screen.
+- Calendar class pages sit centred on screen, with a little more room under the title.
 
 **2.12.4** · 2026-10-22
 

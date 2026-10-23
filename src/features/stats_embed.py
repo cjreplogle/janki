@@ -1383,13 +1383,30 @@ def _wrap_overview_study():
                 pass
         # the page already hid itself on the click (user/css.py, _OVERVIEW_KEYS_JS);
         # this covers a Study that came another way. Then switch straight away.
+        from aqt.qt import QTimer
+        try:
+            from ..util import compat
+            oni = compat.onigiri_on()
+        except Exception:
+            oni = False
+        if hide and oni:
+            # Onigiri's deck preview: a quick fade out, then the review
+            try:
+                mw.web.eval("(function(){var b=document.body;if(!b)return;"
+                            "if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)')"
+                            ".matches){b.style.setProperty('visibility','hidden','important');return;}"
+                            "b.animate([{opacity:getComputedStyle(b).opacity},{opacity:0}],"
+                            "{duration:120,easing:'ease-out',fill:'forwards'});})()")
+            except Exception:
+                pass
+            QTimer.singleShot(120, go)
+            return
         if hide:
             try:
                 mw.web.eval("document.body&&document.body.style.setProperty("
                             "'visibility','hidden','important')")
             except Exception:
                 pass
-        from aqt.qt import QTimer
         QTimer.singleShot(0, go)
 
     def link(self, url):
@@ -1885,8 +1902,17 @@ def install() -> None:
         log("study fade: %s" % exc)
     try:
         from aqt.qt import QTimer
-        gui_hooks.overview_did_refresh.append(
-            lambda *_a: QTimer.singleShot(120, _preload_next_cards))
+        def _schedule_preload(*_a):
+            # under Onigiri the deck preview brightens in over ~0.24 s; image decodes
+            # and the reviewer.js warm-up on the same thread made it stutter, so they
+            # wait until it's done
+            try:
+                from ..util import compat
+                delay = 450 if compat.onigiri_on() else 120
+            except Exception:
+                delay = 120
+            QTimer.singleShot(delay, _preload_next_cards)
+        gui_hooks.overview_did_refresh.append(_schedule_preload)
     except Exception as exc:
         log("preload hook: %s" % exc)
     try:

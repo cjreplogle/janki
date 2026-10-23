@@ -173,6 +173,31 @@ _FOCUS_CSS = (
     # practice slide button) off the very edge of the screen.
     "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:14px!important;}"
 )
+# Onigiri: its reviewer header (pills + progress) hides with the rest of the chrome, and
+# the inline `margin-top: <header height> !important` it puts on #qa (beats any style
+# sheet) is set to auto so the card centres; it's handed back when Focus Mode ends.
+_FOCUS_CSS += "#onigiri-reviewer-ui-host{display:none!important;}"
+_ONIGIRI_FOCUS_ON = (
+    "var q=document.getElementById('qa');if(q&&q.dataset.onigiriBaseMarginTop!==undefined){"
+    "if(!q.__jkSP){var st=q.style,sp=st.setProperty.bind(st);q.__jkSP=sp;"
+    "st.setProperty=function(p,v,pr){if(p==='margin-top'&&"
+    "document.getElementById('__janki_focus'))return;return sp(p,v,pr);};}"
+    "q.__jkSP('margin-top','auto','important');}")
+# Its header host carries `display:block !important` inline (beats the style sheet):
+# hide it inline too, and keep it hidden if Onigiri rebuilds its inline style.
+_ONIGIRI_FOCUS_ON += (
+    "var h=document.getElementById('onigiri-reviewer-ui-host');if(h){"
+    "h.style.setProperty('display','none','important');"
+    "if(!window.__jkHostObs){window.__jkHostObs=new MutationObserver(function(){"
+    "var x=document.getElementById('onigiri-reviewer-ui-host');"
+    "if(x&&document.getElementById('__janki_focus')&&x.style.display!=='none')"
+    "x.style.setProperty('display','none','important');});"
+    "window.__jkHostObs.observe(h,{attributes:true,attributeFilter:['style']});}}")
+_ONIGIRI_FOCUS_OFF = (
+    "var h=document.getElementById('onigiri-reviewer-ui-host');"
+    "if(h)h.style.setProperty('display','block','important');"
+    "if(window.onigiriRefreshReviewerHeaderOffset){"
+    "try{window.onigiriRefreshReviewerHeaderOffset();}catch(_){}}")
 if sys.platform.startswith("win"):
     # The frameless window keeps its 14px grab strip above the card in Focus Mode, so
     # centring inside the web view put the card half that below the window's centre.
@@ -231,9 +256,10 @@ def _focus_apply_card(hidden: bool, offset_px: int = 0, pre: str = "") -> None:
         "var s=document.getElementById('__janki_focus');"
         "if(!s){s=document.createElement('style');s.id='__janki_focus';"
         "(document.head||document.documentElement).appendChild(s);}"
-        "s.textContent=" + _json.dumps(_FOCUS_CSS) + ";"
+        "s.textContent=" + _json.dumps(_FOCUS_CSS) + ";" + _ONIGIRI_FOCUS_ON
     ) if hidden else (
         "var s=document.getElementById('__janki_focus');if(s)s.remove();"
+        + _ONIGIRI_FOCUS_OFF
     )
     js = (
         "(function(){var el=document.getElementById('qa')"
@@ -341,9 +367,10 @@ def _focus_flip_around(hidden: bool, offset_px: int, pre: str, collapse) -> None
         "var s=document.getElementById('__janki_focus');"
         "if(!s){s=document.createElement('style');s.id='__janki_focus';"
         "(document.head||document.documentElement).appendChild(s);}"
-        "s.textContent=" + _json.dumps(_FOCUS_CSS) + ";"
+        "s.textContent=" + _json.dumps(_FOCUS_CSS) + ";" + _ONIGIRI_FOCUS_ON
     ) if hidden else (
         "var s=document.getElementById('__janki_focus');if(s)s.remove();"
+        + _ONIGIRI_FOCUS_OFF
     )
     arm = ("(function(){var el=document.getElementById('qa')||document.body.firstElementChild;"
            "window.__jkFlip={first:el?el.getBoundingClientRect().top:null,"
@@ -607,11 +634,14 @@ def _clamp_toolbar(collapse: bool) -> None:
         return
     try:
         from aqt.qt import QWidget
+        from ..util import compat
         if collapse:
             if tb.isVisible():
                 QWidget.hide(tb)
         else:
-            if not tb.isVisible():
+            # Onigiri keeps Anki's top bar out of the way and draws its own: leaving
+            # Focus Mode must not bring Anki's bar back on top of Onigiri's.
+            if not tb.isVisible() and not compat.onigiri_on():
                 QWidget.show(tb)
     except Exception:
         pass
@@ -887,7 +917,15 @@ function fit(){var qa=document.getElementById('qa');if(!qa)return;
   // than the card), else the card's
   var box=im.parentElement,bw=0;while(box&&box!==qa&&!bw){var cs=getComputedStyle(box);
    if(cs.display!=='inline'&&cs.display!=='contents')bw=box.clientWidth;box=box.parentElement;}
-  var w=Math.min(bw||W,W,innerHeight*H/Z*nw/nh);
+  // the view's top can be reserved (Onigiri's header / the centring pad, __jkFitPad):
+  // size for the height that's actually left
+  var avail=Math.max(120,innerHeight-(window.__jkFitPad||0));
+  var w=Math.min(bw||W,W,avail*H/Z*nw/nh);
+  // with a reserved top (Onigiri), also keep the WHOLE card on screen: the photo gets
+  // the height left after the card's other content (text above / below it)
+  if(window.__jkFitPad){var qh=qa.getBoundingClientRect().height,
+   ih=im.getBoundingClientRect().height,left=avail-16-(qh-ih);
+   if(left>=N*Z&&ih>0&&qh<3*innerHeight)w=Math.min(w,left/Z*nw/nh);}
   // !important: note types (AnKing's Extra) size their images with their own rules
   if(im.dataset.jkFit&&im.style.width===Math.floor(w)+'px')return;   // unchanged: no write, no loop
   im.style.setProperty('width',Math.floor(w)+'px','important');

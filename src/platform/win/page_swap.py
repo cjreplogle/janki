@@ -36,6 +36,11 @@ _errors_js = ("(function(){var e=window.__jkSwapErr||[];window.__jkSwapErr=[];"
 def _swappable(view) -> bool:
     if view is not getattr(mw, "web", None):
         return False
+    # Onigiri's page scripts set run-once flags on window (e.g. Kome's sidebar), which
+    # an in-place rewrite keeps: they'd skip setting up and leave the page blank.
+    from ...util import compat
+    if compat.onigiri_on():
+        return False
     import sys
     if sys.platform.startswith("win"):
         if not _cfg().get("win_page_swap", True):

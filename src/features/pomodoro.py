@@ -750,6 +750,10 @@ def _apply_pomodoro(on: bool) -> None:
     if sys.platform != "darwin" and not sys.platform.startswith("win"):
         return
     global _pomo_instance
+    # Onigiri has its own Pomodoro: Janki's stays off while Onigiri is enabled.
+    from ..util import compat
+    if on and compat.onigiri_on():
+        on = False
     if on:
         if _pomo_instance is None:
             _pomo_instance = _make_pomodoro()

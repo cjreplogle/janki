@@ -5054,6 +5054,9 @@ _JP_SLIDE_JS = (
 )
 _FRONT_JS = (
     "(function(){if(document.querySelector('.jp-answered'))return;"  # back re-runs this; skip it
+    # a previous back held the card in place with a relative offset: clear it
+    "try{var _q0=document.getElementById('qa');if(_q0&&_q0.__jpHold){_q0.style.removeProperty('top');"
+    "_q0.style.removeProperty('position');_q0.__jpHold=0;}}catch(e){}"
     "var box=document.getElementById('jp-choices');if(!box)return;"
     + _JP_ANSWER_JS + "window.jankiMarkCorrect();"
     + _JP_SLIDE_JS + "window.jankiSlideInit();"
@@ -5295,9 +5298,18 @@ _BACK_JS = (
     "try{var _ft=parseFloat(sessionStorage.getItem('jp_stem_top'));"
     "var _bs=document.querySelector('.jp-stem');"
     "if(!isNaN(_ft)&&_bs){var _dy=_ft-_bs.getBoundingClientRect().top;"
-    "if(Math.abs(_dy)>1){var _cd=document.querySelector('.card')||document.body;"
-    "try{_cd.animate([{transform:'translateY('+_dy+'px)'},{transform:'translateY(0)'}],"
-    "{duration:300,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}}"
+    # Hold the prompt where it was on the front; move it up only as far as needed to
+    # bring the explanation on screen (never above the top), then glide what's left.
+    "if(Math.abs(_dy)>1){var _cd=document.getElementById('qa')||document.querySelector('.card')||document.body;"
+    "var _sh=_dy;try{if(_cd.id==='qa'){var _qr=_cd.getBoundingClientRect(),"
+    "_vh=window.innerHeight,_tp=Math.max(12,window.__jkFitPad||0),_bt=_vh-12;"
+    "if(_qr.bottom+_sh>_bt)_sh-=(_qr.bottom+_sh-_bt);"
+    "if(_qr.top+_sh<_tp)_sh=_tp-_qr.top;"
+    "if(_sh<0&&_dy>0)_sh=0;if(_sh>0&&_dy<0)_sh=0;"   # never move against the old spot
+    "if(Math.abs(_sh)>1){_cd.style.position='relative';_cd.style.top=_sh+'px';_cd.__jpHold=1;}"
+    "else _sh=0;_dy=_dy-_sh;}}catch(e){_sh=0;}"
+    "if(Math.abs(_dy)>1){try{_cd.animate([{transform:'translateY('+_dy+'px)'},{transform:'translateY(0)'}],"
+    "{duration:300,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}}}"
     "sessionStorage.removeItem('jp_stem_top');}catch(e){}"
     # Binary grading: the pick already decided the grade. Add a single Continue that
     # applies the stashed ease (correct→Easy 4, wrong→Hard 2) and advances — the native

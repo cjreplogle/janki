@@ -1041,6 +1041,12 @@ class GlassSettings(QDialog):
         # Master on/off for the whole Pomodoro system (breaks, XP bar, break tint).
         self._pomo_on = QCheckBox("Enable Pomodoro breaks")
         self._pomo_on.setChecked(bool(self.cfg.get("pomodoro", False)))
+        from ..util import compat as _compat_p
+        if _compat_p.onigiri_on():           # Onigiri brings its own Pomodoro
+            self._pomo_on.setEnabled(False)
+            self._pomo_on.setText(self._pomo_on.text() + " (off while Onigiri is enabled)")
+            self._pomo_on.setToolTip("Onigiri has its own Pomodoro, so Janki's is off "
+                                     "while Onigiri is enabled. Your setting is kept.")
 
         def on_pomo(_state):
             on = self._pomo_on.isChecked()
@@ -2107,6 +2113,44 @@ class GlassSettings(QDialog):
             self._better_manki.stateChanged.connect(on_better_manki)
             app_text_lay.addWidget(self._better_manki)    # Appearance → Text
 
+        # Auto photo size: shrink card photos to fit the visible window (focus.py,
+        # fit_images; a deck with its own zoom keeps that instead).
+        self._fit_images = QCheckBox("Auto photo size (fit card photos to the window)")
+        self._fit_images.setToolTip(
+            "Shrinks photos on cards so they fit inside the visible window. Decks you've "
+            "zoomed yourself keep their zoom.")
+        self._fit_images.setChecked(bool(self.cfg.get("fit_images", True)))
+
+        def _fit_images_changed(_s):
+            self.cfg["fit_images"] = bool(self._fit_images.isChecked())
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                from ..features import focus as _f
+                _f._apply_card_zoom()          # the current card follows right away
+            except Exception:
+                pass
+        self._fit_images.stateChanged.connect(_fit_images_changed)
+        app_text_lay.addWidget(self._fit_images)        # Appearance → Text
+
+        # Onigiri: cards take Onigiri's main "Text" font so they match its theming.
+        from ..util import compat as _compat_f
+        if _compat_f.onigiri_on():
+            self._oni_card_font = QCheckBox("Card font follows Onigiri (its main Text font)")
+            self._oni_card_font.setToolTip(
+                "While Onigiri is enabled, card text uses the font chosen in Onigiri "
+                "Settings → Text, instead of Janki's card font.")
+            self._oni_card_font.setChecked(bool(self.cfg.get("onigiri_card_font", True)))
+
+            def _oni_card_font_changed(_s):
+                self.cfg["onigiri_card_font"] = bool(self._oni_card_font.isChecked())
+                mw.addonManager.writeConfig(__name__, self.cfg)
+                try:
+                    glass._reload_all_webviews()
+                except Exception:
+                    pass
+            self._oni_card_font.stateChanged.connect(_oni_card_font_changed)
+            app_text_lay.addWidget(self._oni_card_font)    # Appearance → Text
+
         # --- Glass patch / uninstall ----------------------------------------
         # On stock Anki the glass needs a small patch to Anki's own files (applied
         # automatically). This lets you cleanly REMOVE it: restore the original
@@ -2480,7 +2524,10 @@ class GlassSettings(QDialog):
         self._tour_btn.setStyleSheet(
             "QPushButton{background-color:#4f5b75;color:white;border:none;"
             "padding:5px 12px;border-radius:5px;}"
-            "QPushButton:hover{background-color:#5b6886;}")
+            "QPushButton:hover{background-color:#5b6886;}"
+            # visibly off when disabled (e.g. while Onigiri is enabled)
+            "QPushButton:disabled{background-color:rgba(79,91,117,0.35);"
+            "color:rgba(255,255,255,0.4);}")
 
         def _open_tour():
             from ..features import onboarding
@@ -2488,6 +2535,12 @@ class GlassSettings(QDialog):
             self.close()                       # the tour runs on the main window
             _QTt.singleShot(150, onboarding.show_tour)
         self._tour_btn.clicked.connect(_open_tour)
+        # The tour spotlights Janki's own deck list / toolbar, which Onigiri replaces.
+        from ..util import compat as _compat_t
+        if _compat_t.onigiri_on():
+            self._tour_btn.setEnabled(False)
+            self._tour_btn.setText("Janki tour (not available with Onigiri)")
+            self._tour_btn.setToolTip("The tour walks through Janki's own screens, which Onigiri replaces, so it's off while Onigiri is enabled.")
         # The first-launch setup window again (calendar, hotkeys, controller, lectures).
         self._setup_btn = QPushButton("Janki setup…")
         self._setup_btn.setToolTip("Run the first-launch setup again: calendar, background "
@@ -2587,6 +2640,29 @@ class GlassSettings(QDialog):
                 pass
         self._cal_icon.stateChanged.connect(_cal_icon_changed)
         app_win_lay.addWidget(self._cal_icon)             # Appearance → Window
+
+        # Onigiri keeps its own look on the deck list/overview; optionally let the
+        # window glass show through its panels.
+        from ..util import compat as _compat
+        if _compat.onigiri_on():
+            self._oni_glass = QCheckBox("Glass behind Onigiri (see-through dashboard)")
+            self._oni_glass.setToolTip(
+                "Onigiri's layout and colours stay as they are; its background panels "
+                "become see-through so Janki's glass shows behind them.")
+            self._oni_glass.setChecked(_compat.onigiri_glass())
+
+            def _oni_glass_changed(_s):
+                on = bool(self._oni_glass.isChecked())
+                self.cfg["onigiri_glass"] = on        # dialog's copy (saved wholesale)
+                _compat.set_onigiri_glass(on)
+                try:
+                    glass._reload_all_webviews()
+                    from ..integrations import onigiri as _oni
+                    _oni._sync_strip()
+                except Exception:
+                    pass
+            self._oni_glass.stateChanged.connect(_oni_glass_changed)
+            app_win_lay.addWidget(self._oni_glass)
 
         # Documentation link and "Anki Preferences…" share one row (the button is
         # added to it further down, where it's built).

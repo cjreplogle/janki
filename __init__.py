@@ -1207,6 +1207,15 @@ def _startup():
                     qbank.apply_practice_prefs()   # click-to-flip + back show/hide defaults
                     qbank.sync_contanki_for_card() # suspend Contanki on remote practice cards
                     qbank.sync_practice_bottom()   # question side: restore native buttons
+                    # a practice back holds #qa in place with a relative offset: drop it
+                    # before every next question draws (wrapping _showQuestion once)
+                    mw.reviewer.web.eval(
+                        "(function(){function c(){var q=document.getElementById('qa');"
+                        "if(q&&q.__jpHold){q.style.removeProperty('top');"
+                        "q.style.removeProperty('position');q.__jpHold=0;}}"
+                        "if(window._showQuestion&&!window._showQuestion.__jpc){"
+                        "var o=window._showQuestion;window._showQuestion=function(){c();"
+                        "return o.apply(this,arguments);};window._showQuestion.__jpc=1;}})()")
                     qbank.cleanup_slide_button_if_not_practice()  # drop stale slide btn
                     qbank.enforce_slide_btn_style()  # minimal reword-toggle look, live
                 except Exception:
@@ -1737,9 +1746,18 @@ except Exception as _sw_exc:
 # Drag decks onto a row's top/bottom edge to reorder the deck list
 try:
     from .src.features import deck_order as _deck_order
-    _deck_order.install()
+    from .src.util import compat as _compat
+    if not _compat.onigiri_on():        # Onigiri has its own deck drag-and-drop
+        _deck_order.install()
 except Exception as _do_exc:
     log("deck_order: %s" % _do_exc)
+
+# Onigiri: Janki's Calendar / Practice / Load Lectures / Settings in its sidebar
+try:
+    from .src.integrations import onigiri as _onigiri
+    _onigiri.install()
+except Exception as _oni_exc:
+    log("onigiri: %s" % _oni_exc)
 
 # Better Manki: toggleable restyle + smart new-card order for the Manki muscle cards
 try:

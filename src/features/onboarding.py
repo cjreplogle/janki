@@ -273,6 +273,11 @@ def _done_page():
             _dlg.accept()                      # finish the setup, then open the tour
         QTimer.singleShot(0, show_tour)
     tour.clicked.connect(_go)
+    from ..util import compat
+    if compat.onigiri_on():              # the tour is built for Janki's own screens
+        tour.setEnabled(False)
+        tour.setText("Take the tour (not available with Onigiri)")
+        tour.setToolTip("The tour walks through Janki's own screens, which Onigiri replaces, so it's off while Onigiri is enabled.")
     row = QHBoxLayout()
     row.addWidget(tour)
     row.addStretch()
@@ -446,6 +451,9 @@ _tour = None
 def show_tour() -> None:
     """The in-app guided tour (spotlights the real controls). Falls back to the
     windowed tour below if the overlay can't start."""
+    from ..util import compat
+    if compat.onigiri_on():              # its screens are Onigiri's: not supported
+        return
     try:
         from . import coach
         coach.start()

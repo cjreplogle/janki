@@ -1991,10 +1991,16 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   border-radius:8px;padding:4px 11px;cursor:pointer;}
 .jkd-back:hover{background:rgba(255,255,255,.16);}
 .jkd{max-width:520px;margin:28px auto 0;}
-.jkd h2{margin:0 0 4px;font-size:1.45em;}
+.jkd h2{margin:0 0 14px;font-size:1.45em;}
 .jkd-sub{margin-bottom:4px;}
 /* lecture picker: a button (name centred, inset chevron) + Janki's own glass menu */
 #jkc .jkc-grid.jkc-detail{clip-path:none;padding-right:0;}  /* no hour column here */
+/* a class page sits centred in the window (even space above and below), as it does
+   inside Onigiri; taller pages still start at the top and scroll */
+#jkc:has(> .jkc-grid.jkc-detail:not(.jkw)){display:flex;flex-direction:column;
+  min-height:calc(100vh - 42px);margin-top:0;margin-bottom:0;box-sizing:border-box;}
+#jkc > .jkc-grid.jkc-detail:not(.jkw){flex:1 1 auto;display:flex;flex-direction:column;
+  justify-content:center;padding-top:0;padding-bottom:0;}
 #jkc .jkd-dd{position:relative !important;display:inline-block;}
 #jkc .jkd-pick{background:rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23cfd3dc' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center !important;
   color:inherit;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:3px 30px 3px 14px;
@@ -2249,7 +2255,7 @@ _JS = """<script>(function(){
          var c=ev.closest('.jkc-col'),i=c?Math.max(0,colsL.indexOf(c)):0;
          cf.push(ev.animate(
            [{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'none'}],
-           {duration:300,delay:i*40,easing:'cubic-bezier(0,0,.2,1)',fill:'backwards'})
+           {duration:180,delay:i*20,easing:'cubic-bezier(0,0,.2,1)',fill:'backwards'})
            .finished.catch(function(){}));});
        if(cf.length){var ca=Promise.all(cf);inDone=ca;
          ca.then(function(){if(inDone===ca)inDone=null;});}
@@ -2257,7 +2263,7 @@ _JS = """<script>(function(){
      if(wfade){
        var fs=[];
        wfadeEls().forEach(function(el){if(el.animate)fs.push(el.animate(
-         [{opacity:0},{opacity:1}],{duration:280,easing:'cubic-bezier(0,0,.2,1)'})
+         [{opacity:0},{opacity:1}],{duration:170,easing:'cubic-bezier(0,0,.2,1)'})
          .finished.catch(function(){}));});
        if(fs.length){var all=Promise.all(fs);inDone=all;
          all.then(function(){if(inDone===all)inDone=null;});}   // updates wait for it
