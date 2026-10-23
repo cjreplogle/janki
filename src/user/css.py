@@ -524,6 +524,12 @@ _WHEEL_JS = (
     "function despike(d){if(!d)return d;var t=performance.now(),a=Math.abs(d),s=d>0?1:-1;\n"
     "if(s!==_es||t-_et>90||t<_et){_ep=0;_ed=0;}_es=s;_et=t;\n"
     "if(_ed>=3&&_ep>2&&a>_ep*2.2)a=_ep*1.1;\n"
+    # Bursts: macOS now and then sends one step 4-7x the one before it (measured on the
+    # Kome deck list: 39 then 259 px; -1 then -157, -544), flinging the page. A real
+    # speed-up grows a step at a time, so cap a step at 2.5x the last (30 px floor) while
+    # a gesture is running, and any single step at 160 px.
+    "if(_ep&&t-_et<90&&a>Math.max(30,_ep*2.5))a=Math.max(30,_ep*2.5);\n"
+    "if(a>160)a=160;\n"
     "_ed=(_ep&&a<=_ep+0.5)?_ed+1:0;_ep=a;return s*a;}\n"
     # Shorter coast after a flick. Detected by SPEED over a 60 ms window (absorbs macOS's
     # 0-size events and ~1 ms doubles): a coast = speed 8 % below the gesture's peak and
@@ -538,7 +544,10 @@ _WHEEL_JS = (
     "if(!_cs&&v<_pk*0.92&&t-_lup>25)_cs=t;\n"
     "if(!_cs)return d;var o=d*Math.exp(-(t-_cs)/K);return Math.abs(o)<1?0:o;}\n"
     "addEventListener('wheel',function(e){if(e.ctrlKey||e.defaultPrevented||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;\n"
+
     "var t=e.composedPath?e.composedPath()[0]:e.target;if(innerCan(t,e.deltaY))return;\n"
+    # over Onigiri's (Kome) sidebar: it scrolls on its own, never the list behind it
+    "if(t&&t.closest&&t.closest('.ba-side')){e.preventDefault();return;}\n"
     "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
     "var d=coast(despike(e.deltaY*k))*SENS;\n"
     "if(d)feed(d);},{passive:false});\n"
@@ -3082,6 +3091,11 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
             web_content.head = _CARD_FRAME_JS + _IMG_RIM_JS + web_content.head
         if _db or isinstance(context, Reviewer):
             web_content.head = _SCROLL_STATE_JS + _WHEEL_JS + web_content.head
+        elif isinstance(context, DeckBrowser):
+            # Onigiri's deck list keeps its own layout and scroll state, but natively
+            # macOS's lone bursts (one step 4-7x the last: 39 → 259 px) flung a long list
+            # to the top / bottom: give it the wheel smoothing (+ its burst limiter) only
+            web_content.head = _WHEEL_JS + web_content.head
             # A/B: ~/.janki_native_scroll → Chromium's own scrolling; prepended last so the
             # flag is set before _WHEEL_JS reads it
             if os.path.exists(os.path.expanduser("~/.janki_native_scroll")):

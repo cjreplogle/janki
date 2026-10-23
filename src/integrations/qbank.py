@@ -5070,6 +5070,21 @@ _FRONT_JS = (
     + _JP_TINT_JS +
     _JP_SIZE_JS +
     "try{sessionStorage.removeItem('jp_result');}catch(e){}"          # fresh question
+    # Record where the stem sits once the front is laid out (and after a resize), so the
+    # back can hold it there however the answer is shown: a pick re-records it at flip
+    # time, but Space / the Show Answer button never ran that, and the back then sat at
+    # the top of the screen.
+    "if(!window.__jpWrapPin)window.__jpWrapPin=function(q){if(!q.__jkSP||q.__jkSP.__jpw)return;"
+    "var o=q.__jkSP,w=function(p,v,pr){var P=window.__jpPinned;"
+    "if(p==='margin-top'&&P&&((P.el&&P.el.isConnected)||(P.until&&performance.now()<P.until)))v=P.v;"
+    "return o(p,v,pr);};w.__jpw=1;q.__jkSP=w;};"
+    "(function(){function sv(){try{var s=document.querySelector('.jp-stem');"
+    "if(s&&!document.querySelector('.jp-answered'))"
+    "sessionStorage.setItem('jp_stem_top',s.getBoundingClientRect().top);}catch(e){}}"
+    "try{sessionStorage.removeItem('jp_stem_top');}catch(e){}"
+    "setTimeout(sv,350);setTimeout(sv,900);window.__jpSv=sv;"
+    "if(!window.__jpSvR){window.__jpSvR=1;window.addEventListener('resize',function(){"
+    "window.__jpSv&&window.__jpSv();});}})();"
     "try{sessionStorage.removeItem('jp_pick');}catch(e){}"            # fresh question
     "try{sessionStorage.removeItem('jp_dropped');}catch(e){}"         # remote-mode drop
     "window.__jpRemoteDone=false;"                                     # arm remote setup for this card
@@ -5102,7 +5117,14 @@ _FRONT_JS = (
     # Record the stem's on-screen position at flip time so the back can glide the
     # card from here to its new (re-centred) spot instead of jumping.
     "var _stp=document.querySelector('.jp-stem');"
-    "if(_stp)sessionStorage.setItem('jp_stem_top',_stp.getBoundingClientRect().top);}catch(e){}"
+    "if(_stp)sessionStorage.setItem('jp_stem_top',_stp.getBoundingClientRect().top);"
+    # Pin #qa's margin now, so the back's FIRST frame isn't drawn re-centred (a one-frame
+    # flicker before the back's own pin). Card centring sets margin-top through
+    # q.__jkSP; while a pin is live it keeps the pinned value instead: the front's for
+    # 1.5 s (the back replaces it), the back's while its stem is on screen.
+    "var _fq=document.getElementById('qa');if(_fq&&_fq.__jkSP){var _fv=getComputedStyle(_fq).marginTop;"
+    "window.__jpPinned={v:_fv,until:performance.now()+1500};window.__jpWrapPin(_fq);"
+    "_fq.__jkSP('margin-top',_fv,'important');}}catch(e){}"
     "if(!ok){var r=box.querySelector('.jp-choice.jp-correct');"
     "if(r){r.classList.add('jp-reveal-blue');window.jankiTint(r,'blue');}}"
     # After the pick registers, optionally flip to the back (explanation) so a
@@ -5230,7 +5252,25 @@ _BACK_JS = (
     "tb.setAttribute('aria-expanded',showExp?'true':'false');}"
     "var r,pk;try{r=sessionStorage.getItem('jp_result');"
     "pk=parseInt(sessionStorage.getItem('jp_pick'),10);}catch(e){}"
-    "if(!r)return;"
+    # Shown without a pick (Space / Show Answer): nothing folds; just hold the stem where
+    # the front had it (it jumped to the top of the screen)
+    "if(!r){try{var _q3=document.getElementById('qa'),_s3=document.querySelector('.jp-stem'),"
+    "_f3=parseFloat(sessionStorage.getItem('jp_stem_top'));"
+    "if(_q3&&_s3&&!isNaN(_f3)){var _d3=_f3-_s3.getBoundingClientRect().top,"
+    "_t3=Math.max(12,window.__jkFitPad||0),_r3=_q3.getBoundingClientRect();"
+    "if(_r3.top+_d3<_t3)_d3=_t3-_r3.top;"
+    # then the whole card glides up as far as needed to bring the explanation on screen
+    # (never above the top padding)
+    "var _up=Math.max(0,Math.min(_r3.bottom+_d3-(window.innerHeight-12),_r3.top+_d3-_t3));"
+    "_d3-=_up;"
+    "var _m3=Math.max(0,parseFloat(getComputedStyle(_q3).marginTop)+_d3)+'px';"
+    "window.__jpPinned={v:_m3,el:_s3};window.__jpWrapPin&&window.__jpWrapPin(_q3);"
+    "_q3.style.setProperty('transition','none','important');"
+    "(_q3.__jkSP||_q3.style.setProperty.bind(_q3.style))('margin-top',_m3,'important');"
+    "void _q3.offsetHeight;_q3.style.removeProperty('transition');"
+    "if(_up>1)try{_q3.animate([{transform:'translateY('+_up+'px)'},{transform:'translateY(0)'}],"
+    "{duration:300,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}"
+    "sessionStorage.removeItem('jp_stem_top');}catch(e){}return;}"
     "var card=document.querySelector('.card')||document.body;"
     # Whole-card fill only on DESKTOP (see front) — mobile tints just the boxes.
     "if(typeof window.jankiPracticeAutoFlip!=='undefined')"
@@ -5295,6 +5335,33 @@ _BACK_JS = (
     # differently from the front, so the prompt would JUMP on the flip. Start the
     # card at the front's stem position and animate it to its new spot — one smooth
     # move. No-op when top-aligned (delta ~0). Runs after the layout is final.
+    # A centred card (Janki's Onigiri card centring) re-centred as the other choices
+    # folded away: the glide took it up, then it slid back down. Measure the folded
+    # layout first and pin #qa's top margin there, so the glide is the only move and
+    # the fold just shrinks the card from the bottom.
+    "try{var _q2=document.getElementById('qa');"
+    "if(_q2&&!showAll&&others.length){"
+    
+    "others.forEach(function(e){e.style.transition='none';e.classList.add('jp-collapsed');});"
+    "void _q2.offsetHeight;var _fm=getComputedStyle(_q2).marginTop;"
+    # and keep the stem where it was on the front (a long back runs on below the
+    # screen and scrolls, rather than the prompt moving); the glide then has nothing to do
+    "try{var _f0=parseFloat(sessionStorage.getItem('jp_stem_top')),"
+    "_st0=document.querySelector('.jp-stem'),_qr0=_q2.getBoundingClientRect();"
+    "if(!isNaN(_f0)&&_st0){var _d0=_f0-_st0.getBoundingClientRect().top,"
+    "_tp0=Math.max(12,window.__jkFitPad||0);"
+    "if(_qr0.top+_d0<_tp0)_d0=_tp0-_qr0.top;"
+    "_fm=Math.max(0,parseFloat(_fm)+_d0)+'px';}}catch(e){}"
+    # Janki's card centring re-sets margin-top:auto through q.__jkSP after this: keep
+    # the pin while this card's content is on screen (the next card replaces it)
+    "window.__jpPinned={v:_fm,el:document.querySelector('.jp-stem')};"
+    "window.__jpWrapPin&&window.__jpWrapPin(_q2);"
+    "others.forEach(function(e){e.classList.remove('jp-collapsed');});void _q2.offsetHeight;"
+    "others.forEach(function(e){e.style.transition='';});"
+    "_q2.style.setProperty('transition','none','important');"
+    "(_q2.__jkSP||_q2.style.setProperty.bind(_q2.style))('margin-top',_fm,'important');"
+    "void _q2.offsetHeight;"
+    "_q2.style.removeProperty('transition');}}catch(e){}"
     "try{var _ft=parseFloat(sessionStorage.getItem('jp_stem_top'));"
     "var _bs=document.querySelector('.jp-stem');"
     "if(!isNaN(_ft)&&_bs){var _dy=_ft-_bs.getBoundingClientRect().top;"

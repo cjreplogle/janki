@@ -155,7 +155,25 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.12</b> · 2026-10-19 · 6 releases</summary>
+<summary><b>2.12</b> · 2026-10-19 · 7 releases</summary>
+
+**2.12.6** · 2026-10-23
+
+**Onigiri compatibility**
+- Smoother screen changes:
+  - Decks (from a review, Practice or a deck preview) fades out and the deck list drops in, sidebar included.
+  - The deck preview always fades in.
+  - The Shima Calendar panel opens and closes smoothly and always fills the window.
+- Layout:
+  - The Kome sidebar starts just under the window buttons.
+  - The Shima Calendar button sits next to Today.
+  - Class pages are centred in Shima.
+- No more dark box flashing when Anki opens with Onigiri's hidden title bar.
+- Scrolling the deck list no longer flings it to the top or bottom, and the sidebar scrolls on its own.
+
+**Everyone**
+- Practice questions stay put when you pick an answer or press Space, and only move up to show the explanation.
+- "Collection sync complete" and other notices sit in the window's bottom-left corner.
 
 **2.12.5** · 2026-10-23
 

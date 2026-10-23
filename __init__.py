@@ -191,8 +191,13 @@ def _patch_tooltip():
 
         if par and hasattr(par, 'geometry'):
             geo = par.geometry()
-            win.move(geo.x() + x_offset + 18,
-                     geo.y() + geo.height() - win.height() - y_offset)
+            if (x_offset, y_offset) == (0, 100):
+                # Anki's default lifts toasts 100px for its bottom bar; Janki's sits
+                # flush, so put them in the window's real bottom-left corner
+                win.move(geo.x() + 12, geo.y() + geo.height() - win.height() - 12)
+            else:
+                win.move(geo.x() + x_offset + 18,
+                         geo.y() + geo.height() - win.height() - y_offset)
 
         # Fade in / out (it used to pop in and vanish)
         win.setWindowOpacity(0.0)
@@ -1505,6 +1510,70 @@ def _early_tooltip():
         _patch_tooltip()
     except Exception as _et_exc:
         log("early tooltip: %s" % _et_exc)
+
+
+def _preset_onigiri_titlebar():
+    # Onigiri's "hide macOS title bar" sets Qt's expanded-client-area flags once the
+    # window is already on screen; Qt hides and re-shows a visible window to change
+    # flags, which flashed a dark box at launch. Set them before the first show, so
+    # Onigiri finds them already on and leaves the window alone.
+    if sys.platform != "darwin" or mw is None or mw.isVisible():
+        return
+    # at load the flags didn't hold until the first show: set them as it happens
+    if not getattr(mw, "_jk_tb_preset", False):
+        mw._jk_tb_preset = True
+        _orig_show = mw.show
+
+        def _show(*a, **k):
+            try:
+                mw.show = _orig_show
+            except Exception:
+                pass
+            _preset_onigiri_titlebar()
+            r = _orig_show(*a, **k)
+            geo = getattr(mw, "_jk_tb_geo", None)
+            if geo is not None and mw.geometry() != geo:
+                mw.setGeometry(geo)
+            if GLASS:
+                # the rebuilt window starts opaque; glass otherwise waits for _startup
+                try:
+                    # the same glass Janki re-asserts later (transparency, tint, corners,
+                    # blur); _apply_native_glass would add a vibrancy layer the normal
+                    # look doesn't have, and it stayed for the session
+                    from .src.user import glass as _g
+                    _g._reapply_native()
+                except Exception as _ge:
+                    log("early glass: %s" % _ge)
+            return r
+        mw.show = _show
+        return
+    try:
+        from importlib import import_module
+        from .src.util import compat
+        if not compat.onigiri_on():
+            return
+        conf = import_module(compat.ONIGIRI_ID + ".core.config").get_config_readonly()
+        if not conf.get("hideMacTitleBar", False):
+            return
+        wt = Qt.WindowType
+        ex = getattr(wt, "ExpandedClientAreaHint", None)
+        nb = getattr(wt, "NoTitleBarBackgroundHint", None)
+        if ex is None or nb is None:
+            return
+        flags = mw.windowFlags()
+        if (flags | ex | nb) != flags:
+            # setWindowFlags drops the spot Anki just restored; the new window then opens
+            # centred. Put it back before the show and, if Qt re-centres anyway, at once
+            # after it (same event-loop turn, so nothing is drawn in between)
+            saved, geo = mw.saveGeometry(), mw.geometry()
+            mw.setWindowFlags(flags | ex | nb)
+            mw.restoreGeometry(saved)
+            mw._jk_tb_geo = geo
+    except Exception as _pt_exc:
+        log("onigiri titlebar preset: %s" % _pt_exc)
+
+
+_preset_onigiri_titlebar()
 
 
 gui_hooks.profile_did_open.append(_early_tooltip)

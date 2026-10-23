@@ -309,9 +309,12 @@ def _hidden_rows_css() -> str:
 # Kome's sidebar is a full-height panel from the very top of the page; under Janki's
 # glass title strip its square top edge looked cut off. Float it as a rounded card.
 _KOME_CSS = (
-    "<style>body.ba-with-side .ba-side{top:34px!important;left:8px!important;"
+    "<style>body.ba-with-side .ba-side{top:28px!important;left:8px!important;"
     "bottom:8px!important;height:auto!important;border-radius:14px!important;"
-    "border:1px solid rgba(255,255,255,.08)!important;overflow:hidden auto;}"
+    "border:1px solid rgba(255,255,255,.08)!important;overflow:hidden auto;"
+    "overscroll-behavior:contain;}"   # scrolling past its end doesn't move the list
+    # the card starts below the traffic lights: drop Onigiri's title-bar inset inside it
+    "body.ba-with-side .ba-side{padding-top:18px!important;}"
     # Janki's page drop-in moves <html>; with a transform there Kome's fixed sidebar
     # scrolls with the page. Keep the fade, drop the slide.
     "body.ba-with-side{--jk-nodrop:1;}html:has(body.ba-with-side){transform:none!important;}"
@@ -489,7 +492,7 @@ _KOME_VIEW_CSS = (
     ".jk-kome-cal .jkc-grid>.jkc-col{flex:1 1 0;min-width:0;width:auto!important;}"
     # no page scroll in the Calendar (it scrolls itself); room above/below
     "html:has(body.jk-cal),body.jk-cal{overflow:hidden!important;}"
-    "body.jk-cal .ba-home{padding-top:16px!important;padding-bottom:0!important;}"
+    "body.jk-cal .ba-home{padding-top:8px!important;padding-bottom:0!important;}"
     # text in Kome's own font, like the rest of the screen
     ".jk-kome-cal{font-family:var(--rf-sans,inherit)!important;}"
     ".jk-kome-cal *:not(svg):not(path){font-family:inherit!important;}"
@@ -529,7 +532,7 @@ _KOME_VIEW_CSS = (
     # centre down by its height), and a bit more room under the class title
     "body.jk-cal .jk-kome-cal{position:relative!important;}"
     "body.jk-cal .jk-kome-cal > div:has(> #jk-cal-back){position:absolute!important;"
-    "top:14px;left:0;z-index:5;}"   # pill top level with the sidebar card's (34px)
+    "top:6px;left:0;z-index:5;}"   # pill near the top, level with the Calendar bar
     ".jk-kome-cal #jkc .jkd h2{margin-bottom:14px!important;}"
     # Practice: just the banks list, with bank columns: Bank · Progress · Questions
     # (Questions = the New count: questions not done yet; Learn / Due don't apply)
@@ -746,11 +749,24 @@ _ONI_VIEW_CSS = (
     ".jk-oni-cal #jkc{width:100%!important;max-width:100%!important;min-width:0!important;"
     "height:100%!important;flex:1 1 auto;}"
     # Shima: the island grows into the Calendar's panel
-    ".onigiri-shima>.sidebar-left.shima-island{transition:width .38s cubic-bezier(.2,.8,.2,1),"
-    "height .38s cubic-bezier(.2,.8,.2,1)!important;}"
-    "body.jk-cal .onigiri-shima>.sidebar-left.shima-island{width:calc(100vw - 56px)!important;"
+    # (no width / height transition: __jkOniSet masks the change instead)
+    # (as specific as Shima's own sizing rule + body, or its small island won)
+    "body.jk-cal .container.modern-main-menu.onigiri-shima>.sidebar-left.shima-island"
+    "{width:calc(100vw - 56px)!important;"
     "height:calc(100vh - 56px)!important;max-width:none!important;max-height:none!important;}"
     "body.jk-cal .onigiri-shima #deck-list-container{display:none!important;}"
+    "body.jk-cal .onigiri-shima #deck-list-header:not(:has(#jk-oni-calbtn)){display:none!important;}"
+    # class page: the "‹ Calendar" pill floats (in the flow it pushed the page's centre
+    # down by its height) and the page centres in the panel, as on Kome
+    "body.jk-cal .jk-oni-cal > div:has(> #jk-cal-back){position:absolute!important;"
+    "top:0;left:0;z-index:5;}"
+    "body.jk-cal .jk-oni-cal #jkc:has(.jkc-detail){display:flex!important;"
+    "flex-direction:column!important;}"
+    "body.jk-cal .jk-oni-cal #jkc .jkc-grid.jkc-detail{display:flex!important;"
+    "flex-direction:column!important;justify-content:center!important;"
+    "flex:1 1 auto!important;min-height:0!important;margin-top:0!important;"
+    "padding-top:0!important;}"
+    ".jk-oni-cal .jkc-r #jk-oni-calbtn{align-self:center;margin-left:2px;}"
     "body.jk-cal #deck-list-header .deck-header-actions>:not(#jk-oni-calbtn){visibility:hidden;}"
     "#jk-oni-calbtn[data-on]{color:var(--accent-color)!important;opacity:1!important;}"
     ".jk-oni-calbtn-float{position:fixed;top:14px;right:18px;z-index:50;width:32px;height:32px;"
@@ -876,9 +892,42 @@ function soft(el,d){if(!el||(window.matchMedia&&matchMedia('(prefers-reduced-mot
   {duration:320,delay:d||0,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});}catch(e){}}
 /* D.mode: decks|cal|prac; D.cal: section html ('' = none, true = already in the page);
    D.tree: new deck-list rows (null = leave) */
+/* the mask cuts the island's own border while it moves: a lone outline follows it */
+function ring(isl,A,B,dur,ease){try{var c=getComputedStyle(isl),r=document.createElement('div');
+ r.style.cssText='position:fixed;pointer-events:none;z-index:2147483000;box-sizing:border-box;'+
+  'border-radius:20px;border:'+(c.borderTopWidth||'1px')+' solid '+c.borderTopColor+';';
+ document.body.appendChild(r);
+ var k=function(R){return {left:R.left+'px',top:R.top+'px',width:R.width+'px',height:R.height+'px'};};
+ var a=r.animate([k(A),k(B)],{duration:dur,easing:ease,fill:'forwards'});
+ a.onfinish=function(){r.remove();};setTimeout(function(){r.remove();},dur+200);}catch(e){}}
 window.__jkOniSet=function(D){var b=document.body,was=mode();
+ var isl=document.querySelector('.onigiri-shima>.sidebar-left.shima-island'),r0=isl&&isl.getBoundingClientRect();
+ var RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+ /* Leaving the Calendar on Shima: the island can't mask itself bigger than it is, so
+    shrinking it first showed a cropped deck list. Keep it big, fade the Calendar while
+    the mask closes in on the small island's outline, then switch */
+ if(isl&&r0&&was==='cal'&&D.mode!=='cal'&&!D.__jkNow&&!RM){
+  b.classList.remove('jk-cal');var sm=isl.getBoundingClientRect();b.classList.add('jk-cal');
+  var ins='inset('+Math.max(0,sm.top-r0.top)+'px '+Math.max(0,r0.right-sm.right)+'px '+
+   Math.max(0,r0.bottom-sm.bottom)+'px '+Math.max(0,sm.left-r0.left)+'px round 20px)';
+  var cs=document.querySelector('.jk-oni-cal'),fa=null,ma=null;
+  try{if(cs)fa=cs.animate([{opacity:1},{opacity:0}],{duration:160,fill:'forwards'});}catch(e){}
+  try{ma=isl.animate([{clipPath:'inset(0px round 20px)'},{clipPath:ins}],
+   {duration:320,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'});}catch(e){}
+  ring(isl,r0,sm,320,'cubic-bezier(.4,0,.2,1)');
+  D.__jkNow=1;setTimeout(function(){window.__jkOniSet(D);
+   try{ma&&ma.cancel();}catch(e){}try{fa&&fa.cancel();}catch(e){}},320);return 'ok';}
  b.classList.remove('jk-cal','jk-prac');
  if(D.mode==='cal')b.classList.add('jk-cal');else if(D.mode==='prac')b.classList.add('jk-prac');
+ /* Shima's island changes size in one step and a rounded mask grows / shrinks between
+    the two boxes: animating width / height re-laid out the page on every frame (choppy,
+    worst right after launch) */
+ if(isl&&r0&&was!=='cal'&&D.mode==='cal'&&!RM){
+  var r1=isl.getBoundingClientRect(),big=r1.width>r0.width,A=big?r0:r1,B=big?r1:r0;
+  var ins='inset('+Math.max(0,A.top-B.top)+'px '+Math.max(0,B.right-A.right)+'px '+
+   Math.max(0,B.bottom-A.bottom)+'px '+Math.max(0,A.left-B.left)+'px round 20px)',full='inset(0px round 20px)';
+  try{isl.animate([{clipPath:big?ins:full},{clipPath:big?full:ins}],
+   {duration:380,easing:'cubic-bezier(.2,.8,.2,1)'});}catch(e){}}
  tabs();foot();marks();
  var h=host(),sec;
  if(D.cal===true){sec=document.querySelector('.jk-oni-cal');if(sec&&h&&sec.parentNode!==h)h.appendChild(sec);}
@@ -886,14 +935,27 @@ window.__jkOniSet=function(D){var b=document.body,was=mode();
   if(D.cal&&h){var t=document.createElement('div');t.innerHTML=D.cal;sec=t.firstElementChild;
    h.appendChild(sec);runScripts(sec);
    /* Shima's island grows first, then the Calendar fades up into it */
-   soft(sec,was==='cal'?0:(document.querySelector('.onigiri-shima')?220:0));}}
+   soft(sec,was!=='cal'&&document.querySelector('.onigiri-shima')?120:0);}}
  if(D.tree!=null&&window.OnigiriEngine&&OnigiriEngine.updateDeckTree){
   OnigiriEngine.updateDeckTree(D.tree);
   if(was!==D.mode&&D.mode!=='cal')soft(document.getElementById('deck-list-container'));}
- fitCal();setTimeout(fitCal,420);return 'ok';};   /* again once Shima's island has grown */
+ calBtnHome();fitCal();setTimeout(fitCal,420);return 'ok';};   /* again once Shima's island has grown */
 /* The Calendar sizes its hours for the whole window: fit them to the panel instead, so
    the whole day (8–5 at least) shows without being cut off at the bottom */
+/* Shima: while the Calendar is open its icon sits in the Calendar's own bar, after
+   Today / the wand (its header row above was a strip of empty space); back on close */
+function calBtnHome(){var b=document.getElementById('jk-oni-calbtn')||window.__jkCalBtn;if(!b||!b.__jkHome)return;
+ /* (the bar redraws with the week: a dropped icon is kept in __jkCalBtn) */
+ if(mode()==='cal'||!b.classList.contains('jk-calbtn-inbar'))return;var H=b.__jkHome;
+ if(H.next&&H.next.parentNode===H.parent)H.parent.insertBefore(b,H.next);else H.parent.appendChild(b);
+ b.classList.remove('jk-calbtn-inbar');}
+function calBtnToBar(sec){if(!document.querySelector('.onigiri-shima'))return;
+ var b=document.getElementById('jk-oni-calbtn')||window.__jkCalBtn,r=sec.querySelector('.jkc-bar .jkc-r');
+ if(!b||!r||b.parentNode===r)return;window.__jkCalBtn=b;
+ if(!b.__jkHome)b.__jkHome={parent:b.parentNode,next:b.nextSibling};
+ r.appendChild(b);b.classList.add('jk-calbtn-inbar');}
 function fitCal(){var sec=document.querySelector('.jk-oni-cal');if(!sec||mode()!=='cal')return;
+ calBtnToBar(sec);
  var g=sec.querySelector('.jkc-grid:not(.jkc-detail)'),bd=g&&g.querySelector('.jkc-body');if(!bd)return;
  /* measure at the end of the fade-up (its 8px slide would skew the numbers, and the
     later refit then nudged the Calendar) */
@@ -1151,9 +1213,14 @@ _OV_BRIGHTEN = ("(function(){var d=document.documentElement,b=document.body;if(!
                 "easing:'cubic-bezier(.2,.8,.2,1)'});}catch(e){}})()" % (_FADE_MS + 60))
 _OVERVIEW_FADE = (
     "<style>html:not(.jk-ov-in) body{opacity:.4!important}</style>"
+    # a swapped-in page keeps the document's old paint entry (and the old .jk-ov-in):
+    # then the fade ran before anything showed, or never dimmed. Drop the class, and
+    # with an old paint entry wait for this content's own frames instead.
     "<script>(function(){var done=0;function go(){if(done)return;done=1;%s;}"
+    "document.documentElement.classList.remove('jk-ov-in');"
     "try{if(performance.getEntriesByType('paint').some(function(e){"
-    "return e.name==='first-contentful-paint';}))setTimeout(go,0);"
+    "return e.name==='first-contentful-paint';}))requestAnimationFrame(function(){"
+    "requestAnimationFrame(function(){setTimeout(go,16);});});"
     "else new PerformanceObserver(function(l){if(l.getEntries().some(function(e){"
     "return e.name==='first-contentful-paint';}))go();}).observe({type:'paint',buffered:true});}"
     "catch(e){setTimeout(go,120);}setTimeout(go,600);})();</script>" % _OV_BRIGHTEN)
@@ -1199,7 +1266,12 @@ def _wrap_deck_open() -> None:
 
 
 def _on_will_set_content(web_content, context):
+    global _decks_side_in
     try:
+        from aqt.deckbrowser import DeckBrowser
+        if _decks_side_in and isinstance(context, DeckBrowser):
+            _decks_side_in = False
+            web_content.head += _SIDE_IN_CSS
         # Reviews: Janki's study screen (centred card, typewriter, timer, Focus Mode, its
         # bottom buttons). Onigiri / Kome styling is taken off the card and the bottom
         # bar; Onigiri's top bar (pills, progress) is a separate view and stays.
@@ -1454,6 +1526,91 @@ def _sync_strip(*_a):
         _strip.sync()
     except Exception as e:
         log("onigiri strip: %s" % e)
+
+
+# Onigiri's "Decks" pill (review / deck overview) switched pages in one cut: give it the
+# Practice ↔ Decks switch instead (fade out, deck list drops in). Onigiri acts on the
+# click even when an earlier handler claimed it, so the click goes through untouched and
+# the page switch it makes (moveToState) is what gets the effect.
+_decks_pending = False
+_decks_side_in = False      # the next deck-list page fades its sidebar in (the drop
+_SIDE_IN_CSS = ("<script>(function(){var d=document.documentElement;"   # page reused:
+                "['opacity','transition'].forEach(function(p){d.style.removeProperty(p);});"
+                "})();</script>"                                       # drop the fade-out
+                "<style>@media (prefers-reduced-motion: no-preference){"   # misses it)
+                "body.ba-with-side .ba-side{animation:jkSideIn .32s ease both;}}"
+                "@keyframes jkSideIn{from{opacity:0;}to{opacity:1;}}</style>")
+
+
+def _on_review_decks(handled, message, context):
+    global _decks_pending
+    if (message != "decks" or getattr(mw, "state", None) not in ("review", "overview")
+            or _decks_pending):
+        return handled
+    _decks_pending = True
+    QTimer.singleShot(600, _decks_fade_settle)
+    return handled
+
+
+def _decks_fade_settle():
+    global _decks_pending
+    _decks_pending = False        # nothing switched (Focus Dango kept you in review)
+
+
+def _clear_toolbar_fade():
+    """The toolbar's page is reused: undo the Decks fade-out once the switch is done
+    (the deck list keeps the toolbar hidden by then)."""
+    try:
+        mw.toolbar.web.eval("(function(){var b=document.body;if(!b)return;"
+                            "['visibility','opacity','transition'].forEach(function(p){"
+                            "b.style.removeProperty(p);});})()")
+    except Exception:
+        pass
+
+
+def _wrap_move_to_state():
+    orig = mw.moveToState
+    if getattr(orig, "_jk_decks_fade", False):
+        return
+
+    def move(state, *a, **k):
+        global _decks_pending
+        if (_decks_pending and state == "deckBrowser"
+                and getattr(mw, "state", None) in ("review", "overview")):
+            _decks_pending = False
+            global _decks_side_in
+            _decks_side_in = True
+            # fade out fully FIRST, then switch: switching at once (as Practice ↔ Decks
+            # does) showed the review page squeezed narrower for a frame or two — the
+            # top buttons jumped left and the text was cut off. Then the list drops in.
+            from ..features import stats_embed, sfx
+            # the answer bar is its own view: fade it out with the page and keep it hidden,
+            # or the deck list's own bottom buttons load into it before Onigiri hides it
+            # (the top toolbar too: Decks / Sync re-laid out to the left before going)
+            for v in (getattr(mw, "bottomWeb", None), getattr(getattr(mw, "toolbar", None), "web", None)):
+                try:
+                    v.eval("(function(){var b=document.body;if(!b)return;"
+                           "b.style.transition='opacity .15s ease';b.style.opacity='0';"
+                           "setTimeout(function(){b.style.visibility='hidden';},150);})()")
+                except Exception:
+                    pass
+            QTimer.singleShot(700, _clear_toolbar_fade)
+            try:
+                sfx.play("page")
+            except Exception:
+                pass
+            mw.web.eval("(function(){var d=document.documentElement;"
+                        "d.style.setProperty('transition','opacity .16s ease','important');"
+                        "d.style.setProperty('opacity','0','important');})()")
+
+            def go():
+                stats_embed.animate_next_deck_render()
+                orig(state, *a, **k)
+            QTimer.singleShot(170, go)
+            return None
+        return orig(state, *a, **k)
+    move._jk_decks_fade = True
+    mw.moveToState = move
 
 
 def _on_js_message(handled, message, context):
@@ -2180,7 +2337,7 @@ def _apply_card_centring(*_a) -> None:
                   # the card mid-rebuild and shrank the photo)
                   "if(window.__jkFit)setTimeout(function(){try{window.__jkFit();}catch(e){}},80);"
                   # Onigiri's inline push-down margin on #qa (beats style sheets) → auto
-                  "var q=document.getElementById('qa');if(q){if(!q.__jkSP){var st=q.style,"
+                  "var q=document.getElementById('qa');if(q){q.dataset.onigiriBaseMarginTop='0px';if(!q.__jkSP){var st=q.style,"
                   "sp=st.setProperty.bind(st);q.__jkSP=sp;st.setProperty=function(p,v,pr){"
                   "if(p==='margin-top'&&document.getElementById('__janki_focus'))return;"
                   "return sp(p,v,pr);};}q.__jkSP('margin-top','auto','important');}"
@@ -2234,7 +2391,9 @@ def _release_bottom() -> None:
         return
     _bottom_hold[0] = False
     try:                       # clear any page-level hide left on the bar
-        mw.bottomWeb.eval("document.body&&document.body.style.removeProperty('visibility')")
+        mw.bottomWeb.eval("(function(){var b=document.body;if(!b)return;"
+                          "['visibility','opacity','transition'].forEach(function(p){"
+                          "b.style.removeProperty(p);});})()")   # incl. the Decks fade-out
     except Exception:
         pass
     # hand the bar back to Onigiri's own rule for the current focus level (Zen hides it,
@@ -2323,6 +2482,9 @@ def install() -> None:
     if not compat.onigiri_on():
         return
     gui_hooks.webview_did_receive_js_message.append(_on_js_message)
+    # ahead of Onigiri's own handler, which switches pages at once
+    gui_hooks.webview_did_receive_js_message._hooks.insert(0, _on_review_decks)
+    _wrap_move_to_state()
     gui_hooks.webview_will_set_content.append(_on_will_set_content)
     _wrap_render_page()
     _wrap_tree()

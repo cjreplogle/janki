@@ -179,6 +179,7 @@ _FOCUS_CSS = (
 _FOCUS_CSS += "#onigiri-reviewer-ui-host{display:none!important;}"
 _ONIGIRI_FOCUS_ON = (
     "var q=document.getElementById('qa');if(q&&q.dataset.onigiriBaseMarginTop!==undefined){"
+    "q.dataset.onigiriBaseMarginTop='0px';"
     "if(!q.__jkSP){var st=q.style,sp=st.setProperty.bind(st);q.__jkSP=sp;"
     "st.setProperty=function(p,v,pr){if(p==='margin-top'&&"
     "document.getElementById('__janki_focus'))return;return sp(p,v,pr);};}"
@@ -194,6 +195,9 @@ _ONIGIRI_FOCUS_ON += (
     "x.style.setProperty('display','none','important');});"
     "window.__jkHostObs.observe(h,{attributes:true,attributeFilter:['style']});}}")
 _ONIGIRI_FOCUS_OFF = (
+    # Onigiri keeps #qa's margin as read once, as a "base" under its header offset; read
+    # while centred it is the centring gap, and the card dropped by that much after
+    "var q=document.getElementById('qa');if(q)q.dataset.onigiriBaseMarginTop='0px';"
     "var h=document.getElementById('onigiri-reviewer-ui-host');"
     "if(h)h.style.setProperty('display','block','important');"
     "if(window.onigiriRefreshReviewerHeaderOffset){"
