@@ -155,7 +155,12 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.12</b> · 2026-10-19 · 7 releases</summary>
+<summary><b>2.12</b> · 2026-10-19 · 8 releases</summary>
+
+**2.12.7** · 2026-10-23
+
+**Onigiri compatibility**
+- Much lower CPU / battery use on the Kome theme while idle: its always-running decorations (the Sync dot's pulse, the streak flame's flicker) now hold still.
 
 **2.12.6** · 2026-10-23
 

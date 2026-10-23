@@ -313,6 +313,10 @@ _KOME_CSS = (
     "bottom:8px!important;height:auto!important;border-radius:14px!important;"
     "border:1px solid rgba(255,255,255,.08)!important;overflow:hidden auto;"
     "overscroll-behavior:contain;}"   # scrolling past its end doesn't move the list
+    # Kome's never-ending idle animations (the Sync "pending" dot's breathing, the streak
+    # flame's flicker) kept the page redrawing nonstop: with the frame cap lifted and
+    # software drawing that was ~1 CPU core while idle (heat / battery). Hold them still.
+    "body.ba-with-side .ba-side-dot,body.ba-with-side .ba-streak-fire{animation:none!important;}"
     # the card starts below the traffic lights: drop Onigiri's title-bar inset inside it
     "body.ba-with-side .ba-side{padding-top:18px!important;}"
     # Janki's page drop-in moves <html>; with a transform there Kome's fixed sidebar
