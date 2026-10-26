@@ -29,6 +29,8 @@ _ENTRIES = (
      "1.6V14M12 17h.01'/>"),
     ("janki.lectures", "Load Lectures", "janki_oni:lectures",
      "<path d='M4 19V6a2 2 0 0 1 2-2h12v15H6a2 2 0 0 0-2 2zM8 8h6M8 12h6'/>"),
+    ("janki.weak", "Lectures", "janki_oni:weak",
+     "<path d='M4 20V11M10 20V5M16 20v-6M2 20h20'/>"),
     ("janki.settings", "Janki Settings", "janki_oni:settings",
      "<path d='M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6 7.1 18.2l.9-5.5-4-3.9 5.5-.8z'/>"),
 )
@@ -47,6 +49,23 @@ def _run(message: str) -> None:
     elif message == "janki_oni:practice":
         from ..features import practice
         practice.open_practice_hub()
+    elif message == "janki_oni:weak":
+        # the weak-areas page lives inside the Calendar: open that first if needed
+        from ..features import calendar_view
+        if calendar_view._view and getattr(mw, "state", None) == "deckBrowser":
+            calendar_view.open_weak()
+        else:
+            # open the Calendar already ON the weak-areas page (its first draw is that
+            # page), instead of drawing the week and swapping it out 0.35 s later —
+            # that showed the calendar, then the swap
+            cv = calendar_view
+            cv._detail = cv.WEAK
+            cv._weak_redo_runs.clear()
+            cv._weak = cv._weak_cached(cv._weak_mode)
+            cv.open_calendar()
+            QTimer.singleShot(0, cv._redraw_bottom)
+            if cv._weak is None:
+                cv._weak_compute(cv._weak_mode)
     elif message == "janki_oni:lectures":
         from ..integrations import lectures
         lectures.run_today(interactive=True)
@@ -59,6 +78,8 @@ def _run(message: str) -> None:
         hidden_decks.set_hidden(int(message.rsplit(":", 1)[1]), True)
     elif message == "janki_oni:barsready":
         _fade_bars_in()
+    elif message.startswith("janki_oni:deckorder:"):
+        _kome_reorder(message.split(":", 2)[2])
     elif message == "janki_oni:reload":
         mw.deckBrowser.refresh()
     elif message == "janki_oni:back":
@@ -350,6 +371,66 @@ def _practice_keep():
     return keep
 
 
+def _order_rows(rows):
+    """Kome builds its list straight from Anki's tree, so Janki's saved deck order
+    (deck_order, parent id → child ids) is applied here: rebuild the tree from the flat
+    depth-tagged rows, sort each level, flatten again."""
+    from ..features import deck_order
+    order = deck_order._order()
+    if not order or not rows:
+        return rows
+    root = {"row": None, "kids": []}
+    stack = [root]
+    for r in rows:
+        d = int(r.get("depth", 0))
+        del stack[d + 1:]
+        node = {"row": r, "kids": []}
+        (stack[-1] if len(stack) > d else stack[-1])["kids"].append(node)
+        stack.append(node)
+
+    def walk(node, parent):
+        want = order.get(str(parent))
+        if want and len(node["kids"]) > 1:
+            rank = {int(x): i for i, x in enumerate(want)}
+            big = len(rank)
+            node["kids"] = [k for _i, k in sorted(
+                enumerate(node["kids"]),
+                key=lambda p: (rank.get(int(p[1]["row"].get("did", 0)), big), p[0]))]
+        out = []
+        for k in node["kids"]:
+            out.append(k["row"])
+            out.extend(walk(k, int(k["row"].get("did", 0))))
+        return out
+    try:
+        return walk(root, 0)
+    except Exception as e:
+        log("kome order: %s" % e)
+        return rows
+
+
+def _kome_reorder(arg: str) -> None:
+    """Edge drop in Kome's list: a sibling is re-placed (Janki's deck order), a deck
+    from elsewhere is moved beside the target first (Anki's reparent) — then redraw."""
+    from ..features import deck_order
+    try:
+        src, tgt, where = arg.split(",")
+        src, tgt, after = int(src), int(tgt), where == "after"
+    except Exception:
+        return
+    if deck_order._parent_of(src) != deck_order._parent_of(tgt):
+        deck_order._move_out(src, tgt, after)      # reparents, places, redraws
+        return
+
+    def done(fut):
+        try:
+            fut.result()
+            mw.update_undo_actions()
+        except Exception as e:
+            log("kome reorder: %s" % e)
+        deck_order._refresh()
+    mw.taskman.run_in_background(lambda: deck_order._place(src, tgt, after), done)
+
+
 def _filter_rows(rows):
     try:
         from ..features import practice
@@ -362,7 +443,7 @@ def _filter_rows(rows):
                     r["depth"] = int(r.get("depth", 0)) - base
             return rows
         drop = _dropped_decks()
-        return [r for r in rows if int(r.get("did", 0)) not in drop]
+        return _order_rows([r for r in rows if int(r.get("did", 0)) not in drop])
     except Exception as e:
         log("kome rows: %s" % e)
         return rows
@@ -402,13 +483,17 @@ def _kome_nav_js() -> str:
     sidebar action grid, built like Kome's own (same classes, masked icon)."""
     import json
     from ..features import calendar_view, practice
-    active = ("janki_oni:calendar" if calendar_view._view else
+    active = (("janki_oni:weak" if getattr(calendar_view, "_detail", None) == calendar_view.WEAK
+               else "janki_oni:calendar") if calendar_view._view else
               "janki_oni:practice" if getattr(practice, "_practice_view", False) else "")
     items = []
     import urllib.parse as _up
     # Only Calendar and Practice go in the grid: the settings live in Kome's bottom rows
     # (foot script below) and Load Lectures is in the Calendar.
-    entries = [e for e in _ENTRIES if e[0] in ("janki.calendar", "janki.practice")]
+    # Study Progress (the weak-areas page: Biweekly / End of block, formerly a button
+    # under the Calendar) takes Stats' cell; Stats leaves the sidebar
+    entries = [e for e in _ENTRIES if e[0] in ("janki.calendar", "janki.practice",
+                                                "janki.weak")]
     for _eid, label, cmd, body in entries:
         svg = (_SVG % body).replace("black", "#000")
         items.append({"label": label, "cmd": cmd,
@@ -416,6 +501,7 @@ def _kome_nav_js() -> str:
     return ("<script>(function(){var ITEMS=%s,ACTIVE=%s;"
             "function add(){var g=document.querySelector('.ba-side-actions-grid');"
             "if(!g)return false;if(g.querySelector('[data-jk]'))return true;"
+            "var ref=g.children[2]||null;"
             "ITEMS.forEach(function(it){var b=document.createElement('button');b.type='button';"
             "b.className='ba-side-item';b.setAttribute('data-jk','1');"
             "b.setAttribute('data-cmd',it.cmd);"
@@ -424,7 +510,18 @@ def _kome_nav_js() -> str:
             "b.querySelector('i').style.setProperty('--ba-side-icon-url','url(\"'+it.icon+'\")');"
             "b.querySelector('.ba-side-l-text').textContent=it.label;"
             "b.addEventListener('click',function(e){e.preventDefault();pycmd(it.cmd);});"
-            "g.appendChild(b);});"
+            # the row right under Decks / Add (the grid is two columns)
+            "if(it.cmd==='janki_oni:weak'){var st=g.querySelector('[data-cmd=\"stats\"]');"
+            "if(st){g.insertBefore(b,st);st.remove();return;}}"
+            "g.insertBefore(b,ref);});"
+            # the grid's order (two columns): Decks · Calendar / Practice · Lectures /
+            # Browse · Add / New deck · Import File — anything else after
+            "['decks','janki_oni:calendar','janki_oni:practice','janki_oni:weak','browse','add',"
+            "'create','import'].forEach(function(c){var x=g.querySelector('[data-cmd=\"'+c+'\"]');"
+            "if(x)g.appendChild(x);});"
+            "[].slice.call(g.children).forEach(function(x){var c=x.getAttribute('data-cmd');"
+            "if(['decks','janki_oni:calendar','janki_oni:practice','janki_oni:weak','browse','add',"
+            "'create','import'].indexOf(c)<0)g.appendChild(x);});"
             "if(ACTIVE){[].forEach.call(document.querySelectorAll('.ba-side-item[data-active]'),"
             "function(x){x.removeAttribute('data-active');});"
             "var a=g.querySelector('[data-cmd=\"'+ACTIVE+'\"]');if(a)a.setAttribute('data-active','true');}"
@@ -444,8 +541,326 @@ def _kome_nav_js() -> str:
             "pycmd('janki_oni:settings');});"
             "s.parentNode.insertBefore(j,s.nextSibling);return true;}"
             "if(!add()){var n=0,t=setInterval(function(){if(add()||++n>100)clearInterval(t);},50);}"
+            # the Calendar swaps pages in place (week ↔ Lectures list ↔ a class) without a
+            # redraw, so the active item follows what's on screen
+            "function sync(){var j=document.getElementById('jkc');if(!j)return;"
+            "var want=j.querySelector('.jkw-seg')?'janki_oni:weak':'janki_oni:calendar';"
+            "var a=document.querySelector('.ba-side-item[data-cmd=\"'+want+'\"]');"
+            "if(!a||a.getAttribute('data-active')==='true')return;"
+            "[].forEach.call(document.querySelectorAll('.ba-side-item[data-active]'),"
+            "function(x){x.removeAttribute('data-active');});a.setAttribute('data-active','true');}"
+            "if(window.MutationObserver)new MutationObserver(sync).observe(document.documentElement,"
+            "{childList:true,subtree:true});setTimeout(sync,0);"
             "if(!foot()){var m=0,u=setInterval(function(){if(foot()||++m>100)clearInterval(u);},50);}"
             "})();</script>") % (json.dumps(items), json.dumps(active))
+
+
+# Janki's deck-list hover + arrow-key / d-pad nav, rebuilt for Kome's own list (flat
+# .ad-list-row divs with data-depth; its chevrons fold rows in place, no redraw).
+# Hover: the name slides right over a soft pill — transform / shadow only, no layout
+# change. The pill is the name span's own background + spread shadow (its parents clip
+# pseudo-elements), so Kome's name button stops clipping (the span keeps the ellipsis).
+_KOME_HOVER_CSS = (
+    "<style>"
+    ".ad-list-row .ad-list-name{overflow:visible!important;}"
+    ".ad-list-row .ad-list-name-text{display:inline-block;max-width:100%;vertical-align:top;"
+    "border-radius:7px;background-color:transparent;box-shadow:0 0 0 0 transparent;"
+    "transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .3s ease,"
+    "box-shadow .35s cubic-bezier(.2,.8,.2,1);}"
+    ".ad-list-row:hover .ad-list-name,.ad-list-row.jk-kb-row .ad-list-name"
+    "{text-decoration:none!important;color:var(--rf-ink-strong)!important;}"
+    ".ad-list-row:hover .ad-list-name-text,.ad-list-row.jk-kb-row .ad-list-name-text{"
+    "transform:translateX(6px);"
+    "background-color:color-mix(in srgb,var(--rf-ink,#888) 9%,transparent);"
+    # one layer: background + a single spread ring that doesn't overlap it (a second,
+    # offset ring stacked the translucent tint into visible double edges)
+    "box-shadow:0 0 0 5px color-mix(in srgb,var(--rf-ink,#888) 9%,transparent);}"
+    ".ad-list-row.jk-kb-row .ad-list-gear{opacity:.85;}"
+    ".ad-list-chev{transition:transform .25s cubic-bezier(.2,.8,.2,1),opacity .25s ease;}"
+    "html.jk-kbnav .ad-list-row{pointer-events:none;}"
+    ".ba-side-item.jk-kb-side{background:var(--rf-row-hover)!important;}"
+    ".ad-list-name:focus-visible{outline:none!important;}"
+    "@media (prefers-reduced-motion:reduce){.ad-list-row .ad-list-name-text"
+    "{transition:none!important;transform:none!important;}}"
+    "</style>"
+)
+
+_KOME_KEYS_JS = r"""<script>(function(){
+ if(window.__jkKomeKeys)return; window.__jkKomeKeys=true;
+ function rows(){return [].filter.call(document.querySelectorAll('.ad-list--home .ad-list-row'),
+   function(r){return r.offsetParent!==null;});}
+ function dep(r){return parseInt(r.getAttribute('data-depth')||'0',10);}
+ function sfx(n){try{if(window.__jkPlay&&window.__jkPlay(n))return;pycmd('janki:sfx:'+n);}catch(x){}}
+ function sfxOut(n){try{pycmd('janki:sfx:'+n);}catch(x){}}
+ var idle=null, hid=null, sync=false;
+ function cur(){return document.querySelector('.ad-list-row.jk-kb-row');}
+ function sel(r,keep){if(!keep)hid=null;var o=cur();if(o)o.classList.remove('jk-kb-row');
+   document.documentElement.classList.toggle('jk-kbnav',!!r);if(!r)return;
+   r.classList.add('jk-kb-row');var b=r.querySelector('.ad-list-name');
+   if(b&&document.activeElement!==b){sync=true;try{b.focus({preventScroll:true});}catch(x){}sync=false;}
+   try{sessionStorage.setItem('jkKomeSel',r.getAttribute('data-did'));}catch(x){}
+   var q=r.getBoundingClientRect();
+   if(q.top<40||q.bottom>innerHeight-40)r.scrollIntoView({block:'nearest'});}
+ // the highlight fades after 3 s idle; the next key brings it back where it was
+ function poke(){clearTimeout(idle);idle=setTimeout(function(){var c=cur();
+   if(c){hid=c.getAttribute('data-did');sel(null,true);}},3000);}
+ function byDid(d){return d&&document.querySelector('.ad-list--home .ad-list-row[data-did="'+d+'"]');}
+ function start(){var rs=rows();try{var r=byDid(sessionStorage.getItem('jkKomeSel'));
+   if(r&&r.offsetParent)return r;}catch(x){}return rs[0]||null;}
+ // Sidebar mode: the arrows move between Kome's sidebar rows by position (its action
+ // grid is two columns), Enter opens one, → past the right edge goes back to the decks.
+ function sideItems(){return [].filter.call(document.querySelectorAll('.ba-side .ba-side-item'),
+   function(b){return b.offsetParent!==null;});}
+ function curSide(){return document.querySelector('.ba-side-item.jk-kb-side');}
+ // Which part the arrows drive: 'side' after a click in (or ← into) the sidebar, until
+ // a click in the page or → back out. Kept across the page switch a sidebar item makes.
+ function zone(z){try{if(z)sessionStorage.setItem('jkKomeZone',z);
+   return sessionStorage.getItem('jkKomeZone')||'main';}catch(x){return z||'main';}}
+ document.addEventListener('mousedown',function(e){
+   zone(e.target.closest&&e.target.closest('.ba-side')?'side':'main');},true);
+ function side(b){var o=curSide();if(o)o.classList.remove('jk-kb-side');
+   document.documentElement.classList.toggle('jk-kbside',!!b);if(!b)return;
+   b.classList.add('jk-kb-side');b.scrollIntoView({block:'nearest'});}
+ function near(from,k){var a=from.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2,
+   best=null,bs=1e9;
+   sideItems().forEach(function(b){if(b===from)return;var r=b.getBoundingClientRect(),
+     dx=r.left+r.width/2-ax,dy=r.top+r.height/2-ay,p,o;
+     if(k==='ArrowDown'){p=dy;o=dx;}else if(k==='ArrowUp'){p=-dy;o=dx;}
+     else if(k==='ArrowRight'){p=dx;o=dy;}else{p=-dx;o=dy;}
+     if(p<4)return;var sc=p+Math.abs(o)*3;if(sc<bs){bs=sc;best=b;}});
+   return best;}
+ // other pages' keys hand over to the sidebar with this (the Lectures list's ←)
+ window.jkKomeSide=function(){var s3=document.querySelector('.ba-side-item[data-active="true"]')||sideItems()[0];
+   if(!s3)return false;sfx('move');sel(null);clearTimeout(idle);zone('side');side(s3);return true;};
+ // Contanki / Tab move focus between the name buttons: follow it with the pill
+ // (not focus a mouse click gives: that switched to keyboard mode mid-click, which
+ // turns off pointer events on the rows, so the click on a chevron never landed)
+ var downAt=0;
+ document.addEventListener('mousedown',function(){downAt=Date.now();},true);
+ document.addEventListener('focusin',function(e){if(sync||Date.now()-downAt<500)return;
+   if(!(e.target.closest&&e.target.closest('.ad-list-name')))return;
+   var r=e.target.closest('.ad-list--home .ad-list-row');
+   if(r&&r!==cur()){sel(r);poke();}},true);
+ // window capture: runs before the Calendar / Practice page's own arrow keys
+ window.addEventListener('keydown',function(e){
+   if(e.metaKey||e.ctrlKey||e.altKey)return;
+   var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
+   var k=e.key;if(!/^(Arrow(Up|Down|Left|Right)|Enter| )$/.test(k))return;
+   var sc=curSide();
+   if(!sc&&zone()==='side'){var s1=document.querySelector('.ba-side-item[data-active="true"]')||sideItems()[0];
+     if(s1){e.preventDefault();e.stopImmediatePropagation();sfx('move');side(s1);return;}}
+   if(sc){e.preventDefault();e.stopImmediatePropagation();
+     if(k==='Enter'||k===' '){sfxOut('select');side(null);sc.click();return;}
+     var nx=near(sc,k);
+     if(nx){sfx('move');side(nx);return;}
+     // nothing further right: back to the deck it came from
+     if(k==='ArrowRight'){var r=rows().length?start():null;zone('main');side(null);
+       if(r){sfx('move');sel(r);poke();}
+       // the Calendar: its ↓ picks the first class, so the highlight lands there
+       else if(document.getElementById('jkc'))document.dispatchEvent(new KeyboardEvent('keydown',
+         {key:'ArrowDown',bubbles:true,cancelable:true}));}
+     return;}
+   var rs=rows();
+   // Calendar / Practice page (no deck rows): ← with nothing selected there goes
+   // into the sidebar; everything else stays the page's own
+   // (a class page is open: its ← goes back to the week, not here)
+   if(!rs.length){var cs=document.querySelectorAll('#jkc .jkc-grid:not(.jkc-detail) .jkc-col'),
+       dy=document.querySelector('#jkc .jkc-col.jk-kbday');
+     if(k==='ArrowLeft'&&document.getElementById('jkc')&&!document.querySelector('#jkc .jkc-detail')
+       &&!document.querySelector('#jkc .jk-kbf')
+       &&(!dy||dy===cs[0])){   // nothing selected, or already on the leftmost day
+       var o=document.querySelector('#jkc .jkc-ev.jk-kb');if(o)o.classList.remove('jk-kb');
+       if(dy)dy.classList.remove('jk-kbday');
+       var s2=document.querySelector('.ba-side-item[data-active="true"]')||sideItems()[0];
+       if(s2){e.preventDefault();e.stopImmediatePropagation();sfx('move');zone('side');side(s2);}}
+     return;}
+   var c=cur();
+   if(!c&&hid){var h=byDid(hid);if(h&&h.offsetParent){
+     if(k==='Enter'||k===' '){e.preventDefault();sel(h);poke();return;}sel(h);c=h;}}
+   var i=c?rs.indexOf(c):-1;poke();
+   if(!c){e.preventDefault();sel(start());sfx('move');return;}
+   if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();
+     var n=k==='ArrowDown'?Math.min(rs.length-1,i+1):Math.max(0,i-1);
+     if(rs[n]!==c)sfx('move');sel(rs[n]);return;}
+   var ch=c.querySelector('button.ad-list-chev'),
+       shut=ch&&ch.classList.contains('ad-list-chev--collapsed');
+   if(k==='ArrowRight'){e.preventDefault();
+     if(ch&&shut){sfx('unfold');ch.click();}
+     else if(i+1<rs.length&&dep(rs[i+1])>dep(c)){sfx('move');sel(rs[i+1]);}return;}
+   if(k==='ArrowLeft'){e.preventDefault();
+     if(ch&&!shut){sfx('fold');ch.click();return;}
+     for(var j=i-1;j>=0;j--)if(dep(rs[j])<dep(c)){sfx('move');sel(rs[j]);return;}
+     // a top-level deck: ← carries on into Kome's sidebar (Decks / Stats / Calendar…)
+     var s0=document.querySelector('.ba-side-item[data-active="true"]')||sideItems()[0];
+     if(s0){sfx('move');sel(null);clearTimeout(idle);zone('side');side(s0);}return;}
+   e.preventDefault();sfxOut('select');
+   var b=c.querySelector('.ad-list-name');if(b)b.click();
+ },true);
+ // real mouse movement hands control back to the pointer (ignores the synthetic
+ // move a still cursor fires)
+ var last=null;
+ document.addEventListener('mousemove',function(e){var p=[e.screenX,e.screenY];
+   if(!last){last=p;return;}var m=Math.abs(p[0]-last[0])+Math.abs(p[1]-last[1]);last=p;
+   if(m>3&&cur()){clearTimeout(idle);hid=null;sel(null);}
+   if(m>3&&curSide())side(null);},true);
+})();</script>"""
+
+
+# Kome's deck list in a tight window: the Progress column (fixed 112 px) shrinks with
+# the list instead, and (only when narrow) subdecks drop their bar — the name runs across.
+_KOME_ROOMY_CSS = (
+    "<style>"
+    ".ad-list.ad-list--home{--ad-cols:24px minmax(0,1fr) minmax(56px,22%) 38px 38px 38px 28px;"
+    "--ad-row-cols:minmax(0,1fr) minmax(56px,22%) 38px 38px 38px 28px;}"
+    # subdecks keep their bar unless the list is narrow (then the name takes that room)
+    ".ad-list.ad-list--home{container-type:inline-size;}"
+    "@container (max-width:620px){"
+    ".ad-list--home .ad-list-row[data-parent-did] .ad-list-tree{grid-column:1 / span 2;}"
+    ".ad-list--home .ad-list-row[data-parent-did] .ad-list-progress{display:none!important;}}"
+    "</style>"
+)
+
+
+# Dragging the window edge: with the glass every frame is drawn on the CPU, and blurs,
+# shadows, filters and running transitions are what make each frame slow (the Review
+# activity / Weekly reviews cards worst). They pause while the size is changing and
+# come back ~200 ms after it stops. The sidebar still scrolls, just without a bar.
+_KOME_RESIZE_CSS = (
+    "<style>"
+    "html.jk-resizing *,html.jk-resizing *::before,html.jk-resizing *::after{"
+    "transition:none!important;animation-play-state:paused!important;"
+    "backdrop-filter:none!important;-webkit-backdrop-filter:none!important;"
+    "box-shadow:none!important;text-shadow:none!important;filter:none!important;}"
+    ".ba-side,.ba-side *{scrollbar-width:none!important;}"
+    # the Calendar's "Updating…" chip lingers on the reused page after it closes
+    "html:not(:has(#jkc)) #jkc-busy{display:none!important;}"
+    ".ba-side::-webkit-scrollbar,.ba-side *::-webkit-scrollbar{display:none!important;"
+    "width:0!important;height:0!important;}"
+    "</style>"
+    "<script>(function(){if(window.__jkResz)return;window.__jkResz=1;var t=null,"
+    "h=document.documentElement;window.addEventListener('resize',function(){"
+    "h.classList.add('jk-resizing');clearTimeout(t);"
+    "t=setTimeout(function(){h.classList.remove('jk-resizing');},200);},{passive:true});"
+    "})();</script>"
+)
+
+
+# Drag to reorder on Kome's list, with the mouse (like Janki's own list): HTML5 drag
+# and drop goes through a native Qt drag inside Anki's web view, which didn't start
+# here, so Kome's draggable rows are switched off and the drag is tracked by hand. Hold a
+# deck ~0.2 s and move: it follows the pointer. Over the top / bottom quarter of a row
+# a line shows "before / after this deck" (Janki's deck order); over the middle the
+# row is highlighted and the drop puts it inside (Janki's nest: Kome's own
+# `ba:deck:reparent` message has no handler in Onigiri).
+_KOME_DRAG = (
+    "<style>.ad-list--home .ad-list-row{position:relative;}"
+    ".ad-list-row.jk-ins-before::before,.ad-list-row.jk-ins-after::after{content:'';"
+    "position:absolute;left:var(--ad-indent,0px);right:6px;height:2px;border-radius:1px;"
+    "background:var(--rf-accent,#6ea0ff);pointer-events:none;}"
+    ".ad-list-row.jk-ins-before::before{top:-1px;}.ad-list-row.jk-ins-after::after{bottom:-1px;}"
+    ".ad-list-row.jk-drag-src{pointer-events:none;z-index:5;opacity:.75;"
+    "transition:none!important;}"
+    "html.jk-dragging,html.jk-dragging *{cursor:grabbing!important;user-select:none!important;}"
+    "</style>"
+    r"""<script>(function(){if(window.__jkKomeDrag)return;window.__jkKomeDrag=1;
+ var src=null,sx=0,sy=0,t0=0,on=false,blocked={},spot=null,eat=false;
+ function rows(){var l=document.querySelector('.ad-list--home');
+   return l?[].slice.call(l.querySelectorAll('.ad-list-row')):[];}
+ function dep(r){return parseInt(r.getAttribute('data-depth')||'0',10);}
+ function mark(){rows().forEach(function(r){r.classList.remove('jk-ins-before','jk-ins-after','ad-list-row--drop');});}
+ function stop(){mark();if(src){src.classList.remove('jk-drag-src');src.style.transform='';}
+   document.documentElement.classList.remove('jk-dragging');src=null;on=false;spot=null;}
+ document.addEventListener('mousedown',function(e){if(e.button!==0)return;
+   var r=e.target.closest&&e.target.closest('.ad-list--home .ad-list-row');if(!r)return;
+   if(e.target.closest('.ad-list-chev,.ad-list-deck-icon,.ad-list-gear,input'))return;
+   r.setAttribute('draggable','false');          // no native drag: ours instead
+   src=r;sx=e.clientX;sy=e.clientY;t0=Date.now();on=false;},true);
+ document.addEventListener('mousemove',function(e){if(!src)return;
+   var dx=e.clientX-sx,dy=e.clientY-sy;
+   if(!on){if(Date.now()-t0<200||Math.abs(dx)+Math.abs(dy)<10)return;
+     on=true;blocked={};var rs=rows(),i=rs.indexOf(src),d=dep(src);
+     blocked[src.getAttribute('data-did')]=1;
+     for(var j=i+1;j<rs.length&&dep(rs[j])>d;j++)blocked[rs[j].getAttribute('data-did')]=1;
+     src.classList.add('jk-drag-src');document.documentElement.classList.add('jk-dragging');}
+   e.preventDefault();src.style.transform='translateY('+dy+'px)';mark();spot=null;
+   var el=document.elementFromPoint(e.clientX,e.clientY),
+       r=el&&el.closest&&el.closest('.ad-list--home .ad-list-row');
+   if(!r||blocked[r.getAttribute('data-did')])return;
+   var b=r.getBoundingClientRect(),f=(e.clientY-b.top)/b.height,
+       w=f<=.28?'before':f>=.72?'after':'in';
+   r.classList.add(w==='in'?'ad-list-row--drop':'jk-ins-'+w);
+   spot={did:r.getAttribute('data-did'),w:w};},true);
+ document.addEventListener('mouseup',function(){if(!src)return;
+   var s=src.getAttribute('data-did'),p=spot,was=on;stop();if(!was)return;
+   eat=true;setTimeout(function(){eat=false;},0);   // the click a drag's release makes
+   if(!p)return;
+   try{pycmd(p.w==='in'?'janki:decknest:'+s+','+p.did
+            :'janki_oni:deckorder:'+s+','+p.did+','+p.w);}catch(x){}},true);
+ document.addEventListener('click',function(e){if(eat){e.preventDefault();e.stopImmediatePropagation();eat=false;}},true);
+ window.addEventListener('blur',stop);
+})();</script>"""
+)
+
+
+# Deck preview (Kome's overview) by keys / remote: the arrows walk its buttons by
+# position (Study Now, Options, Custom Study…), Enter / A presses the selected one, and
+# with nothing selected Enter still means Study Now. Runs before Janki's overview keys
+# (window capture), whose ↑ would otherwise jump to the hidden toolbar.
+_KOME_OV_NAV = (
+    "<style>.jk-ov-sel{outline:2px solid rgba(176,203,246,.85)!important;"
+    "outline-offset:3px!important;border-radius:8px;}</style>"
+    r"""<script>(function(){if(window.__jkOvNav)return;window.__jkOvNav=1;
+ // One A press on the deck list is TWO Enters (Janki's pad reader opens the deck, and
+ // Contanki's "Enter" action presses Enter again): the second reached this page as it
+ // loaded and started studying. Enter / Space in the first 0.6 s are the opening press.
+ var T0=Date.now();
+ window.addEventListener('keydown',function(e){if(document.getElementById('study')&&(e.key==='Enter'||e.key===' ')&&Date.now()-T0<600){
+   e.preventDefault();e.stopImmediatePropagation();}},true);
+ function items(){return [].filter.call(document.querySelectorAll(
+   'button,a[href],[role=button],[onclick]'),function(e){
+   if(e.closest('.ba-side'))return false;var r=e.getBoundingClientRect();
+   return r.width>4&&r.height>4&&getComputedStyle(e).visibility!=='hidden';});}
+ function cur(){return document.querySelector('.jk-ov-sel');}
+ function pick(e){var o=cur();if(o)o.classList.remove('jk-ov-sel');if(!e)return;
+   e.classList.add('jk-ov-sel');try{if(window.__jkPlay&&__jkPlay('move'))return;pycmd('janki:sfx:move');}catch(x){}}
+ function near(f,k){var a=f.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2,b=null,bs=1e9;
+   items().forEach(function(e){if(e===f||e.contains(f)||f.contains(e))return;
+     var r=e.getBoundingClientRect(),dx=r.left+r.width/2-ax,dy=r.top+r.height/2-ay,p,o;
+     if(k==='ArrowDown'){p=dy;o=dx;}else if(k==='ArrowUp'){p=-dy;o=dx;}
+     else if(k==='ArrowRight'){p=dx;o=dy;}else{p=-dx;o=dy;}
+     if(p<4)return;var sc=p+Math.abs(o)*3;if(sc<bs){bs=sc;b=e;}});return b;}
+ window.addEventListener('keydown',function(e){
+   // the page is reused between screens: only while the preview (its Study button) is up
+   if(!document.getElementById('study'))return;
+   if(e.metaKey||e.ctrlKey||e.altKey)return;var k=e.key,c=cur();
+   if(/^Arrow/.test(k)){e.preventDefault();e.stopImmediatePropagation();
+     if(!c){pick(document.getElementById('study')||items()[0]);return;}
+     var n=near(c,k);if(n)pick(n);return;}
+   if((k==='Enter'||k===' ')&&c&&c.id!=='study'){e.preventDefault();e.stopImmediatePropagation();
+     pick(null);c.click();}},true);
+ document.addEventListener('mousemove',function(e){if(Math.abs(e.movementX)+Math.abs(e.movementY)>3)pick(null);},true);
+})();</script>"""
+)
+
+
+def _kome_deck_nav() -> str:
+    """Hover + keyboard/controller nav for Kome's deck list (sounds and the d-pad
+    poller are the same ones Janki's own deck list uses)."""
+    out = _KOME_HOVER_CSS + _KOME_ROOMY_CSS + _KOME_RESIZE_CSS + _KOME_KEYS_JS
+    from ..features import practice
+    if not getattr(practice, "_practice_view", False):   # banks keep their own order
+        out += _KOME_DRAG
+    try:
+        from ..user import css as _css
+        out += "<script>" + _css._PAD_NAV_JS + "</script>"
+    except Exception as e:
+        log("kome pad nav: %s" % e)
+    try:
+        from ..features import sfx as _sfx
+        out += _sfx.web_player()
+    except Exception:
+        pass
+    return out
 
 
 def _wrap_kome_fades() -> None:
@@ -491,7 +906,9 @@ _KOME_VIEW_CSS = (
     ".jk-kome-cal #jkc{width:100%!important;max-width:100%!important;"
     "min-width:0!important;height:calc(100vh - 32px)!important;}"
     # day columns share the full width (they were sized for the whole window)
-    ".jk-kome-cal .jkc-grid{display:flex!important;gap:6px;}"
+    # (border-box: the grid's right padding, which mirrors the hour column to centre
+    # the days, used to sit OUTSIDE its 100% width, so the clip cut the last day)
+    ".jk-kome-cal .jkc-grid{display:flex!important;gap:6px;box-sizing:border-box!important;}"
     ".jk-kome-cal .jkc-grid>.jkc-hours{flex:0 0 52px;}"
     ".jk-kome-cal .jkc-grid>.jkc-col{flex:1 1 0;min-width:0;width:auto!important;}"
     # no page scroll in the Calendar (it scrolls itself); room above/below
@@ -520,6 +937,38 @@ _KOME_VIEW_CSS = (
     "border:1px solid var(--rf-line-2)!important;}"
     ".jk-kome-cal #jkc .jkd-sec:hover{background:var(--rf-row-hover)!important;}"
     ".jk-kome-cal #jkc .jkc-bar button{font-family:var(--rf-sans)!important;}"
+    # narrow: the bar ran off the right edge (the date, ›, Today and the wizard were cut
+    # off, and the keyboard ring on › was clipped). Same two-row layout as the default
+    # theme's calendar: views left, Today right, ‹ date › centred below
+    ".jk-kome-cal{container-type:inline-size;}"
+    "@container (max-width:760px){.jk-kome-cal .jkc-bar{grid-template-columns:1fr auto!important;"
+    "grid-template-areas:'l r' 'c c';row-gap:8px!important;}"
+    ".jk-kome-cal .jkc-l{grid-area:l;}.jk-kome-cal .jkc-r{grid-area:r;}"
+    ".jk-kome-cal .jkc-c{grid-area:c;justify-self:center;}"
+    # …and the days get the width: no empty strip mirroring the hour column (it only
+    # centred them), slimmer hour labels, smaller tighter blocks whose long words break
+    # instead of being cut mid-letter, and no tag / subtitle line (the title and time
+    # are what fit; the class page has the rest)
+    # (Kome's day grid is a flex row: see the rules above)
+    # (its clip trims 55 px off the right, where the padding was: with no padding it cut
+    # the last day — Fri — instead)
+    ".jk-kome-cal #jkc .jkc-grid:not(.jkc-detail){gap:3px!important;padding-right:0!important;"
+    "clip-path:inset(-40px 0 -40px -40px)!important;}"
+    ".jk-kome-cal #jkc .jkc-grid:not(.jkc-detail)>.jkc-hours{flex:0 0 38px!important;}"
+    ".jk-kome-cal #jkc .jkc-hr span{font-size:.6em!important;}"
+    ".jk-kome-cal #jkc .jkc-ev:not(.jkc-ad){font-size:.68em!important;line-height:1.2!important;"
+    "padding:2px 4px!important;left:1px!important;right:1px!important;"
+    "overflow-wrap:break-word;word-break:normal;-webkit-hyphens:auto;hyphens:auto;}"
+    ".jk-kome-cal #jkc .jkc-ev .jkc-t{padding-right:10px!important;}"
+    ".jk-kome-cal #jkc .jkc-ev .jkc-m{transform:scale(.75);top:2px;right:1px;}"
+    ".jk-kome-cal #jkc .jkc-ev .jkc-sub,.jk-kome-cal #jkc .jkc-ev .jkc-tc{display:none!important;}"
+    # dress code on ONE line (… when it doesn't fit; hover shows it): the day height is
+    # worked out for one line per all-day row, so a chip wrapping to 2–3 lines in a
+    # narrow Week column made that view taller than the window
+    ".jk-kome-cal #jkc .jkc-dress{font-size:.66em!important;padding:1px 4px!important;"
+    "white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;"
+    "height:18px!important;line-height:16px!important;}"
+    ".jk-kome-cal #jkc .jkc-dh{font-size:.78em!important;}}"
     ".jk-kome-cal #jkc .jkd-sw.on .jkd-knob{background:var(--rf-accent)!important;}"
     ".jk-kome-cal #jkc .jkd-study:hover{background:var(--rf-accent)!important;}"
     ".jk-kome-cal #jkc .jkd-study.jkd-prac:hover{background:color-mix(in srgb,var(--rf-accent) "
@@ -528,10 +977,18 @@ _KOME_VIEW_CSS = (
     # week grid's column-flex rule above would otherwise pin it to the top)
     "body.jk-cal .jk-kome-cal #jkc:has(.jkc-detail){display:flex!important;"
     "flex-direction:column!important;}"
+    # 'safe center' + its own scroll: a page taller than the area (the weak-areas list)
+    # was centred past both edges — its top cut off, and the page can't scroll there
     "body.jk-cal .jk-kome-cal #jkc .jkc-grid.jkc-detail{display:flex!important;"
-    "flex-direction:column!important;justify-content:center!important;"
+    "flex-direction:column!important;justify-content:safe center!important;"
     "align-items:stretch!important;flex:1 1 auto!important;min-height:0!important;"
-    "margin-top:0!important;padding-top:0!important;gap:0!important;}"
+    "margin-top:0!important;padding-top:0!important;gap:0!important;"
+    "overflow-y:auto!important;overscroll-behavior:contain;}"
+    # the Lectures list starts at the top (a short list was centred mid-screen)
+    "body.jk-cal .jk-kome-cal #jkc .jkc-grid.jkc-detail.jkw{justify-content:flex-start!important;"
+    "padding-top:0!important;overflow:hidden!important;}"   # only its list scrolls
+    "body.jk-cal .jk-kome-cal #jkc .jkc-grid.jkc-detail.jkw>.jkd{margin-top:0!important;"
+    "padding-top:0!important;}"
     # the "‹ Calendar" pill floats over the class page (in the flow it pushed the page's
     # centre down by its height), and a bit more room under the class title
     "body.jk-cal .jk-kome-cal{position:relative!important;}"
@@ -543,13 +1000,23 @@ _KOME_VIEW_CSS = (
     "body.jk-prac .ba-home .ba-practice{display:none!important;}"
     "body.jk-prac .ad-list-header-cell--learn,body.jk-prac .ad-list-header-cell--due,"
     "body.jk-prac .ad-list-learn,body.jk-prac .ad-list-due{display:none!important;}"
-    "body.jk-prac .ad-list-header{grid-template-columns:24px minmax(0,1fr) 112px 114px 28px"
+    # Progress is a share of the width (not a fixed 112 px) and Questions only as wide
+    # as its label, so a narrow list gives the room to the bank names. A % track
+    # resolves the same in the header and the rows, so the columns stay lined up.
+    "body.jk-prac .ad-list-header{grid-template-columns:24px minmax(0,1fr) minmax(64px,26%) 44px 28px"
     "!important;}"
-    "body.jk-prac .ad-list-row{grid-template-columns:minmax(0,1fr) 112px 114px 28px!important;}"
+    "body.jk-prac .ad-list-row{grid-template-columns:minmax(0,1fr) minmax(64px,26%) 44px 28px!important;}"
+    # Kome keeps 38 px for a "NN%" label after every bar; with no percent to show the
+    # bar now runs the full column
+    "body.jk-prac .ad-list-progress-pct:empty{display:none!important;}"
     "body.jk-prac .ad-list-header-cell:not([class*='--']),"
     "body.jk-prac .ad-list-header-cell--new{font-size:0!important;}"
     "body.jk-prac .ad-list-header-cell:not([class*='--'])::before{content:'Bank';font-size:10px;}"
     "body.jk-prac .ad-list-header-cell--new::before{content:'Questions';font-size:10px;}"
+    # the column only fits a 3-digit count: its label hangs left, over the Progress
+    # header's empty right end, instead of widening the column
+    "body.jk-prac .ad-list-header-cell--new{overflow:visible!important;white-space:nowrap;"
+    "display:flex!important;justify-content:flex-end;}"
     "</style>")
 
 
@@ -767,9 +1234,9 @@ _ONI_VIEW_CSS = (
     "body.jk-cal .jk-oni-cal #jkc:has(.jkc-detail){display:flex!important;"
     "flex-direction:column!important;}"
     "body.jk-cal .jk-oni-cal #jkc .jkc-grid.jkc-detail{display:flex!important;"
-    "flex-direction:column!important;justify-content:center!important;"
+    "flex-direction:column!important;justify-content:safe center!important;"
     "flex:1 1 auto!important;min-height:0!important;margin-top:0!important;"
-    "padding-top:0!important;}"
+    "padding-top:0!important;overflow-y:auto!important;overscroll-behavior:contain;}"
     ".jk-oni-cal .jkc-r #jk-oni-calbtn{align-self:center;margin-left:2px;}"
     "body.jk-cal #deck-list-header .deck-header-actions>:not(#jk-oni-calbtn){visibility:hidden;}"
     "#jk-oni-calbtn[data-on]{color:var(--accent-color)!important;opacity:1!important;}"
@@ -1153,11 +1620,15 @@ _CAL_BACK_JS = (
     "transition:background-color .15s ease,transform .1s ease;}"
     "#jk-cal-back:hover{background:var(--rf-row-hover,rgba(62,62,68,.96));}"
     "#jk-cal-back:active{transform:scale(.97);}"
+    # not on the weak-areas page (its Biweekly / End of block tabs): the sidebar's Study
+    # Progress opens it, and Calendar is right there in the sidebar
+    "html:has(#jkc .jkw-seg) #jk-cal-back{display:none!important;}"
 "</style><script>(function(){function add(){if(document.getElementById('jk-cal-back'))return true;"
     "var h=document.querySelector('.jk-kome-cal')||document.querySelector('.jk-oni-cal')||document.querySelector('.ba-home')||document.body;"
     "if(!h)return false;"
-    "var b=document.createElement('div');b.id='jk-cal-back';b.innerHTML='&#8249; Calendar';"
-    "b.onclick=function(){pycmd('janki_oni:calendar');};"
+    # "Back", to wherever the page was opened from (the Lectures list or the Calendar)
+    "var b=document.createElement('div');b.id='jk-cal-back';b.innerHTML='&#8249; Back';"
+    "b.onclick=function(){pycmd('janki:cal:det:back');};"
     "var w=document.createElement('div');w.style.textAlign='left';w.appendChild(b);"
     "h.insertBefore(w,h.firstChild);return true;}"
     "if(!add())document.addEventListener('DOMContentLoaded',add);})();</script>")
@@ -1286,6 +1757,9 @@ def _on_will_set_content(web_content, context):
                 # first card of a session fades in (Janki's own first-card fade keys off
                 # Anki revealing #qa, which Onigiri's script has already done)
                 web_content.body += _FIRST_CARD_FADE_JS
+                # remote: d-pad to the top pills / answer bar (integrations/review_nav)
+                from . import review_nav
+                web_content.body += review_nav.PAGE_JS
                 # Reworded / Practice line up with the answer bar's edges below them
                 web_content.head += ("<style>#jk-rw-bar{left:18px!important;}"
                                      "#jk-pq-bar{right:18px!important;}</style>")
@@ -1367,6 +1841,16 @@ def _on_will_set_content(web_content, context):
         from aqt.overview import Overview
         if isinstance(context, Overview):           # the deck preview fades in quickly
             web_content.head += _OVERVIEW_FADE
+            # Enter / Space / the controller's face buttons → Study Now. Janki adds these
+            # with its own overview styling, which stands down on screens Onigiri draws,
+            # so the preview never started studying from the keyboard or the pad.
+            # (Kome's preview keeps Anki's #study button, which the handler clicks.)
+            try:
+                from ..user import css as _css
+                web_content.head += (_KOME_OV_NAV + "<script>" + _css._OVERVIEW_KEYS_JS
+                                     + "</script><script>" + _css._PAD_NAV_JS + "</script>")
+            except Exception as e:
+                log("onigiri overview keys: %s" % e)
             if os.path.exists(os.path.expanduser("~/.janki_oni_trace")):
                 web_content.head += (
                     "<script>(function(){var t0=performance.now(),last=t0,F=window.__jkOvFr=[];"
@@ -1390,7 +1874,7 @@ def _on_will_set_content(web_content, context):
         if isinstance(context, DeckBrowser) and compat.janki_view() \
                 and compat.onigiri_theme() == "kome":
             web_content.body += (_HIDE_MENU_JS + _KOME_CSS + _kome_view_css() + _kome_nav_js()
-                                 + _KOME_SLIDE_JS)
+                                 + _KOME_SLIDE_JS + _kome_deck_nav())
         elif isinstance(context, DeckBrowser) and compat.onigiri_on() \
                 and compat.onigiri_theme() != "kome":
             web_content.body += (_susp_decks_js() + _HIDE_MENU_JS + _hidden_rows_css()
@@ -1400,7 +1884,7 @@ def _on_will_set_content(web_content, context):
                                  + _KOME_CSS)
             if compat.onigiri_theme() == "kome":
                 web_content.body += (_kome_view_css() + _kome_nav_js() + _KOME_SLIDE_JS
-                                     + _KOME_MENU_JS)
+                                     + _KOME_MENU_JS + _kome_deck_nav())
     except Exception as e:
         log("onigiri back button: %s" % e)
 
@@ -1618,6 +2102,16 @@ def _wrap_move_to_state():
 
 
 def _on_js_message(handled, message, context):
+    # Enter / Study Now on the deck preview: Janki's overview keys send "jkstudy", which
+    # only Janki's wrapper of Anki's overview link handler understands — Onigiri's
+    # preview passes its messages elsewhere, so Enter did nothing. Start studying here.
+    if message == "jkstudy" and getattr(mw, "state", None) == "overview":
+        try:
+            from aqt.overview import Overview
+            Overview._linkHandler(mw.overview, "jkstudy")
+        except Exception as e:
+            log("onigiri jkstudy: %s" % e)
+        return (True, None)
     if isinstance(message, str) and message.startswith("janki_oni:barrect:"):
         global _bar_rect
         try:
@@ -1714,6 +2208,13 @@ def _register() -> None:
         return
     _seed_visible()
     _pair_settings()
+    # the sidebar's Lectures can be the first thing opened (before the Calendar, whose
+    # opening prewarms it): work the Biweekly list out in the background after startup
+    try:
+        from ..features import calendar_view
+        QTimer.singleShot(8000, calendar_view.prewarm_weak)     # (this IS profile open)
+    except Exception as e:
+        log("lectures prewarm: %s" % e)
 
 
 def _wrap_stats() -> None:
@@ -2322,6 +2823,16 @@ def _apply_card_centring(*_a) -> None:
         import json
         from ..features import focus as _focus
         level = _focus_level()
+        # Practice (MCQ) cards stay top-aligned at the "Focus" level, where the top bar
+        # and the answer bar still show: centred, the question floated mid-screen.
+        # Janki's Focus Mode and Onigiri's Flow / Zen (bars hidden) still centre them.
+        if level == 1 and not getattr(_focus, "_focus_hidden", False):
+            try:
+                c = mw.reviewer.card
+                if c is not None and c.note_type()["name"] == "Janki Practice":
+                    level = 0
+            except Exception:
+                pass
         if level >= 1:
             bw = getattr(mw, "bottomWeb", None)
             bar = bw.height() if bw is not None and bw.isVisible() else 0
@@ -2347,8 +2858,11 @@ def _apply_card_centring(*_a) -> None:
                   "return sp(p,v,pr);};}q.__jkSP('margin-top','auto','important');}"
                   "})()" % (int(bar), json.dumps(css)))
         else:
+            # only when there's centring to undo: re-running Onigiri's header offset on
+            # every side (Practice cards at the Focus level) moved #qa mid-flip, so the
+            # card dipped and glided back up on Show Answer
             js = ("(function(){var s=document.getElementById('__janki_focus');"
-                  "if(s)s.remove();try{%s}catch(e){}})()" % _focus._ONIGIRI_FOCUS_OFF)
+                  "if(!s)return;s.remove();window.__jkFitPad=0;try{%s}catch(e){}})()" % _focus._ONIGIRI_FOCUS_OFF)
         mw.web.eval(js)
     except Exception as e:
         log("onigiri card centring: %s" % e)

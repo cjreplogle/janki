@@ -5254,9 +5254,12 @@ _BACK_JS = (
     "pk=parseInt(sessionStorage.getItem('jp_pick'),10);}catch(e){}"
     # Shown without a pick (Space / Show Answer): nothing folds; just hold the stem where
     # the front had it (it jumped to the top of the screen)
+    # Only while the card is centred (Janki's card centring adds #__janki_focus): a
+    # top-aligned card already sits where the front had it, and this re-pin + lift made
+    # it dip and slide back up on every Space
     "if(!r){try{var _q3=document.getElementById('qa'),_s3=document.querySelector('.jp-stem'),"
     "_f3=parseFloat(sessionStorage.getItem('jp_stem_top'));"
-    "if(_q3&&_s3&&!isNaN(_f3)){var _d3=_f3-_s3.getBoundingClientRect().top,"
+    "if(_q3&&_s3&&!isNaN(_f3)&&document.getElementById('__janki_focus')){var _d3=_f3-_s3.getBoundingClientRect().top,"
     "_t3=Math.max(12,window.__jkFitPad||0),_r3=_q3.getBoundingClientRect();"
     "if(_r3.top+_d3<_t3)_d3=_t3-_r3.top;"
     # then the whole card glides up as far as needed to bring the explanation on screen

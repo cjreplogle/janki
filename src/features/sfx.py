@@ -161,9 +161,18 @@ def web_player(names=("move", "select", "back", "open", "fold", "unfold", "page"
             "function load(n){var c=C[n];if(!c||buf[n]||!ac())return;buf[n]='…';\n"
             " fetch(c.u).then(function(r){return r.arrayBuffer();}).then(function(a){return ctx.decodeAudioData(a);})\n"
             " .then(function(b){buf[n]=b;}).catch(function(){delete buf[n];});}\n"
-            "setTimeout(function(){Object.keys(C).forEach(load);},400);\n"
+            # Load at once (it used to wait 0.4 s): a remote press right after a page
+            # switch found nothing loaded and fell back to Python's QSoundEffect, which
+            # played the first sound much louder than the page's own. A sound asked for
+            # while it's still loading now waits for it (≤ 0.6 s) instead.
+            "Object.keys(C).forEach(load);\n"
+            "var waitT={};\n"
             "window.__jkPlay=function(n){if(!(n in C))return false;var c=C[n];if(!c)return true;\n"
-            " var b=buf[n];if(!b||b==='…'||!ac())return false;\n"
+            " var b=buf[n];if(b==='…'&&ctx){var t0=performance.now();if(waitT[n])return true;\n"
+            "  waitT[n]=setInterval(function(){if(buf[n]&&buf[n]!=='…'){clearInterval(waitT[n]);waitT[n]=0;\n"
+            "   if(performance.now()-t0<600)window.__jkPlay(n);}else if(!buf[n]||performance.now()-t0>600){\n"
+            "   clearInterval(waitT[n]);waitT[n]=0;}},15);return true;}\n"
+            " if(!b||b==='…'||!ac())return false;\n"
             " var t=performance.now();if(last[n]&&t-last[n]<80)return true;last[n]=t;\n"
             " try{if(ctx.state==='suspended')ctx.resume();var s=ctx.createBufferSource(),g=ctx.createGain();\n"
             "  s.buffer=b;g.gain.value=c.v;s.connect(g);g.connect(ctx.destination);s.start();return true;}\n"

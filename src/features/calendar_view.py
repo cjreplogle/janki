@@ -139,9 +139,15 @@ def _mode():
     m = str(_mode_override or _cfg().get("calendar_view", "week"))
     if m == "2":
         m = "3"                                   # (the old 2-day view is now 3 days)
-    return m if m in ("week", "1", "3") else "week"
+    m = m if m in ("week", "1", "3") else "week"
+    # a narrow window shows fewer days than chosen (the choice itself stays saved)
+    if _fit and _RANK[_fit] < _RANK[m]:
+        return _fit
+    return m
 
 
+_RANK = {"1": 0, "3": 1, "week": 2}
+_fit = None             # the most days that fit the page's width ("3" / "1"); None = any
 _mode_override = None   # the just-chosen view, until its config write lands
 
 
@@ -375,7 +381,10 @@ def _week_html():
         label = "%s %d – %s %d" % (monday.strftime("%b"), monday.day,
                                     sunday.strftime("%b"), sunday.day)
     mode = _mode()
-    seg = "<span class='jkc-pill'></span>" + "".join(
+    from ..util.config import _cfg as _c
+    pref = str(_mode_override or _c().get("calendar_view", "week"))
+    seg = ("<span class='jkc-fit' hidden data-pref='%s' data-fit='%s'></span>"
+           % (pref if pref in _RANK else "week", _fit or "")) + "<span class='jkc-pill'></span>" + "".join(
         "<button class='jkc-seg%s' data-k='%s' onclick=\"jkcMode('%s')\">%s</button>"
         % (" on" if mode == k else "", k, k, l)
         for k, l in (("1", "Day"), ("3", "3-day"), ("week", "Week")))
@@ -437,7 +446,7 @@ def prime():
         return
     try:
         k = _prime_key()
-        html_ = _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
+        html_ = _CSS + "<div id='jkc' lang='en'>" + _week_html() + "</div>" + _JS
         if _pending_tries == 0:                 # only keep a fully-matched page
             _primed["key"], _primed["html"] = k, html_
     except Exception as e:
@@ -451,7 +460,7 @@ def _page_html():
             return h
     except Exception:
         pass
-    return _CSS + "<div id='jkc'>" + _week_html() + "</div>" + _JS
+    return _CSS + "<div id='jkc' lang='en'>" + _week_html() + "</div>" + _JS
 
 
 # ------------------------------------------------------------- class page --------
@@ -1387,7 +1396,7 @@ def _weak_html():
                   % (" on" if _weak_mode == k else "", k, l)
                   for k, l in (("2w", "Biweekly"), ("block", "End of block")))
     head = ("<div class='jkc-grid jkc-detail jkw'><div class='jkd'>"
-            "<h2>Weak areas</h2><div class='jkw-seg'>%s</div>"
+            "<div class='jkw-seg'>%s</div>"
             "<div class='jkd-when'>Lectures since %s, least-studied first</div>"
             % (seg, _date_label(_weak_start(_weak_mode))))
     if _weak is None:
@@ -1409,9 +1418,6 @@ def _weak_html():
         chips = []
         if not r.get("active", r["n"]):
             chips.append("<span class='jkw-c'>all suspended</span>")
-        elif r["unstarted"] >= 0.05:
-            chips.append("<span class='jkw-c jkw-bad'>%d%% not started</span>"
-                         % round(100 * r["unstarted"]))
         if r["recall"] is not None:
             chips.append("<span class='jkw-c%s'>%d%% recall</span>"
                          % (" jkw-bad" if r["recall"] < 0.8 else "", round(100 * r["recall"])))
@@ -1424,19 +1430,25 @@ def _weak_html():
                          % (r["leech"], "es" if r["leech"] != 1 else ""))
         act = r.get("active", r["n"])
         done_pct = round(100 * (1 - r["unstarted"])) if act else 0
+        # severity → the coloured left edge: red = mostly unstarted or poorly recalled
+        rc = r["recall"]
+        sev = ("bad" if act and (r["unstarted"] >= 0.5 or (rc is not None and rc < 0.5)) else
+               "mid" if act and (r["unstarted"] >= 0.15 or (rc is not None and rc < 0.8)) else
+               "ok")
         cards = ("%d cards" % r["n"]) if act == r["n"] else ("%d cards · %d active" % (r["n"], act))
         return (
-            "<div class='jkw-row' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
+            "<div class='jkw-row jkw-s-%s' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
             "<div class='jkw-main'><div class='jkw-t'>%s</div>"
             "<div class='jkw-sub'>%s · %s</div>"
-            "<div class='jkw-bar'><i style='width:%d%%'></i></div>"
+            "<div class='jkw-prog'><div class='jkw-bar'><i style='width:%d%%'></i></div>"
+            "<span>%d%% started</span></div>"
             "<div class='jkw-chips'>%s</div></div>"
-            "%s<div class='jkw-btns'>"
-            "<button class='jkd-sec' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
+            "<div class='jkw-sp'>%s<span>reviews · 14d</span></div><div class='jkw-btns'>"
+            "<button class='jkd-sec jkw-study' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
             "<button class='jkd-sec jkw-prac' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:prac:%d')\">"
             "Practice</button></div></div>"
-            % (i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
-               "".join(chips), _spark_svg(r.get("spark") or []), i, i))
+            % (sev, i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
+               done_pct, "".join(chips), _spark_svg(r.get("spark") or []), i, i))
 
     rows = list(enumerate(_weak))
     start = _weak_start(_weak_mode)
@@ -1457,8 +1469,8 @@ def _weak_html():
 
 def _weak_block_html(head, rows, row):
     start = _weak_start(_weak_mode)
-    # End of block: one group per biweekly exam (the lectures each exam covers), newest
-    # first; open one to see its lectures (still least-studied first). Without exams in
+    # End of block: one group per biweekly exam (the lectures each exam covers), in
+    # exam order — Biweekly I, II, III… (the latest one starts open); open one to see its lectures (still least-studied first). Without exams in
     # the calendar, plain two-week periods.
     exams = _exam_dates()
     groups, meta = {}, {}
@@ -1477,12 +1489,11 @@ def _weak_block_html(head, rows, row):
     today = datetime.date.today()
     for k, (ed_, lbl) in enumerate(exams):
         if k not in groups and ed_ >= today:
-            out.append("<details class='jkw-grp'><summary><span class='jkw-gt'>%s "
+            out.append((k, "<details class='jkw-grp'><summary><span class='jkw-gt'>%s "
                        "<span class='jkw-gx'>· exam %s %d · upcoming</span></span>"
                        "<span class='jkw-gs'>no lectures yet</span></summary></details>"
-                       % (html.escape(lbl), ed_.strftime("%b"), ed_.day))
-    out.reverse()                           # latest exam on top, like the groups below
-    for k in sorted(groups, reverse=True):
+                       % (html.escape(lbl), ed_.strftime("%b"), ed_.day)))
+    for k in sorted(groups):
         g = groups[k]
         dates = [r["e"]["date"] for _i, r in g]
         a, b = min(dates), max(dates)
@@ -1499,14 +1510,15 @@ def _weak_block_html(head, rows, row):
             title, span = "%s %d – %s %d" % (a.strftime("%b"), a.day, b.strftime("%b"), b.day), ""
         uns = sum(r["unstarted"] for _i, r in g) / len(g)
         weakest = g[0][1]["m"]["display"]
-        out.append(
+        out.append((k,
             "<details class='jkw-grp'%s><summary><span class='jkw-gt'>%s</span>"
             "<span class='jkw-gs'>%s%d lecture%s · %d%% not started · weakest: %s</span>"
             "<span class='jkw-bar jkw-gbar'><i style='width:%d%%'></i></span></summary>%s</details>"
             % (" open" if k == max(groups) else "", title, (span + " · ") if span else "",
                len(g), "" if len(g) == 1 else "s", round(100 * uns), html.escape(weakest),
-               round(100 * (1 - uns)), "".join(row(i, r) for i, r in g[:40])))
-    return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(out)
+               round(100 * (1 - uns)), "".join(row(i, r) for i, r in g[:40]))))
+    out.sort(key=lambda p: p[0])            # I, II, III… then the one in progress
+    return head + "<div class='jkw-list'>%s</div></div></div>" % "".join(h for _k, h in out)
 
 
 _from_weak = False     # the open class page came from the weak-areas list
@@ -2052,6 +2064,27 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-m{background:transparent !important;border:none;color:inherit;font:inherit;font-size:.88em;
   padding:3px 12px;border-radius:7px;cursor:pointer;opacity:.75;}
 #jkc .jkw-m.on{background:rgba(156,188,243,.28) !important;color:#cfe0ff;opacity:1;}
+/* Biweekly / End of block: one pill behind the buttons that glides to the clicked one */
+#jkc .jkw-seg{position:relative;}
+#jkc .jkw-seg .jkw-m{font-size:1.02em;font-weight:650;padding:5px 16px;}
+/* the tabs sit at the top and stay there while the list scrolls under them (a solid
+   backing, no blur: a blur re-rasters on every scroll frame with the glass) */
+#jkc .jkw .jkw-seg{display:flex;width:fit-content;margin:0 auto 4px;}
+/* The tabs and the "since" line stay put at the top; only the list scrolls, under a short
+   static fade at its edges (a band behind the tabs read as a dark slab on the glass) */
+#jkc .jkc-grid.jkc-detail.jkw{overflow:hidden !important;display:flex !important;flex-direction:column !important;}
+#jkc .jkw > .jkd{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
+#jkc .jkw .jkw-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  width:100%;box-sizing:border-box;padding:12px 6px 28px;margin-top:4px !important;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 16px,#000 calc(100% - 24px),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,#000 16px,#000 calc(100% - 24px),transparent 100%);
+  scrollbar-width:none;}
+#jkc .jkw .jkw-list::-webkit-scrollbar{display:none;width:0;height:0;}
+#jkc .jkw-seg .jkw-m{position:relative;z-index:1;transition:color .2s ease,opacity .2s ease;}
+#jkc .jkw-seg.jkw-has-pill .jkw-m.on{background:transparent !important;}
+#jkc .jkw-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
+  background:rgba(156,188,243,.28) !important;pointer-events:none;
+  transition:transform .26s cubic-bezier(.2,.8,.2,1),width .26s cubic-bezier(.2,.8,.2,1);}
 #jkc .jkw-pbar{width:min(360px,70vw);height:5px;margin:10px auto 0;border-radius:3px;
   background:rgba(255,255,255,.1) !important;overflow:hidden;}
 #jkc .jkw-pbar i{display:block;height:100%;width:5%;border-radius:3px;background:#9cbcf3 !important;
@@ -2067,6 +2100,14 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-grp summary::before{content:'›';grid-row:span 2;font-size:1.3em;opacity:.6;
   transition:transform .2s ease;display:inline-block;}
 #jkc .jkw-grp[open] summary::before{transform:rotate(90deg);}
+/* smooth motion on this page: the arrow turns, buttons ease, and the list scrolls on its
+   own layer (software compositing re-rasters text on every scroll frame otherwise) */
+#jkc .jkw-grp summary::before{transition:transform .26s cubic-bezier(.2,.8,.2,1);}
+#jkc .jkw-grp{overflow:hidden;}
+#jkc .jkw .jkw-list{will-change:opacity;}
+#jkc .jkw-btns .jkd-sec{transition:background-color .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
+#jkc .jkw-btns .jkd-sec:active{transform:scale(.96);}
+#jkc .jkw-row{transition:background-color .18s ease,border-color .18s ease;}
 .jkw-gt{font-weight:700;}
 .jkw-gx{font-weight:400;opacity:.7;font-size:.9em;}
 .jkw-gs{grid-column:2;opacity:.7;font-size:.85em;}
@@ -2075,7 +2116,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
 #jkc .jkw-row{cursor:pointer;transition:background-color .15s ease;display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
-#jkc .jkw-row:hover{background:rgba(255,255,255,.09) !important;}
+#jkc .jkw-row:hover,#jkc .jkw-row.jk-kbf{background:rgba(255,255,255,.09) !important;}
 .jkw-main{flex:1;min-width:0;}
 .jkw-t{font-weight:700;}
 .jkw-sub{opacity:.7;font-size:.86em;margin:1px 0 5px;}
@@ -2088,6 +2129,27 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkw-spark{flex:none;opacity:.95;}
 .jkw-btns .jkd-sec{margin:0 !important;}
 #jkc .jkw-prac{color:#c9f7c9 !important;}
+/* card polish: severity edge, one labelled progress line, quiet sparkline, a primary Study */
+#jkc .jkw-row{border-left:3px solid rgba(255,255,255,.12);padding:12px 16px 12px 14px;gap:16px;}
+#jkc .jkw-row.jkw-s-bad{border-left-color:#ff8a7a;}
+#jkc .jkw-row.jkw-s-mid{border-left-color:#e8c06a;}
+#jkc .jkw-row.jkw-s-ok{border-left-color:#7fd08a;}
+#jkc .jkw-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  line-height:1.25;}
+#jkc .jkw-sub{margin:3px 0 8px;}
+#jkc .jkw-prog{display:flex;align-items:center;gap:10px;max-width:340px;}
+#jkc .jkw-prog .jkw-bar{flex:1;}
+#jkc .jkw-prog span{font-size:.76em;opacity:.65;white-space:nowrap;font-variant-numeric:tabular-nums;}
+#jkc .jkw-chips{margin-top:8px;}
+#jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;gap:2px;flex:none;}
+#jkc .jkw-sp .jkw-spark text{display:none;}
+#jkc .jkw-sp span{font-size:.68em;opacity:.45;letter-spacing:.02em;}
+#jkc .jkw-btns{flex-direction:column;gap:6px;}
+#jkc .jkw-btns .jkd-sec{padding:6px 18px;font-size:.92em;min-width:96px;}
+#jkc .jkw-study{background:rgba(156,188,243,.85) !important;color:#0e1a2e !important;font-weight:600;}
+#jkc .jkw-study:hover{background:#b6cdf6 !important;}
+#jkc .jkw-btns .jkw-prac{background:rgba(159,224,163,.10) !important;}
+#jkc .jkw .jkd-when{font-size:.82em;opacity:.55;margin-top:6px;}
 #jkc .jkd-prac{background:#9fe0a3 !important;color:#0f2e16 !important;margin-left:8px;}
 #jkc .jkd-prac:hover{background:#b3ebb6 !important;}
 #jkc .jkd-study2{background:rgba(156,188,243,.22) !important;color:#cfe0ff !important;
@@ -2167,7 +2229,10 @@ _JS = """<script>(function(){
  window.jkcBusy=function(on){var b=document.getElementById('jkc-busy');
    if(!b){b=document.createElement('div');b.id='jkc-busy';
      b.innerHTML="<i></i><span>Updating…</span>";document.body.appendChild(b);}
-   b.classList.toggle('on',!!on);};
+   b.classList.toggle('on',!!on);
+   // the page is reused after the Calendar closes, without the Calendar's styles: the
+   // chip then showed as bare "Updating…" text — only ever visible with the Calendar up
+   b.style.display=(on&&document.getElementById('jkc'))?'':'none';};
  // Counts can land while the class page is still sliding in (its elements don't
  // exist yet): keep them and apply as soon as the page is in place.
  var pendC=null,pendA=null;
@@ -2323,8 +2388,36 @@ _JS = """<script>(function(){
  if(document.readyState!=='loading')setTimeout(watchCounts,0);
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){pillInit();});
  else pillInit();
+ // Narrow page: Week → 3 days → 1 day so every day keeps a readable width (each day
+ // needs ~160 px); widening brings the chosen view back. 30 px of slack each way so a
+ // size right at the edge can't flip back and forth.
+ function fitCheck(){var j=document.getElementById('jkc'),m=document.querySelector('#jkc .jkc-fit');
+   if(!j||!m||!j.clientWidth)return;
+   var w=j.clientWidth,cur=window.__jkcManual?'':(m.getAttribute('data-fit')||''),
+       // already at/below a boundary: widening must clear it by 30 px to step back up
+       pad=function(f){return (cur==='1'||cur===f)?30:0;},
+       want=w<480+pad('1')?'1':w<800+pad('3')?'3':'';
+   // a view picked by hand stays until a resize crosses a fit boundary
+   if(window.__jkcManual){if(window.__jkcManual.want===want)return;window.__jkcManual=null;cur='';}
+   if(want!==cur){m.setAttribute('data-fit',want);pycmd('janki:cal:fit:'+want);}
+   // the Day / 3-day / Week switch shows what's on screen (the chosen view, or fewer
+   // days while the page is too narrow for it)
+   var R={'1':0,'3':1,'week':2},pf=m.getAttribute('data-pref')||'week',
+       eff=want&&R[want]<R[pf]?want:pf,
+       b=document.querySelector('#jkc .jkc-seg[data-k="'+eff+'"]');
+   if(b&&!b.classList.contains('on')){
+     document.querySelectorAll('#jkc .jkc-seg').forEach(function(x){x.classList.remove('on');});
+     b.classList.add('on');pill(b,true);}}
+ // checked on every resize step (cheap: Python is only called when the count changes),
+ // so the days drop / come back while the edge is still being dragged
+ window.addEventListener('resize',fitCheck,{passive:true});
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fitCheck);
+ else setTimeout(fitCheck,0);
  // Day / 3 Days / Week: fewer days zooms in, more days zooms out (scale + fade).
  window.jkcMode=function(k){
+   // remember what the width wanted when this view was picked (fitCheck leaves it be)
+   try{var j=document.getElementById('jkc'),w=j?j.clientWidth:9999;
+     window.__jkcManual={want:w<480?'1':w<800?'3':''};}catch(x){}
    var b=document.querySelector('#jkc .jkc-seg[data-k="'+k+'"]');
    if(b&&!b.classList.contains('on')){
      document.querySelectorAll('#jkc .jkc-seg').forEach(function(x){x.classList.remove('on');});
@@ -2359,7 +2452,8 @@ _JS = """<script>(function(){
      return r.width>0&&r.height>0;});}
  function kbPick(el){var o=document.querySelector('#jkc .jk-kbf');if(o)o.classList.remove('jk-kbf');
    if(!el)return;el.classList.add('jk-kbf');try{pycmd('janki:sfx:move');}catch(x){}
-   var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}
+   // glide the scroll (class page / Lectures list) when the pick is near an edge
+   var r=el.getBoundingClientRect();if(r.top<40||r.bottom>innerHeight-20)el.scrollIntoView({block:'nearest',behavior:'smooth'});}
  function kbNext(cur,k){var a=cur.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2,
    best=null,bd=1e9;
    kbItems().forEach(function(x){if(x===cur||x.contains(cur)||cur.contains(x))return;
@@ -2371,6 +2465,12 @@ _JS = """<script>(function(){
      if(d<bd){bd=d;best=x;}});
    return best;}
  document.addEventListener('mousemove',function(){kbPick(null);},{passive:true});
+ // Two tiers: ‹ › / Today / wizard (↑ from the days), and above it the Day / 3-day /
+ // Week switch — kept out of the first so ←/→ there don't wander into the views
+ function barBtns(seg){return Array.prototype.filter.call(document.querySelectorAll(
+   seg?'#jkc .jkc-bar button.jkc-seg':'#jkc .jkc-bar button:not(.jkc-seg)'),
+   function(b){var r=b.getBoundingClientRect();return r.width>0&&r.height>0;})
+   .sort(function(a,b){return a.getBoundingClientRect().left-b.getBoundingClientRect().left;});}
  function cols(){return Array.prototype.slice.call(
    document.querySelectorAll('#jkc .jkc-grid:not(.jkc-detail) .jkc-col'));}
  function markDay(col){var o=document.querySelector('#jkc .jkc-col.jk-kbday');
@@ -2387,11 +2487,40 @@ _JS = """<script>(function(){
    if(el){el.classList.add('jk-kb');markDay(el.closest('.jkc-col'));try{pycmd('janki:sfx:move');}catch(x){}
      var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}}
  document.addEventListener('keydown',function(e){
+   // this script can be on the page twice (the Calendar block swapped in again): handle
+   // each key once — two handlers moved two steps, so arrows skipped every other lecture
+   if(e.__jkcDone)return;e.__jkcDone=1;
+   // the page is reused when you switch to Practice / Decks: with no Calendar on screen
+   // these keys aren't ours (↑ found "no class above" and sent focus to the toolbar,
+   // which stopped the Practice list short of its top)
+   if(!document.getElementById('jkc'))return;
    if(e.metaKey||e.ctrlKey||e.altKey)return;
    var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
    var k=e.key, det=document.querySelector('#jkc .jkc-detail');
    if(det){
      if(k==='Escape'||k==='Backspace'){e.preventDefault();kbPick(null);pycmd('janki:cal:det:back');return;}
+     // The Lectures list: ↑/↓ go lecture to lecture (tabs and group headers on the way),
+     // → steps into a card (Study, then Practice), ← back out; Enter opens / presses
+     if(det.classList.contains('jkw')&&/^(Arrow(Up|Down|Left|Right)|Enter| )$/.test(k)){
+       e.preventDefault();var cw=document.querySelector('#jkc .jk-kbf');
+       var vis=function(x){return x.getClientRects().length&&!(x.closest('details:not([open])')&&!x.matches('summary'));};
+       var stops=Array.prototype.filter.call(det.querySelectorAll('.jkw-m.on, .jkw-grp > summary, .jkw-row'),vis);
+       var lvl=cw?(cw.closest('.jkw-row')||(cw.classList.contains('jkw-m')?det.querySelector('.jkw-m.on'):cw)):null;
+       if(k==='Enter'||k===' '){if(cw)cw.click();return;}
+       if(!cw){kbPick(stops.filter(function(x){return x.classList.contains('jkw-row');})[0]||stops[0]);return;}
+       if(k==='ArrowDown'||k==='ArrowUp'){var si=stops.indexOf(lvl),
+           nx=stops[Math.max(0,Math.min(stops.length-1,si+(k==='ArrowDown'?1:-1)))];
+         if(nx&&nx!==cw)kbPick(nx);return;}
+       var right=k==='ArrowRight';
+       // ← past the left edge (the first tab, or a card itself) → Kome's sidebar
+       var toSide=function(){if(window.jkKomeSide){var o=document.querySelector('#jkc .jk-kbf');
+         if(o)o.classList.remove('jk-kbf');window.jkKomeSide();}};
+       if(cw.classList.contains('jkw-m')){var ms=Array.prototype.slice.call(det.querySelectorAll('.jkw-m')),
+           mi=ms.indexOf(cw),mn=ms[mi+(right?1:-1)];if(mn)kbPick(mn);else if(!right)toSide();return;}
+       var row=cw.closest('.jkw-row');if(!row)return;
+       var bs=Array.prototype.slice.call(row.querySelectorAll('.jkw-btns button'));
+       var ci=cw===row?-1:bs.indexOf(cw),ni=ci+(right?1:-1);
+       if(ni<-1){toSide();return;}if(ni>=bs.length)return;kbPick(ni<0?row:bs[ni]);return;}
      if(/^Arrow/.test(k)){e.preventDefault();
        var cur=document.querySelector('#jkc .jk-kbf');
        if(!cur){var f=kbItems()[0];if(f)kbPick(f);return;}       // first press: highlight
@@ -2404,6 +2533,34 @@ _JS = """<script>(function(){
      if(k==='Enter'||k===' '){e.preventDefault();
        var c2=document.querySelector('#jkc .jk-kbf');
        if(c2)c2.click();else pycmd('janki:cal:det:study:active');
+       return;}
+     return;}
+   // The bar on top (Day / 3-day / Week, ‹ ›, Today, wizard), reached with ↑ from the
+   // first class: ←/→ walk it, Enter / A presses (and stays on that button, so › can be
+   // pressed again and again), ↓ goes back down to the classes, ↑ on to the toolbar
+   var bsel=document.querySelector('#jkc .jkc-bar .jk-kbf');
+   if(bsel){
+     var tseg=bsel.classList.contains('jkc-seg');
+     if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();var bb=barBtns(tseg),bi=bb.indexOf(bsel),
+         bn=bb[Math.max(0,Math.min(bb.length-1,bi+(k==='ArrowRight'?1:-1)))];
+       if(bn&&bn!==bsel)kbPick(bn);return;}
+     // down into the days: today if it's showing, else the first day — its top class,
+     // or the day itself when it has none (paging with ‹ › often lands on empty days,
+     // and picking "the first class" then selected nothing)
+     if(k==='ArrowDown'&&tseg){e.preventDefault();var nx2=document.querySelector('#jkc .jkc-bar .jkc-next');
+       if(nx2)kbPick(nx2);return;}
+     if(k==='ArrowUp'&&!tseg){e.preventDefault();
+       var sg=document.querySelector('#jkc .jkc-bar .jkc-seg.on')||barBtns(true)[0];
+       if(sg){kbPick(sg);return;}}
+     if(k==='ArrowDown'){e.preventDefault();kbPick(null);var cs0=cols(),
+         td0=document.querySelector('#jkc .jkc-col.jkc-today'),ti0=td0?cs0.indexOf(td0):-1;
+       selDay(ti0>=0?ti0:0,null);return;}
+     if(k==='ArrowUp'){e.preventDefault();kbPick(null);pycmd('janki:toolbar');return;}
+     if(k==='Enter'||k===' '){e.preventDefault();var oc=bsel.getAttribute('onclick');bsel.click();
+       [60,200,450].forEach(function(ms){setTimeout(function(){
+         if(document.querySelector('#jkc .jkc-bar .jk-kbf'))return;
+         var nb=barBtns(tseg).filter(function(b){return b.getAttribute('onclick')===oc;})[0];
+         if(nb){nb.classList.add('jk-kbf');}},ms);});
        return;}
      return;}
    if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();
@@ -2422,7 +2579,9 @@ _JS = """<script>(function(){
      var d=right?'next':'prev';press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);return;}
    var all=evs(), c=document.querySelector('#jkc .jkc-ev.jk-kb'), i=c?all.indexOf(c):-1;
    if(k==='ArrowDown'){e.preventDefault();if(all.length)sel(all[Math.min(all.length-1,i+1)]);return;}
-   if(k==='ArrowUp'){e.preventDefault();if(i<=0){sel(null);pycmd('janki:toolbar');}else sel(all[i-1]);return;}
+   if(k==='ArrowUp'){e.preventDefault();if(i<=0){sel(null);
+       var nx=document.querySelector('#jkc .jkc-bar .jkc-next');if(nx)kbPick(nx);else pycmd('janki:toolbar');}
+     else sel(all[i-1]);return;}
    if((k==='Enter'||k===' ')&&c){e.preventDefault();
      pycmd('janki:cal:ev:'+c.getAttribute('data-i'));}
  },true);
@@ -2453,8 +2612,60 @@ _JS = """<script>(function(){
  setInterval(function(){
    if(document.querySelector('#jkc .jkw .jkw-pbar')){try{pycmd('janki:cal:weakcheck');}catch(x){}}
  },3000);
+ function wpill(anim){var sg=document.querySelector('#jkc .jkw-seg');if(!sg)return;
+   var b=sg.querySelector('.jkw-m.on');if(!b)return;
+   var p=sg.querySelector('.jkw-pill');
+   if(!p){p=document.createElement('span');p.className='jkw-pill';sg.insertBefore(p,sg.firstChild);
+     sg.classList.add('jkw-has-pill');anim=false;}
+   if(!anim)p.style.transition='none';
+   p.style.width=b.offsetWidth+'px';p.style.transform='translateX('+b.offsetLeft+'px)';
+   if(!anim){void p.offsetWidth;p.style.transition='';}}
+ // the page redraws (open / tab switch / results arriving): pill under the active tab
+ if(window.MutationObserver){new MutationObserver(function(){
+   var sg=document.querySelector('#jkc .jkw-seg');if(sg&&!sg.querySelector('.jkw-pill'))wpill(false);})
+   .observe(document.documentElement,{childList:true,subtree:true});}
+ // End of block groups open / close with a height animation (a <details> just snaps)
+ document.addEventListener('click',function(e){
+   var sm=e.target.closest&&e.target.closest('#jkc .jkw-grp > summary');if(!sm)return;
+   var d=sm.parentNode;if(!d.animate||d.__jkAnim)return;
+   e.preventDefault();var from=d.offsetHeight,to;
+   var FD=(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?0:260;
+   if(!d.open){d.open=true;to=d.offsetHeight;}else{to=sm.offsetHeight+10;}
+   try{pycmd('janki:sfx:'+(d.open&&to>from?'unfold':'fold'));}catch(x){}
+   if(!FD){if(to<from)d.open=false;return;}
+   d.__jkAnim=d.animate([{height:from+'px'},{height:to+'px'}],
+     {duration:FD,easing:'cubic-bezier(.2,.8,.2,1)'});
+   // the lecture cards inside slide with it: down into place one after another on
+   // open, up and out on close (transform / opacity only)
+   var rows=Array.prototype.slice.call(d.querySelectorAll(':scope > .jkw-row')),ra=[];
+   rows.forEach(function(r,i){
+     ra.push(to>from
+       ? r.animate([{opacity:0,transform:'translateY(-10px)'},{opacity:1,transform:'none'}],
+           {duration:240,delay:Math.min(i,8)*28,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'})
+       : r.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(-10px)'}],
+           {duration:180,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'}));});
+   d.__jkAnim.onfinish=d.__jkAnim.oncancel=function(){if(to<from){d.open=false;
+     ra.forEach(function(a){try{a.cancel();}catch(x){}});}d.__jkAnim=null;};
+ },true);
+ // Lectures page: the tabs line up with the top of Kome's sidebar panel (measured, so it
+ // holds whatever the window / theme spacing is); re-checked on redraws and resizes
+ function walign(){var sd=document.querySelector('.ba-side'),sg=document.querySelector('#jkc .jkw .jkw-seg');
+   if(!sd||!sg)return;var d=sd.getBoundingClientRect().top-sg.getBoundingClientRect().top;
+   if(Math.abs(d)<1)return;sg.style.marginTop=Math.max(0,(parseFloat(sg.style.marginTop)||0)+d)+'px';}
+ if(window.MutationObserver){new MutationObserver(function(){
+   var sg=document.querySelector('#jkc .jkw .jkw-seg');if(sg&&!sg.__jkAl){sg.__jkAl=1;walign();setTimeout(walign,450);}})
+   .observe(document.documentElement,{childList:true,subtree:true});}
+ window.addEventListener('resize',walign);
+ // the wheel anywhere on the Lectures page (beside the list too) scrolls the list
+ document.addEventListener('wheel',function(e){
+   var pg=e.target.closest&&e.target.closest('#jkc .jkw');if(!pg)return;
+   var ls=pg.querySelector('.jkw-list');if(!ls||ls.contains(e.target))return;
+   e.preventDefault();ls.scrollTop+=e.deltaY;},{capture:true,passive:false});
  window.jkwMode=function(btn,k){
    if(btn&&btn.classList.contains('on'))return;          // already showing
+   // slide the pill now (the lectures below fade while the new list loads)
+   if(btn){var o=document.querySelector('#jkc .jkw-m.on');if(o)o.classList.remove('on');
+     btn.classList.add('on');wpill(true);}
    var ps=[];                       // only the lectures below fade — not the header
    wfadeEls().forEach(function(el){if(el.animate)ps.push(el.animate([{opacity:1},{opacity:0}],
      {duration:140,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'}).finished.catch(function(){}));});
@@ -2676,7 +2887,18 @@ def on_js_message(handled, message, context):
             _go_week(1)
         elif cmd == "today":
             _go_week(None)
+        elif cmd.startswith("fit:"):
+            global _fit, _anchor
+            f = cmd[4:] or None
+            if f in (None, "1", "3") and f != _fit:
+                before = _mode()
+                _fit = f
+                if _mode() != before:
+                    _anchor = None
+                    _swap("mode")
         elif cmd.startswith("mode:"):
+            _fit = None            # a view you pick wins over the narrow-window fit
+            _anchor = None
             parts = cmd[5:].split(":")
             _set_mode(parts[0], parts[1] if len(parts) > 1 else "mode")
         elif cmd == "loader":

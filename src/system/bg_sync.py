@@ -75,8 +75,23 @@ def install():
             # window hides when the close sync starts, past that point)
             if _cfg().get("sync_in_background", True):
                 _exit_at = time.monotonic()
+            self._jk_quitting = True
             return orig_exit(self, *a, **k)
         AnkiQt.unloadProfileAndExit = unloadProfileAndExit
+
+        # …and on quit, hide it the moment every other window has agreed to close (the
+        # point past which the quit can't be cancelled). Anki only hides it after the
+        # close sync and the backup, so for ~½ s an emptied glass window sat on screen.
+        orig_close_sync = AnkiQt.maybe_auto_sync_on_open_close
+
+        def maybe_auto_sync_on_open_close(self, *a, **k):
+            if getattr(self, "_jk_quitting", False):
+                try:
+                    self.hide()
+                except Exception:
+                    pass
+            return orig_close_sync(self, *a, **k)
+        AnkiQt.maybe_auto_sync_on_open_close = maybe_auto_sync_on_open_close
 
         _showWin._jk_bg = True
         PM._showWin, PM._set_busy_cursor = _showWin, _set_busy_cursor

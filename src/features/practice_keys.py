@@ -16,6 +16,30 @@ _JS = r"""<script>(function(){
      else if(box.querySelector('.jp-wrong')){played=true;f('wrong');}})
    .observe(box,{subtree:true,attributes:true,attributeFilter:['class']});}
 })();
+// Show Answer keeps your place: Anki only scrolls on the answer side to an #answer
+// marker, which Practice cards don't have, so swapping in the answer jumped to the top.
+(function(){
+ if(window.__jkPqKeep||typeof window._showAnswer!=='function')return; window.__jkPqKeep=true;
+ var orig=window._showAnswer;
+ window._showAnswer=function(){
+   var y=window.pageYOffset||0, qa=document.getElementById('qa');
+   // the answer side glides the question from where it was on the question side
+   // (qbank's jp_stem_top): record that NOW — the value saved 0.35 s / 0.9 s after the
+   // card appeared could predate its settling, so the answer started lower and slid up
+   try{var st=document.querySelector('.jp-stem');
+     if(st&&!document.querySelector('.jp-answered'))
+       sessionStorage.setItem('jp_stem_top',st.getBoundingClientRect().top);}catch(x){}
+   if(!document.getElementById('jp-choices')||!qa||y<2)return orig.apply(this,arguments);
+   var done=false, moved=false, set=function(){if(!moved)window.scrollTo(0,y);};
+   var onWheel=function(){moved=true;};
+   addEventListener('wheel',onWheel,{passive:true,once:true});
+   var mo=new MutationObserver(function(){if(done)return;done=true;mo.disconnect();
+     set();requestAnimationFrame(set);setTimeout(set,120);setTimeout(set,400);
+     setTimeout(function(){removeEventListener('wheel',onWheel);},500);});
+   mo.observe(qa,{childList:true,subtree:true});
+   setTimeout(function(){mo.disconnect();},2000);
+   return orig.apply(this,arguments);};
+})();
 (function(){
  if(window.__jkPqKeys)return; window.__jkPqKeys=true;
  function vis(){var box=document.getElementById('jp-choices')||document.body;
@@ -72,6 +96,9 @@ _JS = r"""<script>(function(){
    if(ev.metaKey||ev.ctrlKey||ev.altKey)return;
    var k=ev.key; if(!/^Arrow(Up|Down|Left|Right)$/.test(k))return;
    ev.stopImmediatePropagation();
+   // the remote is on the top pills (review_nav): its d-pad is driven from Python
+   if(window.jkRNavOn&&window.jkRNavOn())return;
+   if(!window.__jkRNavSynth&&Date.now()-(window.__jkRNavOffAt||0)<200)return;
    if(document.querySelector('.jp-answered'))return;
    var v=vis(); if(!v.length)return;
    ev.preventDefault(); ev.stopPropagation();
@@ -79,7 +106,12 @@ _JS = r"""<script>(function(){
    var c=cur(), i=c?v.indexOf(c):-1, d=(k==='ArrowDown'||k==='ArrowRight')?1:-1;
    // ↑ above the first answer leaves the choices for the toolbar, on Practice — the
    // way ↑ on a normal card goes up to the toolbar
+   // ↓ below the last answer: on to Show Answer / the answer bar (Onigiri, review_nav)
+   if(k==='ArrowDown'&&i===v.length-1&&window.jkRNav){sel(null);
+     document.documentElement.classList.remove('jk-kbnav');window.jkRNav('bar');return;}
    if(k==='ArrowUp'&&i===0){sel(null);document.documentElement.classList.remove('jk-kbnav');
+     // Onigiri: on to its top pills (Decks, Sync…) — Janki's toolbar is hidden there
+     if(window.jkRNav){window.jkRNav('pills');return;}
      sfx('move');try{pycmd('janki:toolbar:practice');}catch(x){}return;}
    sfx('move'); sel(v[i<0?(d>0?0:v.length-1):Math.max(0,Math.min(v.length-1,i+d))]);
  },true);

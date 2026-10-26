@@ -548,6 +548,9 @@ _WHEEL_JS = (
     "var t=e.composedPath?e.composedPath()[0]:e.target;if(innerCan(t,e.deltaY))return;\n"
     # over Onigiri's (Kome) sidebar: it scrolls on its own, never the list behind it
     "if(t&&t.closest&&t.closest('.ba-side')){e.preventDefault();return;}\n"
+    # the Calendar's Lectures page: only its list scrolls — at the list's end the wheel
+    # stops there (scrolling the page instead slid the Biweekly / End of block tabs up)
+    "if(t&&t.closest&&t.closest('#jkc .jkw')){e.preventDefault();return;}\n"
     "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
     "var d=coast(despike(e.deltaY*k))*SENS;\n"
     "if(d)feed(d);},{passive:false});\n"
@@ -899,9 +902,18 @@ _PAD_NAV_JS = r"""(function(){
    if(on&&!last[id]){key(k);held[id]=t+380;}
    else if(on&&k!=='Enter'&&held[id]&&t>=held[id]){key(k);held[id]=t+90;}
    if(!on)held[id]=0; last[id]=on;}
+ var seeded=false;
  function tick(){
    var ps=navigator.getGamepads?navigator.getGamepads():[];
    var mine=document.hasFocus();
+   // first look at the pad on this page: whatever is already held is the press that
+   // brought us here (A on a deck → the preview), not a new one — it went straight
+   // on through the next page (the deck preview started studying by itself)
+   if(!seeded){seeded=true;for(var q=0;q<ps.length;q++){var G=ps[q];if(!G)continue;
+     var B=function(n){return !!(G.buttons[n]&&G.buttons[n].pressed);},A=G.axes||[];
+     last[q+'u']=B(12)||(A[1]||0)<-0.5;last[q+'d']=B(13)||(A[1]||0)>0.5;
+     last[q+'l']=B(14)||(A[0]||0)<-0.5;last[q+'r']=B(15)||(A[0]||0)>0.5;
+     last[q+'a']=B(0)||B(1)||B(2)||B(3);}}
    for(var i=0;i<ps.length;i++){var g=ps[i];if(!g)continue;
      var b=function(n){return !!(g.buttons[n]&&g.buttons[n].pressed);};
      var ax=g.axes||[], x=ax[0]||0, y=ax[1]||0;

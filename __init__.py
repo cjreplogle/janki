@@ -1818,8 +1818,21 @@ try:
     from .src.util import compat as _compat
     if not _compat.onigiri_on():        # Onigiri has its own deck drag-and-drop
         _deck_order.install()
+    else:
+        # Kome's list drags with Janki's script (integrations/onigiri.py): only the drop
+        # messages (nest / move) are needed, not Anki's table render or page script
+        gui_hooks.webview_did_receive_js_message.append(_deck_order._on_js)
 except Exception as _do_exc:
     log("deck_order: %s" % _do_exc)
+
+# Remote on the review screen: d-pad to the top pills / answer bar (Onigiri)
+try:
+    from .src.integrations import review_nav as _review_nav
+    from .src.util import compat as _compat2
+    if _compat2.onigiri_on():
+        _review_nav.install()
+except Exception as _rn_exc:
+    log("review_nav: %s" % _rn_exc)
 
 # Onigiri: Janki's Calendar / Practice / Load Lectures / Settings in its sidebar
 try:

@@ -15,13 +15,14 @@ _LOG = os.path.expanduser("~/.janki_fps.log")
 # rAF counter in the page; reports once a second. Uses rAF only while measuring (the
 # probe is a diagnostic: with --disable-frame-rate-limit rAF may run past 60).
 _JS = r"""(function(tag){if(window.__jkFps)return;window.__jkFps=1;
- var n=0,worst=0,slow=0,last=performance.now(),t0=last,scr=0;
+ var n=0,worst=0,slow=0,last=performance.now(),t0=last,scr=0,rsz=0;
  addEventListener('scroll',function(){scr++;},{passive:true,capture:true});
+ addEventListener('resize',function(){rsz++;},{passive:true});
  function f(now){var d=now-last;last=now;n++;if(d>worst)worst=d;if(d>50)slow++;
   if(now-t0>=1000){var a=0;try{a=document.getAnimations().length;}catch(e){}
    try{pycmd('janki:fps:'+JSON.stringify({v:tag,fps:Math.round(n*1000/(now-t0)),
-    worst:Math.round(worst),slow:slow,scroll:scr,anims:a}));}catch(e){}
-   n=0;worst=0;slow=0;scr=0;t0=now;}
+    worst:Math.round(worst),slow:slow,scroll:scr,resize:rsz,w:innerWidth,anims:a}));}catch(e){}
+   n=0;worst=0;slow=0;scr=0;rsz=0;t0=now;}
   requestAnimationFrame(f);}
  requestAnimationFrame(f);})(%s);"""
 
@@ -66,9 +67,10 @@ def _on_msg(handled, message, context):
             for tag in ("main", "top", "bottom"):
                 v = _pending.pop(tag, None)
                 if v:
-                    parts.append("%s %3dfps worst %4dms slow %d%s%s" % (
+                    parts.append("%s %3dfps worst %4dms slow %d%s%s%s" % (
                         tag, v["fps"], v["worst"], v["slow"],
                         " scroll" if v.get("scroll") else "",
+                        (" RESIZE x%d w%s" % (v["resize"], v.get("w"))) if v.get("resize") else "",
                         " anim%d" % v["anims"] if v.get("anims") else ""))
             parts.append("qt lag avg %.0fms max %.0fms" % (avg, lag["max"]))
             lag.update(max=0.0, sum=0.0, n=0)

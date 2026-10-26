@@ -460,7 +460,11 @@ def _practice_remote_grade(kc: int) -> bool:
         # continues (grades with the stashed ease + advances) via the card's Continue.
         if _cfg().get("practice_binary_grade", True):
             web = getattr(r, "web", None) or mw.web
-            web.eval("if(window.jankiContinue)window.jankiContinue();")
+            # Shown without a pick (Space / Show Answer) the back returns before it
+            # defines jankiContinue: ask Python straight away, as the bar's Continue
+            # button does (_jp_resolve is latched per card, so this can't double up)
+            web.eval("if(window.jankiContinue)window.jankiContinue();"
+                     "else pycmd('jp-continue');")
             _gtap_log(f"practice remote continue (kc={kc})")
             return True
         ease = _KC_TO_EASE.get(kc)
@@ -485,6 +489,14 @@ def _practice_or_rate(kc: int, fwd: bool) -> None:
     fall back to the normal reveal-first forward — but only when the focus gate would
     have forwarded it, so ordinary cards behave exactly as before (no double-fire with
     Contanki while Anki is focused)."""
+    # The remote is on the review screen's top pills / answer bar (review_nav): any face
+    # button presses the selected one (Decks, Show Answer…) instead of picking/grading
+    try:
+        from ..integrations import review_nav
+        if review_nav.remote_press():
+            return
+    except Exception as e:
+        _gtap_log(f"review nav press: {e}")
     if _practice_remote_pick(kc):
         return
     if _practice_remote_grade(kc):
