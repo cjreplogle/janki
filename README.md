@@ -160,24 +160,13 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 **2.13.0** · 2026-10-26
 
 **Onigiri / Kome**
-- The deck list works with the keyboard and a controller again: arrows / d-pad move, → and ← open and close subdecks, Enter opens. Decks slide on hover like Janki's own list.
-- Drag decks to reorder them: drop on a deck's top or bottom edge to put it before or after, on the middle to put it inside. Janki's saved deck order now applies to Kome's list too.
-- New sidebar buttons: **Calendar**, **Practice** and **Lectures**. ← moves from a page into the sidebar and → moves back.
-- During review, ↑ at the top of a card reaches the Decks / Sync buttons and ↓ at the bottom reaches Show Answer. The controller's A presses them, including from Practice questions.
-- On the deck preview, Enter or A starts studying, and the d-pad moves between its buttons.
-
-**Lectures**
-- Your weakest lectures, by Biweekly or End of block (Biweekly I, II, III in order), with a colour edge showing which need attention most.
-- It opens straight from the sidebar, works fully with arrows / the remote, and opens and closes groups smoothly.
-
-**Calendar**
-- Shows fewer days in narrow windows (a view you pick yourself still wins), with a cleaner narrow week view and a two-row top bar.
-- ↑ from the classes reaches ‹ › / Today, then Day / 3-day / Week.
+- Added support for arrow key / d-pad navigation. You can now use Onigiri entirely with a keyboard or remote.
+- Improved Calendar UI in smaller windows.
+- Integrated the Lecture Manager into the sidebar.
+- Hover animations and drag to reorder decks!
 
 **Everyone**
-- Practice questions no longer jump when you press Space, and the controller's Continue works without picking an answer.
-- Quitting hides the window at once (no blank glass window).
-- The first navigation sound after opening a page is no longer loud.
+- Fixed some minor bugs in the Lecture Manager.
 
 </details>
 
