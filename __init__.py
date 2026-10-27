@@ -531,7 +531,9 @@ def _startup():
                             from .src.integrations.qbank import _defer_from_review
                             if _defer_from_review(_qb_rec.reconcile_names):
                                 return    # answering a card: don't stall the next one
-                            _qb_rec.reconcile_names()
+                            # (opening / closing subdecks is a deck change too: run it a
+                            # moment later, once, not on the click)
+                            _qb_rec._later(_qb_rec._reconcile_later_cb)
                     except Exception:
                         pass
 
@@ -1811,6 +1813,22 @@ try:
     gui_hooks.profile_did_open.append(lambda: _fps_probe.install())
 except Exception as _sw_exc:
     log("stall_watch: %s" % _sw_exc)
+
+try:   # hide 0-px web views: under the uncapped frame rate they spin the compositor
+    from .src.util import zero_views as _zero_views
+    gui_hooks.profile_did_open.append(lambda: _zero_views.install())
+except Exception as _zv_exc:
+    log("zero_views: %s" % _zv_exc)
+
+try:   # no controller connected → nothing listens for one (battery; gamepad.py)
+    from .src.integrations import gamepad as _gp_gate
+    gui_hooks.profile_did_open.append(lambda: _gp_gate.start_controller_gate())
+
+    def _pad_flag(web_content, _context):
+        web_content.head = _gp_gate.pad_flag_js() + web_content.head
+    gui_hooks.webview_will_set_content.append(_pad_flag)
+except Exception as _gg_exc:
+    log("controller gate: %s" % _gg_exc)
 
 # Drag decks onto a row's top/bottom edge to reorder the deck list
 try:

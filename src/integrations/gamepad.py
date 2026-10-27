@@ -378,10 +378,15 @@ def _start_hid_monitor():
                                     kc = 126 if cur == 0 else 125
                                 else:
                                     kc = 123 if cur == 0 else 124
-                                fwd = bool(state._remote_active and not state._anki_focused)
+                                fwd = bool(state._remote_active and (not state._anki_focused or _contanki_warming()))
                                 keytap._gtap_log(f"[hid] dpad kc={kc} fwd={fwd}")
                                 if fwd:
                                     keytap._key_bridge.send_key.emit(kc)
+                                elif not state._anki_focused and not state._remote_active:
+                                    # background, no card up: navigate the page
+                                    keytap._key_bridge.page_key.emit(
+                                        {126: "ArrowUp", 125: "ArrowDown",
+                                         123: "ArrowLeft", 124: "ArrowRight"}[kc])
                     return
                 usage = int(IOKit.IOHIDElementGetUsage(elem))
                 ival = int(IOKit.IOHIDValueGetIntegerValue(value))
@@ -412,10 +417,46 @@ def _start_hid_monitor():
                         keytap._gtap_log(f"[hid] zoom button {usage}")
                         return
                 if ival == 1 and last != 1:   # rising edge = button down
-                    fwd = bool(state._remote_active and not state._anki_focused)
+                    # Contanki not reading the pad (its page wants a press to reveal the
+                    # pad, then ~0.5 s): that first press reached nobody — the deck
+                    # preview and a deck's first card needed B twice. Janki takes it.
+                    try:
+                        from . import review_nav as _rn
+                        c_idle = _rn.contanki_idle()
+                    except Exception:
+                        _rn, c_idle = None, False
+                    fwd = bool(state._remote_active and (not state._anki_focused
+                                                         or _contanki_warming() or c_idle))
                     kc = _hid_button_map().get(usage)
+                    # Deck preview: a face button always means Study Now, from Janki
+                    # (Contanki's B did nothing there, so the first press was lost)
+                    if (kc in (18, 19, 20, 21) and state._anki_focused and _rn is not None
+                            and not state._remote_active
+                            and getattr(mw, "state", None) == "overview"):
+                        _rn.hold_contanki()
+                        keytap._gtap_log(f"[hid] button {usage} → Study Now")
+                        keytap._key_bridge.send_key.emit(36)         # Enter on the preview
+                        return
+                    # Deck list (Kome / Calendar / Practice): the page's own pad reader can't
+                    # see the pad until a press reveals it, so that first press was lost (B
+                    # twice to open a deck). Not read lately → Janki presses Enter itself.
+                    if (kc in (18, 19, 20, 21) and state._anki_focused and _rn is not None
+                            and c_idle and not state._remote_active
+                            and getattr(mw, "state", None) == "deckBrowser"):
+                        _rn.hold_contanki()
+                        keytap._gtap_log(f"[hid] button {usage} → Enter on the deck list")
+                        keytap._key_bridge.page_key.emit("Enter")
+                        return
+                    # (review: the Contanki hold is set after the press is acted on —
+                    # keytap._practice_or_rate — set before, it swallowed that press)
                     keytap._gtap_log(f"[hid] button {usage} press kc={kc} fwd={fwd} "
                               f"remote={state._remote_active} focused={state._anki_focused}")
+                    if (kc in (18, 19, 20, 21) and not state._anki_focused
+                            and not state._remote_active):
+                        # background, no card up: a face button is Enter in the page
+                        # (open the selected deck, Study Now on the preview…)
+                        keytap._key_bridge.page_key.emit("Enter")
+                        return
                     if kc in (18, 19, 20, 21):
                         # Rating buttons: route through the main-thread practice
                         # router. On a Janki Practice question in remote mode it picks
@@ -529,3 +570,100 @@ def _stop_hid_monitor():
             th.join(timeout=0.1)
         if th.is_alive():
             keytap._gtap_log("[hid] monitor thread did not stop within 3s")
+
+
+# ---------------------------------------------------------------------------
+# Controller gate (battery): with no controller connected, nothing listens for one.
+# ---------------------------------------------------------------------------
+# A page with a gamepad listener (Contanki's hidden page, Janki's in-page reader) keeps
+# Chromium's controller polling thread running all the time, and App Nap prevention
+# keeps Anki awake in the background — both for a controller that isn't there. The IOKit
+# monitor above knows when one is plugged in (event-driven), so: connected → everything
+# on as before; none → Contanki's page hidden (a hidden page gets no pad data, so it
+# stops the polling), the pages' readers stopped, App Nap allowed. Only gates while the
+# HID monitor runs (otherwise connection is unknown and nothing is switched off).
+_gate_timer = None
+_gate_on = None              # last applied state (None = not applied yet)
+_gate_on_at = 0.0           # when the gate last turned on (Contanki's page waking)
+
+
+def _contanki_warming():
+    """True for 3 s after the gate turned on: Contanki's page is shown again but only
+    starts reading the pad ~0.5 s after its connect event, so a waking remote's first
+    presses reached nobody (B had to be pressed twice). Janki forwards them itself then
+    — Contanki isn't reading yet, so nothing fires twice. Read from the HID thread."""
+    import time
+    return _gate_on is True and time.monotonic() - _gate_on_at < 3.0
+
+
+def _allow_app_nap():
+    global _app_nap_token
+    if _app_nap_token is None:
+        return
+    try:
+        msg, cls = _bridge()
+        pi = msg(c_void_p, cls(b"NSProcessInfo"), b"processInfo")
+        msg(None, pi, b"endActivity:", (c_void_p,), (_app_nap_token,))
+        msg(None, _app_nap_token, b"release")
+    except Exception as e:
+        keytap._gtap_log(f"app nap end: {e}")
+    _app_nap_token = None
+
+
+def _contanki_views():
+    try:
+        from aqt.qt import QApplication
+        return [w for w in QApplication.allWidgets() if type(w).__name__ == "Contanki"]
+    except Exception:
+        return []
+
+
+def pad_flag_js():
+    """For a page's head: whether its controller reader starts (css._PAD_NAV_JS)."""
+    return "<script>window.__jkPadOff=%d;</script>" % (0 if _gate_on in (None, True) else 1)
+
+
+def _apply_gate(on):
+    global _gate_on
+    if on == _gate_on:
+        return
+    _gate_on = on
+    for w in _contanki_views():
+        try:
+            w.setVisible(on)
+        except Exception:
+            pass
+    js = ("window.__jkPadOff=0;window.__jkPadStart&&window.__jkPadStart();" if on else
+          "window.__jkPadOff=1;window.__jkPadStop&&window.__jkPadStop();")
+    for v in (getattr(mw, "web", None), getattr(mw, "bottomWeb", None),
+              getattr(getattr(mw, "toolbar", None), "web", None)):
+        try:
+            if v is not None:
+                v.eval(js)
+        except Exception:
+            pass
+    if on:
+        import time
+        global _gate_on_at
+        _gate_on_at = time.monotonic()
+        _prevent_app_nap()
+    else:
+        _allow_app_nap()
+    keytap._gtap_log("controller gate: %s" % ("on" if on else "off"))
+
+
+def _gate_tick():
+    if _hid_manager is None or _hid_shutting_down:
+        _apply_gate(True)            # can't tell → leave controllers working
+        return
+    _apply_gate(bool(is_controller_connected()))
+
+
+def start_controller_gate():
+    global _gate_timer
+    if sys.platform != "darwin" or _gate_timer is not None:
+        return
+    _gate_timer = QTimer(mw)
+    _gate_timer.timeout.connect(_gate_tick)
+    _gate_timer.start(250)          # a waking remote is picked up within ¼ s
+    QTimer.singleShot(500, _gate_tick)

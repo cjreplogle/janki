@@ -57,7 +57,10 @@ _JS = r"""<script>(function(){
  function place(e,animate){var g=ring(),r=e.getBoundingClientRect(),p=4;
    g.style.transition=animate?'':'none';
    g.style.width=(r.width+2*p)+'px';g.style.height=(r.height+2*p)+'px';
-   g.style.transform='translate('+(r.left+scrollX-p)+'px,'+(r.top+scrollY-p)+'px)';
+   // fixed + viewport coordinates: cards scroll in Janki's frame (#jk-sc), whose scroll
+   // window.scrollY reports — added to an absolute ring it pushed the ring below the
+   // answers by however far the card was scrolled
+   g.style.transform='translate('+(r.left-p)+'px,'+(r.top-p)+'px)';
    if(!animate){void g.offsetWidth;g.style.transition='';}}
  function sel(e){var c=cur();if(c)c.classList.remove('jp-kb');var g=ring();
    if(!e){g.style.opacity='0';return;}
@@ -125,7 +128,7 @@ _JS = r"""<script>(function(){
    if(window.jankiPickHighlighted()){ev.preventDefault();ev.stopImmediatePropagation();}},true);
 })();</script>
 <style>html.jk-kbnav .jp-choice{pointer-events:none;}
-#jk-pq-sel{position:absolute;left:0;top:0;pointer-events:none;z-index:50;
+#jk-pq-sel{position:fixed;left:0;top:0;pointer-events:none;z-index:50;
  border:2px solid rgba(156,188,243,.85);border-radius:10px;box-sizing:border-box;opacity:0;
  transition:transform .18s cubic-bezier(.2,.8,.2,1),width .18s cubic-bezier(.2,.8,.2,1),
  height .18s cubic-bezier(.2,.8,.2,1),opacity .15s ease;}</style>"""

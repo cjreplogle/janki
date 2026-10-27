@@ -2804,6 +2804,21 @@ class GlassSettings(QDialog):
         _anki_prefs.clicked.connect(_open_anki_prefs)
         _doc_row.addWidget(_anki_prefs)
 
+        # Windows hides Anki's menu bar (Alt shows it): Tools → Add-ons, one click away.
+        if sys.platform.startswith("win"):
+            _addons_btn = QPushButton("Add-ons…")
+            _addons_btn.setToolTip("Open Anki's add-ons manager (install, enable, configure).")
+            _addons_btn.setStyleSheet(_anki_prefs.styleSheet())
+
+            def _open_addons():
+                try:
+                    from aqt.addons import onAddonsDialog
+                    onAddonsDialog(mw)
+                except Exception as _e:
+                    log("addons dialog: %s" % _e)
+            _addons_btn.clicked.connect(_open_addons)
+            _doc_row.addWidget(_addons_btn)
+
         # No Close button — the window's own close (red X / Esc) ends the dialog. Save
         # the Lectures fields however it closes (finished fires for accept AND reject).
         def _save_on_close(*_a):

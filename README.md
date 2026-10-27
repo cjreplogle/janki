@@ -155,7 +155,16 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.13</b> · 2026-10-26 · 1 release</summary>
+<summary><b>2.13</b> · 2026-10-26 · 2 releases</summary>
+
+**2.13.1** · 2026-10-26
+
+- Using Janki with Onigiri no longer eats up as much of your battery.
+- Several performance improvements.
+- Removed a lot of jittering/flickering both on-launch and in reviews.
+- Patched a Contanki bug that when combined with the unlimited framerate would cause lag.
+- Simplified Manki card animations.
+- Janki + Onigiri now runs at 120 fps!
 
 **2.13.0** · 2026-10-26
 

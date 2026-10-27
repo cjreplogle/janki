@@ -43,7 +43,8 @@ _CACHE = Path.home() / ".janki_stock_cache"
 
 # Bump when the injected patch changes, so a cached .pyc from an older janki isn't
 # reused for the same Anki build.
-_PATCH_FMT = "v5"   # v3: 120 Hz flag; v4: rollback of .py too; v5: atexit clears the marker
+_PATCH_FMT = "v6"   # v3: 120 Hz flag; v4: rollback of .py too; v5: atexit clears the marker;
+                    # v6: GPU on (WebGL) with software compositing only
 
 # Crash-guard sentinels (in $HOME so they survive an Anki reinstall).
 _PENDING = Path.home() / ".janki_glass_pending"
@@ -101,7 +102,12 @@ _INIT_INJECT = (
     "            except Exception:\n"
     "                pass\n"
     "            _jos.environ.setdefault('ANKI_GLASS', '1')\n"
-    "            _jflags = ('--disable-gpu --disable-features=CalculateNativeWinOcclusion '\n"
+    # The glass needs software COMPOSITING only; leaving the GPU itself on keeps WebGL
+    # (3D cards). Old all-off behaviour without re-patching: ~/.janki_no_webgl
+    "            _jgpucomp = '--disable-gpu-compositing'\n"
+    "            if (_jhome / '.janki_no_webgl').exists():\n"
+    "                _jgpucomp = '--disable-gpu'\n"
+    "            _jflags = (_jgpucomp + ' --disable-features=CalculateNativeWinOcclusion '\n"
     "                       '--disable-renderer-backgrounding --disable-backgrounding-occluded-windows')\n"
     # Software compositing ticks at a fixed 60 Hz; lift that so ProMotion (120 Hz)
     # displays scroll/animate past 60. Off switch without re-patching: ~/.janki_60fps
@@ -438,7 +444,7 @@ def unpatch(purge: bool = True) -> int:
 
 # --- entry point ---------------------------------------------------------------
 
-_FMT_MARK = b"_jankiatexit"          # name used by the v5+ snippet (older ones get rebuilt)
+_FMT_MARK = b"_jgpucomp"             # name used by the v6+ snippet (older ones get rebuilt)
 
 
 _upgrade_started = False

@@ -2,7 +2,8 @@
 progress window (and busy cursor) is skipped; when Anki quits, the main window hides at
 once and the sync + backup finish with no progress windows. The sync itself is unchanged;
 Anki's own "synced" tooltip still reports the result, and any question it needs to ask
-(e.g. a full sync) still appears. Clicking Sync shows the window as usual.
+(e.g. a full sync) still appears. A sync started from the Sync button also runs without
+the window: a slim bar beside the Sync button shows it's running instead.
 Settings: `sync_in_background` (default on)."""
 from aqt import gui_hooks, mw
 
@@ -12,6 +13,64 @@ _pending = False     # profile just opened → the next sync is the automatic on
 _quiet = False       # that sync is running now
 _exit_at = 0.0       # when Quit was asked for (a cancelled quit expires)
 _exiting = False     # the close sync has started: everything until exit stays unseen
+_manual = False      # a Sync-button sync is running: no window, a bar by the button
+
+# Progress on the Sync button itself (Kome's sidebar row, the top bar, Onigiri's review
+# header — shadow roots included): a fill sweeps across behind the label while the sync
+# runs, easing toward ~90 % (Anki gives no real percentage), then completes and fades
+# when it's done. Transform / opacity only, so nothing around it moves.
+_BAR_JS = r"""(function(on){
+ function roots(r,out){out.push(r);(r.querySelectorAll?r.querySelectorAll('*'):[]).forEach(
+  function(e){if(e.shadowRoot)roots(e.shadowRoot,out);});return out;}
+ function txt(e){return (e&&e.textContent||'').trim();}
+ roots(document,[]).forEach(function(r){
+  if(on&&!r.getElementById('jk-syncfill-css')){var st=document.createElement('style');
+   st.id='jk-syncfill-css';st.textContent='.jk-sync-on{position:relative!important;}'
+   +'.jk-syncfill{position:absolute;top:50%;height:2px;margin-top:-1px;pointer-events:none;'
+   +'border-radius:1px;background:rgba(120,170,255,.85);transform-origin:left center;'
+   +'transform:scaleX(0);}';
+   (r.head||r).appendChild(st);}
+  if(on){
+   // the outermost element reading just "Sync" (the whole row / button, not its label)
+   r.querySelectorAll('*').forEach(function(e){
+    if(txt(e)!=='Sync'||txt(e.parentElement)==='Sync'||e.querySelector('.jk-syncfill'))return;
+    if(/^(STYLE|SCRIPT|TITLE)$/.test(e.tagName))return;
+    // the label itself (innermost element reading "Sync"): the line starts just past
+    // its last letter and runs to the row's right edge
+    var lab=e;while(true){var k=[].filter.call(lab.children,function(c){return txt(c)==='Sync';});
+     if(!k.length)break;lab=k[0];}
+    var rng=document.createRange();rng.selectNodeContents(lab);
+    var er=e.getBoundingClientRect(),lr=rng.getBoundingClientRect();
+    e.classList.add('jk-sync-on');var f=document.createElement('span');f.className='jk-syncfill';
+    f.style.left=Math.round(lr.right-er.left+8)+'px';f.style.right='32px';   // short of the row's status dot
+    e.appendChild(f);
+    // one continuous curve (a mid keyframe made a visible change of pace): quick at
+    // first, then slowing evenly toward 90 %
+    try{f.__a=f.animate([{transform:'scaleX(0)'},{transform:'scaleX(.9)'}],
+     {duration:14000,easing:'cubic-bezier(.15,.55,.25,1)',fill:'forwards'});}catch(x){}
+   });
+  }else{
+   r.querySelectorAll('.jk-syncfill').forEach(function(f){
+    var host=f.parentElement,from=getComputedStyle(f).transform;
+    if(f.__a)try{f.__a.cancel();}catch(x){}
+    function gone(){f.remove();if(host)host.classList.remove('jk-sync-on');}
+    // glide to full, then fade (two animations, so each keeps its own smooth easing)
+    try{var a=f.animate([{transform:from==='none'?'scaleX(0)':from},{transform:'scaleX(1)'}],
+     {duration:420,easing:'cubic-bezier(.2,.8,.2,1)',fill:'forwards'});
+     a.onfinish=function(){try{f.animate([{opacity:1},{opacity:0}],{duration:320,
+      easing:'ease-out',fill:'forwards'}).onfinish=gone;}catch(x){gone();}};}catch(x){gone();}
+   });
+  }
+ });})(ON)"""
+
+
+def _show_bar(on):
+    for w in (getattr(mw, "web", None), getattr(getattr(mw, "toolbar", None), "web", None)):
+        try:
+            if w is not None:
+                w.eval(_BAR_JS.replace("(ON)", "(true)" if on else "(false)"))
+        except Exception:
+            pass
 
 
 def _on_profile_open():
@@ -20,9 +79,15 @@ def _on_profile_open():
 
 
 def _on_sync_start():
-    global _pending, _quiet, _exiting
+    global _pending, _quiet, _exiting, _manual
     import time
+    # the deck list redrawn as a sync starts (Onigiri's sync-status dot) loads with no
+    # entry animations too, like the one after it finishes (css.py)
+    mw._jk_quiet_render = time.monotonic()
     _quiet, _pending = _pending, False
+    if not _quiet and _cfg().get("sync_in_background", True):
+        _manual = True
+        _show_bar(True)
     # the quit's own sync starts right after its windows close; a quit cancelled by a
     # window (unsaved Add, …) never gets here, and a later manual Sync is past this
     if _exit_at and time.monotonic() - _exit_at < 8:
@@ -36,12 +101,19 @@ def _on_sync_start():
 
 
 def _on_sync_done():
-    global _quiet
+    global _quiet, _manual
+    # the deck list Anki redraws after a sync loads with no entry animations (css.py):
+    # Kome's rise / fade replaying on an unchanged list read as a flicker
+    import time
+    mw._jk_quiet_render = time.monotonic()
     _quiet = _exiting
+    if _manual:
+        _manual = False
+        _show_bar(False)
 
 
 def _hidden():
-    return _quiet or _exiting
+    return _quiet or _exiting or _manual
 
 
 def install():

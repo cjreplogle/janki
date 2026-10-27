@@ -608,6 +608,12 @@ def _install_close_hook() -> None:
                     pass
                 _minimize_to_tray()
                 return
+            if self is mw:
+                try:    # really quitting: play the exit sound now, not after the
+                    from ..features import sfx    # profile closes (backup/sync)
+                    sfx.play_on_exit()
+                except Exception:
+                    pass
             return _orig(self, event)
 
         AnkiQt.closeEvent = _ce

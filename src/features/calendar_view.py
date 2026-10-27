@@ -339,17 +339,16 @@ def _week_html():
             title = html.escape(e["summary"])
             mbadge = "<span class='jkc-m' title='Mandatory'>%s</span>" % _STAR if e.get("mandatory") else ""
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
-            tip = html.escape(e["summary"] + (("\n→ " + m["display"]) if m else "\n(no lecture match)"))
             if e["start"] is None or _is_allday_kind(e["summary"]):
                 if e.get("_dress"):                # a notice, not a class: not clickable
                     # the dress code itself first (a shirt icon stands in for the
                     # "Dress code:" label, which used to push it off the chip)
                     val = re.sub(r"(?i)^dress\s*-?\s*code\s*[:\-–]?\s*", "", e["summary"])
-                    allday.append("<div class='jkc-ev jkc-ad jkc-dress' title='%s'>%s%s</div>"
-                                  % (title, _SHIRT, html.escape(val or e["summary"])))
+                    allday.append("<div class='jkc-ev jkc-ad jkc-dress'>%s%s</div>"
+                                  % (_SHIRT, html.escape(val or e["summary"])))
                     continue
-                allday.append("<div class='%s jkc-ad' data-i='%d' title='%s'>%s%s</div>"
-                              % (cls, i, tip, mbadge, title))
+                allday.append("<div class='%s jkc-ad' data-i='%d'>%s%s</div>"
+                              % (cls, i, mbadge, title))
                 continue
             top = 100.0 * (e["start"] - lo) / span           # % of the day: the grid
             h = 100.0 * (e["end"] - e["start"]) / span        # stretches to the window
@@ -358,9 +357,9 @@ def _week_html():
                    "left:calc(%.4f%% + 2px);right:auto;width:calc(%.4f%% - 4px);"
                    % (100.0 * ln / nl, 100.0 / nl))
             blocks.append(
-                "<div class='%s%s' data-i='%d' title='%s' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s'>"
+                "<div class='%s%s' data-i='%d' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s'>"
                 "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s%s</div>%s</div>"
-                % (cls, " jkc-narrow" if nl > 1 else "", i, tip, top, h, pos, mbadge, title,
+                % (cls, " jkc-narrow" if nl > 1 else "", i, top, h, pos, mbadge, title,
                    _hm(e["start"]), _hm(e["end"]), _tag_count_html(m),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         if d == today:                     # "now" line, kept current by the page's timer
@@ -1905,6 +1904,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-bar .jkc-next:active,.jkc-bar .jkc-next.press{transform:translateX(4px) scale(.86);}
 .jkc-ev.jk-kb{outline:2px solid rgba(255,255,255,.75);outline-offset:1px;}
 #jkc .jk-kbf{outline:2px solid rgba(255,255,255,.8) !important;outline-offset:2px;border-radius:8px;}
+#jkc .jkc-lbl.jk-kbf{outline-offset:6px;}
 .jkc-c{display:flex;align-items:center;gap:6px;}
 .jkc-c .jkc-lbl{margin:0 6px;min-width:9em;text-align:center;}
 .jkc-bar button{background:rgba(255,255,255,.08);color:inherit;border:none;border-radius:8px;
@@ -1915,8 +1915,11 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-grid{display:grid;grid-template-columns:52px repeat(var(--jkc-n,5),1fr);gap:0 6px;position:relative;padding-right:58px;  /* mirrors the hour column so the days sit centred */
   clip-path:inset(-40px 55px -40px -40px);  /* hour lines end with the last day, not in the margin */
   will-change:transform,opacity;}  /* layer made up front: first Day/3-day/Week zoom doesn't stall */
-#jkc .jkc-segs{position:relative;display:inline-flex;background:rgba(255,255,255,.06) !important;border-radius:9px;padding:2px;margin-right:6px;}
-.jkc-segs .jkc-seg{position:relative;z-index:1;white-space:nowrap;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;}
+#jkc .jkc-segs{position:relative;display:inline-flex;gap:3px;background:rgba(255,255,255,.06) !important;border-radius:10px;padding:3px;margin-right:6px;}
+/* even spacing: the outer gap (padding) matches the gap between options; the theme's
+   button margin / border / shadow made each option its own pill with uneven spacing */
+.jkc-segs .jkc-seg{position:relative;z-index:1;white-space:nowrap;background:transparent !important;padding:3px 10px;border-radius:7px;transition:color .2s ease;
+  margin:0 !important;border:none !important;box-shadow:none !important;}
 .jkc-segs .jkc-seg.on{color:#cfe0ff;}
 /* one pill behind the buttons that glides to the chosen view */
 #jkc .jkc-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
@@ -2080,9 +2083,13 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   mask-image:linear-gradient(to bottom,transparent 0,#000 16px,#000 calc(100% - 24px),transparent 100%);
   scrollbar-width:none;}
 #jkc .jkw .jkw-list::-webkit-scrollbar{display:none;width:0;height:0;}
-#jkc .jkw-seg .jkw-m{position:relative;z-index:1;transition:color .2s ease,opacity .2s ease;}
+#jkc .jkw-seg .jkw-m{position:relative;z-index:1;transition:color .2s ease,opacity .2s ease;
+  margin:0 !important;box-shadow:none !important;border:none !important;}
+/* the same 3 px inset all round the pill (Kome's button margins pushed it 6 px in from
+   the sides but 2 px from the top) */
+#jkc .jkw .jkw-seg{padding:3px;gap:0;}
 #jkc .jkw-seg.jkw-has-pill .jkw-m.on{background:transparent !important;}
-#jkc .jkw-pill{position:absolute;z-index:0;top:2px;bottom:2px;left:0;width:0;border-radius:7px;
+#jkc .jkw-pill{position:absolute;z-index:0;top:3px;bottom:3px;left:0;width:0;border-radius:7px;
   background:rgba(156,188,243,.28) !important;pointer-events:none;
   transition:transform .26s cubic-bezier(.2,.8,.2,1),width .26s cubic-bezier(.2,.8,.2,1);}
 #jkc .jkw-pbar{width:min(360px,70vw);height:5px;margin:10px auto 0;border-radius:3px;
@@ -2468,7 +2475,7 @@ _JS = """<script>(function(){
  // Two tiers: ‹ › / Today / wizard (↑ from the days), and above it the Day / 3-day /
  // Week switch — kept out of the first so ←/→ there don't wander into the views
  function barBtns(seg){return Array.prototype.filter.call(document.querySelectorAll(
-   seg?'#jkc .jkc-bar button.jkc-seg':'#jkc .jkc-bar button:not(.jkc-seg)'),
+   seg?'#jkc .jkc-bar button.jkc-seg, #jkc .jkc-bar .jkc-r button':'#jkc .jkc-bar .jkc-c button'),
    function(b){var r=b.getBoundingClientRect();return r.width>0&&r.height>0;})
    .sort(function(a,b){return a.getBoundingClientRect().left-b.getBoundingClientRect().left;});}
  function cols(){return Array.prototype.slice.call(
@@ -2485,7 +2492,8 @@ _JS = """<script>(function(){
  function sel(el){var c=document.querySelector('#jkc .jkc-ev.jk-kb');if(c)c.classList.remove('jk-kb');
    if(!el)markDay(null);
    if(el){el.classList.add('jk-kb');markDay(el.closest('.jkc-col'));try{pycmd('janki:sfx:move');}catch(x){}
-     var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}}
+     var r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight)el.scrollIntoView({block:'nearest'});}
+   if(window.__jkcPeek){if(c&&c!==el)window.__jkcPeek(c,false);if(el)window.__jkcPeek(el,true);}}
  document.addEventListener('keydown',function(e){
    // this script can be on the page twice (the Calendar block swapped in again): handle
    // each key once — two handlers moved two steps, so arrows skipped every other lecture
@@ -2540,15 +2548,23 @@ _JS = """<script>(function(){
    // pressed again and again), ↓ goes back down to the classes, ↑ on to the toolbar
    var bsel=document.querySelector('#jkc .jkc-bar .jk-kbf');
    if(bsel){
-     var tseg=bsel.classList.contains('jkc-seg');
+     var tseg=!bsel.closest('.jkc-c');
+     // on the date span itself: ←/→ page the view (no Enter on an arrow needed), and
+     // the span stays picked on the redrawn bar so you can keep going
+     if(bsel.classList.contains('jkc-lbl')&&(k==='ArrowLeft'||k==='ArrowRight')){e.preventDefault();
+       var dn=k==='ArrowRight'?'next':'prev';press('jkc-'+dn);jkcNav(dn);
+       [60,200,450].forEach(function(ms){setTimeout(function(){
+         if(document.querySelector('#jkc .jkc-bar .jk-kbf'))return;
+         var l=document.querySelector('#jkc .jkc-bar .jkc-lbl');if(l)l.classList.add('jk-kbf');},ms);});
+       return;}
      if(k==='ArrowLeft'||k==='ArrowRight'){e.preventDefault();var bb=barBtns(tseg),bi=bb.indexOf(bsel),
          bn=bb[Math.max(0,Math.min(bb.length-1,bi+(k==='ArrowRight'?1:-1)))];
        if(bn&&bn!==bsel)kbPick(bn);return;}
      // down into the days: today if it's showing, else the first day — its top class,
      // or the day itself when it has none (paging with ‹ › often lands on empty days,
      // and picking "the first class" then selected nothing)
-     if(k==='ArrowDown'&&tseg){e.preventDefault();var nx2=document.querySelector('#jkc .jkc-bar .jkc-next');
-       if(nx2)kbPick(nx2);return;}
+     if(k==='ArrowDown'&&tseg){e.preventDefault();var lb2=document.querySelector('#jkc .jkc-bar .jkc-lbl');
+       if(lb2)kbPick(lb2);return;}
      if(k==='ArrowUp'&&!tseg){e.preventDefault();
        var sg=document.querySelector('#jkc .jkc-bar .jkc-seg.on')||barBtns(true)[0];
        if(sg){kbPick(sg);return;}}
@@ -2577,10 +2593,16 @@ _JS = """<script>(function(){
                document.querySelector('#jkc .jkc-seg.on').getAttribute('data-k')==='3';
      selAfter=three?(right?'last':'first'):(right?'first':'last');selRef=ref;
      var d=right?'next':'prev';press(d==='next'?'jkc-next':'jkc-prev');jkcNav(d);return;}
-   var all=evs(), c=document.querySelector('#jkc .jkc-ev.jk-kb'), i=c?all.indexOf(c):-1;
+   // ↑/↓ stay within the selected day (they used to run on into the day before / after,
+   // so ↑ from the top of Tuesday landed on Monday's last class instead of the arrows):
+   // ↑ from its first event (or an empty day) goes up to the ‹ › bar
+   var c=document.querySelector('#jkc .jkc-ev.jk-kb'),
+       day=c?c.closest('.jkc-col'):document.querySelector('#jkc .jkc-col.jk-kbday'),
+       all=evs().filter(function(x){return !day||x.closest('.jkc-col')===day;}),
+       i=c?all.indexOf(c):-1;
    if(k==='ArrowDown'){e.preventDefault();if(all.length)sel(all[Math.min(all.length-1,i+1)]);return;}
    if(k==='ArrowUp'){e.preventDefault();if(i<=0){sel(null);
-       var nx=document.querySelector('#jkc .jkc-bar .jkc-next');if(nx)kbPick(nx);else pycmd('janki:toolbar');}
+       var lb=document.querySelector('#jkc .jkc-bar .jkc-lbl');if(lb)kbPick(lb);else pycmd('janki:toolbar');}
      else sel(all[i-1]);return;}
    if((k==='Enter'||k===' ')&&c){e.preventDefault();
      pycmd('janki:cal:ev:'+c.getAttribute('data-i'));}
@@ -2681,6 +2703,48 @@ _JS = """<script>(function(){
    var ev=e.target.closest&&e.target.closest('.jkc-ev:not(.jkc-dress)'); if(!ev)return;
    pycmd('janki:cal:ev:'+ev.getAttribute('data-i'));
  },true);
+ // An event too short for its text: hovered (or picked with the arrows) for a moment,
+ // its text scrolls up inside the box to show the rest; back to the top on leaving.
+ // All-day chips (the dress code…) are one line: theirs scrolls sideways instead.
+ // (an 8 ms timer, not rAF: rAF spins under the unlimited frame rate)
+ if(!window.__jkcPeek){var pk=null;
+  function X(ev){return ev.classList.contains('jkc-ad');}
+  function over(ev){return X(ev)?ev.scrollWidth-ev.clientWidth:ev.scrollHeight-ev.clientHeight;}
+  function pos(ev,v){if(v===undefined)return X(ev)?ev.scrollLeft:ev.scrollTop;
+   if(X(ev))ev.scrollLeft=v;else ev.scrollTop=v;}
+  // after a few seconds at the end (or after the last wheel step) it goes back on its own
+  function later(ev){clearTimeout(ev.__pkR);ev.__pkR=setTimeout(function(){window.__jkcPeek(ev,false);},3000);}
+  window.__jkcPeek=function(ev,on){clearTimeout(ev.__pkD);clearInterval(ev.__pkT);clearTimeout(ev.__pkR);
+   // the ellipsis would scroll along with the text: clip while it's shown
+   if(on&&X(ev)&&over(ev)>=1)ev.style.setProperty('text-overflow','clip','important');
+   var go=function(){var to=on?Math.max(0,over(ev)):0,from=pos(ev),
+     done=function(){if(on)later(ev);else ev.style.removeProperty('text-overflow');};
+    if(Math.abs(to-from)<1)return done();
+    if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches){pos(ev,to);return done();}
+    // a short reveal (one line) still takes its time: below ~0.7 s it read as a jump
+    var dur=Math.min(1600,Math.max(700,400+Math.abs(to-from)*(X(ev)?14:12))),t0=performance.now();
+    ev.__pkT=setInterval(function(){var p=Math.min(1,(performance.now()-t0)/dur),
+     k=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;pos(ev,from+(to-from)*k);
+     if(p>=1){clearInterval(ev.__pkT);done();}},8);};
+   if(on)ev.__pkD=setTimeout(go,220);else go();};
+  document.addEventListener('mouseover',function(e){
+   var ev=e.target.closest&&e.target.closest('#jkc .jkc-ev');if(ev===pk)return;
+   if(pk)window.__jkcPeek(pk,false);pk=ev;if(ev)window.__jkcPeek(ev,true);},true);
+  // the wheel over a cut-off event scrolls its text (the page's own wheel handler
+  // skips an event already handled here)
+  document.addEventListener('wheel',function(e){
+   var ev=e.target.closest&&e.target.closest('#jkc .jkc-ev');
+   if(!ev||over(ev)<1||e.ctrlKey)return;
+   clearTimeout(ev.__pkD);clearInterval(ev.__pkT);e.preventDefault();
+   if(X(ev))ev.style.setProperty('text-overflow','clip','important');
+   var d=Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY,
+     k=e.deltaMode===1?16:(e.deltaMode===2?(X(ev)?ev.clientWidth:ev.clientHeight):1);
+   pos(ev,Math.max(0,Math.min(over(ev),pos(ev)+d*k)));later(ev);
+  },{capture:true,passive:false});
+  // Kome: the Calendar fits the window, so its page stays at the top (an arrow-key
+  // scrollIntoView or a stray scroll could still move it under overflow:hidden)
+  addEventListener('scroll',function(){var b=document.body,se=document.scrollingElement;
+   if(b&&b.classList.contains('jk-cal')&&se&&se.scrollTop)se.scrollTop=0;});}
 })();</script>"""
 
 

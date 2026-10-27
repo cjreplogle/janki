@@ -172,6 +172,8 @@ _FOCUS_CSS = (
     # The answer bar is hidden here, so lift the bottom-left controls (reword toggle,
     # practice slide button) off the very edge of the screen.
     "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:14px!important;}"
+    # resource hint buttons (Sketchy, Pixorize, ...) and their lifted top row
+    "#jk-hints,.hintBtn{display:none!important;}"
 )
 # Onigiri: its reviewer header (pills + progress) hides with the rest of the chrome, and
 # the inline `margin-top: <header height> !important` it puts on #qa (beats any style
@@ -225,7 +227,9 @@ def _fade_chrome(wv, visible: bool) -> None:
     Calendar. (QGraphicsOpacityEffect renders black on QWebEngineView/macOS, so it's
     done inside the page; height is toggled instantly by the caller — GPU-cheap, no
     per-frame relayout.)"""
-    dy = "-6px" if wv is getattr(mw, "toolbarWeb", None) else "6px"
+    # the answer bar only fades: its buttons stay put (sliding them in from below made
+    # their position feel unsteady); the top bar keeps its small slide
+    dy = "-6px" if wv is getattr(mw, "toolbarWeb", None) else "0px"
     try:
         if visible:
             wv.eval("(function(){var b=document.body;if(!b)return;"
@@ -909,9 +913,12 @@ function badge(im,qa){if(/anking|logo|badge|icon/i.test((im.getAttribute('src')|
   (im.alt||'')+' '+(im.className||'')+' '+(im.id||'')))return true;
  for(var n=im;n&&n!==qa;n=n.parentElement){var p=getComputedStyle(n).position;
   if(p==='fixed'||p==='absolute')return true;}return false;}
-function fit(){var qa=document.getElementById('qa');if(!qa)return;
- var W=qa.clientWidth||innerWidth;
+// A photo already on screen is never resized automatically (it should appear at its
+// final size and stay there); only a change of window WIDTH (force) refits it.
+function fit(force){var qa=document.getElementById('qa');if(!qa)return;
+ var W=qa.clientWidth||innerWidth,todo=[];
  qa.querySelectorAll('img').forEach(function(im){
+  if(!force&&on&&im.hasAttribute('data-jk-fit-shown')&&im.dataset.jkFit)return;
   if(!on||io(im)||badge(im,qa)){if(im.dataset.jkFit){['width','height','max-width','max-height'].forEach(function(p){
     im.style.removeProperty(p);});delete im.dataset.jkFit;}return;}
   var nw=im.naturalWidth,nh=im.naturalHeight;
@@ -921,23 +928,69 @@ function fit(){var qa=document.getElementById('qa');if(!qa)return;
   // than the card), else the card's
   var box=im.parentElement,bw=0;while(box&&box!==qa&&!bw){var cs=getComputedStyle(box);
    if(cs.display!=='inline'&&cs.display!=='contents')bw=box.clientWidth;box=box.parentElement;}
-  // the view's top can be reserved (Onigiri's header / the centring pad, __jkFitPad):
-  // size for the height that's actually left
-  var avail=Math.max(120,innerHeight-(window.__jkFitPad||0));
-  var w=Math.min(bw||W,W,avail*H/Z*nw/nh);
-  // with a reserved top (Onigiri), also keep the WHOLE card on screen: the photo gets
-  // the height left after the card's other content (text above / below it)
-  if(window.__jkFitPad){var qh=qa.getBoundingClientRect().height,
-   ih=im.getBoundingClientRect().height,left=avail-16-(qh-ih);
-   if(left>=N*Z&&ih>0&&qh<3*innerHeight)w=Math.min(w,left/Z*nw/nh);}
+  todo.push({im:im,nw:nw,nh:nh,bw:bw});});
+ // the view's top can be reserved (Onigiri's header / the centring pad, __jkFitPad):
+ // size for the height that's actually left
+ var avail=Math.max(120,innerHeight-(window.__jkFitPad||0));
+ todo.forEach(function(t){t.w=Math.min(t.bw||W,W,avail*H/Z*t.nw/t.nh);});
+ // with a reserved top (Onigiri), also keep the WHOLE card on screen, photos sized
+ // TOGETHER: photos side by side share a row (its tallest counts), stacked rows add
+ // up (a note type that puts its photos beside the text stacks them in a narrow
+ // window, and each one fitted alone made the card twice the window's height)
+ // (every card, not only with a reserved top: on a Practice question without one the
+ // photo took 78 % of the height and pushed B–D off the bottom)
+ if(todo.length){
+  var rows={},rowH={},sum=0,cur=0;
+  // only photos actually on screen: ones in a closed section (Show all / More Info)
+  // have no box and counted as a full extra row, shrinking the visible one; they're
+  // refitted when their section opens (the observer below)
+  var shown=todo.filter(function(t){return t.im.getClientRects().length>0;});
+  shown.forEach(function(t){var r=t.im.getBoundingClientRect(),k=Math.round(r.top/8);
+   rows[k]=Math.max(rows[k]||0,r.height);rowH[k]=Math.max(rowH[k]||0,t.w*Z*t.nh/t.nw);});
+  for(var k in rows){cur+=rows[k];sum+=rowH[k];}
+  // room: the view's height less the card's own padding / margins (a fixed 40 px — not
+  // its measured top: the card is centred, so as it shrank its top moved down and it
+  // shrank again)
+  var qh=qa.getBoundingClientRect().height,other=qh-cur,left=avail-40-other;
+  // the shrink only ever tightens for this card + window size: re-measuring after
+  // a write regrouped the rows and swung the size back and forth (flicker)
+  var key=innerWidth+'x'+innerHeight+'|'+todo.map(function(t){return t.im.src;}).join(',');
+  if(window.__jkFitKey!==key){window.__jkFitKey=key;window.__jkFitF=1;}
+  var f=1;if(sum>0&&left<sum&&qh<4*innerHeight)f=Math.max(left,N*Z)/sum;
+  f=Math.min(f,window.__jkFitF);window.__jkFitF=f;
+  if(f<1)shown.forEach(function(t){t.w*=f;});}
+ todo.forEach(function(t){var im=t.im,w=Math.floor(t.w);
   // !important: note types (AnKing's Extra) size their images with their own rules
-  if(im.dataset.jkFit&&im.style.width===Math.floor(w)+'px')return;   // unchanged: no write, no loop
-  im.style.setProperty('width',Math.floor(w)+'px','important');
+  if(im.dataset.jkFit&&im.style.width===w+'px')return;   // unchanged: no write, no loop
+  im.style.setProperty('width',w+'px','important');
   im.style.setProperty('height','auto','important');
   im.style.setProperty('max-width','100%','important');
   im.style.setProperty('max-height','none','important');
   im.dataset.jkFit=1;});}
-fit();setTimeout(fit,120);
+// A new card's photos stay invisible until their size is final, then fade in: no size
+// change you can see. Two quick passes, then one fresh fit from full size (an early
+// measure can see a taller card, and the shrink-only rule above would keep it small).
+if(!document.getElementById('jk-fit-css')){var fc=document.createElement('style');fc.id='jk-fit-css';
+ fc.textContent='#qa img:not([data-jk-fit-shown]){opacity:0!important;}';(document.head||document.documentElement).appendChild(fc);}
+// (the rule hides any card image not yet marked shown, so a new photo is hidden from
+// its very first frame; images this doesn't size show at once)
+function show(im,fade){if(im.hasAttribute('data-jk-fit-shown'))return;im.setAttribute('data-jk-fit-shown','1');
+ if(fade)try{im.animate([{opacity:0},{opacity:1}],{duration:160,easing:'ease-out'});}catch(e){}}
+function holdNew(){var qa=document.getElementById('qa');if(!qa)return;
+ qa.querySelectorAll('img').forEach(function(im){var nw=im.naturalWidth,nh=im.naturalHeight;
+  if(!on||io(im)||badge(im,qa)||(nw&&nh&&nw<M&&nh<N))show(im,false);});}
+function reveal(){var qa=document.getElementById('qa');if(!qa)return;
+ qa.querySelectorAll('img').forEach(function(im){show(im,true);});}
+holdNew();fit();setTimeout(fit,90);
+// A Practice question's answers appear by their own animation after the card: until
+// they take room, the photo would be sized as if alone (it filled the window and hid
+// B–D). Wait for them (≤1.5 s), then the fresh fit, then show.
+setTimeout(function(){(function settle(n){var cb=document.getElementById('jp-choices');
+ if(cb&&n<13){var c1=cb.querySelector('.jp-choice');
+  if(!c1||c1.getBoundingClientRect().height<4||cb.getBoundingClientRect().height<20){
+   setTimeout(function(){settle(n+1);},100);return;}}
+ window.__jkFitF=1;fit();reveal();})(0);},250);
+setTimeout(reveal,1800);   // safety: never leave a photo hidden (after the Practice wait)
 // photos in sections that open later (AnKing's Extra / hint buttons) or load late
 // Fit RIGHT AWAY too (observer callbacks run before the next paint): the back's
 // photos otherwise drew at full size first, Anki scrolled to the answer with those
@@ -945,18 +998,32 @@ fit();setTimeout(fit,120);
 // Only changes that involve images count: the text reveal makes hundreds of DOM/style
 // changes per card, and fitting on each one held up the answer appearing.
 function hasImg(n){return n&&n.nodeType===1&&(n.tagName==='IMG'||(n.querySelector&&n.querySelector('img')));}
+// Its own writes (a fitted photo's style) don't count: with photos sized together a
+// refit can move them, regroup the rows and refit again — an endless loop that froze the
+// card page (Space then never showed the answer: Anki waits on the page to reply).
 function relevant(rs){for(var i=0;i<rs.length;i++){var r=rs[i];
  if(r.type==='childList'){for(var j=0;j<r.addedNodes.length;j++)if(hasImg(r.addedNodes[j]))return true;}
- else if(r.target&&!(r.target.getAttribute&&r.target.getAttribute('data-jtw'))&&hasImg(r.target))return true;}
+ else if(r.target&&!(r.target.getAttribute&&r.target.getAttribute('data-jtw'))
+  &&!(r.target.tagName==='IMG'&&r.attributeName==='style')&&hasImg(r.target))return true;}
  return false;}
+// and a hard cap: at most 8 refits a second, whatever triggers them
+var fitN=0,fitT=0;function budget(){var n=performance.now();if(n-fitT>1000){fitT=n;fitN=0;}return ++fitN<=8;}
 if(!window.__jkFitMo){window.__jkFitMo=1;var mt;new MutationObserver(function(rs){
- if(!window.__jkFitOn||!window.__jkFit||!relevant(rs))return;
+ // images added later (hint buttons, AMBOSS) are revealed after their fit: the page
+ // rule hides any card image not yet marked shown
+ if(!window.__jkFitOn){window.__jkFitReveal&&window.__jkFitReveal();return;}
+ if(!window.__jkFit||!relevant(rs))return;
+ if(!budget()){setTimeout(function(){window.__jkFitReveal&&window.__jkFitReveal();},200);return;}
  window.__jkFit();clearTimeout(mt);
- mt=setTimeout(function(){window.__jkFitOn&&window.__jkFit&&window.__jkFit();},60);})
+ mt=setTimeout(function(){window.__jkFitOn&&window.__jkFit&&window.__jkFit();
+  window.__jkFitReveal&&window.__jkFitReveal();},60);})
  .observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});}
-if(!window.__jkFitRs){window.__jkFitRs=1;var t;addEventListener('resize',function(){
- clearTimeout(t);t=setTimeout(function(){window.__jkFitOn&&fit();},100);});}
-window.__jkFitOn=on;window.__jkFit=fit;
+// only a WIDTH change refits photos already shown (Focus Mode hiding the bars only
+// makes the page taller, and that resized photos in front of you)
+if(!window.__jkFitRs){window.__jkFitRs=1;var t,lw=innerWidth;addEventListener('resize',function(){
+ if(innerWidth===lw)return;lw=innerWidth;
+ clearTimeout(t);t=setTimeout(function(){window.__jkFitOn&&window.__jkFit&&window.__jkFit(true);},100);});}
+window.__jkFitOn=on;window.__jkFit=fit;window.__jkFitReveal=reveal;
 })(__ON__);"""
 
 

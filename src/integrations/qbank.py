@@ -173,6 +173,31 @@ def _trash_dir():
     return os.path.join(_qbanks_dir(), ".trash")
 
 
+_later_pending = set()
+
+
+def _reconcile_later_cb(*_a):
+    reconcile_names()
+
+
+def _later(fn, ms=1200):
+    """Run fn(None, None) once, ms from now (repeat calls in that time merge)."""
+    if fn in _later_pending:
+        return
+    _later_pending.add(fn)
+
+    def go():
+        _later_pending.discard(fn)
+        try:
+            fn(None, None)
+        except TypeError:
+            fn()
+        except Exception as e:
+            log("qbank later: %s" % e)
+    from aqt.qt import QTimer
+    QTimer.singleShot(ms, go)
+
+
 def _banks_with_cards():
     """Set of bank ids that currently have at least one Janki Practice note."""
     m = mw.col.models.by_name(_MODEL_NAME)
@@ -283,6 +308,11 @@ def sync_banks_with_cards(changes=None, handler=None):
     global _banks_seen
     if changes is not None and not (getattr(changes, "deck", False)
                                     or getattr(changes, "note", False)):
+        return
+    # Deck-only change (opening / closing subdecks writes each deck's collapsed flag):
+    # check a moment later, once, not on the click — the scan held up the deck list
+    if changes is not None and not getattr(changes, "note", False):
+        _later(sync_banks_with_cards)
         return
     # Answering a card fires this too (deck counts change) and the full card scan
     # stalled the next card ~40ms+. Banks can't vanish mid-review, so catch up once

@@ -551,6 +551,9 @@ _WHEEL_JS = (
     # the Calendar's Lectures page: only its list scrolls — at the list's end the wheel
     # stops there (scrolling the page instead slid the Biweekly / End of block tabs up)
     "if(t&&t.closest&&t.closest('#jkc .jkw')){e.preventDefault();return;}\n"
+    # the Calendar inside Kome fits the window: the page itself never scrolls (inner
+    # lists that can still scroll were let through by innerCan above)
+    "if(document.body&&document.body.classList.contains('jk-cal')){e.preventDefault();return;}\n"
     "e.preventDefault();var k=e.deltaMode===1?16:(e.deltaMode===2?innerHeight:1);\n"
     "var d=coast(despike(e.deltaY*k))*SENS;\n"
     "if(d)feed(d);},{passive:false});\n"
@@ -902,7 +905,7 @@ _PAD_NAV_JS = r"""(function(){
    if(on&&!last[id]){key(k);held[id]=t+380;}
    else if(on&&k!=='Enter'&&held[id]&&t>=held[id]){key(k);held[id]=t+90;}
    if(!on)held[id]=0; last[id]=on;}
- var seeded=false;
+ var seeded=false,lastAct=0;
  function tick(){
    var ps=navigator.getGamepads?navigator.getGamepads():[];
    var mine=document.hasFocus();
@@ -910,12 +913,15 @@ _PAD_NAV_JS = r"""(function(){
    // brought us here (A on a deck → the preview), not a new one — it went straight
    // on through the next page (the deck preview started studying by itself)
    if(!seeded){seeded=true;for(var q=0;q<ps.length;q++){var G=ps[q];if(!G)continue;
-     var B=function(n){return !!(G.buttons[n]&&G.buttons[n].pressed);},A=G.axes||[];
+     var B=function(n){return (n<12||G.mapping==='standard')&&!!(G.buttons[n]&&G.buttons[n].pressed);},A=G.axes||[];
      last[q+'u']=B(12)||(A[1]||0)<-0.5;last[q+'d']=B(13)||(A[1]||0)>0.5;
      last[q+'l']=B(14)||(A[0]||0)<-0.5;last[q+'r']=B(15)||(A[0]||0)>0.5;
      last[q+'a']=B(0)||B(1)||B(2)||B(3);}}
    for(var i=0;i<ps.length;i++){var g=ps[i];if(!g)continue;
-     var b=function(n){return !!(g.buttons[n]&&g.buttons[n].pressed);};
+     // buttons 12–15 are the d-pad only in the browser's standard layout; on other pads
+     // (the 8BitDo remote: its d-pad is the axes) they're other keys — the heart button
+     // came through as 12 and acted as ↑
+     var b=function(n){return (n<12||g.mapping==='standard')&&!!(g.buttons[n]&&g.buttons[n].pressed);};
      var ax=g.axes||[], x=ax[0]||0, y=ax[1]||0;
      // Not focused: remember what's held instead of forgetting it. Focus passes
      // between views (toolbar ↔ deck list) WHILE the d-pad is still down, and a
@@ -931,9 +937,25 @@ _PAD_NAV_JS = r"""(function(){
    // with no controller. Poll at ~60 Hz only while a pad is connected and we have
    // focus; otherwise check once a second.
    var any=false;for(var j=0;j<ps.length;j++){if(ps[j]){any=true;break;}}
-   setTimeout(tick, any?(mine?16:100):1000);}
- window.addEventListener('gamepadconnected',function(){setTimeout(tick,0);});
- tick();
+   // 60 Hz only for 2 s after the pad was last touched (held d-pad repeats, quick
+   // presses), 20 Hz while it rests: a connected but idle pad read at 60 Hz kept the
+   // page busy (and the Mac warm) for the whole review
+   var act=false;for(var q2 in last){if(last[q2]){act=true;break;}}
+   if(act)lastAct=Date.now();
+   var hot=Date.now()-lastAct<2000;
+   tmr=setTimeout(tick, any?(mine?(hot?16:50):150):1000);}
+ // Gated on a controller being connected (gamepad.py's watcher, window.__jkPadOff):
+ // a gamepad listener or getGamepads() call kept Chromium's controller polling thread
+ // running all the time, with no controller. Started after load, so the page's flag
+ // (set in its head) is in place.
+ var on=false,tmr=0,onConn=function(){clearTimeout(tmr);tmr=setTimeout(tick,0);};
+ var tick0=tick;tick=function(){if(!on)return;tick0();};
+ window.__jkPadStart=function(){if(on)return;on=true;seeded=false;
+   window.addEventListener('gamepadconnected',onConn);tick();};
+ window.__jkPadStop=function(){on=false;clearTimeout(tmr);
+   window.removeEventListener('gamepadconnected',onConn);};
+ function go(){if(!window.__jkPadOff)window.__jkPadStart();}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();
 })();"""
 
 _OVERVIEW_KEYS_JS = r"""(function(){
@@ -1650,8 +1672,8 @@ def _build_css(cfg, context):
             parts.append(
                 "<style>@media (prefers-reduced-motion: no-preference){"
                 "body{animation:jkBarIn %dms cubic-bezier(.2,.8,.2,1) both;}}"
-                "@keyframes jkBarIn{from{opacity:0;transform:translateY(6px)}"
-                "to{opacity:1;transform:none}}</style>\n"
+                # fade only: the bar's buttons keep one fixed position
+                "@keyframes jkBarIn{from{opacity:0}to{opacity:1}}</style>\n"
                 % max(300, int(cfg.get("first_card_fade_ms", 220)) + 150))
         # A new deck/overview strip page fades in (stats_embed swaps do the same)
         if isinstance(context, (DeckBrowserBottomBar, OverviewBottomBar)):
@@ -1768,6 +1790,13 @@ def _build_css(cfg, context):
                 "#middle center, #middle table, #middle tbody, #middle tr, #middle td {\n"
                 "  display:contents !important; }\n"
                 "#middle button { flex:1 1 0 !important; }\n"
+                # Onigiri locks each answer button to the width it measured when drawn
+                # (--onigiri-answer-button-width): after a resize (going fullscreen)
+                # they stayed that size, each stuck at the left of its quarter. Fill.
+                "#outer #middle td:has(> button[data-onigiri-ease]) { flex:1 1 0 !important;"
+                " min-width:0 !important; }\n"
+                "#outer #middle button[data-onigiri-ease] { flex:1 1 0 !important;"
+                " width:100% !important; min-width:0 !important; max-width:none !important; }\n"
                 "#outer button { padding:6px 14px !important; min-width:0 !important;"
                 " white-space:nowrap !important; }\n"
                 # Fullscreen: reveal Edit/More as equal side cells (keeps #middle centred).
@@ -1780,11 +1809,18 @@ def _build_css(cfg, context):
                 "body.janki-fs #innertable > tbody > tr > td:last-child {\n"
                 "  justify-content:flex-end !important; }\n"
                 # Fullscreen answer side: hide them again so ease buttons fill.
-                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]) > td:first-child,\n"
-                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]) > td:last-child {\n"
+                # (not with Practice's Continue: it stands where Show Answer did, and the
+                # freed side cells made it wider than Show Answer)
+                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]):not(:has(#jp-continue-bar)) > td:first-child,\n"
+                "body.janki-fs #innertable > tbody > tr:has(button[data-ease]):not(:has(#jp-continue-bar)) > td:last-child {\n"
                 "  display:none !important; }\n"
                 "</style>\n"
             )
+            # Answer buttons (Onigiri's solid colours): a little see-through on glass, and
+            # a quick fade in instead of popping in. Onigiri's sheet pins
+            # `animation:none !important` on them, so the fade is a script animation; its
+            # colours are !important too, so the translucent one goes on inline.
+            parts.append(_EASE_GLASS_JS)
         parts.append(bottom_round)
     elif isinstance(context, Overview) and screens.get("overview", True):
         # Space / Enter (or the remote's face button) = Study Now.
@@ -2342,6 +2378,16 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        // leave the already-seen front instantly visible.\n"
         "        if(marker && !(marker.compareDocumentPosition(n) & 4)) continue;\n"
         "        o.push([n,n.nodeValue]); }\n"
+        # Note types whose back is their own layout (no <hr id=answer>, e.g. Manki):
+        # text already shown on the question side shows at once — only what's new types.
+        # The question side's text is remembered when it's typed (side from jkWrap).
+        "      var key=function(v){return v.replace(/\\s+/g,' ').trim();};\n"
+        "      if(window.__jkSide==='_showQuestion'){ var seen={};\n"
+        "        o.forEach(function(x){var k=key(x[1]);if(k)seen[k]=(seen[k]||0)+1;});\n"
+        "        window.__jkQSeen=seen; }\n"
+        "      else if(window.__jkSide==='_showAnswer' && !marker && window.__jkQSeen){\n"
+        "        var left=Object.assign({},window.__jkQSeen);\n"
+        "        o=o.filter(function(x){var k=key(x[1]);if(k&&left[k]>0){left[k]--;return false;}return true;}); }\n"
         "      return o; }\n"
         "    function outerSig(){ var c=qa.cloneNode(true), cs=c.querySelectorAll('.cloze');\n"
         "      for(var i=0;i<cs.length;i++){ cs[i].textContent=''; }\n"
@@ -2535,6 +2581,9 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # jumping between card versions swaps instantly with NO type animation (the bottom-
         # left toggle button, a client-side swap, is unaffected and still animates).
         "      if(window.__jkNoType){ window.__jkNoType=0; setSig(s); reveal(); return; }\n"
+        # Same card + side re-rendered with no answer in between (Focus Mode, level
+        # switch, style re-apply): Python marks it (_tw_mark_repeat) → just show it.
+        "      if(qa.querySelector('[data-jk-same]')){ fresh=false; docFirst=false; setSig(s); reveal(); return; }\n"
         # PREV_HASH = last card Python actually animated (survives a full re-render/
         # new document, unlike window.name). getSig() = same-document/reload guard.
         # Either match → this exact card content already animated → just reveal.
@@ -2575,7 +2624,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # Every real card show (question or answer) animates, even mid-reveal or when
         # the text matches the previous card (a relearning card shown again).
         "    function jkWrap(name){ var o=window[name]; if(typeof o!=='function'||o.__jkw) return;\n"
-        "      var w=function(){ gen++; if(animating){ animating=false;\n"
+        "      var w=function(){ window.__jkSide=name; gen++; if(animating){ animating=false;\n"
         "          if(JK_NOHALO) document.body.classList.remove('jk-tw-active'); }\n"
         "        fresh=!docFirst; try{ observer.observe(qa,{childList:true}); }catch(e){}\n"
         "        return o.apply(this, arguments); };\n"
@@ -3045,8 +3094,182 @@ _WIN_TOOLBAR_DRAG_JS = (
     "if(bare(e))pycmd('jkwin:max');},true);})();")
 
 
+# A deck / bank name cut off with "…": hovered (or picked with the arrows / d-pad) for a
+# moment (pointer on the name itself), it slides sideways to show the rest, and back after 1.8 s or on leaving; the
+# wheel scrolls it too. Names that fit never move. (8 ms timer: rAF spins at 120 Hz+)
+_NAME_PEEK_JS = r"""<script>(function(){if(window.__jkNamePeek)return;window.__jkNamePeek=1;
+ var SEL='.ad-list-name-text, a.deck .jk-dn, a.deck';
+ function over(el){return el.scrollWidth-el.clientWidth;}
+ function nameIn(n){var c=n&&n.querySelectorAll?[].slice.call(n.querySelectorAll(SEL)):[];
+   if(n&&n.matches&&n.matches(SEL))c.unshift(n);
+   for(var i=0;i<c.length;i++)if(over(c[i])>=1)return c[i];return null;}
+ function later(el){clearTimeout(el.__pkR);el.__pkR=setTimeout(function(){peek(el,false);},1800);}
+ function peek(el,on){clearTimeout(el.__pkD);clearInterval(el.__pkT);clearTimeout(el.__pkR);
+  if(on)el.style.setProperty('text-overflow','clip','important');
+  var go=function(){var to=on?Math.max(0,over(el)):0,from=el.scrollLeft,
+    done=function(){if(on)later(el);else el.style.removeProperty('text-overflow');};
+   if(Math.abs(to-from)<1)return done();
+   if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches){el.scrollLeft=to;return done();}
+   var dur=Math.min(2000,Math.max(350,Math.abs(to-from)*20)),t0=performance.now();
+   el.__pkT=setInterval(function(){var p=Math.min(1,(performance.now()-t0)/dur),
+    k=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;el.scrollLeft=from+(to-from)*k;
+    if(p>=1){clearInterval(el.__pkT);done();}},8);};
+  if(on)el.__pkD=setTimeout(go,500);else go();}
+ var hv=null;
+ // the pointer has to be on the name itself, not just its row
+ function under(t){var n=t&&t.closest?t.closest(SEL):null;return n?nameIn(n):null;}
+ // real pointer movement only: Focus Mode resizes the page under a still cursor, and
+ // the browser's synthetic hover over whatever name lands there replayed the slide
+ document.addEventListener('mousemove',function(e){if(!e.movementX&&!e.movementY)return;
+  var el=under(e.target);
+  if(el===hv)return;if(hv)peek(hv,false);hv=el;if(el)peek(el,true);},true);
+ document.addEventListener('mouseout',function(e){if(hv&&!e.relatedTarget){peek(hv,false);hv=null;}},true);
+ document.addEventListener('wheel',function(e){var el=under(e.target);
+  if(!el||e.ctrlKey||Math.abs(e.deltaX)<=Math.abs(e.deltaY))return;
+  clearTimeout(el.__pkD);clearInterval(el.__pkT);e.preventDefault();
+  el.style.setProperty('text-overflow','clip','important');
+  el.scrollLeft=Math.max(0,Math.min(over(el),el.scrollLeft+e.deltaX));later(el);
+ },{capture:true,passive:false});
+ // the arrow keys / d-pad select a row with .jk-kb-row. Only a change to THAT class is
+ // looked at (measuring names on every class change held up the page while it built)
+ var kb=null;
+ function kbOf(c){return /(^|\s)jk-kb-row(\s|$)/.test(c||'');}
+ // the row that last slid, by name, kept across redraws: Focus Mode re-renders the list
+ // (or drops and restores .jk-kb-row), and the same row coming back shouldn't replay
+ function key(el){return el?(el.textContent||'').trim():'';}
+ function lastKey(v){try{if(v===undefined)return sessionStorage.getItem('jkPeekKb')||'';
+  sessionStorage.setItem('jkPeekKb',v);}catch(_){}return '';}
+ new MutationObserver(function(ms){
+  for(var i=0;i<ms.length;i++){var m=ms[i];
+   if(kbOf(m.oldValue)!==kbOf(m.target.getAttribute('class'))){
+    var r=document.querySelector('.jk-kb-row'),el=r?nameIn(r):null;
+    if(r&&key(r)===lastKey()){kb=el;return;}   // same row restored: no replay
+    if(r)lastKey(key(r));
+    if(el!==kb){if(kb)peek(kb,false);kb=el;if(el)peek(el,true);}return;}}})
+  .observe(document.documentElement,{subtree:true,attributes:true,attributeOldValue:true,
+   attributeFilter:['class']});
+})();</script>"""
+
+
+# After a same-card rebuild: once the card is in, slide it from its old on-screen top
+# (measured on the old page) to where it now sits — transform only.
+_REBUILD_GLIDE_JS = (
+    "(function(){var Y=%f;function go(){var qa=document.getElementById('qa');"
+    "if(!qa||!qa.childNodes.length){return setTimeout(go,16);}"
+    "setTimeout(function(){var dy=Y-qa.getBoundingClientRect().top;"
+    "if(Math.abs(dy)<1||typeof qa.animate!=='function')return;"
+    "qa.animate([{transform:'translateY('+dy+'px)'},{transform:'none'}],"
+    "{duration:220,easing:'cubic-bezier(.2,.8,.2,1)'});},60);}"
+    "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);"
+    "else go();})();"
+)
+
+
+_EASE_GLASS_JS = r"""<script>(function(){if(window.__jkEase)return;window.__jkEase=1;
+ var A=0.62;
+ function tint(b){if(b.__jkTint)return;var c=getComputedStyle(b).backgroundColor,
+   m=c.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/);if(!m)return;b.__jkTint=1;
+  var v='rgba('+m[1]+','+m[2]+','+m[3]+','+A+')';
+  b.style.setProperty('background',v,'important');b.style.setProperty('background-color',v,'important');}
+ function scan(){var bs=document.querySelectorAll('#outer button[data-onigiri-ease],#outer button[data-ease]');
+  var fresh=[];bs.forEach(function(b){if(b.closest('.jk-out'))return;
+   tint(b);if(!b.__jkIn){b.__jkIn=1;fresh.push(b);}});
+  var sa=document.getElementById('ansbut');if(sa&&!sa.__jkIn){sa.__jkIn=1;fresh.push(sa);}
+  if(fresh.length&&!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))
+   // minimal crossfade: the outgoing copy is gone in 160 ms; the new buttons start near
+   // its end (held at 0 until then), so the two barely overlap
+   fresh.forEach(function(b){try{b.animate([{opacity:0},{opacity:1}],
+    {duration:260,delay:120,fill:'backwards',easing:'cubic-bezier(.2,.8,.2,1)'});}catch(e){}});}
+ // Out: Anki swaps the bar's buttons in one step (showAnswer → #middle.innerHTML, also
+ // used by showQuestion), so the outgoing ones are copied over the same spot and fade
+ // out there while the new ones fade in. The copy ignores the pointer; no delay added.
+ // Edit / More (the bar's side cells) come and go with the swap too (fullscreen shows them
+ // on the question side only): the whole row is copied, so they fade out with the old
+ // buttons; ones that stay are left out of the copy (no dip), new ones fade in.
+ function sides(tr){return [].filter.call(tr.children,function(td){return td.id!=='middle'&&!td.classList.contains('jk-out');});}
+ function wrap(){var o=window.showAnswer;if(typeof o!=='function'||o.__jk)return;
+  var w=function(){var m=document.getElementById('middle'),tr=m&&m.parentElement,c=null,before=[];
+   var rm=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+   if(tr&&m.children.length&&!rm){
+    before=sides(tr).map(function(td){return td.offsetParent!==null;});
+    var r=tr.getBoundingClientRect();c=tr.cloneNode(true);
+    c.querySelectorAll('[id]').forEach(function(x){if(x.id!=='middle')x.removeAttribute('id');});
+    // border-box: the copy is given the real row's outer size; without it padding was
+    // added on top and the buttons in it sat a couple of px off
+    c.style.cssText='position:fixed;margin:0;pointer-events:none;z-index:5;box-sizing:border-box;'
+     +'left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px;';
+    c.classList.add('jk-out');tr.parentNode.insertBefore(c,tr.nextSibling);
+    // each copied button is pinned at the exact screen spot and size of the one it
+    // copies (fixed, so the copy's own layout can't move it: laid out by the copy, the
+    // buttons came out wider and Easy slid outward as it faded)
+    var ob=[].slice.call(tr.querySelectorAll('button')),cbs=[].slice.call(c.querySelectorAll('button'));
+    ob.forEach(function(o,i){var q=cbs[i];if(!q)return;var R=o.getBoundingClientRect();
+     if(!R.width){q.style.setProperty('display','none','important');return;}
+     [['position','fixed'],['left',R.left+'px'],['top',R.top+'px'],['width',R.width+'px'],
+      ['min-width',R.width+'px'],['max-width',R.width+'px'],['height',R.height+'px'],
+      ['margin','0'],['flex','none'],['transform','none']].forEach(function(kv){
+       q.style.setProperty(kv[0],kv[1],'important');});});}
+   var res=o.apply(this,arguments);
+   if(tr){var cs=c?sides(c):[];
+    sides(tr).forEach(function(td,i){var now=td.offsetParent!==null;
+     if(now&&before[i]){if(cs[i])cs[i].style.visibility='hidden';}      // stays: not in the copy
+     else if(now&&!before[i]&&!rm){try{td.animate([{opacity:0},{opacity:1}],
+      {duration:260,delay:120,fill:'backwards',easing:'cubic-bezier(.2,.8,.2,1)'});}catch(e){}}});}
+   if(c){try{c.animate([{opacity:1},{opacity:0}],{duration:160,easing:'ease-out',fill:'forwards'})
+     .onfinish=function(){c.remove();};}catch(e){c.remove();}}
+   return res;};
+  w.__jk=1;window.showAnswer=w;}
+ function go(){wrap();scan();new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});}
+ if(document.body)go();else document.addEventListener('DOMContentLoaded',go);
+})();</script>
+"""
+
+
+_HINT_BAR = (
+    "<style>#jk-hints{position:fixed;top:8px;left:50%;transform:translateX(-50%);"
+    "z-index:50;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;"
+    "max-width:80vw;pointer-events:auto;}"
+    "#jk-hints button{font-size:11px!important;padding:2px 9px!important;margin:0!important;"
+    "border-radius:999px!important;line-height:1.4!important;min-height:0!important;"
+    "opacity:.55;transition:opacity .15s ease;}"
+    "#jk-hints button:hover,#jk-hints button.jk-on{opacity:1;}"
+    "#jk-hints button img{height:10px!important;}"
+    "</style><script>(function(){"
+    "function lift(){var qa=document.getElementById('qa');if(!qa)return;"
+    "var bs=qa.querySelectorAll('.hintBtn > button');"
+    "var bar=document.getElementById('jk-hints');"
+    "if(bar)bar.remove();if(!bs.length)return;"
+    "bar=document.createElement('div');bar.id='jk-hints';"
+    "bs.forEach(function(b){bar.appendChild(b);});document.body.appendChild(bar);}"
+    "function watch(){var qa=document.getElementById('qa');if(!qa){setTimeout(watch,50);return;}"
+    "new MutationObserver(function(){if(qa.querySelector('.hintBtn > button'))lift();"
+    "else{var b=document.getElementById('jk-hints');if(b&&!qa.querySelector('.hintBtn'))b.remove();}})"
+    ".observe(qa,{childList:true,subtree:true});lift();}"
+    "watch();"
+    "})();</script>\n"
+)
+
+
 def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> None:
     try:
+        # Resource hint buttons (AnKing note types: Sketchy, Pixorize, Bootcamp, ...) sat
+        # mid-card in big pills. Lift just the buttons into a small fixed row at the top;
+        # their hint content stays in place and still toggles via the buttons' onclick.
+        # Independent of the glass look / Onigiri, so it's added before those gates.
+        if isinstance(context, Reviewer):
+            web_content.head += _HINT_BAR
+            # A rebuild of the SAME card (Onigiri focus level switch) asks for no
+            # type-out / fade, set in the new page itself (an eval after _initWeb() can
+            # land on the old page while the new one loads). Here, before the Onigiri
+            # gate below, which returns early for Onigiri-drawn reviewers. The card also
+            # glides from where it sat on the old page instead of jumping to its new spot.
+            if getattr(mw, "_janki_no_type_once", False):
+                mw._janki_no_type_once = False
+                y = getattr(mw, "_janki_flip_from", None)
+                mw._janki_flip_from = None
+                web_content.head = ("<script>window.__jkNoType=1;window.__jkNoFade=1;"
+                                    + (_REBUILD_GLIDE_JS % float(y) if y is not None else "")
+                                    + "</script>" + web_content.head)
         # Onigiri's own windows (settings, dialogs) load with no context: recognise them
         # by their Onigiri resources and leave them untouched (the glass strip erased
         # its theme previews).
@@ -3101,6 +3324,24 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # 1:1 wheel scrolling on the deck list / Practice AND on cards (same 120 Hz misfire)
         if isinstance(context, Reviewer):
             web_content.head = _CARD_FRAME_JS + _IMG_RIM_JS + web_content.head
+
+        if isinstance(context, DeckBrowser):
+            web_content.head += _NAME_PEEK_JS
+            # the redraw right after a sync: no entry animations / transitions, so an
+            # unchanged list doesn't replay Kome's rise-in (a flicker); back on after
+            import time as _t
+            # (within 3 s of a sync starting or finishing; not cleared on use, as a sync
+            # start can redraw the list more than once)
+            if _t.monotonic() - (getattr(mw, "_jk_quiet_render", 0) or 0) < 3:
+                # (entry animations stay off for this page: lifting them after load
+                # started Kome's rise-in from opacity 0 — the charts, already up,
+                # blinked out and faded back. Only the transitions come back.)
+                web_content.head = (
+                    "<style id='jk-quiet-anim'>*,*::before,*::after{animation:none!important;}</style>"
+                    "<style id='jk-quiet'>*,*::before,*::after{transition:none!important;}</style>"
+                    "<script>addEventListener('load',function(){setTimeout(function(){"
+                    "var q=document.getElementById('jk-quiet');if(q)q.remove();},400);});</script>"
+                    + web_content.head)
         if _db or isinstance(context, Reviewer):
             web_content.head = _SCROLL_STATE_JS + _WHEEL_JS + web_content.head
         elif isinstance(context, DeckBrowser):
@@ -3183,6 +3424,36 @@ def _on_reviewer_answered(reviewer, card, ease):
 
 if hasattr(gui_hooks, "reviewer_did_answer_card"):
     gui_hooks.reviewer_did_answer_card.append(_on_reviewer_answered)
+
+
+# Type out each card side ONCE per showing. Focus Mode, Onigiri level switches and
+# style re-applies re-render the card that's already up, and every render replayed
+# the typewriter. A render of the same card + side with no answer in between carries
+# a marker, and the typewriter just shows it. Answering (or undoing) starts a new
+# showing, so a relearning card that comes back still types out.
+_tw_show = {"n": 0, "last": None}
+
+
+def _tw_bump(*_a):
+    _tw_show["n"] += 1
+
+
+def _tw_mark_repeat(text, card, kind):
+    if not str(kind).startswith("review"):
+        return text
+    key = (getattr(card, "id", None), kind, _tw_show["n"])
+    if key == _tw_show["last"]:
+        return text + '<span data-jk-same hidden></span>'
+    _tw_show["last"] = key
+    return text
+
+
+gui_hooks.card_will_show.append(_tw_mark_repeat)
+if hasattr(gui_hooks, "reviewer_did_answer_card"):
+    gui_hooks.reviewer_did_answer_card.append(_tw_bump)
+for _h in ("state_did_undo", "reviewer_will_end"):
+    if hasattr(gui_hooks, _h):
+        getattr(gui_hooks, _h).append(_tw_bump)
 
 
 def _jp_bury():

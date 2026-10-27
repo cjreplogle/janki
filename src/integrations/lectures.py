@@ -678,6 +678,11 @@ def _ak_tag_index():
         # Those huge OR searches (one regexp per term over every note) were what
         # lagged Anki on the AnKing deck.
         for i, seg in enumerate(segs):
+            # Skip the deck root (#AK_Step1_v12) and the source (#B&B): neither is a
+            # concept, and a sheet line that boiled down to the root resolved to
+            # `tag:#AK_Step1_v12` — every AnKing card (a lecture showed 31k cards).
+            if i < 2:
+                continue
             leaf = key_cache.get(seg)
             if leaf is None:
                 leaf = key_cache[seg] = _leaf_key(seg)

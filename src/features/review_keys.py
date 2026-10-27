@@ -119,7 +119,11 @@ class _BarKeys(QObject):
                 tw = getattr(getattr(mw, "toolbar", None), "web", None)
                 # the bottom bar while it has a selection, or the toolbar (arrow-key
                 # navigating up there): Enter opens the selected item, not the card
-                if (_bar_active and inside(getattr(mw, "bottomWeb", None))) or inside(tw):
+                # …or review_nav has a top pill (Decks…) / bar button selected: its page
+                # script presses it on Enter, but Anki's reveal shortcut took the key first
+                from ..integrations import review_nav
+                if ((_bar_active and inside(getattr(mw, "bottomWeb", None))) or inside(tw)
+                        or (review_nav._mode and inside(getattr(mw, "web", None)))):
                     ev.accept()
         except Exception:
             pass

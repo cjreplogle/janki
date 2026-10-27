@@ -311,9 +311,18 @@ def on_js_message(handled, message, context):
     return handled
 
 
+_exit_played = False
+
+
 def play_on_exit():
     """Quitting: Anki is gone within milliseconds, which would cut a QSoundEffect off —
-    so hand the exit sound to the system player, which outlives the app."""
+    so hand the exit sound to the system player, which outlives the app. Played once:
+    the red X plays it the moment it's pressed, and aboutToQuit (seconds later, after
+    the profile closes) is the fallback for other ways out."""
+    global _exit_played
+    if _exit_played:
+        return
+    _exit_played = True
     c = _cfg()
     vol = int(c.get("sfx_volume", 0))
     if vol <= 0 or c.get("sfx_muted") or not c.get("sfx_nav", True) \
@@ -382,6 +391,11 @@ def install():
         pass
     try:
         mw.app.aboutToQuit.connect(play_on_exit)
+    except Exception:
+        pass
+    try:    # the red X plays the exit sound on press (hook is shared with the tray)
+        from ..system import tray
+        tray._install_close_hook()
     except Exception:
         pass
     try:

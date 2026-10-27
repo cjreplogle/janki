@@ -9,7 +9,7 @@ arrangement in Onigiri's layout editor is left alone.
 import os
 
 from aqt import gui_hooks, mw
-from aqt.qt import Qt, QTimer
+from aqt.qt import Qt, QTimer, QObject, QEvent
 
 from ..util import compat
 from ..util.config import log
@@ -247,7 +247,9 @@ document.documentElement.addEventListener('mouseleave',off);window.addEventListe
 _KOME_SLIDE_JS = r"""<script>(function(){if(window.__jkSlide)return;window.__jkSlide=1;
 /* Only right after a click on a deck's chevron: Kome's own first render hides collapsed
    rows the same way, and animating that read as a flicker open-then-closed on launch. */
-var armed=0,busy=new WeakSet(),E='cubic-bezier(.32,.72,0,1)',D=280;
+// 180 ms, quick out: the 280 ms curve crawled at its end, and on the glass every frame of
+// a height slide re-lays the whole list on the CPU — it read as a hang
+var armed=0,busy=new WeakSet(),E='cubic-bezier(.2,.8,.2,1)',D=180;
 document.addEventListener('click',function(e){if(e.target.closest&&e.target.closest('.ad-list-chev'))
  armed=Date.now();},true);
 if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
@@ -257,10 +259,8 @@ function box(r){var cs=getComputedStyle(r);return {h:r.getBoundingClientRect().h
 function run(r,from,to,done){r.style.overflow='hidden';r.style.boxSizing='border-box';
  var a=r.animate([from,to],{duration:D,easing:E});
  a.onfinish=a.oncancel=function(){r.style.overflow='';r.style.boxSizing='';if(done)done();};}
-function zero(){return {height:'0px',paddingTop:'0px',paddingBottom:'0px',opacity:0,
- transform:'translateY(-4px)'};}
-function full(b){return {height:b.h+'px',paddingTop:b.pt,paddingBottom:b.pb,opacity:1,
- transform:'none'};}
+function zero(){return {height:'0px',paddingTop:'0px',paddingBottom:'0px',opacity:0};}
+function full(b){return {height:b.h+'px',paddingTop:b.pt,paddingBottom:b.pb,opacity:1};}
 function grow(r){var b=box(r);if(!b.h)return;run(r,zero(),full(b));}
 function shrink(r){busy.add(r);r.classList.remove('ad-list-row-hidden');var b=box(r);
  run(r,full(b),zero(),function(){r.classList.add('ad-list-row-hidden');
@@ -478,6 +478,68 @@ def _wrap_kome() -> None:
         calendar_view._page_html = _page_html
 
 
+# Hold a sidebar grid button ~0.8 s and it lifts: drag it onto another cell to swap
+# places (the rest glide into their new cells), let go to drop. The order is saved to
+# Janki's config (janki_oni:order:) and used on every redraw. The click that ends a drag
+# is swallowed, so the button isn't pressed as well. Transforms only (no layout shift
+# while dragging besides the swap itself).
+_KOME_GRID_DRAG_JS = r"""<script>(function(){if(window.__jkGridDrag)return;
+ var HOLD=800;
+ window.__jkGridDrag=function(g){if(g.__jkDrag)return;g.__jkDrag=1;
+  var t=null,it=null,sx=0,sy=0,live=false,eat=false,over=null;
+  function cells(){return [].filter.call(g.children,function(x){return x.classList.contains('ba-side-item');});}
+  // FLIP: start each moved cell from where it is ON SCREEN now (mid-slide included),
+  // then drop the old slide and glide from there to its new cell
+  function flip(fn){var cs=cells().filter(function(c){return c!==it;}),
+    r0=cs.map(function(c){return c.getBoundingClientRect();});
+   cs.forEach(function(c){if(c.__jkA){c.__jkA.cancel();c.__jkA=null;}});fn();
+   cs.forEach(function(c,i){var r=c.getBoundingClientRect(),
+     dx=r0[i].left-r.left,dy=r0[i].top-r.top;if(Math.abs(dx)<.5&&Math.abs(dy)<.5)return;
+     c.__jkA=c.animate([{transform:'translate('+dx+'px,'+dy+'px)'},{transform:'none'}],
+       {duration:260,easing:'cubic-bezier(.2,.8,.2,1)'});});}
+  // stay under the pointer: offsetLeft/Top are the cell's layout spot (transform-free),
+  // which changes as it swaps cells
+  function follow(e){var dx=e.clientX-sx-(it.offsetLeft-it.__jkB[0]),dy=e.clientY-sy-(it.offsetTop-it.__jkB[1]);
+   it.style.transform='translate('+dx+'px,'+dy+'px) scale(1.06)';}
+  function end(){clearTimeout(t);t=null;
+   if(live){live=false;eat=true;setTimeout(function(){eat=false;},400);
+    it.style.transition='transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s ease';
+    it.style.transform='';it.classList.remove('jk-lift');g.classList.remove('jk-reorder');
+    it.style.pointerEvents='';
+    var x=it;setTimeout(function(){x.style.transition='';x.style.zIndex='';},200);
+    try{pycmd('janki_oni:order:'+JSON.stringify(cells().map(function(c){return c.getAttribute('data-cmd');})));}catch(_){}}
+   it=null;}
+  g.addEventListener('pointerdown',function(e){if(e.button!==0)return;
+   var b=e.target.closest&&e.target.closest('.ba-side-item');if(!b||b.parentNode!==g)return;
+   it=b;sx=e.clientX;sy=e.clientY;
+   t=setTimeout(function(){t=null;live=true;it.__jkB=[it.offsetLeft,it.offsetTop];
+    it.style.transform='scale(1.06)';it.style.pointerEvents='none';over=it;it.style.zIndex='5';it.classList.add('jk-lift');g.classList.add('jk-reorder');
+    try{pycmd('janki:sfx:select');}catch(_){}},HOLD);});
+  document.addEventListener('pointermove',function(e){if(!it)return;
+   if(!live){if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)>8){clearTimeout(t);t=null;it=null;}return;}
+   e.preventDefault();
+   // (the lifted button ignores the pointer, so this finds the cell under it)
+   var o=document.elementFromPoint(e.clientX,e.clientY),c=o&&o.closest?o.closest('.ba-side-item'):null;
+   if(c&&c.__jkA&&c.__jkA.playState==='running')c=null;   // still sliding in
+   if(c!==over){over=c;}else c=null;
+   if(c&&c!==it&&c.parentNode===g){var cs=cells(),a=cs.indexOf(it),b=cs.indexOf(c);
+    flip(function(){g.insertBefore(it,a<b?c.nextSibling:c);});
+    try{pycmd('janki:sfx:move');}catch(_){}}
+   follow(e);},{passive:false});
+  document.addEventListener('pointerup',end);document.addEventListener('pointercancel',end);
+  document.addEventListener('click',function(e){if(eat&&g.contains(e.target)){
+   e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();eat=false;}},true);
+  // no text selection / native drag while holding
+  g.addEventListener('dragstart',function(e){e.preventDefault();});
+ };
+})();</script>
+<style>.ba-side-actions-grid .ba-side-item{user-select:none;-webkit-user-select:none;}
+.jk-reorder .ba-side-item{transition:opacity .2s ease!important;}
+.ba-side-actions-grid .ba-side-item.jk-lift{position:relative;cursor:grabbing;
+ box-shadow:0 8px 22px rgba(0,0,0,.35);background:var(--rf-row-hover)!important;}
+.jk-reorder .ba-side-item:not(.jk-lift){opacity:.8;transition:opacity .2s ease;}</style>"""
+
+
 def _kome_nav_js() -> str:
     """Janki's Calendar / Practice / Load Lectures / Settings as buttons in Kome's
     sidebar action grid, built like Kome's own (same classes, masked icon)."""
@@ -498,9 +560,18 @@ def _kome_nav_js() -> str:
         svg = (_SVG % body).replace("black", "#000")
         items.append({"label": label, "cmd": cmd,
                       "icon": "data:image/svg+xml," + _up.quote(svg)})
-    return ("<script>(function(){var ITEMS=%s,ACTIVE=%s;"
+    default = ["decks", "janki_oni:calendar", "janki_oni:practice", "janki_oni:weak",
+               "browse", "create", "import", "add"]
+    try:
+        from ..util.config import _cfg
+        saved = [c for c in (_cfg().get("kome_sidebar_order") or []) if isinstance(c, str)]
+    except Exception:
+        saved = []
+    order = saved + [c for c in default if c not in saved]
+    # (the drag helper first: the grid script below calls it as soon as it runs)
+    return _KOME_GRID_DRAG_JS + ("<script>(function(){var ITEMS=%s,ACTIVE=%s,ORDER=%s;"
             "function add(){var g=document.querySelector('.ba-side-actions-grid');"
-            "if(!g)return false;if(g.querySelector('[data-jk]'))return true;"
+            "if(!g)return false;if(g.querySelector('[data-jk]')){g.setAttribute('data-jk-done','1');return true;}"
             "var ref=g.children[2]||null;"
             "ITEMS.forEach(function(it){var b=document.createElement('button');b.type='button';"
             "b.className='ba-side-item';b.setAttribute('data-jk','1');"
@@ -514,14 +585,15 @@ def _kome_nav_js() -> str:
             "if(it.cmd==='janki_oni:weak'){var st=g.querySelector('[data-cmd=\"stats\"]');"
             "if(st){g.insertBefore(b,st);st.remove();return;}}"
             "g.insertBefore(b,ref);});"
-            # the grid's order (two columns): Decks · Calendar / Practice · Lectures /
-            # Browse · Add / New deck · Import File — anything else after
-            "['decks','janki_oni:calendar','janki_oni:practice','janki_oni:weak','browse','add',"
-            "'create','import'].forEach(function(c){var x=g.querySelector('[data-cmd=\"'+c+'\"]');"
+            # the grid's order (two columns): the one saved by a long-press drag (below),
+            # else Decks · Calendar / Practice · Lectures / Browse · New deck /
+            # Import File · Add — anything else after
+            "ORDER.forEach(function(c){var x=g.querySelector('[data-cmd=\"'+c+'\"]');"
             "if(x)g.appendChild(x);});"
             "[].slice.call(g.children).forEach(function(x){var c=x.getAttribute('data-cmd');"
-            "if(['decks','janki_oni:calendar','janki_oni:practice','janki_oni:weak','browse','add',"
-            "'create','import'].indexOf(c)<0)g.appendChild(x);});"
+            "if(ORDER.indexOf(c)<0)g.appendChild(x);});"
+            "window.__jkGridDrag&&__jkGridDrag(g);"
+            "g.setAttribute('data-jk-done','1');"
             "if(ACTIVE){[].forEach.call(document.querySelectorAll('.ba-side-item[data-active]'),"
             "function(x){x.removeAttribute('data-active');});"
             "var a=g.querySelector('[data-cmd=\"'+ACTIVE+'\"]');if(a)a.setAttribute('data-active','true');}"
@@ -529,7 +601,8 @@ def _kome_nav_js() -> str:
             # Kome's bottom rows: its Settings is Onigiri's ("Onigiri Settings"), with
             # "Janki Settings" always right below it (a copy of that row).
             "function foot(){var s=document.querySelector('.ba-side-foot .ba-side-settings');"
-            "if(!s)return false;if(document.querySelector('.ba-side-foot [data-jk-set]'))return true;"
+            "if(!s)return false;if(document.querySelector('.ba-side-foot [data-jk-set]')){"
+            "var f0=s.closest('.ba-side-foot');if(f0)f0.setAttribute('data-jk-done','1');return true;}"
             "var lab=function(b,t){var l=b.querySelector('.ba-side-l-text')||b.querySelector('.ba-side-l');"
             "if(l)l.textContent=t;else{[].forEach.call(b.childNodes,function(n){"
             "if(n.nodeType===3&&n.textContent.trim())n.textContent=t;});}};"
@@ -539,8 +612,26 @@ def _kome_nav_js() -> str:
             "lab(s,'Onigiri Settings');lab(j,'Janki Settings');"
             "j.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();"
             "pycmd('janki_oni:settings');});"
-            "s.parentNode.insertBefore(j,s.nextSibling);return true;}"
-            "if(!add()){var n=0,t=setInterval(function(){if(add()||++n>100)clearInterval(t);},50);}"
+            "s.parentNode.insertBefore(j,s.nextSibling);"
+            "var ft=s.closest('.ba-side-foot');if(ft)ft.setAttribute('data-jk-done','1');return true;}"
+            # Run as soon as Kome's grid / foot exist, from a MutationObserver (its
+            # callback runs before the next paint): polling every 50 ms let Kome's own
+            # order (and plain "Settings") show for a frame when the sidebar redrew after a
+            # sync. Both stay invisible until arranged (CSS below), with a 3 s safety.
+            "var css=document.createElement('style');css.textContent="
+            "'.ba-side-actions-grid:not([data-jk-done]),.ba-side-foot:not([data-jk-done])"
+            "{visibility:hidden!important;}';"
+            "(document.head||document.documentElement).appendChild(css);"
+            # safety: a grid / foot this can't arrange (Kome changed) shows after 3 s
+            "setInterval(function(){[].forEach.call(document.querySelectorAll("
+            "'.ba-side-actions-grid:not([data-jk-done]),.ba-side-foot:not([data-jk-done])'),"
+            "function(x){if(!x.__jkSeen){x.__jkSeen=performance.now();return;}"
+            "if(performance.now()-x.__jkSeen>3000)x.setAttribute('data-jk-done','1');});},500);"
+            "add();"
+            "if(window.MutationObserver)new MutationObserver(function(){"
+            "var g=document.querySelector('.ba-side-actions-grid:not([data-jk-done])');if(g)add();"
+            "var f=document.querySelector('.ba-side-foot:not([data-jk-done])');if(f)foot();})"
+            ".observe(document.documentElement,{childList:true,subtree:true});"
             # the Calendar swaps pages in place (week ↔ Lectures list ↔ a class) without a
             # redraw, so the active item follows what's on screen
             "function sync(){var j=document.getElementById('jkc');if(!j)return;"
@@ -551,8 +642,8 @@ def _kome_nav_js() -> str:
             "function(x){x.removeAttribute('data-active');});a.setAttribute('data-active','true');}"
             "if(window.MutationObserver)new MutationObserver(sync).observe(document.documentElement,"
             "{childList:true,subtree:true});setTimeout(sync,0);"
-            "if(!foot()){var m=0,u=setInterval(function(){if(foot()||++m>100)clearInterval(u);},50);}"
-            "})();</script>") % (json.dumps(items), json.dumps(active))
+            "foot();"
+            "})();</script>") % (json.dumps(items), json.dumps(active), json.dumps(order))
 
 
 # Janki's deck-list hover + arrow-key / d-pad nav, rebuilt for Kome's own list (flat
@@ -567,9 +658,12 @@ _KOME_HOVER_CSS = (
     "border-radius:7px;background-color:transparent;box-shadow:0 0 0 0 transparent;"
     "transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .3s ease,"
     "box-shadow .35s cubic-bezier(.2,.8,.2,1);}"
-    ".ad-list-row:hover .ad-list-name,.ad-list-row.jk-kb-row .ad-list-name"
+    # (only with the pointer on or near the name — .jk-near, _KOME_NEAR_JS — not
+    # anywhere along its row)
+    ".ad-list-row:hover .ad-list-name{text-decoration:none!important;}"
+    ".ad-list-name:has(.jk-near),.ad-list-row.jk-kb-row .ad-list-name"
     "{text-decoration:none!important;color:var(--rf-ink-strong)!important;}"
-    ".ad-list-row:hover .ad-list-name-text,.ad-list-row.jk-kb-row .ad-list-name-text{"
+    ".ad-list-name-text.jk-near,.ad-list-row.jk-kb-row .ad-list-name-text{"
     "transform:translateX(6px);"
     "background-color:color-mix(in srgb,var(--rf-ink,#888) 9%,transparent);"
     # one layer: background + a single spread ring that doesn't overlap it (a second,
@@ -584,6 +678,38 @@ _KOME_HOVER_CSS = (
     "{transition:none!important;transform:none!important;}}"
     "</style>"
 )
+
+# "Near" a deck name: anywhere on its row's height within 16 px either side of the
+# name's text (a lenient margin, and the hover's 6 px nudge can't slide it out from
+# under the pointer).
+_KOME_NEAR_JS = r"""<script>(function(){if(window.__jkNear)return;window.__jkNear=1;
+ var cur=null;
+ function set(n){if(n===cur)return;if(cur)cur.classList.remove('jk-near');cur=n;
+   if(n)n.classList.add('jk-near');}
+ document.addEventListener('mousemove',function(e){
+   var r=e.target&&e.target.closest?e.target.closest('.ad-list-row'):null,
+     n=r?r.querySelector('.ad-list-name-text'):null;
+   if(!n)return set(null);
+   var b=n.getBoundingClientRect();
+   set(e.clientX>=b.left-16&&e.clientX<=b.right+16?n:null);},{passive:true});
+ document.addEventListener('mouseleave',function(){set(null);});
+ // no "Choose deck icon" tooltip on the row icons (clicking still opens the picker; the
+ // aria-label stays for screen readers)
+ function untitle(){[].forEach.call(document.querySelectorAll('.ad-list-deck-icon[title]'),
+   function(b){b.removeAttribute('title');});}
+ untitle();new MutationObserver(function(){if(document.querySelector('.ad-list-deck-icon[title]'))untitle();})
+   .observe(document.documentElement,{childList:true,subtree:true});
+ // A click opens the deck only on its name (the same zone as the hover outline: the
+ // name ± 16 px) — the row's empty indent / gaps opened it too. Its controls (the fold
+ // chevron, the gear, any button / link inside) still work; dragging is unaffected.
+ document.addEventListener('click',function(e){
+   var t=e.target,r=t&&t.closest?t.closest('.ad-list-row'):null;if(!r)return;
+   if(t.closest('button,.ad-list-chev,[class*="gear"],[class*="options"],input,select'))return;
+   var n=r.querySelector('.ad-list-name-text');if(!n)return;
+   var b=n.getBoundingClientRect();
+   if(e.clientX>=b.left-16&&e.clientX<=b.right+16)return;
+   e.preventDefault();e.stopImmediatePropagation();},true);
+})();</script>"""
 
 _KOME_KEYS_JS = r"""<script>(function(){
  if(window.__jkKomeKeys)return; window.__jkKomeKeys=true;
@@ -647,8 +773,11 @@ _KOME_KEYS_JS = r"""<script>(function(){
    var t=e.target;if(t&&(t.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(t.tagName)))return;
    var k=e.key;if(!/^(Arrow(Up|Down|Left|Right)|Enter| )$/.test(k))return;
    var sc=curSide();
+   // back in the sidebar after a page switch (or a click there): start from the page's
+   // item AND make the move — the first arrow only re-selected it, so it took two
    if(!sc&&zone()==='side'){var s1=document.querySelector('.ba-side-item[data-active="true"]')||sideItems()[0];
-     if(s1){e.preventDefault();e.stopImmediatePropagation();sfx('move');side(s1);return;}}
+     if(s1){e.preventDefault();e.stopImmediatePropagation();sfx('move');
+       var n1=/^Arrow/.test(k)?near(s1,k):null;side(n1||s1);return;}}
    if(sc){e.preventDefault();e.stopImmediatePropagation();
      if(k==='Enter'||k===' '){sfxOut('select');side(null);sc.click();return;}
      var nx=near(sc,k);
@@ -732,11 +861,96 @@ _KOME_RESIZE_CSS = (
     "backdrop-filter:none!important;-webkit-backdrop-filter:none!important;"
     "box-shadow:none!important;text-shadow:none!important;filter:none!important;}"
     ".ba-side,.ba-side *{scrollbar-width:none!important;}"
+    # (no content-visibility here: on the deck rows a row opened by its chevron drew its
+    # text a frame late, and on the charts they vanished and came back on first load)
     # the Calendar's "Updating…" chip lingers on the reused page after it closes
     "html:not(:has(#jkc)) #jkc-busy{display:none!important;}"
+    # battery: Kome's streak flame flickers forever (4.4 s loop), so the deck list never
+    # stopped drawing — ~60 frames a second while idle, each re-blended on the glass
+    ".ba-streak-fire{animation:none!important;}"
+    # the charts card: Kome's rise-in matched it only once the page settled (~0.45 s,
+    # measured) — it was already showing, so it blinked to 0 and faded back. No rise-in.
+    ".ba-home .ba-practice{animation:none!important;}"
+    # wide windows: give Progress and the New / Learn / Due numbers more room (Kome
+    # fixes them at 112 / 38 px; the name column has plenty to spare there)
+    "@media (min-width:900px){.ad-list:not(.jk-drop1):not(.jk-drop2):not(.jk-drop3){"
+    "--ad-cols:24px 1fr 180px 52px 52px 52px 36px;"
+    "--ad-row-cols:minmax(0,1fr) 180px 52px 52px 52px 36px;}}"
+    # narrow windows: half Kome's subdeck indent (24 → 12 px a level), so deep decks
+    # keep room for their names (its own value on the tree beats the row's inherited one)
+    "@media (max-width:1000px){.ad-list-row[data-depth=\"1\"] .ad-list-tree{--ad-indent:12px;}.ad-list-row[data-depth=\"2\"] .ad-list-tree{--ad-indent:24px;}.ad-list-row[data-depth=\"3\"] .ad-list-tree{--ad-indent:36px;}.ad-list-row[data-depth=\"4\"] .ad-list-tree{--ad-indent:48px;}.ad-list-row[data-depth=\"5\"] .ad-list-tree{--ad-indent:60px;}.ad-list-row[data-depth=\"6\"] .ad-list-tree{--ad-indent:72px;}.ad-list-row[data-depth=\"7\"] .ad-list-tree{--ad-indent:84px;}.ad-list-row[data-depth=\"8\"] .ad-list-tree{--ad-indent:96px;}}"
+    # the block above the sidebar's foot drew its own bottom rule + 16 px gap right above
+    # the foot's top rule: two lines with dead space between. Keep only the foot's.
+    ".ba-side > :has(+ .ba-side-foot){border-bottom:0!important;margin-bottom:0!important;}"
+    # the charts (Weekly reviews / Review activity) render a frame before Kome's deck
+    # list on a redraw (after a sync), so they flashed at the top: keep them invisible
+    # (space kept, nothing moves) until the list has rows; 1.5 s safety (no decks)
+    "html:not(.jk-home-ready) .ba-home:not(:has(.ad-list-name-text)) .ba-practice"
+    "{visibility:hidden!important;}"
     ".ba-side::-webkit-scrollbar,.ba-side *::-webkit-scrollbar{display:none!important;"
     "width:0!important;height:0!important;}"
     "</style>"
+    # ready (charts never hidden again on this page) as soon as deck rows have shown once:
+    # Kome rebuilding its list right after opening dropped the rows for a frame, and the
+    # charts blinked out and back in
+    "<script>(function(){var d=document.documentElement;function ok(){d.classList.add('jk-home-ready');}"
+    "setTimeout(ok,1500);if(document.querySelector('.ad-list-name-text'))return ok();"
+    "var mo=new MutationObserver(function(){if(document.querySelector('.ad-list-name-text')){ok();mo.disconnect();}});"
+    "mo.observe(d,{childList:true,subtree:true});})();</script>"
+    # Deck names squeezed to nothing (narrow window, deep subdecks): drop the number
+    # columns one at a time — Due, Learn, Progress, New, then the subdeck indent —
+    # until every visible name has
+    # room (~4 characters). Re-checked on resize and when the list is redrawn.
+    "<style>.ad-list.jk-drop1{--ad-cols:24px 1fr 112px 38px 38px 28px!important;--ad-row-cols:minmax(0,1fr) 112px 38px 38px 28px!important;}.ad-list.jk-drop2{--ad-cols:24px 1fr 112px 38px 28px!important;--ad-row-cols:minmax(0,1fr) 112px 38px 28px!important;}.ad-list.jk-drop3{--ad-cols:24px 1fr 38px 28px!important;--ad-row-cols:minmax(0,1fr) 38px 28px!important;}.ad-list:is(.jk-drop4,.jk-drop5){--ad-cols:24px 1fr 28px!important;--ad-row-cols:minmax(0,1fr) 28px!important;}.ad-list.jk-drop1 :is(.ad-list-due,.ad-list-header-cell--due),.ad-list.jk-drop2 :is(.ad-list-due,.ad-list-header-cell--due,.ad-list-learn,.ad-list-header-cell--learn),.ad-list.jk-drop3 :is(.ad-list-due,.ad-list-header-cell--due,.ad-list-learn,.ad-list-header-cell--learn,.ad-list-progress,.ad-list-header-cell--progress),.ad-list:is(.jk-drop4,.jk-drop5) :is(.ad-list-due,.ad-list-header-cell--due,.ad-list-learn,.ad-list-header-cell--learn,.ad-list-progress,.ad-list-header-cell--progress,.ad-list-new,.ad-list-header-cell--new){display:none!important;}.ad-list.jk-drop5 .ad-list-row .ad-list-tree{--ad-indent:0px!important;}.ad-list:is(.jk-drop3,.jk-drop4,.jk-drop5) .ad-list-row .ad-list-tree{grid-column:auto!important;}</style>"
+    "<script>(function(){if(window.__jkCols)return;window.__jkCols=1;var MIN=44;"
+    "function lists(){return [].slice.call(document.querySelectorAll('.ad-list'));}"
+    "function tight(l){var ns=l.querySelectorAll('.ad-list-row .ad-list-name-text');"
+    "for(var i=0;i<ns.length;i++){var n=ns[i];if(n.offsetParent===null)continue;"
+    # squeezed = actually cut off AND under ~4 characters showing (a short name like
+    # "About" is narrow on its own — that alone dropped every column in a wide window)
+    "if(n.scrollWidth>n.clientWidth+1&&n.clientWidth<MIN)return true;}return false;}"
+    "function fit(){lists().forEach(function(l){l.classList.remove('jk-drop1','jk-drop2','jk-drop3','jk-drop4','jk-drop5');"
+    "for(var k=1;k<=5&&tight(l);k++){l.classList.remove('jk-drop'+(k-1));l.classList.add('jk-drop'+k);}});}"
+    "var t;function soon(){clearTimeout(t);t=setTimeout(fit,50);}"
+    # (while the window edge is dragged: one fit when it settles, not columns popping
+    # in and out mid-drag)
+    "addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,120);});"
+    "var mo=new MutationObserver(function(rs){for(var i=0;i<rs.length;i++){var n=rs[i].target;"
+    "if(n.closest&&n.closest('.ad-list')||[].some.call(rs[i].addedNodes,function(a){return a.nodeType===1&&"
+    "(a.matches('.ad-list')||a.querySelector&&a.querySelector('.ad-list'));})){soon();return;}}});"
+    "function go(){fit();mo.observe(document.body,{childList:true,subtree:true});}"
+    "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();"
+    "})();</script>"
+    # Sidebar just a little too tall for the window (≤ 8 %): scale its sections down
+    # to fit exactly and lock its scroll, instead of a tiny scroll. Further off → left
+    # alone (it scrolls as usual). Re-fit on resize and when the sidebar is rebuilt.
+    # The size is applied before first paint: the last fit (for this window height) is
+    # remembered and set as a CSS variable in the head, so the sidebar never shows at
+    # full size and then shrinks; the check itself runs as soon as the sidebar's content
+    # exists (an observer callback, before paint), not after load.
+    "<style>.ba-side>*{zoom:var(--jk-side-z,1);}</style>"
+    "<script>(function(){if(window.__jkSideFit)return;window.__jkSideFit=1;"
+    "var d=document.documentElement,K='jkSideZ';"
+    "function load(){try{return JSON.parse(localStorage.getItem(K)||'null');}catch(e){return null;}}"
+    "function save(v){try{localStorage.setItem(K,JSON.stringify(v));}catch(e){}}"
+    "var m=load();if(m&&m.h===innerHeight&&m.z<1){d.style.setProperty('--jk-side-z',m.z);}"
+    "function fit(){var s=document.querySelector('.ba-side');if(!s||!s.querySelector('.ba-side-foot'))return false;"
+    "var prev=d.style.getPropertyValue('--jk-side-z');d.style.removeProperty('--jk-side-z');"
+    "s.style.removeProperty('overflow-y');"
+    "var cs=getComputedStyle(s),pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom),"
+    "room=s.clientHeight-pad,need=s.scrollHeight-pad,z=1;"
+    "if(need>room+1&&need<=room*1.08){z=room/need;for(var i=0;i<3;i++){"
+    "d.style.setProperty('--jk-side-z',z);var n=s.scrollHeight-pad;if(n<=room+0.5)break;z*=room/n;}"
+    "d.style.setProperty('--jk-side-z',z);s.style.setProperty('overflow-y','hidden','important');s.scrollTop=0;}"
+    "save({h:innerHeight,z:z});return true;}"
+    "var t;function soon(){clearTimeout(t);t=setTimeout(fit,60);}"
+    "addEventListener('resize',soon);"
+    "var done=false,mo=new MutationObserver(function(){if(!done&&fit()){done=true;mo.disconnect();"
+    "var s=document.querySelector('.ba-side');new MutationObserver(soon).observe(s,{childList:true,subtree:true});}});"
+    "mo.observe(d,{childList:true,subtree:true});"
+    "if(document.readyState!=='loading'&&!done&&fit()){done=true;mo.disconnect();"
+    "new MutationObserver(soon).observe(document.querySelector('.ba-side'),{childList:true,subtree:true});}"
+    "})();</script>"
     "<script>(function(){if(window.__jkResz)return;window.__jkResz=1;var t=null,"
     "h=document.documentElement;window.addEventListener('resize',function(){"
     "h.classList.add('jk-resizing');clearTimeout(t);"
@@ -812,17 +1026,33 @@ _KOME_OV_NAV = (
     r"""<script>(function(){if(window.__jkOvNav)return;window.__jkOvNav=1;
  // One A press on the deck list is TWO Enters (Janki's pad reader opens the deck, and
  // Contanki's "Enter" action presses Enter again): the second reached this page as it
- // loaded and started studying. Enter / Space in the first 0.6 s are the opening press.
+ // loaded and started studying. Enter in the first 0.6 s is that opening press. (Only
+ // Enter: the pad's second press is an Enter, and gating Space too swallowed a quick
+ // first Space — it took two presses to start.)
+ // 0.3 s, every Enter: Contanki's echo of the opening press comes within it (a check
+ // for a held pad button missed it — the page can't see the pad yet — and the echo
+ // started studying at once); a deliberate keyboard Enter is never that quick
  var T0=Date.now();
- window.addEventListener('keydown',function(e){if(document.getElementById('study')&&(e.key==='Enter'||e.key===' ')&&Date.now()-T0<600){
+ window.addEventListener('keydown',function(e){if(document.getElementById('study')&&e.key==='Enter'&&Date.now()-T0<300){
    e.preventDefault();e.stopImmediatePropagation();}},true);
- function items(){return [].filter.call(document.querySelectorAll(
-   'button,a[href],[role=button],[onclick]'),function(e){
+ // Onigiri draws the preview's top buttons (Decks, Add, Browse…) inside a shadow root,
+ // so they're gathered from there too: ↑ from the preview's buttons reaches them
+ function all(){var out=[].slice.call(document.querySelectorAll('button,a[href],[role=button],[onclick]'));
+   [].forEach.call(document.querySelectorAll('*'),function(h){if(h.shadowRoot)
+     out=out.concat([].slice.call(h.shadowRoot.querySelectorAll('button,a[href],[role=button],[onclick]')));});
+   return out;}
+ function items(){return all().filter(function(e){
    if(e.closest('.ba-side'))return false;var r=e.getBoundingClientRect();
    return r.width>4&&r.height>4&&getComputedStyle(e).visibility!=='hidden';});}
- function cur(){return document.querySelector('.jk-ov-sel');}
- function pick(e){var o=cur();if(o)o.classList.remove('jk-ov-sel');if(!e)return;
-   e.classList.add('jk-ov-sel');try{if(window.__jkPlay&&__jkPlay('move'))return;pycmd('janki:sfx:move');}catch(x){}}
+ // (the selection is kept here, and its ring set on the element itself: the page's
+ // style sheet doesn't reach the top buttons in the shadow root)
+ var SEL=null;
+ function cur(){return SEL&&SEL.isConnected?SEL:null;}
+ function ring(e,on){['outline','outline-offset'].forEach(function(p){e.style.removeProperty(p);});
+   if(on){e.style.setProperty('outline','2px solid rgba(176,203,246,.85)','important');
+     e.style.setProperty('outline-offset','3px','important');}}
+ function pick(e){var o=cur();if(o){o.classList.remove('jk-ov-sel');ring(o,false);}SEL=e||null;if(!e)return;
+   e.classList.add('jk-ov-sel');ring(e,true);try{if(window.__jkPlay&&__jkPlay('move'))return;pycmd('janki:sfx:move');}catch(x){}}
  function near(f,k){var a=f.getBoundingClientRect(),ax=a.left+a.width/2,ay=a.top+a.height/2,b=null,bs=1e9;
    items().forEach(function(e){if(e===f||e.contains(f)||f.contains(e))return;
      var r=e.getBoundingClientRect(),dx=r.left+r.width/2-ax,dy=r.top+r.height/2-ay,p,o;
@@ -830,12 +1060,21 @@ _KOME_OV_NAV = (
      else if(k==='ArrowRight'){p=dx;o=dy;}else{p=-dx;o=dy;}
      if(p<4)return;var sc=p+Math.abs(o)*3;if(sc<bs){bs=sc;b=e;}});return b;}
  window.addEventListener('keydown',function(e){
-   // the page is reused between screens: only while the preview (its Study button) is up
-   if(!document.getElementById('study'))return;
+   // the page is reused between screens: only while the preview is up — its Study
+   // button, or the "finished this deck" page (no Study button, same nav)
+   if(!document.getElementById('study')&&!document.querySelector('.congrats-container'))return;
    if(e.metaKey||e.ctrlKey||e.altKey)return;var k=e.key,c=cur();
    if(/^Arrow/.test(k)){e.preventDefault();e.stopImmediatePropagation();
-     if(!c){pick(document.getElementById('study')||items()[0]);return;}
-     var n=near(c,k);if(n)pick(n);return;}
+     // ↑ with nothing selected: the topmost button (the top bar's first — Decks)
+     if(!c){if(k==='ArrowUp'){var it=items().sort(function(a,b){var ra=a.getBoundingClientRect(),
+         rb=b.getBoundingClientRect();return (ra.top-rb.top)||(ra.left-rb.left);});
+       if(it.length){pick(it[0]);return;}
+       try{pycmd('janki:sfx:move');pycmd('janki:toolbar');}catch(x){}return;}
+       pick(document.getElementById('study')||items()[0]);return;}
+     var n=near(c,k);if(n)pick(n);
+     // nothing above: up to the top bar (Decks, Add, Browse…)
+     else if(k==='ArrowUp'){pick(null);try{pycmd('janki:sfx:move');pycmd('janki:toolbar');}catch(x){}}
+     return;}
    if((k==='Enter'||k===' ')&&c&&c.id!=='study'){e.preventDefault();e.stopImmediatePropagation();
      pick(null);c.click();}},true);
  document.addEventListener('mousemove',function(e){if(Math.abs(e.movementX)+Math.abs(e.movementY)>3)pick(null);},true);
@@ -846,7 +1085,7 @@ _KOME_OV_NAV = (
 def _kome_deck_nav() -> str:
     """Hover + keyboard/controller nav for Kome's deck list (sounds and the d-pad
     poller are the same ones Janki's own deck list uses)."""
-    out = _KOME_HOVER_CSS + _KOME_ROOMY_CSS + _KOME_RESIZE_CSS + _KOME_KEYS_JS
+    out = _KOME_HOVER_CSS + _KOME_ROOMY_CSS + _KOME_RESIZE_CSS + _KOME_NEAR_JS + _KOME_KEYS_JS
     from ..features import practice
     if not getattr(practice, "_practice_view", False):   # banks keep their own order
         out += _KOME_DRAG
@@ -1824,8 +2063,10 @@ def _on_will_set_content(web_content, context):
                     "html:has(#jp-hide-ease) #innertable td#middle td:has(>button[data-ease])"
                     ":not(:has(#jp-continue-bar))"
                     "{display:none!important;}"
+                    # border-box: its 30 px side padding + border went on top of the 100 %,
+                    # so it came out ~62 px wider than Show Answer
                     "#jp-continue-bar{width:100%!important;max-width:none!important;"
-                    "min-width:0!important;margin:0!important;}"
+                    "min-width:0!important;margin:0!important;box-sizing:border-box!important;}"
                     "</style>")
             # Glass follows the "Janki glass behind Onigiri" switch, like the menus: off
             # → a solid background in Onigiri's page colour (the window strip matches).
@@ -1873,8 +2114,11 @@ def _on_will_set_content(web_content, context):
                 web_content.body += _CAL_BACK_JS
         if isinstance(context, DeckBrowser) and compat.janki_view() \
                 and compat.onigiri_theme() == "kome":
-            web_content.body += (_HIDE_MENU_JS + _KOME_CSS + _kome_view_css() + _kome_nav_js()
-                                 + _KOME_SLIDE_JS + _kome_deck_nav())
+            # (the deck menu extras too — Suspend / Unsuspend… — the Practice list's ⋯
+            # menu only had Kome's own items)
+            web_content.body += (_susp_decks_js() + _HIDE_MENU_JS + _KOME_CSS + _kome_view_css()
+                                 + _kome_nav_js() + _KOME_SLIDE_JS + _KOME_MENU_JS
+                                 + _kome_deck_nav())
         elif isinstance(context, DeckBrowser) and compat.onigiri_on() \
                 and compat.onigiri_theme() != "kome":
             web_content.body += (_susp_decks_js() + _HIDE_MENU_JS + _hidden_rows_css()
@@ -2106,6 +2350,18 @@ def _on_js_message(handled, message, context):
     # only Janki's wrapper of Anki's overview link handler understands — Onigiri's
     # preview passes its messages elsewhere, so Enter did nothing. Start studying here.
     if message == "jkstudy" and getattr(mw, "state", None) == "overview":
+        # the preview hides itself as studying starts; if the review never comes (nothing
+        # due, or a stray second Enter), show it again rather than leave a blank window
+        def _unblank():
+            if getattr(mw, "state", None) == "overview":
+                try:
+                    mw.web.eval("(function(){var b=document.body;if(!b)return;"
+                                "try{b.getAnimations().forEach(function(x){x.cancel();});}catch(e){}"
+                                "['visibility','opacity','transform'].forEach(function(p){"
+                                "b.style.removeProperty(p);});})()")
+                except Exception:
+                    pass
+        QTimer.singleShot(1500, _unblank)
         try:
             from aqt.overview import Overview
             Overview._linkHandler(mw.overview, "jkstudy")
@@ -2130,6 +2386,17 @@ def _on_js_message(handled, message, context):
         if compat.janki_view():
             QTimer.singleShot(0, lambda: _safe_run("janki_oni:back"))
         return handled
+    if isinstance(message, str) and message.startswith("janki_oni:order:"):
+        try:
+            import json
+            from ..util.config import _cfg_raw
+            order = [c for c in json.loads(message[len("janki_oni:order:"):]) if isinstance(c, str)]
+            cfg = _cfg_raw()
+            cfg["kome_sidebar_order"] = order
+            mw.addonManager.writeConfig(__name__, cfg)
+        except Exception as e:
+            log("kome sidebar order: %s" % e)
+        return (True, None)
     if isinstance(message, str) and message.startswith("janki_oni:"):
         # after the click finishes, so a new window isn't sent behind the main one
         QTimer.singleShot(0, lambda m=message: _safe_run(m))
@@ -2388,7 +2655,9 @@ _HEADER_JS = (
     "if(!h)return;var A=[{opacity:0},{opacity:1}],O={duration:200,easing:'cubic-bezier(.2,.8,.2,1)'};"
     "if(show){var was=h.style.display==='none';h.style.setProperty('display','block','important');"
     "if(anim&&was){try{h.animate(A,O);}catch(e){}}"
-    "if(window.onigiriRefreshReviewerHeaderOffset)try{window.onigiriRefreshReviewerHeaderOffset();}catch(e){}}"
+    # (no header-offset refresh: the header is built into every page, so the card's
+    # margin from render is already right, and re-measuring it nudged the card ~5 px)
+    "}"
     "else if(h.style.display!=='none'){if(anim){try{var a=h.animate(A.slice().reverse(),O);"
     "a.onfinish=function(){h.style.setProperty('display','none','important');};return;}catch(e){}}"
     "h.style.setProperty('display','none','important');}})(%s,%s)")
@@ -2398,7 +2667,7 @@ def _apply_header_level(anim=False) -> None:
     if getattr(mw, "state", None) != "review":
         return
     try:
-        show = "true" if _focus_level() == 1 else "false"
+        show = "false" if _focus_level() in (2, 3) else "true"   # Flow / Zen hide it
         mw.web.eval(_HEADER_JS % (show, "true" if anim else "false"))
     except Exception as e:
         log("onigiri header level: %s" % e)
@@ -2408,6 +2677,8 @@ def _switch_bars_live() -> None:
     """Fade the top bar and the answer bar together for the new level."""
     bw = getattr(mw, "bottomWeb", None)
     was_bar = bool(bw is not None and bw.isVisible() and bw.height() > 0)
+
+
     try:
         from importlib import import_module
         import_module(compat.ONIGIRI_ID + ".rendering.patcher")._update_toolbar_visibility(
@@ -2417,12 +2688,150 @@ def _switch_bars_live() -> None:
     _apply_header_level(anim=True)
     try:
         now_bar = bool(bw is not None and bw.isVisible() and bw.height() > 0)
+        # The bar stays up at every level now: redraw its buttons only if its page came
+        # back empty (it could be blank while "visible") — redrawing every switch
+        # replayed the buttons' fade for nothing
+        if now_bar and bw is not None:
+            try:
+                bw.evalWithCallback(
+                    "document.querySelectorAll('#middle button').length",
+                    lambda n: (not n) and _redraw_bottom_bar())
+            except Exception:
+                _redraw_bottom_bar()
+        _zen_bar(anim=True)           # fades only if Zen's hide / show actually changes
         if now_bar and not was_bar:
             bw.eval("(function(){var b=document.body;if(b)try{b.animate([{opacity:0},"
                     "{opacity:1}],{duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'});}catch(e){}})()"
                     % _FADE_BARS_MS)
     except Exception:
         pass
+
+def _redraw_bottom_bar() -> None:
+    """The answer bar's page was only ever filled by a full review-page rebuild; a live
+    level switch that brings the bar back has to draw it (and its buttons) itself."""
+    try:
+        r = mw.reviewer
+        # no page reload (that was the delay): clear any hide left on its body and
+        # refill the buttons in place
+        r.bottom.web.eval("(function(){var b=document.body;if(!b)return;"
+                          "['visibility','opacity','transition'].forEach(function(p){"
+                          "b.style.removeProperty(p);});})()")
+        if getattr(r, "state", None) == "answer":
+            r._showEaseButtons()
+        else:
+            r._showAnswerButton()
+    except Exception as e:
+        log("onigiri bottom bar redraw: %s" % e)
+
+
+
+# Zen hides the answer bar by giving it 0 height, so the card's page grew and the card
+# moved / jittered on every switch. In review, keep the bar's height at every level and
+# fade the bar itself out (and make it unclickable): the page never resizes.
+def _zen_bar(anim=False) -> None:
+    if getattr(mw, "state", None) != "review":
+        return
+    # Zen (max focus) hides the answer bar; Focus / Flow keep it
+    hide = _focus_level() == 3
+    try:
+        mw.bottomWeb.eval(
+            # each call takes a token: a hide whose fade finishes after a later show
+            # (leaving Zen within the fade) must not put the hiding style back
+            "(function(hide,anim){var b=document.body;if(!b)return;"
+            "var tok=window.__jkZenTok=(window.__jkZenTok||0)+1;"
+            # already in that state: nothing to fade (a level switch that keeps the bar
+            # up, or keeps it hidden, faded it out and in for no reason)
+            "if(!!document.getElementById('jk-zen-bar')===hide)return;"
+            "b.getAnimations&&b.getAnimations().forEach(function(a){a.cancel();});"
+            "var s=document.getElementById('jk-zen-bar');if(s)s.remove();"
+            "var O={duration:%d,easing:'cubic-bezier(.2,.8,.2,1)'};"
+            "if(hide){var put=function(){if(tok!==window.__jkZenTok)return;"
+            "var t=document.createElement('style');t.id='jk-zen-bar';"
+            "t.textContent='body{opacity:0!important;pointer-events:none!important;}';"
+            "document.head.appendChild(t);};"
+            "if(anim){try{b.animate([{opacity:1},{opacity:0}],O).onfinish=put;return;}catch(e){}}put();}"
+            "else if(anim){try{b.animate([{opacity:0},{opacity:1}],O);}catch(e){}}"
+            "})(%s,%s)" % (_FADE_BARS_MS, "true" if hide else "false", "true" if anim else "false"))
+    except Exception as e:
+        log("onigiri zen bar: %s" % e)
+
+
+def _wrap_zen_bar_height() -> None:
+    try:
+        from importlib import import_module
+        patcher = import_module(compat.ONIGIRI_ID + ".rendering.patcher")
+    except Exception as e:
+        log("onigiri zen height wrap: %s" % e)
+        return
+    orig = patcher.apply_reviewer_bottom_bar_height
+    if getattr(orig, "_jk", False):
+        return
+
+    def apply_reviewer_bottom_bar_height(conf=None, *a, **k):
+        # any time, not only once in review: starting a review Onigiri sizes the bar a
+        # moment BEFORE the state turns to "review", and Zen's 0 height stuck
+        if conf is None:
+            conf = import_module(compat.ONIGIRI_ID + ".core.config").get_config_readonly()
+        if conf.get("maxHide", False):
+            conf = dict(conf, maxHide=False)           # keep the answer bar's height
+        return orig(conf, *a, **k)
+    apply_reviewer_bottom_bar_height._jk = True
+    patcher.apply_reviewer_bottom_bar_height = apply_reviewer_bottom_bar_height
+
+
+
+def _ensure_bar() -> None:
+    """The answer bar is kept at every level now (Zen only fades it), so in review it's
+    always shown unless Janki's Focus Mode has hidden the chrome on purpose. The review-
+    start hold and Onigiri's own rules could leave the bar hidden with its buttons drawn
+    (Show Answer missing, the card page running to the window's bottom)."""
+    try:
+        from ..features import focus
+        if getattr(mw, "state", None) != "review" or getattr(focus, "_focus_hidden", False):
+            return
+        bw = getattr(mw, "bottomWeb", None)
+        if bw is not None and not bw.isVisible():
+            _bottom_hold[0] = False
+            bw.setVisible(True)
+        if bw is not None and bw.height() < 8:     # Zen's 0 height left on it
+            try:
+                from importlib import import_module
+                import_module(compat.ONIGIRI_ID + ".rendering.patcher").apply_reviewer_bottom_bar_height()
+            except Exception:
+                pass
+    except Exception as e:
+        log("onigiri ensure bar: %s" % e)
+
+
+
+class _BarHideWatch(QObject):
+    """Something hides the answer bar mid-review on some cards (Show Answer missing, the
+    card page running to the bottom) — through Qt directly, which no Python wrapper sees.
+    Watch the bar itself: hidden in review without a reason (Janki's Focus Mode, the
+    review-start hold) → shown again on the next tick, and the caller noted in the trace."""
+    def eventFilter(self, obj, ev):
+        try:
+            if ev.type() == QEvent.Type.Hide and getattr(mw, "state", None) == "review":
+                from ..features import focus
+                if not getattr(focus, "_focus_hidden", False) and not _bottom_hold[0]:
+                    QTimer.singleShot(0, _ensure_bar)
+        except Exception:
+            pass
+        return False
+
+
+_bar_watch = None
+
+
+def _watch_bar_hide() -> None:
+    global _bar_watch
+    bw = getattr(mw, "bottomWeb", None)
+    if bw is None or _bar_watch is not None:
+        return
+    _bar_watch = _BarHideWatch(mw)
+    bw.installEventFilter(_bar_watch)
+
+
 _FADE_BARS_MS = 200
 _BARS_READY_JS = (
     "(function(){var n=0;(function w(){var h=document.getElementById('onigiri-reviewer-ui-host');"
@@ -2492,23 +2901,22 @@ def cycle_focus_level() -> None:
         for k, v in zip(_LEVEL_KEYS, vals):
             conf[k] = v
         cfg_mod.write_config(conf)
-        try:                                  # apply now: bars per screen + redraw
-            patcher = import_module(compat.ONIGIRI_ID + ".rendering.patcher")
-            patcher._update_toolbar_visibility(mw.state, mw.state)
-        except Exception as e:
-            log("onigiri focus bars: %s" % e)
+        live = (getattr(mw, "state", None) == "review"
+                and getattr(mw.reviewer, "card", None) is not None)
+        if not live:
+            try:                              # apply now: bars per screen + redraw
+                patcher = import_module(compat.ONIGIRI_ID + ".rendering.patcher")
+                patcher._update_toolbar_visibility(mw.state, mw.state)
+            except Exception as e:
+                log("onigiri focus bars: %s" % e)
         try:
-            if getattr(mw, "state", None) == "review":
-                # rebuild the review page so Onigiri adds (or leaves out) its header for
-                # the new level, then show the same card / side without replaying it
-                r = mw.reviewer
-                if getattr(r, "card", None) is not None:
-                    r._initWeb()
-                    r.web.eval("window.__jkNoType=1;window.__jkNoFade=1;")
-                    r._redraw_current_card()
-                    _restore_body_class(r)
-                else:
-                    mw.reset()
+            if live:
+                # The header is built into the page at every level (_wrap_header_always),
+                # so switch it and the bars live: no rebuild, so the card isn't reloaded
+                # (a rebuild blanked a frame, faded the card in and shifted it).
+                _switch_bars_live()
+            elif getattr(mw, "state", None) == "review":
+                mw.reset()
             elif getattr(mw, "state", None) == "deckBrowser":
                 mw.deckBrowser.refresh()
         except Exception as e:
@@ -2662,10 +3070,22 @@ def _rebuild_review_page() -> None:
     r = mw.reviewer
     if getattr(mw, "state", None) != "review" or getattr(r, "card", None) is None:
         return
-    r._initWeb()
-    r.web.eval("window.__jkNoType=1;window.__jkNoFade=1;")
-    r._redraw_current_card()
-    _restore_body_class(r)
+
+    def _go(y=None):
+        if getattr(mw, "state", None) != "review" or getattr(r, "card", None) is None:
+            return
+        mw._janki_no_type_once = True
+        mw._janki_flip_from = y if isinstance(y, (int, float)) else None
+        r._initWeb()
+        r._redraw_current_card()
+        _restore_body_class(r)
+    # measure where the card sits now, so the rebuilt page can glide it from there
+    try:
+        r.web.evalWithCallback(
+            "(function(){var q=document.getElementById('qa');"
+            "return q?q.getBoundingClientRect().top:null;})()", _go)
+    except Exception:
+        _go()
 
 
 def _restore_body_class(r) -> None:
@@ -3032,6 +3452,33 @@ def install() -> None:
     _wrap_kome_fades()
     _wrap_page_base_color()
     _wrap_focus_toggle()
+    _wrap_header_always()    # header in every level's page: levels switch live
+    # deck preview: give its page the keyboard, so Space / Enter reach its Study Now
+    # handler (focus was left on the review page's buttons or another view, and the
+    # keys went nowhere)
+    def _focus_overview(*_a):
+        def go():
+            try:
+                if getattr(mw, "state", None) == "overview":
+                    mw.web.setFocus()
+                    mw.web.eval("try{document.activeElement&&document.activeElement.blur&&"
+                                "document.activeElement!==document.body&&"
+                                "document.activeElement.blur();window.focus();}catch(e){}")
+            except Exception:
+                pass
+        go()
+        QTimer.singleShot(120, go)      # again once the page has loaded
+    gui_hooks.overview_did_refresh.append(_focus_overview)
+    _wrap_zen_bar_height()   # Zen fades the answer bar instead of resizing the page
+    # ...and hidden on each card's page at Flow / Zen (it's built in at every level)
+    gui_hooks.reviewer_did_show_question.append(lambda *_a: _apply_header_level())
+    gui_hooks.reviewer_did_show_answer.append(lambda *_a: _apply_header_level())
+    # a rebuilt answer bar page starts visible: re-fade it in Zen
+    gui_hooks.reviewer_did_show_question.append(lambda *_a: _zen_bar())
+    gui_hooks.reviewer_did_show_answer.append(lambda *_a: _zen_bar())
+    gui_hooks.reviewer_did_show_question.append(lambda *_a: _ensure_bar())
+    gui_hooks.reviewer_did_show_answer.append(lambda *_a: _ensure_bar())
+    _watch_bar_hide()
     _wrap_deck_open()
     _wrap_cal_back()
     if _strip is None:

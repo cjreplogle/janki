@@ -855,6 +855,9 @@ def _preload() -> None:
     try:
         if not _cfg().get("stats_in_main", True) or getattr(mw, "col", None) is None:
             return
+        from ..util import compat
+        if compat.onigiri_on():          # Onigiri uses Anki's own Stats window
+            return
         if _panel is None:
             _build()
         global _mode
@@ -1156,6 +1159,14 @@ def _patched_on_stats(orig):
             shift = False
         if shift or not _cfg().get("stats_in_main", True):
             return orig(*a, **k)
+        # Onigiri: Anki's own Stats window. The in-window page clashed with Onigiri's
+        # chrome (from the reviewer its back button sat over the graphs).
+        try:
+            from ..util import compat
+            if compat.onigiri_on():
+                return orig(*a, **k)
+        except Exception:
+            pass
         try:
             if not mw._selectedDeck():
                 return None

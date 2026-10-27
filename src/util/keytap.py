@@ -90,6 +90,7 @@ class _KeyBridge(QObject):
     lockdown_warn = _pyqtSignal(bool)   # during very-strict warning: True=skip (Space/Enter), False=cancel (Esc)
     toggle_window = _pyqtSignal()       # Cmd+Opt+A → show Anki, or hide it if it's frontmost
     card_zoom = _pyqtSignal(float)      # remote +/− → card zoom step
+    page_key = _pyqtSignal(str)         # remote, Anki unfocused, not reviewing → a key in the page
     reword_toggle = _pyqtSignal()       # Tab+R → toggle the reworded view of the current card
 
 _key_bridge = _KeyBridge()
@@ -107,6 +108,7 @@ def _remote_zoom(d):
 
 
 _key_bridge.card_zoom.connect(_remote_zoom)
+_key_bridge.page_key.connect(lambda k: _page_key(k))
 _key_bridge.toggle_window.connect(lambda: _toggle_main_window())
 _key_bridge.reword_toggle.connect(lambda: _reword_toggle())
 
@@ -306,6 +308,22 @@ def _reword_toggle() -> None:
         log(f"reword cycle: {e}")
 
 
+def _page_key(k: str) -> None:
+    """The remote while Anki isn't focused and no card is up (deck list, deck preview,
+    Calendar, Practice — Onigiri's or Janki's): its d-pad / face button become arrow /
+    Enter keys inside the page, so it navigates from the background. The pages' own
+    pad readers only act while focused, so nothing fires twice."""
+    import json
+    try:
+        mw.web.eval("(function(k){var t=document.activeElement||document.body||document;"
+                    "t.dispatchEvent(new KeyboardEvent('keydown',{key:k,code:k,bubbles:true,"
+                    "cancelable:true}));t.dispatchEvent(new KeyboardEvent('keyup',{key:k,code:k,"
+                    "bubbles:true,cancelable:true}));})(%s)" % json.dumps(k))
+        _gtap_log(f"page key {k} (background)")
+    except Exception as e:
+        _gtap_log(f"page key: {e}")
+
+
 def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
     """Drive Anki's reviewer directly via Python API — no OS event needed.
 
@@ -341,6 +359,16 @@ def _send_key_to_anki(kc: int, reveal_first: bool = False) -> None:
             intersperse.practice_now()
         except Exception as e:
             _gtap_log(f"practice open error: {e}")
+        return
+
+    if kc == 36:  # Return — the remote's face button on the deck preview: Study Now
+        if getattr(mw, "state", None) == "overview":
+            try:
+                mw.web.eval("(function(){var s=document.getElementById('study');"
+                            "if(s)s.click();})()")
+                _gtap_log("Return → Study Now clicked")
+            except Exception as e:
+                _gtap_log(f"study now: {e}")
         return
 
     key  = _KC_TO_KEY.get(kc)
@@ -503,6 +531,15 @@ def _practice_or_rate(kc: int, fwd: bool) -> None:
         return
     if fwd:
         _send_key_to_anki(kc, reveal_first=True)
+        # Anki focused = Contanki wasn't reading yet (gamepad.py): now that the press is
+        # handled, keep the still-held button from reaching Contanki as a second press
+        try:
+            from ..util import state as _st
+            if _st._anki_focused:
+                from ..integrations import review_nav as _rn
+                _rn.hold_contanki()
+        except Exception:
+            pass
 
 
 def _adjust_caption_font(delta: int) -> None:

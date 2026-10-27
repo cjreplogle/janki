@@ -22,6 +22,35 @@ from ..util.config import log
 _mode = None            # None | "top" | "bot"
 _last = {}              # d-pad direction / face → was held on the last poll
 _hold = False           # after a press: give Contanki nothing until every button is up
+_last_poll_t = 0.0      # when Contanki's page last read the pad (gamepad.py: is it reading?)
+
+
+def contanki_idle(within=0.3):
+    """True when Contanki's page hasn't read the pad lately (just shown again, or still
+    waiting for the press that reveals the pad to the page): its first press is lost
+    there, so gamepad.py handles it instead."""
+    import time
+    return time.monotonic() - _last_poll_t > within
+
+
+_hold_t = 0.0
+
+
+def hold_contanki():
+    """Janki handled a press itself: Contanki gets nothing until every button is up, or
+    it would act on the same, still-held press once it starts reading. Lapses after
+    0.6 s on its own — Contanki may not be reading at all, and its release check would
+    never come (every later press was swallowed)."""
+    global _hold, _hold_t
+    import time
+    _hold, _hold_t = True, time.monotonic()
+
+
+def _hold_lapsed():
+    global _hold
+    import time
+    if _hold and _hold_t and time.monotonic() - _hold_t > 0.6:
+        _hold = False
 
 # The answer bar is a separate web view: select / move / press its buttons there.
 _BOT_JS = r"""(function(op){
@@ -115,20 +144,33 @@ PAGE_JS = r"""<script>(function(){if(window.jkRNav)return;
 })();</script>"""
 
 
+def _dpad_buttons(b):
+    """Buttons 12–15 are the d-pad only in the browser's standard layout (17+ buttons);
+    on other pads (the 8BitDo remote, whose d-pad is the axes) they're other keys — its
+    heart button came through as 12 and acted as ↑."""
+    return len(b) >= 17
+
+
 def _dirs(b, a):
+    std = _dpad_buttons(b)
+
     def btn(n):
         return n < len(b) and b[n]
+
+    def dp(n):
+        return std and btn(n)
     x = a[0] if len(a) > 0 else 0.0
     y = a[1] if len(a) > 1 else 0.0
-    return {"up": btn(12) or y < -0.5, "down": btn(13) or y > 0.5,
-            "left": btn(14) or x < -0.5, "right": btn(15) or x > 0.5,
+    return {"up": dp(12) or y < -0.5, "down": dp(13) or y > 0.5,
+            "left": dp(14) or x < -0.5, "right": dp(15) or x > 0.5,
             "face": any(btn(n) for n in range(5))}
 
 
 def _strip_dpad(b, a):
+    std = _dpad_buttons(b)
     b = list(b)
     for n in (12, 13, 14, 15):
-        if n < len(b):
+        if std and n < len(b):
             b[n] = False
     a = list(a)
     for n in (0, 1):
@@ -195,6 +237,7 @@ def _bar_key(op):
 def remote_press() -> bool:
     """A face button from Janki's own controller path (keytap, Practice cards): press
     the selected pill / bar button. True = handled (also while that press is held)."""
+    _hold_lapsed()
     if _mode:
         if not _dup("press"):
             _press()
@@ -216,8 +259,9 @@ def _clear_hold():
 
 
 def _press():
-    global _hold, _mode
-    _hold = True
+    global _hold, _mode, _hold_t
+    import time as _t
+    _hold, _hold_t = True, _t.monotonic()
     # Contanki's poll clears this once every button is up — but on a Practice card the
     # pad comes through the page / keytap instead, so it would never clear and every
     # later A would be swallowed: a timeout backs it up
@@ -236,7 +280,9 @@ def _wrap(inst):
         return
 
     def poll(input_buttons, input_axes, *rest):
-        global _hold
+        global _hold, _last_poll_t
+        import time as _t
+        _last_poll_t = _t.monotonic()
         st = getattr(mw, "state", None)
         # deckBrowser = Decks, Calendar and Practice: Janki's in-page nav drives the
         # d-pad there, and Contanki's ← Back / → Forward reloaded the page or jumped
