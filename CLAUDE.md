@@ -62,7 +62,7 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 - The hidden menu bar's shortcuts (Ctrl+Z undo…) are re-attached to `mw`
   (`chrome.keep_menu_shortcuts`); Qt disables shortcuts of a hidden QMenuBar.
 - Z/X/C/V rating is an app key filter (`features/zxcv.py`), not QShortcuts (ambiguity).
-- Text shadows: Appearance → Text (`text_shadow`: performance [Windows default] / quality / off).
+- Text shadows: Appearance → Text (`text_shadow`: performance [default] / quality / off).
 
 ## Lessons (don't repeat)
 - **Never preload Stats in the background / on hover** (tried in 2.8.0–2.8.4): with the
@@ -107,7 +107,7 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.3** (Windows: **v2.13.3w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.4** (Windows: **v2.13.4w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.

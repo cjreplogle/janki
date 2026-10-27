@@ -1228,8 +1228,8 @@ def _win_frameless() -> bool:
 _WIN_SOFT = (sys.platform.startswith("win")
              and os.environ.get("JANKI_WIN_RENDER") == "software")
 # Readability halo behind text on the glass (Settings > Appearance > Text > Text
-# shadows). "performance" (Windows default): one light layer, dropped while a card types
-# out. "quality" (macOS default): the full two-layer halo, kept throughout. "off": none.
+# shadows). "performance" (the default): one light layer, dropped while a card types
+# out. "quality": the full two-layer halo, kept throughout. "off": none.
 _SHADOW_PERF = "0 0 2px rgba(0,0,0,.95)"
 _SHADOW_QUALITY = "0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85)"
 TEXT_SHADOW_MODES = ("performance", "quality", "off")
@@ -1240,7 +1240,7 @@ def text_shadow_mode(cfg=None) -> str:
     m = str(cfg.get("text_shadow") or "").lower()
     if m in TEXT_SHADOW_MODES:
         return m
-    return "performance" if sys.platform.startswith("win") else "quality"
+    return "performance"          # default everywhere (was macOS: quality)
 
 
 def _text_shadow(cfg=None) -> str:
@@ -3257,10 +3257,10 @@ _REBUILD_GLIDE_JS = (
 
 
 _EASE_GLASS_JS = r"""<script>(function(){if(window.__jkEase)return;window.__jkEase=1;
- var A=0.62;
+ var A=0.62,A_NATIVE=0.4;   // Janki's own (non-Onigiri) answer buttons: paler
  function tint(b){if(b.__jkTint)return;var c=getComputedStyle(b).backgroundColor,
    m=c.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/);if(!m)return;b.__jkTint=1;
-  var v='rgba('+m[1]+','+m[2]+','+m[3]+','+A+')';
+  var v='rgba('+m[1]+','+m[2]+','+m[3]+','+(b.hasAttribute('data-onigiri-ease')?A:A_NATIVE)+')';
   b.style.setProperty('background',v,'important');b.style.setProperty('background-color',v,'important');}
  function scan(){var bs=document.querySelectorAll('#outer button[data-onigiri-ease],#outer button[data-ease]');
   var fresh=[];bs.forEach(function(b){if(b.closest('.jk-out'))return;
@@ -3284,11 +3284,15 @@ _EASE_GLASS_JS = r"""<script>(function(){if(window.__jkEase)return;window.__jkEa
    if(tr&&m.children.length&&!rm){
     before=sides(tr).map(function(td){return td.offsetParent!==null;});
     var r=tr.getBoundingClientRect();c=tr.cloneNode(true);
+    // the bar's content is zoomed: screen px written as fixed positions get zoomed AGAIN,
+    // so the fading copy came out bigger than the buttons it replaced — divide it out
+    var Z=tr.currentCSSZoom||(function(){var z=1;for(var n=tr;n&&n.nodeType===1;n=n.parentElement){
+     var v=parseFloat(getComputedStyle(n).zoom);if(v&&v!==1)z*=v;}return z;})()||1;
     c.querySelectorAll('[id]').forEach(function(x){if(x.id!=='middle')x.removeAttribute('id');});
     // border-box: the copy is given the real row's outer size; without it padding was
     // added on top and the buttons in it sat a couple of px off
     c.style.cssText='position:fixed;margin:0;pointer-events:none;z-index:5;box-sizing:border-box;'
-     +'left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px;';
+     +'left:'+(r.left/Z)+'px;top:'+(r.top/Z)+'px;width:'+(r.width/Z)+'px;height:'+(r.height/Z)+'px;';
     c.classList.add('jk-out');tr.parentNode.insertBefore(c,tr.nextSibling);
     // each copied button is pinned at the exact screen spot and size of the one it
     // copies (fixed, so the copy's own layout can't move it: laid out by the copy, the
@@ -3296,9 +3300,11 @@ _EASE_GLASS_JS = r"""<script>(function(){if(window.__jkEase)return;window.__jkEa
     var ob=[].slice.call(tr.querySelectorAll('button')),cbs=[].slice.call(c.querySelectorAll('button'));
     ob.forEach(function(o,i){var q=cbs[i];if(!q)return;var R=o.getBoundingClientRect();
      if(!R.width){q.style.setProperty('display','none','important');return;}
-     [['position','fixed'],['left',R.left+'px'],['top',R.top+'px'],['width',R.width+'px'],
-      ['min-width',R.width+'px'],['max-width',R.width+'px'],['height',R.height+'px'],
-      ['margin','0'],['flex','none'],['transform','none']].forEach(function(kv){
+     [['position','fixed'],['left',(R.left/Z)+'px'],['top',(R.top/Z)+'px'],['width',(R.width/Z)+'px'],
+      ['min-width',(R.width/Z)+'px'],['max-width',(R.width/Z)+'px'],['height',(R.height/Z)+'px'],
+      // border-box: the size given IS the on-screen box — content-box added the button's
+      // padding on top, and the fading copy came out taller and wider (no gaps)
+      ['margin','0'],['flex','none'],['transform','none'],['box-sizing','border-box']].forEach(function(kv){
        q.style.setProperty(kv[0],kv[1],'important');});});}
    var res=o.apply(this,arguments);
    if(tr){var cs=c?sides(c):[];

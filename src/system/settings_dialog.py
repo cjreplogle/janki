@@ -559,7 +559,7 @@ class GlassSettings(QDialog):
         app_text_lay.addWidget(self._uniform)
 
         # Text shadows: the readability halo behind text on the glass. High performance
-        # (default on Windows) = one light layer, dropped while a card types out.
+        # (the default) = one light layer, dropped while a card types out.
         from ..user import css as _css_ts
         _ts_row = QHBoxLayout()
         _ts_row.addWidget(QLabel("Text shadows"))
