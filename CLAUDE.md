@@ -92,12 +92,22 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   any hide. Hide via `visibility` (CSS entry animations hold opacity). Diagnostics:
   `~/.janki_studyprof` (profile + page timings), `~/.janki_stallwatch` (ms threshold).
 
+- **CPU pinned at ~100 % with every page idle (2026-10-27):** a DevTools
+  `Page.captureScreenshot` of a page that can't draw (hidden view, dead answer bar) never
+  completes, and the uncapped compositor spins for the rest of the session. Never poll
+  screenshots while debugging (read state with `Runtime.evaluate` instead); test spins on a
+  fresh launch with no debugger attached.
+- **Dead answer bar at launch:** some launches the bottom bar's surface never draws (page
+  alive, framebuffer empty). In-session hide/show/resize/reload don't help; `bar_guard`
+  gives the bar a new `AnkiWebPage` and redraws it. Card templates also carry Janki's mobile
+  typewriter — never search card HTML for `<hr id=answer>` without skipping `<script>`.
+
 ## Releases
 1. Bump `manifest.json` `human_version`; compile (`python -m py_compile`).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.0** (Windows: **v2.13.0w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.3** (Windows: **v2.13.3w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.
