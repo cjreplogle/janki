@@ -160,6 +160,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 **2.13.4** · 2026-10-27
 
 - Minor Hotfix from Previous Version
+- Setup now asks which decks you use (Hutchcom, AnKing, AJ) and switches them on in Settings.
 
 **2.13.3** · 2026-10-27
 

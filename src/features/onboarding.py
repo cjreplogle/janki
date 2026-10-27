@@ -204,6 +204,31 @@ def _hotkeys_page():
     return page, t
 
 
+def _decks_page():
+    """Which shared decks you study — the same switches as Settings' lecture sources
+    (lectures.set_source: tag map, Calendar, Study Progress and lecture loading)."""
+    from ..integrations import lectures
+    status = _status()
+    boxes = []
+    for fam, label in (("huc", "Hutchcom"), ("ak", "AnKing"), ("aj", "AJ")):
+        cb = lectures._Switch(label)              # the slide switch Janki uses elsewhere
+        cb.setChecked(lectures.source_on(fam))
+
+        def _on(on, fam=fam, label=label):
+            c = _cfg_raw()
+            lectures.set_source(c, fam, bool(on))
+            mw.addonManager.writeConfig(__name__, c)
+            status.setText("✓ %s %s" % (label, "on" if on else "off"))
+        cb.toggled.connect(_on)
+        boxes.append(cb)
+    return _page(
+        _title("Which decks do you use?"),
+        _body("Switch on the decks you study. Janki uses them to find each lecture's "
+              "cards, for the Calendar and for loading today's lectures. You can change "
+              "this any time in Janki Settings."),
+        *boxes, status)
+
+
 def _controller_page():
     cb = QCheckBox("Use a game controller to rate cards")
     cb.setChecked(bool(_cfg().get("hid_controller", False)))
@@ -332,7 +357,7 @@ def show() -> None:
             outer.setContentsMargins(m.left() + 6, 34, m.right() + 6, m.bottom())
         stack = QStackedWidget()
         hk_page, hk_timer = _hotkeys_page()
-        pages = [_welcome_page(), _calendar_page(), _lectures_page(), hk_page,
+        pages = [_welcome_page(), _decks_page(), _calendar_page(), _lectures_page(), hk_page,
                  _controller_page(), _done_page()]
         for p in pages:
             stack.addWidget(p)
