@@ -392,7 +392,7 @@ def _apply(text: str, card, kind) -> str:
             # No reword for the back: still keep the reworded front that was just shown,
             # rather than flipping it back to the original on reveal.
             if side == "a" and cid in _front_html:
-                m = re.search(r"""<hr[^>]*id=["']?answer\b[^>]*>""", text or "")
+                m = _answer_hr(text)
                 if m:
                     shown = _front_html[cid] + text[m.start():]
                     if isinstance(kind, str) and "review" in kind.lower():
@@ -432,7 +432,7 @@ def _apply(text: str, card, kind) -> str:
         # own, so its copy of the front (and its variant index) needn't match the reworded
         # front just shown. Rebuild it: the front exactly as displayed + this variant's back.
         if (variant is not None and side == "a" and not is_cz and not rec.get("html")
-                and re.search(r"""id=["']?answer\b""", text or "")):
+                and _answer_hr(text)):
             qv = _front_shown(note, card, cid, cycling, reps)
             if qv:
                 variant = _join_front(qv, variant, note, card.ord)
@@ -1070,11 +1070,26 @@ def _bold_phrases(body: str, phrases) -> str:
 _ANS_MARK = "\x06"
 
 
+_ANS_HR_RE = re.compile(r"""<hr[^>]*id=["']?answer\b[^>]*>""")
+
+
+def _answer_hr(text: str):
+    """Anki's <hr id=answer> — the REAL one, outside <script>/<style>/comments. Janki's
+    mobile typewriter (in 117 note templates) has a comment "back: only after <hr
+    id=answer>", which matched first: the back was cut mid-script and the rest of the
+    script's source showed on the card as text (2026-10-27). Those blocks are blanked to
+    same-length spaces so positions still index into `text`."""
+    t = text or ""
+    masked = re.sub(r"(?is)<(script|style)\b.*?</\1>|<!--.*?-->",
+                    lambda m: " " * len(m.group(0)), t)
+    return _ANS_HR_RE.search(masked)
+
+
 def _with_answer_marker(v: str, text: str, note, ord_) -> str:
     """Answer-side text variant → the same text with _ANS_MARK after the lines that repeat one of
     the card's stored FRONT variants (a reworded back normally opens with its reworded front).
     Only when the original back has the marker; otherwise unchanged."""
-    if not re.search(r"""id=["']?answer\b""", text or ""):
+    if not _answer_hr(text):
         return v
     vl = [ln.strip() for ln in (v or "").split("\n") if ln.strip()]
     vn = [_norm(x) for x in vl]
@@ -3368,9 +3383,13 @@ def _inject_live_current() -> None:
             "(function(){try{"
             "var qa=document.getElementById('qa');"
             "if(!qa||document.getElementById('jk-rw-toggle'))return;"   # already toggleable
-            "var html=qa.innerHTML;"
             "window.__jkNoType=1;"                                      # no re-type animation
-            "qa.innerHTML='<div id=\"jk-rw-live\">'+html+'</div>'+" + json.dumps(tail) + ";"
+            # Move the card's own nodes into the live box instead of re-parsing its HTML
+            # (qa.innerHTML round trip): mid-type, or with a script in the card, the
+            # re-parse could spill script source onto the card as text (2026-10-27).
+            "var live=document.createElement('div');live.id='jk-rw-live';"
+            "while(qa.firstChild)live.appendChild(qa.firstChild);"
+            "qa.appendChild(live);qa.insertAdjacentHTML('beforeend'," + json.dumps(tail) + ");"
             + script +
             "}catch(e){}})();"
         )

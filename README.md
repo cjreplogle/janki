@@ -157,6 +157,16 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 <details>
 <summary><b>2.13</b> · 2026-10-26 · 2 releases</summary>
 
+**2.13.3** · 2026-10-27
+
+- Slide cards (a picture with a short answer under it) stay still when you reveal the answer, with room left for the answer so there's no scrolling.
+- Image occlusion cards: the masks line up with their labels, and the labels never show through while a card fades in.
+- Marlin Muscle Chart pictures no longer overlap the text on zoomed decks or in full screen.
+- Syncing no longer flickers or replays the deck list's drop-in, and the sidebar keeps its scroll position.
+- If the answer bar fails to draw, Janki now repairs it in place instead of restarting Anki.
+- Fixed reworded cards sometimes showing script code.
+- Answer text on picture-heavy cards types out again.
+
 **2.13.2** · 2026-10-27
 
 - Minor bug fixes and performance improvements to Onigiri mode.

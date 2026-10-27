@@ -414,7 +414,7 @@ _TPL_BLOCK = (
     # hidden content — e.g. the reword data field, thousands of characters that were being
     # split letter by letter, slowing the whole reveal.
     "    if(p.closest&&p.closest('#jkrw-b64,#jkrw-btn,.jkrw-floating,[hidden]')) continue;\n"
-    "    if(marker && !(marker.compareDocumentPosition(n)&4)) continue;  // back: only after <hr id=answer>\n"
+    "    if(marker && !(marker.compareDocumentPosition(n)&4)) continue;  // back: only after the answer divider\n"
     "    if(backNoHr && !(p.closest&&p.closest('.cloze'))) continue;       // back w/o marker: cloze answers only\n"
     "    nodes.push([n,n.nodeValue,jkUL(n)]); }\n"
     "  var holders=[],spans=[];\n"

@@ -2531,7 +2531,15 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # measured AFTER reveal(): the card is visibility:hidden until then, which the
         # visibility check would read as "nothing to see" (holders are still clipped)
         "      reveal();\n"
-        "      var VH=innerHeight;\n"
+        # Photos at their final size before measuring: this runs the moment the side is
+        # swapped in, before the photo fit has resized anything — a slide card's picture
+        # was still at its natural size, pushing the answer line below the window, so
+        # it read as off-screen and appeared untyped. Remembered sizes are applied now;
+        # while any photo still awaits its fit, "below the window" doesn't count.
+        "      var unfit=false; try{ qa.querySelectorAll('img').forEach(function(im){\n"
+        "        if(window.__jkFitRecall) window.__jkFitRecall(im);\n"
+        "        if(window.__jkFitOn && !im.hasAttribute('data-jk-fit-shown') && im.naturalWidth>=320) unfit=true; }); }catch(e){}\n"
+        "      var VH=unfit ? Infinity : innerHeight;\n"
         "      function seen(el){ var rs=el.getClientRects(); if(!rs.length) return false;\n"
         "        try{ if(el.checkVisibility && !el.checkVisibility({checkVisibilityCSS:true})) return false; }catch(e){}\n"
         "        var r=rs[0]; if(r.top>VH) return false;\n"

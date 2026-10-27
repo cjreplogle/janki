@@ -131,6 +131,24 @@ def _contanki_sounds():
         table[name] = wrapped
 
 
+def park_contanki_now():
+    """At import time: Contanki makes its view while add-ons load (mw.contanki,
+    setFixedSize(0, 0)), long before any profile opens — it sat at 0 x 0 through the
+    whole start-up, the state that spins the compositor. Janki loads right after it
+    (add-on folders load in name order), so park it here, before Anki shows anything."""
+    w = getattr(mw, "contanki", None)
+    if w is None or getattr(w, "_jk_one", False):
+        return
+    try:
+        w._jk_one = True
+        w.setFixedSize(1, 1)
+        w.move(0, 0)
+        w.lower()
+        _note("1x1 at import: %s" % _name(w))
+    except Exception as e:
+        log("zero views park: %s" % e)
+
+
 def install():
     global _timer
     _quiet_contanki_connects()
@@ -141,5 +159,11 @@ def install():
         _timer = QTimer(mw)
         _timer.timeout.connect(_scan)
         _timer.start(1500)
+        # Launch: Contanki's view is created at 0 x 0 around now, and the 1.5 s scan left
+        # it there for up to 1.5 s. That window can wedge the compositor for the whole
+        # session (Anki at 100 % CPU; on some launches the answer bar never drew), and
+        # fixing the size later doesn't undo it — so scan fast for the first seconds.
+        for ms in range(0, 6000, 50):
+            QTimer.singleShot(ms, _scan)
     except Exception as e:
         log("zero views: %s" % e)

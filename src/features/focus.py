@@ -909,12 +909,38 @@ def _apply_card_zoom() -> None:
 # Icons/small inline images and Image Occlusion are left alone; zooming a deck
 # (Ctrl +/−) turns it off there, so that zoom is exactly what you asked for.
 _FIT_JS = r"""(function(on){
-var M=320,N=240,H=0.95,Z=__Z__;   // #qa is zoomed by Z: size in its units
+// Marlin Muscle Chart (pic | text | pic): its template's window._mcFit sizes the side
+// pictures in screen px, but they sit inside #qa, which Janki zooms per deck — so each
+// picture came out (zoom)x too big and ran into the text (worse in full screen). Keep
+// a zoom-aware version in its place: the template re-assigns it on every card, so the
+// property swallows those assignments.
+if(!window.__jkMcFix){window.__jkMcFix=1;var GAP=28,EDGE=12;
+ var mc=function(){var t=document.querySelector('.mc-text'),ims=document.querySelectorAll('.mc-pics img');
+  if(!t||window.innerWidth<=800)return;var qa=document.getElementById('qa');
+  var z=parseFloat(qa&&getComputedStyle(qa).zoom)||1,r=t.getBoundingClientRect(),vh=window.innerHeight,cy=r.top+r.height/2;
+  for(var i=0;i<ims.length&&i<2;i++){var im=ims[i];if(!im.naturalWidth){im.onload=mc;continue;}
+   var avail=Math.max(i===0?r.left-GAP-EDGE:window.innerWidth-r.right-GAP-EDGE,0),ar=im.naturalHeight/im.naturalWidth;
+   var h=Math.min(avail*ar,vh-2*EDGE),w=h/ar,top=Math.min(Math.max(cy-h/2,EDGE),vh-EDGE-h),st=im.style;
+   st.width=(w/z)+'px';st.height=(h/z)+'px';st.maxHeight='none';st.top=(top/z)+'px';st.transform='none';
+   st.left=st.right='auto';if(i===0)st.left=((EDGE+(avail-w)/2)/z)+'px';else st.right=((EDGE+(avail-w)/2)/z)+'px';}};
+ try{Object.defineProperty(window,'_mcFit',{configurable:true,get:function(){return mc;},set:function(){}});}catch(e){}
+ if(document.querySelector('.mc-pics'))mc();}
+else if(document.querySelector('.mc-pics')&&window._mcFit)window._mcFit();
+var M=320,N=240,H=0.95,Z=__Z__,SLIDE_ROOM=100;   // #qa is zoomed by Z: size in its units
 // (Image Occlusion Enhanced's older #io-wrapper is fitted: its photo and its mask
 // overlay are the same image size, centred in same-width boxes, so both get the same
 // width and the masks stay aligned. Anki's own occlusion draws to a canvas: left alone.)
 function ioe(im){return !!im.closest('#io-wrapper');}
 function io(im){return !ioe(im)&&im.closest('#image-occlusion-container,.image-occlusion,[id^="io-"]');}
+// …and the overlay always takes the photo's exact width: each was fitted on its own (a
+// picture already shown isn't refitted), so they could end up apart — masks 436 px
+// wide over a 577 px photo, off their labels
+function ioeSync(){var o=document.querySelector('#io-original img'),v=document.querySelector('#io-overlay img');
+ if(!o||!v)return;var w=o.style.getPropertyValue('width');
+ if(!w){['width','height','max-width','max-height'].forEach(function(p){v.style.removeProperty(p);});return;}
+ if(v.style.getPropertyValue('width')===w)return;
+ v.style.setProperty('width',w,'important');v.style.setProperty('height','auto','important');
+ v.style.setProperty('max-width','100%','important');v.style.setProperty('max-height','none','important');}
 // logos / badges aren't photos: AnKing's crown logo is a big file shown small (and
 // fitting it blew it up over the card). Skip anything pinned (fixed/absolute) or named
 // like a logo/AnKing badge.
@@ -964,6 +990,10 @@ function fit(force){var qa=document.getElementById('qa');if(!qa)return;
   // photo may use: a photo kept clear of it ended ~85 px above the window's bottom)
   var qh=qa.getBoundingClientRect().height,other=qh-cur,
    left=avail-16-other+(parseFloat(getComputedStyle(qa).paddingBottom)||0);
+  // a slide card (the front is one picture, next to no text; the back adds a line or
+  // two under it): leave that room now, so the back fits without scrolling and the
+  // picture never has to move or shrink for it
+  if(slide())left-=SLIDE_ROOM;
   // the shrink only ever tightens for this card + window size: re-measuring after
   // a write regrouped the rows and swung the size back and forth (flicker)
   var key=innerWidth+'x'+innerHeight+'|'+todo.map(function(t){return t.im.src;}).join(',');
@@ -978,18 +1008,20 @@ function fit(force){var qa=document.getElementById('qa');if(!qa)return;
   im.style.setProperty('height','auto','important');
   im.style.setProperty('max-width','100%','important');
   im.style.setProperty('max-height','none','important');
-  im.dataset.jkFit=1;var m=mem();if(!m[im.src])m.__n++;m[im.src]={w:w,iw:innerWidth};});}
+  im.dataset.jkFit=1;var m=mem();if(!m[im.src])m.__n++;m[im.src]={w:w,iw:innerWidth};});
+ ioeSync();}
 // Revealing the answer redraws the card: its photos are new elements, so they were
 // hidden, refitted (a slightly different size) and faded in again — on screen the
 // whole time. A photo already fitted at this window width takes its size back at once
 // and shows without a fade (remembered by src; fit() skips it like any shown photo).
 function mem(){var m=window.__jkFitMem;if(!m||m.__n>60){m=window.__jkFitMem={__n:0};}return m;}
 function recall(im){if(!on||im.hasAttribute('data-jk-fit-shown'))return false;
+ var pr=im.closest&&im.closest('#io-wrapper');
  var r=mem()[im.src];if(!r||r.iw!==innerWidth)return false;
  im.style.setProperty('width',r.w+'px','important');im.style.setProperty('height','auto','important');
  im.style.setProperty('max-width','100%','important');im.style.setProperty('max-height','none','important');
- im.dataset.jkFit=1;im.setAttribute('data-jk-fit-shown','1');return true;}
-window.__jkFitRecall=recall;
+ im.dataset.jkFit=1;if(pr)show(im,false);else im.setAttribute('data-jk-fit-shown','1');return true;}
+window.__jkFitRecall=function(im){var r=recall(im);ioeSync();return r;};
 // A new card's photos stay invisible until their size is final, then fade in: no size
 // change you can see. Two quick passes, then one fresh fit from full size (an early
 // measure can see a taller card, and the shrink-only rule above would keep it small).
@@ -997,8 +1029,25 @@ if(!document.getElementById('jk-fit-css')){var fc=document.createElement('style'
  fc.textContent='#qa img:not([data-jk-fit-shown]){opacity:0!important;}';(document.head||document.documentElement).appendChild(fc);}
 // (the rule hides any card image not yet marked shown, so a new photo is hidden from
 // its very first frame; images this doesn't size show at once)
-function show(im,fade){if(im.hasAttribute('data-jk-fit-shown'))return;im.setAttribute('data-jk-fit-shown','1');
+function show(im,fade){if(im.hasAttribute('data-jk-fit-shown'))return;
+ // Image Occlusion Enhanced: the photo and its mask overlay appear TOGETHER — shown on
+ // its own (the overlay still loading), the photo's labels were readable for a moment
+ // before the masks covered them
+ var pair=ioePair(im);
+ if(pair){var other=pair[0]===im?pair[1]:pair[0];
+  if(!other.complete||!other.naturalWidth){if(!im.__jkPairWait){im.__jkPairWait=1;
+   other.addEventListener('load',function(){show(im,fade);},{once:true});}return;}
+  // one fade for the WRAPPER, not one per layer: two layers each half-transparent let the
+  // labels under a mask show through it mid-fade
+  pair.forEach(function(x){x.setAttribute('data-jk-fit-shown','1');});
+  var wr=im.closest('#io-wrapper');
+  if(fade&&wr)try{wr.animate([{opacity:0},{opacity:1}],{duration:160,easing:'ease-out'});}catch(e){}
+  return;}
+ im.setAttribute('data-jk-fit-shown','1');
  if(fade)try{im.animate([{opacity:0},{opacity:1}],{duration:160,easing:'ease-out'});}catch(e){}}
+function ioePair(im){if(!im.closest||!im.closest('#io-wrapper'))return null;
+ var o=document.querySelector('#io-original img'),v=document.querySelector('#io-overlay img');
+ return (o&&v)?[o,v]:null;}
 function holdNew(){var qa=document.getElementById('qa');if(!qa)return;
  qa.querySelectorAll('img').forEach(function(im){if(recall(im))return;var nw=im.naturalWidth,nh=im.naturalHeight;
   if(!on||io(im)||badge(im,qa)||(nw&&nh&&nw<M&&nh<N))show(im,false);});}
@@ -1006,7 +1055,8 @@ function holdNew(){var qa=document.getElementById('qa');if(!qa)return;
 // resized on load — a flicker; its load handler fits and shows it. `all`: the safety net)
 function reveal(all){var qa=document.getElementById('qa');if(!qa)return;
  qa.querySelectorAll('img').forEach(function(im){
-  if(all!==true&&on&&!im.complete&&!io(im)&&!badge(im,qa))return;show(im,true);});}
+  if(all!==true&&on&&!im.complete&&!io(im)&&!badge(im,qa))return;show(im,true);
+  if(all===true)im.setAttribute('data-jk-fit-shown','1');});}   // safety: never stays hidden
 // Blank lines a note ends with (trailing <br>s, often 3+) are empty space the card
 // was centred and photos were sized around: the content sat high with a gap below.
 // Hide them (only at the very end: whitespace text, <br>, empty blocks).
@@ -1028,7 +1078,7 @@ setTimeout(function(){(function settle(n){var cb=document.getElementById('jp-cho
  if(cb&&n<13){var c1=cb.querySelector('.jp-choice');
   if(!c1||c1.getBoundingClientRect().height<4||cb.getBoundingClientRect().height<20){
    setTimeout(function(){settle(n+1);},100);return;}}
- window.__jkFitF=1;fit();reveal();})(0);},250);
+ window.__jkFitF=1;fit();window.__jkHoldFn&&window.__jkHoldFn();reveal();})(0);},250);
 setTimeout(function(){reveal(true);},1800);   // safety: never leave a photo hidden (after the Practice wait)
 // photos in sections that open later (AnKing's Extra / hint buttons) or load late
 // Fit RIGHT AWAY too (observer callbacks run before the next paint): the back's
@@ -1065,6 +1115,53 @@ if(!window.__jkFitMo){window.__jkFitMo=1;var mt;new MutationObserver(function(rs
 if(!window.__jkFitRs){window.__jkFitRs=1;var t,lw=innerWidth;addEventListener('resize',function(){
  if(innerWidth===lw)return;lw=innerWidth;
  clearTimeout(t);t=setTimeout(function(){window.__jkFitOn&&window.__jkFit&&window.__jkFit(true);},100);});}
+// ---- slide cards: the picture holds still from front to back -----------------------
+// Front: remember where the picture sits. Back (same picture): put it back exactly
+// there — no re-centring on the taller back, no scroll to the answer — and the answer
+// line appears in the room the front left below it (SLIDE_ROOM).
+function slideImg(){var qa=document.getElementById('qa');if(!qa||qa.querySelector('.jp-stem,.mc-pics,#io-wrapper'))return null;
+ var ims=[].filter.call(qa.querySelectorAll('img'),function(im){return im.getClientRects().length&&im.naturalWidth>=M;});
+ return ims.length===1?ims[0]:null;}
+function slide(){if(window.__jkSide!=='_showQuestion')return !!window.__jkHold;var im=slideImg();if(!im)return false;
+ var qa=document.getElementById('qa'),t=(qa.innerText||'').replace(/\s+/g,'');return t.length<=40;}
+function hold(){var im=slideImg();
+ if(!im||(window.__jkSide==='_showQuestion'&&!slide())){var q0=document.getElementById('qa');if(q0)q0.classList.remove('jk-slide');}
+ if(!im)return;
+ if(window.__jkSide==='_showQuestion'){
+  if(!slide()){window.__jkHold=null;return;}
+  // centre the picture TOGETHER with the room left for the answer (centring the picture
+  // alone put half that room above it, and the answer ran into the bottom edge)
+  var pad=Math.max(12,window.__jkFitPad||0),ih=im.getBoundingClientRect().height,
+   top=Math.max(pad,pad+(innerHeight-pad-ih-SLIDE_ROOM)/2);
+  window.__jkHold={src:im.src,top:top};}
+ var h=window.__jkHold;if(!h||im.src!==h.src)return;
+ // the answer line sits close under the slide (the divider's margins left ~30 px)
+ var qa0=document.getElementById('qa');if(qa0&&!qa0.classList.contains('jk-slide'))qa0.classList.add('jk-slide');
+ if(!document.getElementById('jk-slide-css')){var sc0=document.createElement('style');sc0.id='jk-slide-css';
+  sc0.textContent='#qa.jk-slide #answer{margin-top:6px!important;margin-bottom:6px!important;}';
+  (document.head||document.documentElement).appendChild(sc0);}
+ var qa=document.getElementById('qa'),sc=document.getElementById('jk-sc');
+ if(window.__jkSide==='_showAnswer'){if(sc&&sc.scrollTop)sc.scrollTop=0;if(window.scrollY)window.scrollTo(0,0);}
+ var d=h.top-im.getBoundingClientRect().top;if(Math.abs(d)<1)return;
+ var mt=parseFloat(getComputedStyle(qa).marginTop)||0,v=Math.max(0,mt+d)+'px';
+ // Janki's centring owns #qa's top margin (writes go through q.__jkSP, plain ones are
+ // dropped, and it re-applies auto): pin it the way Practice pins its stem — the value
+ // holds while this picture is on the page (window.__jpPinned / __jpWrapPin)
+ window.__jpPinned={v:v,el:im};
+ if(!window.__jpWrapPin)window.__jpWrapPin=function(q){if(!q.__jkSP||q.__jkSP.__jpw)return;
+  var o=q.__jkSP,w=function(p,val,pr){var P=window.__jpPinned;
+   if(p==='margin-top'&&P&&((P.el&&P.el.isConnected)||(P.until&&performance.now()<P.until)))val=P.v;
+   return o(p,val,pr);};w.__jpw=1;q.__jkSP=w;};
+ window.__jpWrapPin(qa);
+ (qa.__jkSP||qa.style.setProperty.bind(qa.style))('margin-top',v,'important');}
+window.__jkHoldFn=hold;
+// the front's spot is taken once its size is final; the back's pin runs before paint
+// (observer) and again after Anki's scroll-to-answer
+if(window.__jkSide==='_showQuestion'){window.__jkHold=null;}
+else{hold();requestAnimationFrame(hold);setTimeout(hold,60);setTimeout(hold,250);}
+if(!window.__jkHoldMo){window.__jkHoldMo=1;new MutationObserver(function(){
+ if(window.__jkSide==='_showAnswer'&&window.__jkHoldFn)window.__jkHoldFn();})
+ .observe(document.body,{childList:true,subtree:true});}
 window.__jkFitOn=on;window.__jkFit=fit;window.__jkFitReveal=reveal;
 })(__ON__);"""
 

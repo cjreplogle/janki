@@ -945,8 +945,12 @@ _KOME_RESIZE_CSS = (
     "save({h:innerHeight,z:z});return true;}"
     "var t;function soon(){clearTimeout(t);t=setTimeout(fit,60);}"
     "addEventListener('resize',soon);"
+    # the sidebar keeps its scroll across redraws (Sync / a deck change rebuilds the
+    # page, and it came back scrolled to the top): remembered per tab, set before paint
     "var done=false,mo=new MutationObserver(function(){if(!done&&fit()){done=true;mo.disconnect();"
-    "var s=document.querySelector('.ba-side');new MutationObserver(soon).observe(s,{childList:true,subtree:true});}});"
+    "var s=document.querySelector('.ba-side');new MutationObserver(soon).observe(s,{childList:true,subtree:true});"
+    "try{var st=+sessionStorage.getItem('jkSideTop')||0;if(st&&getComputedStyle(s).overflowY!=='hidden')s.scrollTop=st;}catch(e){}"
+    "s.addEventListener('scroll',function(){try{sessionStorage.setItem('jkSideTop',s.scrollTop);}catch(e){}},{passive:true});}});"
     "mo.observe(d,{childList:true,subtree:true});"
     "if(document.readyState!=='loading'&&!done&&fit()){done=true;mo.disconnect();"
     "new MutationObserver(soon).observe(document.querySelector('.ba-side'),{childList:true,subtree:true});}"
@@ -1285,10 +1289,16 @@ def _kome_view_css() -> str:
 _swap_until = 0.0
 
 
-def _arm_swap() -> None:
+_swap_quiet = False      # the next swap is a refresh of the same list (after a sync)
+
+
+def _arm_swap(quiet: bool = False) -> None:
+    """The next deck-list render (within 2 s) happens in the live page. quiet: the list
+    is the same one being refreshed (after a sync), so no entrance animation."""
     import time
-    global _swap_until
+    global _swap_until, _swap_quiet
     _swap_until = time.monotonic() + 2.0
+    _swap_quiet = quiet
 
 
 def _take_swap() -> bool:
@@ -1323,8 +1333,12 @@ if(D.cal){var t=document.createElement('div');t.innerHTML=D.cal;var sec=t.firstE
    {duration:320,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});}catch(e){}}
 window.__baDeckTree=D.rows;var c=document.querySelector('.ad-list--home');
 if(c&&window.__adDeckList){window.__adDeckList.render(c,D.rows,{onStudy:function(d){pycmd('open:'+d);}});
+ /* a refresh of the same list (after a sync): its freshly built rows skip Kome's CSS
+    rise-in (set on those nodes before paint, so later +/- redraws still animate) */
+ if(D.quiet){[c].concat([].slice.call(c.querySelectorAll('*'))).forEach(function(e){
+   e.style.setProperty('animation','none','important');});}
  /* the same soft entrance the Calendar has: fade up the list (and Kome's charts) */
- if(D.mode!=='cal'&&!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)){
+ if(D.mode!=='cal'&&!D.quiet&&!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)){
   [c].concat([].slice.call(h.querySelectorAll(':scope > .ba-practice'))).forEach(function(el,i){
    el.animate([{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'none'}],
     {duration:320,delay:i*50,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});});}}
@@ -1344,7 +1358,9 @@ def _kome_swap() -> None:
         "rows": tm._full_deck_tree_payload(),           # filtered for the mode
         "cal": (calendar_view._page_html() if mode == "cal" else ""),
         "active": {"cal": "janki_oni:calendar", "prac": "janki_oni:practice"}.get(mode, "decks"),
+        "quiet": _swap_quiet,
     }
+    globals()["_swap_quiet"] = False
     if mode == "cal" and getattr(calendar_view, "_detail", None) is not None and data["cal"]:
         # a class page: its "‹ Calendar" pill goes inside the swapped-in block
         cal = data["cal"]

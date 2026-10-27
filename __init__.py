@@ -1816,6 +1816,7 @@ except Exception as _sw_exc:
 
 try:   # hide 0-px web views: under the uncapped frame rate they spin the compositor
     from .src.util import zero_views as _zero_views
+    _zero_views.park_contanki_now()          # before start-up draws anything
     gui_hooks.profile_did_open.append(lambda: _zero_views.install())
 except Exception as _zv_exc:
     log("zero_views: %s" % _zv_exc)

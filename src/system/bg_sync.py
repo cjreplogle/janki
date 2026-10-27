@@ -106,6 +106,19 @@ def _on_sync_done():
     # Kome's rise / fade replaying on an unchanged list read as a flicker
     import time
     mw._jk_quiet_render = time.monotonic()
+    # …and with Onigiri, that redraw updates the open deck list in place (the live swap
+    # Decks / Calendar / Practice use) instead of reloading the page: a sync reloaded it
+    # twice in a second (start + finish), and the rebuild could show as a flicker. The
+    # start's reload stays — it's what updates the Sync row's status dot. (Kome's top
+    # charts refresh at the next normal deck-list load.)
+    try:
+        if getattr(mw, "state", None) == "deckBrowser" and not _exiting:
+            from ..util import compat
+            if compat.onigiri_on():
+                from ..integrations import onigiri
+                onigiri._arm_swap(quiet=True)   # same list: no entrance
+    except Exception:
+        pass
     _quiet = _exiting
     if _manual:
         _manual = False
