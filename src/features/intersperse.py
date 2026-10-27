@@ -727,7 +727,6 @@ def practice_button_html(card) -> str:
         return ""
     btn = (
         '<div id="jk-pq-btn" onclick="pycmd(\'jankipractice:toggle\')" '
-        'title="Related practice questions (Tab+Q)" '
         'onmouseover="this.style.opacity=1;this.style.setProperty(\'color\',\'#fff\',\'important\');" '
         'onmouseout="this.style.opacity=0.55;this.style.setProperty(\'color\',\'#9fb4d8\',\'important\');" '
         # line-height pinned: a note type's `.card { line-height: 1.6em }` (Marlin)

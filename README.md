@@ -157,6 +157,11 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 <details>
 <summary><b>2.13</b> · 2026-10-26 · 2 releases</summary>
 
+**2.13.2** · 2026-10-27
+
+- Minor bug fixes and performance improvements to Onigiri mode.
+- Refinements to the UI when using the Janki card font (Card font follows Onigiri off).
+
 **2.13.1** · 2026-10-26
 
 - Using Janki with Onigiri no longer eats up as much of your battery.

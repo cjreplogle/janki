@@ -102,9 +102,39 @@ def _quiet_contanki_connects():
     mod.tooltip = tooltip
 
 
+def _contanki_sounds():
+    """Contanki's own deck-list actions (Next / Previous (Due) Deck, Expand/Collapse,
+    Select) move the selection without Janki's navigation sounds: play them alongside."""
+    try:
+        import importlib
+        acts = importlib.import_module("1898790263.actions")
+        from ..features import sfx
+    except Exception:
+        return
+    table = getattr(acts, "button_actions", None)
+    if not isinstance(table, dict):
+        return
+    sounds = {"Next Deck": "move", "Previous Deck": "move", "Next Due Deck": "move",
+              "Previous Due Deck": "move", "Expand/Collapse": "move", "Select": "select"}
+    for name, snd in sounds.items():
+        fn = table.get(name)
+        if fn is None or getattr(fn, "_jk_sfx", False):
+            continue
+
+        def wrapped(*a, _fn=fn, _snd=snd, **k):
+            try:
+                sfx.play(_snd)
+            except Exception:
+                pass
+            return _fn(*a, **k)
+        wrapped._jk_sfx = True
+        table[name] = wrapped
+
+
 def install():
     global _timer
     _quiet_contanki_connects()
+    _contanki_sounds()
     if _timer is not None:
         return
     try:

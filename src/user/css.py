@@ -477,8 +477,8 @@ _IMG_RIM_JS = (
 # (their controls sit on the window edges).
 _CARD_FRAME_JS = (
     "<style>#jk-sc{position:fixed;inset:0;width:100vw;height:100vh;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;overscroll-behavior:none;outline:none;"
-    "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);"
-    "mask-image:linear-gradient(to bottom,transparent 0,#000 18px,#000 calc(100% - 18px),transparent 100%);}"
+    "-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 8px,#000 calc(100% - 8px),transparent 100%);"
+    "mask-image:linear-gradient(to bottom,transparent 0,#000 8px,#000 calc(100% - 8px),transparent 100%);}"
     "#jk-sc::-webkit-scrollbar{width:0;height:0}#jk-sc.jk-nofade{-webkit-mask-image:none;mask-image:none}</style>"
     "<script>(function(){if(window.__jkFrame)return;window.__jkFrame=1;\n"
     "function setup(){var q=document.getElementById('qa'),E=document.getElementById('jk-sc');\n"
@@ -1782,6 +1782,9 @@ def _build_css(cfg, context):
                 "#innertable > tbody > tr { display:flex !important; flex-wrap:nowrap !important;\n"
                 "  align-items:center !important; gap:6px !important; min-height:40px !important; }\n"
                 "#innertable > tbody > tr > td { padding:2px !important; }\n"
+                # Onigiri pads the row 6px top / 18px bottom: the buttons sat 10px from
+                # the bar's top and 14px from its bottom. Even (12 / 12 in the 64px bar).
+                "html body #outer > table > tbody > tr { padding:0 0 2px !important; }\n"
                 # Windowed default: hide the Edit/More side cells entirely.
                 "#innertable > tbody > tr > td:first-child,\n"
                 "#innertable > tbody > tr > td:last-child { display:none !important; }\n"
@@ -2043,6 +2046,82 @@ def _build_css(cfg, context):
                      "#qa, .card, #qa *:not(kbd) {\n"
                      "  font-family: %s !important;\n}\n"
                      "</style>\n" % _card_stack)
+        # Card font NOT following Onigiri: its review header (Decks / Sync / progress,
+        # in a shadow root the page CSS can't reach) takes the card font too, so the
+        # page reads as one font instead of Onigiri's next to the card's
+        if not cfg.get("onigiri_card_font", True):
+            # Janki's text mode, full screen: a Practice question (stem + choices) reads
+            # at a comfortable measure instead of spanning the screen — capped, centred.
+            # A width media query at the screen's width (= full screen): applied in the
+            # same layout as the resize itself. A class switched from Python / a resize
+            # handler left one frame at full width before the card narrowed.
+            parts.append(
+                "<script>(function(){var s=document.createElement('style');"
+                "s.textContent='@media (min-width:'+(screen.width-2)+'px){#qa:has(.jp-stem)"
+                "{max-width:900px!important;margin-left:auto!important;margin-right:auto!important;}}';"
+                "(document.head||document.documentElement).appendChild(s);})();</script>\n")
+            parts.append(
+                # (the header is invisible until this style is inside it: added a beat
+                # after the header drew, the plain pills flashed on every card)
+                "<style>#onigiri-reviewer-ui-host:not([data-jk-hdr]){visibility:hidden!important;}</style>"
+                "<script>(function(){var F=%s,mo=0;function put(){"
+                "var h=document.getElementById('onigiri-reviewer-ui-host');if(!h)return;var r=h.shadowRoot;"
+                "if(!r||!r.firstChild){if(!put.t){put.t=1;requestAnimationFrame(function(){put.t=0;put();});}return;}"
+                "if(!r.getElementById('jk-hdr-font')){var s=document.createElement('style');"
+                "s.id='jk-hdr-font';s.textContent=':host,:host *{--font-main:'+F+' !important;font-family:'+F+' !important;}'"
+                # …and the progress pill shows just its bar: the "0/990" count read off
+                # next to the card font. The pill hugs the bar at the buttons' height
+                # (#onigiri-reviewer-header first: Onigiri's own rules carry it, and won)
+                "+'#onigiri-reviewer-header #onigiri-reviewer-progress .orp-text{display:none!important}'"
+                "+'#onigiri-reviewer-header #onigiri-reviewer-progress.onigiri-reviewer-progress{width:auto!important;"
+                "min-width:0!important;box-sizing:border-box!important;height:30px!important;align-items:center!important}'"
+                "+'#onigiri-reviewer-header #onigiri-reviewer-progress .orp-track{width:120px!important;min-width:120px!important;flex:0 0 120px!important}'"
+                # pills: just the outline, no fill (Onigiri's night-mode rule is matched
+                # selector for selector so this one, later, wins)
+                "+':host #onigiri-reviewer-header a.onigiri-reviewer-button,:host(.night-mode) #onigiri-reviewer-header a.onigiri-reviewer-button,"
+                ":host #onigiri-reviewer-header #onigiri-reviewer-progress.onigiri-reviewer-progress,"
+                ":host(.night-mode) #onigiri-reviewer-header #onigiri-reviewer-progress.onigiri-reviewer-progress"
+                "{background:transparent!important;background-color:transparent!important;box-shadow:none!important;"
+                # the card Practice button's shape: 8 px corners, soft white outline
+                "border-radius:8px!important;border:1px solid rgba(255,255,255,0.2)!important;"
+                "backdrop-filter:none!important;-webkit-backdrop-filter:none!important}'"
+                # the header's pills stay out of the way until the pointer is over them
+                # (opacity only: nothing moves; hidden pills still take the hover/click)
+                "+'#onigiri-reviewer-header > *{opacity:0}'"
+                # the fade only once the header has drawn: on from the start, the pills
+                # (briefly styled visible before this sheet) faded OUT on every new card
+                "+':host([data-jk-hdr-go]) #onigiri-reviewer-header > *{transition:opacity .2s ease!important}'"
+                "+'#onigiri-reviewer-header:hover > *,#onigiri-reviewer-header:focus-within > *{opacity:1}'"
+                # the pointer left the window: Chromium can keep :hover set (no leave
+                # event reaches it), so the pills stayed up — hide them until it's back
+                "+':host([data-jk-out]) #onigiri-reviewer-header > *{opacity:0!important}'"
+                # the pill under the pointer lightens its text, like the card's Practice
+                # button (dimmed blue-grey at rest, white on hover). Through Onigiri's own
+                # colour variable: its colour rule is !important and outranked ours
+                "+'#onigiri-reviewer-header a.onigiri-reviewer-button{--onigiri-box-effect-fg:#9fb4d8!important;"
+                "transition:color .15s ease,opacity .2s ease!important}'"
+                "+'#onigiri-reviewer-header a.onigiri-reviewer-button:hover,"
+                "#onigiri-reviewer-header a.onigiri-reviewer-button:focus-visible{--onigiri-box-effect-fg:#fff!important}';"
+                "r.appendChild(s);}"
+                # Onigiri can rebuild the header's insides: put the style back when it does
+                "if(mo!==r){mo=r;new MutationObserver(put).observe(r,{childList:true});}"
+                "h.setAttribute('data-jk-hdr','1');"
+                "if(!h.hasAttribute('data-jk-hdr-go'))requestAnimationFrame(function(){requestAnimationFrame(function(){"
+                "h.setAttribute('data-jk-hdr-go','1');});});}"
+                "put();document.addEventListener('DOMContentLoaded',function(){put();"
+                # (the header is a direct child of <body>: watch only that level — the
+                # typewriter makes hundreds of changes deeper down)
+                "new MutationObserver(put).observe(document.body,{childList:true});});"
+                "var out=function(on){var h=document.getElementById('onigiri-reviewer-ui-host');"
+                "if(h){if(on)h.setAttribute('data-jk-out','');else h.removeAttribute('data-jk-out');}};"
+                "document.addEventListener('mouseout',function(e){if(!e.relatedTarget)out(1);});"
+                "document.documentElement.addEventListener('mouseleave',function(){out(1);});"
+                "window.addEventListener('blur',function(){out(1);});"
+                "document.addEventListener('mousemove',function(){out(0);},{passive:true});"
+                # safety: never leave the header hidden
+                "setTimeout(function(){var h=document.getElementById('onigiri-reviewer-ui-host');"
+                "if(h)h.setAttribute('data-jk-hdr','1');},1500);"
+                "})();</script>\n" % __import__("json").dumps(_card_stack))
         # Practice "Show original slide" button lives on <body> (outside #qa) so the note-type
         # CSS can lag behind the add-on. Force it here to the minimal reword-toggle look
         # (small, sans) with high specificity so it always matches regardless of the deployed
@@ -2056,6 +2135,10 @@ def _build_css(cfg, context):
                      # the slide button sits just above the rephrase bar instead of on it
                      "body:has(#jk-rw-bar) .jp-slide-btn {\n"
                      "  bottom: 44px !important;\n}\n"
+                     # answer bar showing (html.jk-bar-shown, onigiri._mark_bar): the
+                     # bottom controls sit flush with the card view, 12px above Show Answer
+                     "html.jk-bar-shown #jk-pq-bar, html.jk-bar-shown #jk-rw-bar {\n"
+                     "  bottom: 0 !important;\n}\n"
                      "</style>\n")
         # Cloze deletions: recolour to a readable blue by default. Many note types
         # (incl. AnKing) colour the active cloze green, which fights the glass; a
@@ -3250,8 +3333,26 @@ _HINT_BAR = (
 )
 
 
+# Page scripts' animation frames, capped at 240 a second. With the frame rate uncapped
+# (--disable-frame-rate-limit: 120 Hz ProMotion), a script that keeps asking for frames
+# (requestAnimationFrame) ran thousands of times a second — heat and battery for nothing
+# the screen can show. Callbacks asked for in one frame still run together; CSS
+# animations and scrolling aren't touched.
+_RAF_CAP_JS = r"""<script>(function(){if(window.__jkRafCap||!window.requestAnimationFrame)return;
+window.__jkRafCap=1;var raf=window.requestAnimationFrame.bind(window),MIN=1000/240,last=0,
+id=0,cbs={},armed=false;
+function run(t){armed=false;last=performance.now();var m=cbs;cbs={};
+ for(var k in m){try{m[k](t);}catch(e){setTimeout(function(){throw e;},0);}}}
+function arm(){if(armed)return;armed=true;var w=MIN-(performance.now()-last);
+ if(w<=1)raf(run);else setTimeout(function(){raf(run);},w);}
+window.requestAnimationFrame=function(cb){var i=++id;cbs[i]=cb;arm();return i;};
+window.cancelAnimationFrame=function(i){delete cbs[i];};})();</script>
+"""
+
+
 def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> None:
     try:
+        web_content.head = _RAF_CAP_JS + web_content.head
         # Resource hint buttons (AnKing note types: Sketchy, Pixorize, Bootcamp, ...) sat
         # mid-card in big pills. Lift just the buttons into a small fixed row at the top;
         # their hint content stays in place and still toggles via the buttons' onclick.
@@ -3375,7 +3476,10 @@ def _on_will_set_content(web_content: WebContent, context: Optional[Any]) -> Non
         # by sync_practice_bottom (additive, so no flicker).
         if isinstance(context, ReviewerBottomBar) and _is_practice \
                 and _cfg().get("practice_binary_grade", True):
-            web_content.head += "\n<style>button[data-ease]{display:none!important;}</style>"
+            # (same id as sync_practice_bottom's rule, so leaving Practice removes it: the
+            # bar page carries over between cards, and an unnamed copy hid the grade
+            # buttons on the next normal card — no Show Answer / Again–Easy at all)
+            web_content.head += "\n<style id='jp-hide-ease'>button[data-ease]{display:none!important;}</style>"
         if GLASS:
             QTimer.singleShot(150, glass._clear_existing_webviews)
     except Exception as exc:

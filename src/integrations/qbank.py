@@ -5303,10 +5303,13 @@ _BACK_JS = (
     "void _q3.offsetHeight;_q3.style.removeProperty('transition');"
     "if(_up>1)try{_q3.animate([{transform:'translateY('+_up+'px)'},{transform:'translateY(0)'}],"
     "{duration:300,easing:'cubic-bezier(0.645,0.045,0.355,1)'});}catch(e){}}"
-    "sessionStorage.removeItem('jp_stem_top');}catch(e){}return;}"
+    "sessionStorage.removeItem('jp_stem_top');}catch(e){}}"
+    # …then, like after a pick, only the correct answer stays (blue: no pick to be right
+    # or wrong about); the others fold away behind "Other answers"
+    "var noPick=!r;"
     "var card=document.querySelector('.card')||document.body;"
     # Whole-card fill only on DESKTOP (see front) — mobile tints just the boxes.
-    "if(typeof window.jankiPracticeAutoFlip!=='undefined')"
+    "if(typeof window.jankiPracticeAutoFlip!=='undefined'&&!noPick)"
     "card.classList.add(r==='right'?'jp-fill-right':'jp-fill-wrong');"
     "var box=document.getElementById('jp-choices');if(!box)return;"
     "box.classList.add('jp-locked');"
@@ -5324,7 +5327,7 @@ _BACK_JS = (
     "var cor=box.querySelector('.jp-choice.jp-correct');"
     # correct answer: green when you got it right, BLUE when you got it wrong
     "if(cor){cor.classList.add(r==='right'?'jp-reveal':'jp-reveal-blue','jp-picked');"
-    "window.jankiTint(cor,r==='right'?'right':'blue');}"
+    "if(window.jankiTint)window.jankiTint(cor,r==='right'?'right':'blue');}"
     "if(!isNaN(pk)&&cs[pk]){cs[pk].classList.add('jp-picked');" # your pick → green if right, red if wrong
     "cs[pk].classList.add(r==='right'?'jp-right':'jp-wrong');"
     "window.jankiTint(cs[pk],r==='right'?'right':'wrong');}"
@@ -5340,7 +5343,8 @@ _BACK_JS = (
     "setTimeout(function(){if(!el.classList.contains('jp-collapsed'))el.style.maxHeight='';},420);};}"
     # Mark the irrelevant choices (neither your pick nor the correct answer) and add
     # an "Other answers" toggle. Default state from config.
-    "var others=[];for(var i=0;i<cs.length;i++){"
+    # No correct answer (incomplete parse): nothing to single out — keep every choice
+    "var others=[];if(cor)for(var i=0;i<cs.length;i++){"
     "if(!cs[i].classList.contains('jp-picked')&&!cs[i].classList.contains('jp-dropped')){"
     "cs[i].classList.add('jp-other');others.push(cs[i]);}}"
     # remembered per-session state if set, else the config default
@@ -5874,7 +5878,7 @@ def apply_practice_prefs(persist=False):
         if remote_on:
             try:
                 from . import gamepad
-                remote_on = gamepad.is_controller_connected()
+                remote_on = gamepad.remote_in_use()     # used lately, not just paired
             except Exception:
                 remote_on = False
         remote = "true" if remote_on else "false"

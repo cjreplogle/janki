@@ -188,6 +188,15 @@ _hid_axis_last = {}           # d-pad axis usage -> last quantized pos (0/127/25
 _hid_runloop = None           # bg thread's CFRunLoop (so teardown can stop it)
 _hid_cf = None                # CoreFoundation handle (for CFRunLoopStop at exit)
 _hid_device_count = 0         # live count of matched controllers (match/removal cbs)
+_hid_last_input = [0.0]       # monotonic time of the last button / d-pad press
+
+
+def remote_in_use(window=600.0):
+    """Connected AND pressed in the last `window` s. A paired 8BitDo stays "connected"
+    to macOS while asleep, so connection alone turned on Practice's 4-choice remote mode
+    (E hidden) with the remote off."""
+    import time
+    return is_controller_connected() and time.monotonic() - _hid_last_input[0] < window
 _hid_match_cb = None          # keep the device-matching CFUNCTYPE alive
 _hid_remove_cb = None         # keep the device-removal CFUNCTYPE alive
 _hid_iokit = None             # IOKit handle (for IOHIDManagerCopyDevices)
@@ -374,6 +383,8 @@ def _start_hid_monitor():
                         if _hid_axis_last.get(u) != cur:
                             _hid_axis_last[u] = cur
                             if cur != 127:
+                                import time as _tm2
+                                _hid_last_input[0] = _tm2.monotonic()
                                 if u == 0x31:
                                     kc = 126 if cur == 0 else 125
                                 else:
@@ -417,6 +428,8 @@ def _start_hid_monitor():
                         keytap._gtap_log(f"[hid] zoom button {usage}")
                         return
                 if ival == 1 and last != 1:   # rising edge = button down
+                    import time as _tm
+                    _hid_last_input[0] = _tm.monotonic()
                     # Contanki not reading the pad (its page wants a press to reveal the
                     # pad, then ~0.5 s): that first press reached nobody — the deck
                     # preview and a deck's first card needed B twice. Janki takes it.
@@ -467,6 +480,10 @@ def _start_hid_monitor():
                     elif fwd and kc is not None:
                         # Non-rating buttons (e.g. caption toggle) send plain, gated.
                         keytap._key_bridge.send_key.emit(kc)
+                    elif kc is None and not state._anki_focused:
+                        # a button Janki doesn't use, Anki in the background: the action
+                        # it's bound to in Contanki (HID button N = Contanki index N-1)
+                        keytap._key_bridge.contanki_btn.emit(usage - 1)
             except Exception as e:
                 keytap._gtap_log(f"[hid] cb: {e}")
 
@@ -656,7 +673,8 @@ def _gate_tick():
     if _hid_manager is None or _hid_shutting_down:
         _apply_gate(True)            # can't tell → leave controllers working
         return
-    _apply_gate(bool(is_controller_connected()))
+    # used in the last 10 min, not just paired (a sleeping 8BitDo stays "connected")
+    _apply_gate(bool(remote_in_use()))
 
 
 def start_controller_gate():

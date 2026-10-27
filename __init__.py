@@ -1820,6 +1820,12 @@ try:   # hide 0-px web views: under the uncapped frame rate they spin the compos
 except Exception as _zv_exc:
     log("zero_views: %s" % _zv_exc)
 
+try:   # answer bar that never reaches the screen at launch → reopen Anki (bar_guard.py)
+    from .src.util import bar_guard as _bar_guard
+    gui_hooks.profile_did_open.append(lambda: _bar_guard.install())
+except Exception as _bg_exc:
+    log("bar_guard: %s" % _bg_exc)
+
 try:   # no controller connected → nothing listens for one (battery; gamepad.py)
     from .src.integrations import gamepad as _gp_gate
     gui_hooks.profile_did_open.append(lambda: _gp_gate.start_controller_gate())

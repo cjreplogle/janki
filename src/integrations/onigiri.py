@@ -1315,7 +1315,12 @@ if(D.cal){var t=document.createElement('div');t.innerHTML=D.cal;var sec=t.firstE
  document.addEventListener=now(da,document);window.addEventListener=now(wa,window);
  try{[].slice.call(sec.querySelectorAll('script')).forEach(function(s){var n=document.createElement('script');
    n.textContent=s.textContent;s.parentNode.replaceChild(n,s);});}
- finally{document.addEventListener=da;window.addEventListener=wa;}}
+ finally{document.addEventListener=da;window.addEventListener=wa;}
+ /* the Calendar's entrance: the same fade-up the list gets (WAAPI, so a quiet render's
+    animation:none rule can't stop it) */
+ if(!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))
+  try{sec.animate([{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'none'}],
+   {duration:320,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});}catch(e){}}
 window.__baDeckTree=D.rows;var c=document.querySelector('.ad-list--home');
 if(c&&window.__adDeckList){window.__adDeckList.render(c,D.rows,{onStudy:function(d){pycmd('open:'+d);}});
  /* the same soft entrance the Calendar has: fade up the list (and Kome's charts) */
@@ -2041,8 +2046,13 @@ def _on_will_set_content(web_content, context):
                     # each side, buttons filling their cell
                     "#innertable td:not(#middle):not(#middle td){flex:0 0 clamp(96px,9vw,150px)!important;"
                     "width:clamp(96px,9vw,150px)!important;min-width:0!important;"
-                    "display:flex!important;align-items:flex-end!important;padding-top:2px!important;}"
-                    # same height as Show Answer, bottoms level with it
+                    # centred like Show Answer (bottom-aligned, they sat ~10px lower once
+                    # the bar's row padding was evened to 12 / 12)
+                    # (2px on top, as Show Answer's own cell has: centred without it they
+                    # sat 1px higher — 11–51 against its 12–52)
+                    "display:flex!important;align-items:center!important;padding-top:2px!important;"
+                    "padding-bottom:0!important;}"
+                    # same height as Show Answer, level with it
                     "#innertable td:not(#middle):not(#middle td)>button{width:100%!important;"
                     "max-width:none!important;min-width:0!important;margin:0!important;"
                     "height:var(--jk-ans-h,auto)!important;box-sizing:border-box!important;}"
@@ -2051,8 +2061,10 @@ def _on_will_set_content(web_content, context):
                     "#innertable:not(:has(#ansbut)) td:not(#middle):not(#middle td)"
                     "{display:none!important;}"
                     "</style><script>(function(){function sync(){var a=document.getElementById('ansbut');"
-                    "if(a&&a.offsetHeight)document.documentElement.style.setProperty('--jk-ans-h',"
-                    "a.offsetHeight+'px');}"
+                    "if(a&&a.offsetHeight){var R=document.documentElement.style,C=getComputedStyle(a);"
+                    "R.setProperty('--jk-ans-h',a.offsetHeight+'px');"
+                    # Practice's Continue takes Show Answer's text size / weight
+                    "R.setProperty('--jk-ans-fs',C.fontSize);R.setProperty('--jk-ans-fw',C.fontWeight);}}"
                     "function go(){sync();if(document.body)new MutationObserver(sync).observe("
                     "document.body,{childList:true,subtree:true});}"
                     "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);"
@@ -2066,7 +2078,8 @@ def _on_will_set_content(web_content, context):
                     # border-box: its 30 px side padding + border went on top of the 100 %,
                     # so it came out ~62 px wider than Show Answer
                     "#jp-continue-bar{width:100%!important;max-width:none!important;"
-                    "min-width:0!important;margin:0!important;box-sizing:border-box!important;}"
+                    "min-width:0!important;margin:0!important;box-sizing:border-box!important;"
+                    "font-size:var(--jk-ans-fs,inherit)!important;font-weight:var(--jk-ans-fw,600)!important;}"
                     "</style>")
             # Glass follows the "Janki glass behind Onigiri" switch, like the menus: off
             # → a solid background in Onigiri's page colour (the window strip matches).
@@ -2545,7 +2558,7 @@ def _keep_bottom_bar_hidden() -> None:
     orig = bw.setVisible
 
     def setVisible(visible, _orig=orig):
-        if visible and (getattr(mw, "state", None) == "deckBrowser" or _bottom_hold[0]):
+        if visible and getattr(mw, "state", None) == "deckBrowser":
             visible = False
         return _orig(visible)
     bw.setVisible = setVisible
@@ -2811,13 +2824,65 @@ class _BarHideWatch(QObject):
     review-start hold) → shown again on the next tick, and the caller noted in the trace."""
     def eventFilter(self, obj, ev):
         try:
+            # Hidden: finish any animation on its page. A hidden page gets no frames, so a
+            # fade caught mid-way never ends — and with the frame rate uncapped the
+            # compositor chased it flat out (Anki at ~100 % CPU while idle).
+            if ev.type() == QEvent.Type.Hide:
+                try:
+                    obj.eval("try{document.getAnimations().forEach(function(a){"
+                             "if(a.playState==='running'||a.playState==='pending')a.finish();});}catch(e){}")
+                except Exception:
+                    pass
             if ev.type() == QEvent.Type.Hide and getattr(mw, "state", None) == "review":
                 from ..features import focus
                 if not getattr(focus, "_focus_hidden", False) and not _bottom_hold[0]:
                     QTimer.singleShot(0, _ensure_bar)
+            if ev.type() == QEvent.Type.Show:
+                QTimer.singleShot(300, lambda o=obj: _wake_page(o, 2))
+            if obj is getattr(mw, "bottomWeb", None) and ev.type() in (QEvent.Type.Show,
+                                                                         QEvent.Type.Hide):
+                _mark_bar()
         except Exception:
             pass
         return False
+
+
+def _mark_bar() -> None:
+    """Tell the card page whether the answer bar is showing (html.jk-bar-shown): the
+    bottom controls (Practice / Reworded / slide) then sit flush with the card view's
+    bottom, 12px above Show Answer, else lifted 14px off the window's edge. A class
+    the page keeps, so no rewrite of the Focus Mode sheet can drop it."""
+    try:
+        bw = getattr(mw, "bottomWeb", None)
+        on = bool(bw is not None and bw.isVisible() and bw.height() > 0)
+        mw.web.eval("document.documentElement.classList.toggle('jk-bar-shown',%s)"
+                    % ("true" if on else "false"))
+    except Exception:
+        pass
+    _sync_fullscreen()          # (backstop: a missed full-screen change heals per card)
+
+
+def _wake_page(view, tries) -> None:
+    """A web view hidden and shown again in quick succession (the review-start hold) can
+    come back with its page still "hidden" to Chromium: Qt says visible, but the page gets
+    no frames and nothing reaches the screen (Show Answer missing; a resize didn't help).
+    Seen via CDP: document.visibilityState 'hidden' on a visible bar. Toggle it once more."""
+    def check(state):
+        try:
+            if state != "hidden" or not view.isVisible():
+                return
+            view.setVisible(False)
+            view.setVisible(True)
+            log("woke stuck-hidden page: %s" % type(view).__name__)
+            if tries > 1:
+                QTimer.singleShot(300, lambda: _wake_page(view, tries - 1))
+        except Exception:
+            pass
+    try:
+        if view.isVisible():
+            view.page().runJavaScript("document.visibilityState", check)
+    except Exception:
+        pass
 
 
 _bar_watch = None
@@ -2830,6 +2895,11 @@ def _watch_bar_hide() -> None:
         return
     _bar_watch = _BarHideWatch(mw)
     bw.installEventFilter(_bar_watch)
+    gui_hooks.reviewer_did_show_question.append(lambda _c: QTimer.singleShot(0, _mark_bar))
+    gui_hooks.reviewer_did_show_answer.append(lambda _c: QTimer.singleShot(0, _mark_bar))
+    tw = getattr(mw, "toolbarWeb", None)       # the top toolbar too (finish-on-hide only:
+    if tw is not None:                          # the re-show above checks for the bar)
+        tw.installEventFilter(_bar_watch)
 
 
 _FADE_BARS_MS = 200
@@ -2845,7 +2915,11 @@ def _hide_bottom_for_fade() -> None:
     until the top bar is ready; _fade_bars_in brings both in together."""
     try:
         _bottom_hold[0] = True
-        mw.bottomWeb.setVisible(False)
+        # page-level hide (cleared by _release_bottom): hiding the widget and showing it
+        # again a moment later could leave the bar's page never reaching the screen
+        # (Show Answer missing / a black strip; page alive, CDP screenshot hangs)
+        mw.bottomWeb.eval("(function(){var b=document.body;if(b)"
+                          "b.style.setProperty('visibility','hidden');})()")
     except Exception:
         pass
 
@@ -3246,7 +3320,11 @@ def _apply_card_centring(*_a) -> None:
         # Practice (MCQ) cards stay top-aligned at the "Focus" level, where the top bar
         # and the answer bar still show: centred, the question floated mid-screen.
         # Janki's Focus Mode and Onigiri's Flow / Zen (bars hidden) still centre them.
-        if level == 1 and not getattr(_focus, "_focus_hidden", False):
+        # (not with the card font NOT following Onigiri — Janki's text mode: there
+        # they centre at Focus too, placed as in Flow)
+        from ..util.config import _cfg as _jk_cfg
+        if level == 1 and not getattr(_focus, "_focus_hidden", False) \
+                and _jk_cfg().get("onigiri_card_font", True):
             try:
                 c = mw.reviewer.card
                 if c is not None and c.note_type()["name"] == "Janki Practice":
@@ -3257,8 +3335,8 @@ def _apply_card_centring(*_a) -> None:
             bw = getattr(mw, "bottomWeb", None)
             bar = bw.height() if bw is not None and bw.isVisible() else 0
             css = _focus._FOCUS_CSS.replace("#onigiri-reviewer-ui-host{display:none!important;}", "")
-            if bar:   # answer bar showing: keep Reworded / Practice right above it
-                css += "#jk-rw-bar,#jk-pq-bar,body .jp-slide-btn{bottom:4px!important;}"
+            # (answer bar showing: html.jk-bar-shown puts the bottom controls flush —
+            # see _mark_bar)
             js = ("(function(){var s=document.getElementById('__janki_focus');"
                   "if(!s){s=document.createElement('style');s.id='__janki_focus';"
                   "(document.head||document.documentElement).appendChild(s);}"
@@ -3309,6 +3387,9 @@ def _sync_fullscreen(*_a) -> None:
         if bw is not None:
             bw.eval("document.documentElement.classList.toggle('jk-fs',%s)"
                     % ("true" if fs else "false"))
+        # the card page too (Practice questions narrow in full screen only)
+        mw.web.eval("document.documentElement.classList.toggle('jk-fs',%s)"
+                    % ("true" if fs else "false"))
     except Exception as e:
         log("onigiri fullscreen sync: %s" % e)
 
@@ -3318,7 +3399,14 @@ def _watch_fullscreen(*_a) -> None:
         wh = mw.windowHandle()
         if wh is not None and not getattr(mw, "_jk_fs_watch", False):
             mw._jk_fs_watch = True
-            wh.windowStateChanged.connect(_sync_fullscreen)
+            # (the state read back from the window can lag macOS's full-screen
+            # animation — leaving full screen kept html.jk-fs: Edit / More and the
+            # narrow Practice width stayed. Sync now and again once it has settled)
+            def _changed(*_a):
+                _sync_fullscreen()
+                QTimer.singleShot(400, _sync_fullscreen)
+                QTimer.singleShot(1200, _sync_fullscreen)
+            wh.windowStateChanged.connect(_changed)
     except Exception as e:
         log("onigiri fullscreen watch: %s" % e)
 
@@ -3362,8 +3450,9 @@ def _blank_stale_bottom(new_state, _old_state) -> None:
     QTimer.singleShot(1500, _release_bottom)
     try:
         bw = getattr(mw, "bottomWeb", None)
-        if bw is not None:
-            bw.setVisible(False)
+        if bw is not None:             # page-level (see _hide_bottom_for_fade)
+            bw.eval("(function(){var b=document.body;if(b)"
+                    "b.style.setProperty('visibility','hidden');})()")
     except Exception:
         pass
 

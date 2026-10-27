@@ -91,6 +91,7 @@ class _KeyBridge(QObject):
     toggle_window = _pyqtSignal()       # Cmd+Opt+A → show Anki, or hide it if it's frontmost
     card_zoom = _pyqtSignal(float)      # remote +/− → card zoom step
     page_key = _pyqtSignal(str)         # remote, Anki unfocused, not reviewing → a key in the page
+    contanki_btn = _pyqtSignal(int)     # remote, Anki unfocused → the Contanki action bound to it
     reword_toggle = _pyqtSignal()       # Tab+R → toggle the reworded view of the current card
 
 _key_bridge = _KeyBridge()
@@ -109,6 +110,7 @@ def _remote_zoom(d):
 
 _key_bridge.card_zoom.connect(_remote_zoom)
 _key_bridge.page_key.connect(lambda k: _page_key(k))
+_key_bridge.contanki_btn.connect(lambda i: _contanki_action(i))
 _key_bridge.toggle_window.connect(lambda: _toggle_main_window())
 _key_bridge.reword_toggle.connect(lambda: _reword_toggle())
 
@@ -306,6 +308,42 @@ def _reword_toggle() -> None:
             tooltip("Original")
     except Exception as e:
         log(f"reword cycle: {e}")
+
+
+def _contanki_action(index: int) -> None:
+    """Anki isn't focused, so Contanki (it reads the pad through its page, which only gets
+    pad input while focused) can't see this press: run the action the user bound to the
+    button in Contanki's own profile, looked up the way Contanki does (screen → review →
+    all). Undo / Redo / Bury / Flag… then work from the background too."""
+    try:
+        import importlib
+        from ..integrations import review_nav
+        inst = review_nav._find_contanki()
+        prof = getattr(inst, "profile", None) if inst is not None else None
+        base = (type(inst).__module__.rsplit(".", 1)[0] if inst is not None else "1898790263")
+        if prof is None:
+            # Contanki loads its profile only once its page has seen the pad (needs Anki
+            # focused): load the user's own profile directly — the one named after a
+            # Micro / the only one saved
+            pm = importlib.import_module(base + ".profile")
+            names = list(pm.get_profile_list(defaults=False))
+            pick = next((n for n in names if "micro" in n.lower()), names[0] if len(names) == 1 else None)
+            prof = pm.get_profile(pick) if pick else None
+            if prof is None:
+                return
+        st = getattr(mw, "state", None)
+        if st == "review":
+            st = getattr(getattr(mw, "reviewer", None), "state", None) or "review"
+        name = prof.get(st, index)
+        if not name:
+            return
+        acts = importlib.import_module(base + ".actions")
+        fn = acts.button_actions.get(name)
+        if fn is not None:
+            fn()
+            _gtap_log(f"contanki action {name!r} (button {index}, {st}, background)")
+    except Exception as e:
+        _gtap_log(f"contanki action: {e}")
 
 
 def _page_key(k: str) -> None:
