@@ -159,9 +159,7 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 
 **2.13.4** · 2026-10-27
 
-- Answer buttons no longer grow for a moment as they fade out after you grade a card.
-- Answer buttons outside Onigiri are paler on the glass.
-- Text shadows default to High performance (lighter, and off while a card types out).
+- Minor Hotfix from Previous Version
 
 **2.13.3** · 2026-10-27
 
