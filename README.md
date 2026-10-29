@@ -159,7 +159,8 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 
 **2.13.5** · 2026-10-29
 
-- Anki should now use about 10x less battery than before: fixed Anki getting stuck near 100 % CPU after entering or leaving full screen on Mac. 120 Hz is kept. Takes effect after relaunching Anki twice.
+- Anki should now use about 10x less battery than before on MacOS.
+- Takes effect after relaunching Anki twice.
 
 **2.13.4** · 2026-10-27
 
