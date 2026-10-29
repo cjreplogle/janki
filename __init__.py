@@ -1827,6 +1827,12 @@ try:   # answer bar that never reaches the screen at launch → reopen Anki (bar
 except Exception as _bg_exc:
     log("bar_guard: %s" % _bg_exc)
 
+try:   # a stuck add-on job can't keep a quit Anki alive (never during a sync; quit_guard.py)
+    from .src.system import quit_guard as _quit_guard
+    _quit_guard.install()
+except Exception as _qg_exc:
+    log("quit_guard: %s" % _qg_exc)
+
 try:   # no controller connected → nothing listens for one (battery; gamepad.py)
     from .src.integrations import gamepad as _gp_gate
     gui_hooks.profile_did_open.append(lambda: _gp_gate.start_controller_gate())
