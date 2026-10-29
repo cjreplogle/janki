@@ -124,7 +124,7 @@ def _install(path: str) -> None:
     def ask(*_a):
         if askUser("Janki updated to the latest version.\n\nRestart Anki now to "
                    "apply it?", title="Janki"):
-            mw.close()
+            _restart()
     # Rebuild Anki's launch patch from the NEW files before the restart, so a changed
     # Chromium flag is live on the very next launch (otherwise that launch only notices
     # the old snippet and the one after it gets the new flags).
@@ -132,6 +132,33 @@ def _install(path: str) -> None:
         mw.taskman.run_in_background(_refresh_launch_patch, ask)
     except Exception:
         ask()
+
+
+def _restart() -> None:
+    """Quit Anki and open it again. mw.close() only quit (the user had to reopen Anki),
+    and with close-to-tray on it was turned into a hide, so nothing restarted at all."""
+    import os
+    import sys
+    try:
+        if sys.platform == "darwin":
+            import subprocess
+            from . import stock_selfheal
+            ad = stock_selfheal._aqt_dir()
+            app = stock_selfheal._app_root(ad) if ad else None
+            # wait for THIS process to exit (quitting can take a while: sync on close),
+            # else `open` would just bring the dying instance forward
+            subprocess.Popen(["/bin/sh", "-c",
+                              'while kill -0 "$0" 2>/dev/null; do sleep 0.5; done; '
+                              'sleep 1; open -a "$1"', str(os.getpid()),
+                              str(app) if app else "Anki"],
+                             start_new_session=True)
+        elif sys.platform.startswith("win"):
+            from ..platform.win import shell
+            shell.relaunch_after_exit()
+    except Exception as exc:
+        log("update restart: %s" % exc)
+    from . import tray
+    tray._quit_from_tray()               # a real quit, past the close-to-tray hide
 
 
 def _refresh_launch_patch() -> None:
