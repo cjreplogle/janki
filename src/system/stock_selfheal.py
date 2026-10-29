@@ -43,8 +43,9 @@ _CACHE = Path.home() / ".janki_stock_cache"
 
 # Bump when the injected patch changes, so a cached .pyc from an older janki isn't
 # reused for the same Anki build.
-_PATCH_FMT = "v6"   # v3: 120 Hz flag; v4: rollback of .py too; v5: atexit clears the marker;
+_PATCH_FMT = "v7"   # v3: 120 Hz flag; v4: rollback of .py too; v5: atexit clears the marker;
                     # v6: GPU on (WebGL) with software compositing only
+                    # v7: 120 Hz via variable refresh rate, not --disable-frame-rate-limit
 
 # Crash-guard sentinels (in $HOME so they survive an Anki reinstall).
 _PENDING = Path.home() / ".janki_glass_pending"
@@ -110,9 +111,12 @@ _INIT_INJECT = (
     "            _jflags = (_jgpucomp + ' --disable-features=CalculateNativeWinOcclusion '\n"
     "                       '--disable-renderer-backgrounding --disable-backgrounding-occluded-windows')\n"
     # Software compositing ticks at a fixed 60 Hz; lift that so ProMotion (120 Hz)
-    # displays scroll/animate past 60. Off switch without re-patching: ~/.janki_60fps
+    # displays scroll/animate past 60. Variable refresh rate, NOT --disable-frame-rate-limit:
+    # the uncapped flag left VizCompositorThread at ~100 % CPU for the rest of the session
+    # after any native full-screen transition (v7, 2026-10-29). Off: ~/.janki_60fps
+    "            _jvrr = ' --enable-features=EnableVariableRefreshRateAlwaysOn'\n"
     "            if not (_jhome / '.janki_60fps').exists():\n"
-    "                _jflags += ' --disable-frame-rate-limit'\n"
+    "                _jflags += _jvrr\n"
     "            _jos.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', _jflags)\n"
     "            from aqt.qt import QSurfaceFormat as _JankiQSF\n"
     "            _jf = _JankiQSF.defaultFormat()\n"
@@ -444,7 +448,7 @@ def unpatch(purge: bool = True) -> int:
 
 # --- entry point ---------------------------------------------------------------
 
-_FMT_MARK = b"_jgpucomp"             # name used by the v6+ snippet (older ones get rebuilt)
+_FMT_MARK = b"_jvrr"                 # name used by the v7+ snippet (older ones get rebuilt)
 
 
 _upgrade_started = False

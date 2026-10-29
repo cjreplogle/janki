@@ -97,6 +97,14 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
   completes, and the uncapped compositor spins for the rest of the session. Never poll
   screenshots while debugging (read state with `Runtime.evaluate` instead); test spins on a
   fresh launch with no debugger attached.
+- **120 Hz = `--enable-features=EnableVariableRefreshRateAlwaysOn`, never
+  `--disable-frame-rate-limit` (self-heal v7, 2026-10-29, measured):** with the uncapped
+  flag, ANY native full-screen transition (in or out, even from a screen-sized window)
+  left VizCompositorThread at ~100 % CPU until relaunch — hiding every view / the window
+  didn't stop it. VRR AlwaysOn gives the same ~200 rAF/s and animation cost with no spin
+  over repeated full-screen cycles. `EnableVariableRefreshRate` alone stays at 60;
+  `--disable-gpu-vsync` stays at 60. The older notes above that blame
+  `--disable-frame-rate-limit` describe this same compositor behaviour.
 - **Dead answer bar at launch:** some launches the bottom bar's surface never draws (page
   alive, framebuffer empty). In-session hide/show/resize/reload don't help; `bar_guard`
   gives the bar a new `AnkiWebPage` and redraws it. Card templates also carry Janki's mobile
@@ -107,7 +115,7 @@ README): the `cjrepl` repo, `ogle/janki/` (+ `ogle/canki/` web reviewer).
 2. Commit (trailer rule above) → `git pull --rebase` → push → tag → push tag.
 3. `git archive --format=zip -o <asset> HEAD`, then `gh release create`.
 - **macOS channel**: normal release, asset `janki.ankiaddon` (+ `load-todays-lectures.ankiaddon`).
-  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.4** (Windows: **v2.13.4w**).
+  The Mac updater reads `/releases/latest` only. Latest Mac release: **v2.13.5** (Windows: **v2.13.5w**).
 - **Windows channel**: `--prerelease`, tag `vX.Y.Zw` (version shown as `X.Y.Zw`), asset
   `janki-windows.ankiaddon` (same commit as the Mac release; manifest version gets the `w`).
   The Windows updater picks the newest release carrying that asset, so Mac never sees it.

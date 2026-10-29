@@ -155,7 +155,11 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.13</b> · 2026-10-26 · 2 releases</summary>
+<summary><b>2.13</b> · 2026-10-26 · 6 releases</summary>
+
+**2.13.5** · 2026-10-29
+
+- Fixed high battery drain (Anki stuck near 100 % CPU) after entering or leaving full screen on Mac. 120 Hz is kept. Takes effect after relaunching Anki twice.
 
 **2.13.4** · 2026-10-27
 
