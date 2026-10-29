@@ -162,7 +162,6 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 - Anki should now use about 10x less battery than before on MacOS.
 - Takes effect after relaunching Anki twice.
 - "Restart Anki now" after an update now really restarts Anki (it used to only quit, and did nothing with close-to-tray on).
-- From now on, updates take effect after a single restart.
 
 **2.13.4** · 2026-10-27
 
