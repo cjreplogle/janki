@@ -121,9 +121,41 @@ def _install(path: str) -> None:
     if errmsg:
         showInfo("Janki update: install failed (%s)." % errmsg, title="Janki")
         return
-    if askUser("Janki updated to the latest version.\n\nRestart Anki now to "
-               "apply it?", title="Janki"):
-        mw.close()
+    def ask(*_a):
+        if askUser("Janki updated to the latest version.\n\nRestart Anki now to "
+                   "apply it?", title="Janki"):
+            mw.close()
+    # Rebuild Anki's launch patch from the NEW files before the restart, so a changed
+    # Chromium flag is live on the very next launch (otherwise that launch only notices
+    # the old snippet and the one after it gets the new flags).
+    try:
+        mw.taskman.run_in_background(_refresh_launch_patch, ask)
+    except Exception:
+        ask()
+
+
+def _refresh_launch_patch() -> None:
+    """Run the just-installed stock_selfheal's rebuild (the loaded module is the old
+    version). Mac only; a no-op when the snippet on disk is already current."""
+    import sys
+    if sys.platform != "darwin":
+        return
+    try:
+        import importlib.util
+        from pathlib import Path
+        pkg = __name__.rsplit(".", 1)[0]                    # <addon>.src.system
+        path = Path(__file__).with_name("stock_selfheal.py")
+        spec = importlib.util.spec_from_file_location(pkg + "._selfheal_new", path)
+        mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = pkg
+        spec.loader.exec_module(mod)
+        mod._upgrade_patch_work()
+    except Exception as exc:
+        try:
+            from ..util.config import log
+            log("update: launch patch refresh: %s" % exc)
+        except Exception:
+            pass
 
 
 def _prompt_update(tag: str, url: str, asked: bool = False) -> None:
