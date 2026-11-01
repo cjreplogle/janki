@@ -2518,6 +2518,27 @@ class GlassSettings(QDialog):
             self._wfs.toggled.connect(_on_wfs)
             gen_lay.addWidget(self._wfs)
 
+        # --- Older image occlusion cards: keep every other box covered -------
+        self._iom = QCheckBox("Keep all masks on older image occlusion cards")
+        self._iom.setToolTip("Image Occlusion Enhanced cards made in \"hide one\" mode "
+                             "only cover their own box, so the other labels give answers "
+                             "away. This keeps every box covered until you press Toggle "
+                             "Masks. Changes the card templates only; syncs to your devices.")
+        self._iom.setChecked(bool(self.cfg.get("io_keep_all_masks", True)))
+
+        def _on_iom(on):
+            self.cfg["io_keep_all_masks"] = bool(on)
+            mw.addonManager.writeConfig(__name__, self.cfg)
+            try:
+                from ..features import io_masks
+                n = io_masks.apply(mw.col, bool(on))
+                tooltip(("Older image occlusion cards updated (%d note types)." % n)
+                        if n else "Nothing to change.")
+            except Exception as _e:
+                log("io masks toggle: %s" % _e)
+        self._iom.toggled.connect(_on_iom)
+        gen_lay.addWidget(self._iom)
+
         # --- Tour ------------------------------------------------------------
         self._tour_btn = QPushButton("Take the Janki tour…")
         self._tour_btn.setToolTip("A short walk-through of where each feature lives.")

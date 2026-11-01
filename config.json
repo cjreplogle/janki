@@ -138,6 +138,7 @@
   "mobile_cards": false,
   "mobile_font": "Lora (serif)",
   "auto_update_check": true,
+  "io_keep_all_masks": true,
   "min_win_height_frac": 0.58,
   "lockdown_level": "strict",
   "lockdown_hold_secs": 5.0,

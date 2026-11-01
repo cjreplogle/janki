@@ -1833,6 +1833,12 @@ try:   # a stuck add-on job can't keep a quit Anki alive (never during a sync; q
 except Exception as _qg_exc:
     log("quit_guard: %s" % _qg_exc)
 
+try:   # older image occlusion cards keep every other box covered (io_masks.py)
+    from .src.features import io_masks as _io_masks
+    _io_masks.install()
+except Exception as _iom_exc:
+    log("io_masks: %s" % _iom_exc)
+
 try:   # no controller connected → nothing listens for one (battery; gamepad.py)
     from .src.integrations import gamepad as _gp_gate
     gui_hooks.profile_did_open.append(lambda: _gp_gate.start_controller_gate())
