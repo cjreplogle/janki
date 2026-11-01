@@ -19,27 +19,27 @@ SNIP = START + r"""
 <script>
 (function(){
   function show(){ var h=document.getElementById('jk-io-hold'); if(h) h.remove(); }
-  setTimeout(show,1500);   // never leave the card blank
+  setTimeout(show,2500);   // never leave the card blank
 try{
-  var ov=document.getElementById('io-overlay'); if(!ov){ show(); return; }
+  var ov=document.getElementById('io-overlay'); var base=ov&&ov.querySelector('img');
   var o=document.querySelector('#jk-io-all-src img'), q=document.querySelector('#jk-io-cur-src img');
-  if(!o){ show(); return; }
+  if(!base||!o||base.dataset.jkAll){ show(); return; }
   var cur=q?decodeURIComponent((q.getAttribute('src')||'').split('/').pop()).replace(/-Q\.svg$/,''):'';
-  var old=ov.querySelector('.jk-io-all'); if(old) old.remove();
-  fetch(o.src).then(function(r){return r.text();}).then(function(txt){
-    var doc=new DOMParser().parseFromString(txt,'image/svg+xml');
-    if(cur){ var me=doc.getElementById(cur); if(me) me.remove(); }
-    // the card's own box: drawn by the Question Mask (front) / revealed (back)
-    var url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(doc));
-    var base=ov.querySelector('img'); if(!base){ show(); return; }
-    var img=document.createElement('img'); img.className='jk-io-all'; img.onload=img.onerror=show; img.src=url;
-    function place(){
-      if(getComputedStyle(ov).position==='static') ov.style.position='relative';
-      img.style.cssText='position:absolute;pointer-events:none;left:'+base.offsetLeft+'px;top:'+base.offsetTop+'px;width:'+base.offsetWidth+'px;height:'+base.offsetHeight+'px';
-    }
-    ov.insertBefore(img, base);   // under the card's own (red) mask
-    if(base.complete) place(); else base.addEventListener('load',place);
-    window.addEventListener('resize',place);
+  function txt(u){ return fetch(u).then(function(r){ return r.text(); }); }
+  // merge the other boxes INTO the card's own mask svg: same size and place, always
+  Promise.all([txt(base.src), txt(o.src)]).then(function(t){
+    var P=new DOMParser(), mine=P.parseFromString(t[0],'image/svg+xml'), all=P.parseFromString(t[1],'image/svg+xml');
+    var gs=mine.documentElement.getElementsByTagName('g'), dst=gs.length?gs[gs.length-1]:mine.documentElement;
+    var ag=all.documentElement.getElementsByTagName('g'), src=ag.length?ag[ag.length-1]:all.documentElement;
+    var first=dst.firstChild;
+    Array.prototype.slice.call(src.children).forEach(function(el){
+      if(el.tagName==='title'||(cur&&el.id===cur)) return;
+      dst.insertBefore(mine.importNode(el,true), first);   // under the card's own box
+    });
+    base.dataset.jkAll='1';
+    base.onload=function(){ (base.decode?base.decode():Promise.resolve()).then(show,show); };
+    base.onerror=show;
+    base.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(mine));
   }).catch(show);
 }catch(e){ show(); }})();
 </script>
