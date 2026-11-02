@@ -15,6 +15,7 @@ START, END = "<!--janki-io-all-start-->", "<!--janki-io-all-end-->"
 SNIP = START + r"""
 <div id="jk-io-all-src" style="display:none">{{Original Mask}}</div>
 <div id="jk-io-cur-src" style="display:none">{{Question Mask}}</div>
+<div id="jk-io-tags" style="display:none">{{Tags}}</div>
 <style id="jk-io-hold">#io-original,#io-overlay{visibility:hidden!important}</style>
 <script>
 (function(){
@@ -31,6 +32,19 @@ try{
     var P=new DOMParser(), mine=P.parseFromString(t[0],'image/svg+xml'), all=P.parseFromString(t[1],'image/svg+xml');
     var gs=mine.documentElement.getElementsByTagName('g'), dst=gs.length?gs[gs.length-1]:mine.documentElement;
     var ag=all.documentElement.getElementsByTagName('g'), src=ag.length?ag[ag.length-1]:all.documentElement;
+    // Tables (boxes lined up in columns) are meant to show the rest of each row as
+    // the cue, so they keep hide-one. Tags override: io_hide_one / io_hide_all.
+    var tg=' '+((document.getElementById('jk-io-tags')||{}).textContent||'').toLowerCase()+' ';
+    var shapes=Array.prototype.filter.call(src.children,function(el){ return el.tagName!=='title'; });
+    function isTable(){
+      var W=parseFloat(all.documentElement.getAttribute('width'))||1000, cols={}, n=0;
+      shapes.forEach(function(el){ var x=parseFloat(el.getAttribute('x')); if(isNaN(x)) return;
+        var k=Math.round(x/(W*0.03)); cols[k]=(cols[k]||0)+1; });
+      var big=Object.keys(cols).filter(function(k){ return cols[k]>=3; });
+      big.forEach(function(k){ n+=cols[k]; });
+      return big.length>=3 && n>=shapes.length*0.6;
+    }
+    if(/ io_hide_one /.test(tg) || (!/ io_hide_all /.test(tg) && isTable())){ show(); return; }
     var first=dst.firstChild;
     Array.prototype.slice.call(src.children).forEach(function(el){
       if(el.tagName==='title'||(cur&&el.id===cur)) return;
