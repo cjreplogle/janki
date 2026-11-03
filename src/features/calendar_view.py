@@ -1455,14 +1455,24 @@ def _mastery_map(days):
 
 
 def _mastery_color(r, alpha=None):
-    """Left-edge colour: a red → amber → green gradient by how learned the lecture is;
-    the green deepens as more of its cards are mature. Grey: nothing active."""
+    """Left-edge / calendar colour by how learned the lecture is: red, a quick amber, green,
+    then a deep green-blue for well-known lectures (darker with more mature cards).
+    Grey: nothing active."""
     m = r.get("mastery")
     if m is None:
         return "rgba(255,255,255,%s)" % (".10" if alpha else ".18")
     m = max(0.0, min(1.0, m))
-    hue = 6 + 124 * m                       # 6 = red, ~45 amber, 130 = green
-    light = 70 - 24 * max(0.0, min(1.0, r.get("mature_f", 0))) * m
+    # mostly red or green: a short pass through amber, and the best-known lectures go a
+    # deep green-blue (teal)
+    if m < 0.3:
+        hue = 4 + 10 * m / 0.3                    # red
+    elif m < 0.42:
+        hue = 14 + 86 * (m - 0.3) / 0.12          # brief amber → green
+    elif m < 0.8:
+        hue = 100 + 40 * (m - 0.42) / 0.38        # green
+    else:
+        hue = 140 + 40 * (m - 0.8) / 0.2          # → teal / green-blue
+    light = 70 - 26 * max(0.0, min(1.0, r.get("mature_f", 0))) * m - (8 if m >= 0.8 else 0)
     if alpha:
         return "hsla(%d,62%%,%d%%,%.2f)" % (round(hue), round(light), alpha)
     return "hsl(%d,62%%,%d%%)" % (round(hue), round(light))
