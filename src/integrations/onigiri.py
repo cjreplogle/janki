@@ -342,8 +342,9 @@ _KOME_CSS = (
     "body.ba-with-side .ba-side{padding-top:18px!important;}"
     # full screen has no title strip / traffic lights: match the 8px bottom gap
     "html.jk-fs body.ba-with-side .ba-side{top:8px!important;}"
-    # deck list header text (Deck / Progress / New / Learn / Due) level with the card's top
-    "body.ba-with-side .ba-home.ba-multi{padding-top:23px!important;}"
+    # full screen: deck list header text (Deck / Progress / New / Learn / Due) level with
+    # the card's top (windowed: a little above Onigiri's 40px, still clear of the title strip)
+    "html:not(.jk-fs) body.ba-with-side .ba-home.ba-multi{padding-top:32px!important;}"
     "html.jk-fs body.ba-with-side .ba-home.ba-multi{padding-top:3px!important;}"
     # Janki's page drop-in moves <html>; with a transform there Kome's fixed sidebar
     # scrolls with the page. Keep the fade, drop the slide.
