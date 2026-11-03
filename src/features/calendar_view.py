@@ -340,9 +340,13 @@ def _week_html():
             tint = ""
             if m and mast is not None and not mast:
                 cls += " jkc-mwait"                # colours still being worked out
+            if mast is not None and m is None:
+                cls += " jkc-mwait"                # no lecture match: no progress to show
             if m and mast:
                 r_ = mast.get(m["key"])
-                if r_ is not None:
+                if r_ is None:
+                    cls += " jkc-mwait"            # no cards for it: neutral, never a
+                if r_ is not None:                 # course colour that reads as a grade
                     cls += " jkc-mast"
                     tint = "--jkc-mc:%s;--jkc-mb:%s;" % (_mastery_color(r_, 0.34),
                                                          _mastery_color(r_, 0.85))
@@ -423,7 +427,9 @@ def _week_html():
     global _pending_tries
     if pending and _pending_tries < 2:        # match in the background, then refresh
         _pending_tries += 1
-        QTimer.singleShot(0, _prewarm)
+        # reach the shown week too (far-ahead weeks were never matched → no colours)
+        _f = (sunday - today).days
+        QTimer.singleShot(0, lambda: _prewarm(fwd=_f if _f > 0 else None))
     elif not pending:
         _pending_tries = 0
     return bar + empty + grid
@@ -1480,8 +1486,9 @@ def _ago(d):
 
 # three overlapping circles (white line art) — the calendar's colour-by-progress toggle
 _VENN = ("<svg width='16' height='15' viewBox='0 0 16 15' fill='none' stroke='#fff' "
-         "stroke-width='1.3'><circle cx='8' cy='5' r='4'/><circle cx='5.2' cy='9.6' r='4'/>"
-         "<circle cx='10.8' cy='9.6' r='4'/></svg>")
+         "stroke-width='1.3'><circle class='v1' cx='8' cy='5' r='4'/>"
+         "<circle class='v2' cx='5.2' cy='9.6' r='4'/>"
+         "<circle class='v3' cx='10.8' cy='9.6' r='4'/></svg>")
 
 
 def _mastery_on():
@@ -2099,6 +2106,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-mbtn{padding:4px 8px !important;}
 .jkc-mbtn svg{display:block;opacity:.5;transition:opacity .15s ease;}
 .jkc-mbtn.on svg{opacity:1;}
+.jkc-mbtn circle{transition:stroke .2s ease;}
+.jkc-mbtn.on .v1{stroke:#ec7d6f;}.jkc-mbtn.on .v2{stroke:#6fcf86;}.jkc-mbtn.on .v3{stroke:#79a8f2;}
 .jkc-ev:hover,.jkc-ev.jk-kb{background:rgba(156,188,243,.36);transform:translateY(-1px);}
 .jkc-fz{border-left-width:2px !important;border-left-style:dashed !important;}
 .jkc-c0{background:rgba(120,165,245,.24);border-color:rgba(120,165,245,.55);}
@@ -3375,6 +3384,7 @@ _pending_tries = 0      # caps background-match → refresh rounds per opening
 
 
 _prewarm_back = [14]   # days back the background matching covers (End of block → 56)
+_prewarm_fwd = [14]    # days ahead (the shown week, when it is further out)
 
 
 def _flush_weak_redo():
@@ -3387,7 +3397,7 @@ def _flush_weak_redo():
             QTimer.singleShot(0, lambda m=mode: _weak_compute(m))
 
 
-def _prewarm(back=None):
+def _prewarm(back=None, fwd=None):
     """Match the nearby fortnight's classes to lectures in the background, a few at a
     time: each batch is its own short collection job, so a class page's card count (or
     anything else) can slot in between instead of waiting for the whole run."""
@@ -3396,12 +3406,15 @@ def _prewarm(back=None):
     global _warming
     if back:
         _prewarm_back[0] = max(_prewarm_back[0], back)
+    if fwd:
+        _prewarm_fwd[0] = max(_prewarm_fwd[0], fwd)
     if _warming or getattr(mw, "col", None) is None:
         return
     from ..integrations import lectures
     t = datetime.date.today()
     evs, fresh = lectures.events_cached_between(
-        t - datetime.timedelta(days=_prewarm_back[0]), t + datetime.timedelta(days=14))
+        t - datetime.timedelta(days=_prewarm_back[0]),
+        t + datetime.timedelta(days=max(14, _prewarm_fwd[0])))
     if not fresh:
         lectures.load_events_bg(lambda: QTimer.singleShot(0, _prewarm))
         return
