@@ -1246,9 +1246,11 @@ def _weak_compute(mode, then=None):
             if den:
                 # mostly how many you've started, then how far along those are
                 sd = sum(t_[2] + t_[3] + t_[4] for t_ in pool)
-                qual = ((0.3 * sum(t_[2] for t_ in pool) + 0.75 * sum(t_[3] for t_ in pool)
+                # learning .2, young .6, mature 1: all-young tops out at green (.8);
+                # the teal end (>= .85) needs a good share of mature cards
+                qual = ((0.2 * sum(t_[2] for t_ in pool) + 0.6 * sum(t_[3] for t_ in pool)
                          + sum(t_[4] for t_ in pool)) / sd) if sd else 0.0
-                mastery = (sd / den) * (0.55 + 0.45 * qual)
+                mastery = (sd / den) * (0.5 + 0.5 * qual)
                 mat_f = sum(t_[4] for t_ in pool) / den
             else:
                 ss = [t_[5:] for t_ in pf.values()]
