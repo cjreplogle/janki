@@ -1479,7 +1479,7 @@ def _weak_html():
             "<div class='jkw-chips'>%s</div></div>"
             "<div class='jkw-sp'>%s<span>reviews · 14d</span></div></div>"
             % (sev, _mastery_color(r), i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
-               done_pct, "".join(chips), _spark_svg(r.get("spark") or [])))
+               done_pct, "".join(chips), _spark_svg(r.get("spark") or [], 150, 56)))
 
     rows = list(enumerate(_weak))
     start = _weak_start(_weak_mode)
@@ -2185,7 +2185,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-prog .jkw-bar{flex:1;}
 #jkc .jkw-prog span{font-size:.76em;opacity:.65;white-space:nowrap;font-variant-numeric:tabular-nums;}
 #jkc .jkw-chips{margin-top:8px;}
-#jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;gap:2px;flex:none;}
+#jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex:none;align-self:center;width:150px;}
 #jkc .jkw-sp .jkw-spark text{display:none;}
 #jkc .jkw-sp span{font-size:.68em;opacity:.45;letter-spacing:.02em;}
 #jkc .jkw-btns{flex-direction:column;gap:6px;}
