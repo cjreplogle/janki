@@ -1034,8 +1034,8 @@ def _weak_compute(mode, then=None):
     for e in sorted(evs, key=lambda x: x["date"], reverse=True):
         if e["start"] is None or _is_allday_kind(e["summary"]):
             continue
-        if e["date"] == today and (e["end"] or 0) > now_min:
-            continue                             # not had it yet
+        # today's lectures count even before they've happened: the new set's first
+        # day after a biweekly should show its pool from the morning
         m = lectures.peek_match(e["summary"])
         if m is lectures._PENDING:
             pending = True
