@@ -344,6 +344,8 @@ def _week_html():
                 cls += " jkc-mwait"                # no lecture match: no progress to show
             if m and mast:
                 r_ = mast.get(m["key"])
+                if r_ is not None and e["date"] > today and not r_.get("studied"):
+                    r_ = None                      # not held yet, nothing studied: neutral
                 if r_ is None:
                     cls += " jkc-mwait"            # no cards for it: neutral, never a
                 if r_ is not None:                 # course colour that reads as a grade
@@ -1266,7 +1268,7 @@ def _weak_compute(mode, then=None):
             if mastery is not None and recall is not None:
                 mastery *= 0.7 + 0.3 * min(1.0, recall / 0.9)
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
-                         "mastery": mastery, "mature_f": mat_f,
+                         "mastery": mastery, "mature_f": mat_f, "studied": bool(lrn or young or mature),
                          "active": active, "spark": spark,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
