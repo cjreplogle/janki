@@ -1171,6 +1171,7 @@ def _weak_compute(mode, then=None):
                     hits.setdefault(nid, set()).add(fam)
             n = sus = new = due = leech = good = bad = lrn = young = mature = 0
             spark = [0] * 14
+            pf = {}           # source -> [active, new, lrn, young, mature, sus-studied…]
             for nid, fams in hits.items():
                 lch = nid in leech_nids
                 for cid, q, typ, d, did, ivl in nid_cards.get(nid, ()):
@@ -1178,6 +1179,14 @@ def _weak_compute(mode, then=None):
                     if not any(f not in allow or did in allow[f] for f in fams):
                         continue
                     n += 1
+                    st = 0 if typ == 0 else 1 if typ in (1, 3) else 3 if ivl >= 21 else 2
+                    t_ = pf.setdefault(min(fams), [0, 0, 0, 0, 0, 0, 0, 0])
+                    if q == -1:
+                        if st:
+                            t_[4 + st] += 1          # studied, then suspended
+                    else:
+                        t_[0] += 1
+                        t_[1 + st] += 1
                     if q == -1:
                         sus += 1
                     elif typ == 0:
@@ -1207,11 +1216,25 @@ def _weak_compute(mode, then=None):
                      + 0.15 * min(1.0, due / n * 3) + min(0.15, leech * 0.02))
             # how learned the lecture is, 0..1: each card weighted by how far along it
             # is (new 0, learning .15, young .55, mature 1), then scaled by recall
-            mastery = ((0.15 * lrn + 0.55 * young + mature) / active) if active else None
+            # …over the cards you're working on: sources with any studied card (a source
+            # you haven't started doesn't drag it down); none studied → all unsuspended;
+            # nothing unsuspended → the studied cards, suspended or not
+            W = (0.15, 0.55, 1.0)
+            studied = [t_ for t_ in pf.values() if t_[2] + t_[3] + t_[4]]
+            pool = studied or list(pf.values())
+            den = sum(t_[0] for t_ in pool)
+            if den:
+                mastery = sum(W[0] * t_[2] + W[1] * t_[3] + W[2] * t_[4] for t_ in pool) / den
+                mat_f = sum(t_[4] for t_ in pool) / den
+            else:
+                ss = [t_[5:] for t_ in pf.values()]
+                den = sum(sum(x) for x in ss)
+                mastery = (sum(W[0] * a + W[1] * b + W[2] * c for a, b, c in ss) / den) if den else None
+                mat_f = (sum(c for _a, _b, c in ss) / den) if den else 0
             if mastery is not None and recall is not None:
                 mastery *= 0.5 + 0.5 * min(1.0, recall / 0.9)
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
-                         "mastery": mastery, "mature_f": (mature / active) if active else 0,
+                         "mastery": mastery, "mature_f": mat_f,
                          "active": active, "spark": spark,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
