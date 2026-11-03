@@ -302,9 +302,8 @@ def _week_html():
     _shown = evs
     timed = [e for e in evs if e["start"] is not None and not _is_allday_kind(e["summary"])]
     lo = min([e["start"] for e in timed] + [8 * 60])
-    hi = max([e["end"] for e in timed] + [17 * 60])
+    hi = 17 * 60          # the day always ends at 5 pm: later events are cut at the bottom
     lo = (lo // 60) * 60
-    hi = -(-hi // 60) * 60
     span = max(60, hi - lo)
     px_per_min = 0.9
     grid_h = int(span * px_per_min)
@@ -369,8 +368,10 @@ def _week_html():
                 allday.append("<div class='%s jkc-ad' data-i='%d' style='%s'>%s%s</div>"
                               % (cls, i, tint, mbadge, title))
                 continue
-            top = 100.0 * (e["start"] - lo) / span           # % of the day: the grid
-            h = 100.0 * (e["end"] - e["start"]) / span        # stretches to the window
+            _s = min(e["start"], hi - 30)                    # past 5 pm: kept on the grid
+            _e = max(_s + 30, min(e["end"], hi))
+            top = 100.0 * (_s - lo) / span                   # % of the day: the grid
+            h = 100.0 * (_e - _s) / span                     # stretches to the window
             ln, nl = lanes.get(i, (0, 1))
             pos = ("" if nl == 1 else
                    "left:calc(%.4f%% + 2px);right:auto;width:calc(%.4f%% - 4px);"
@@ -428,7 +429,7 @@ def _week_html():
     # the bar, day names and all-day strip
     grid = ("<div class='jkc-grid' style='--jkc-n:%d;--jkc-h:max(%dpx,calc(100vh - %dpx))'>"
             "<div class='jkc-hours'>%s</div>%s</div>"
-            % (len(days), grid_h, 130 + ads_h, hours, "".join(cols)))
+            % (len(days), grid_h, 138 + ads_h, hours, "".join(cols)))
     global _pending_tries
     if pending and _pending_tries < 2:        # match in the background, then refresh
         _pending_tries += 1
