@@ -344,8 +344,11 @@ def _week_html():
                 cls += " jkc-mwait"                # no lecture match: no progress to show
             if m and mast:
                 r_ = mast.get(m["key"])
-                if r_ is not None and e["date"] > today and not r_.get("studied"):
-                    r_ = None                      # not held yet, nothing studied: neutral
+                if r_ is not None and e["date"] > today:
+                    # not held yet: only what you've already studied counts (an unstarted
+                    # pile can't make it red); nothing studied → neutral
+                    r_ = ({"mastery": r_["seen_m"], "mature_f": r_.get("seen_mat", 0)}
+                          if r_.get("seen_m") is not None else None)
                 if r_ is None:
                     cls += " jkc-mwait"            # no cards for it: neutral, never a
                 if r_ is not None:                 # course colour that reads as a grade
@@ -1188,6 +1191,7 @@ def _weak_compute(mode, then=None):
         for idx, (e, m, atoms) in enumerate(lecs):
             if _closing:
                 return []
+            _t.sleep(0.001)                     # let the UI thread run (smooth animations)
             now = _t.monotonic()
             if now - last > 0.1:
                 last = now
@@ -1265,10 +1269,15 @@ def _weak_compute(mode, then=None):
                 den = sum(sum(x) for x in ss)
                 mastery = (sum(W[0] * a + W[1] * b + W[2] * c for a, b, c in ss) / den) if den else None
                 mat_f = (sum(c for _a, _b, c in ss) / den) if den else 0
-            if mastery is not None and recall is not None:
-                mastery *= 0.7 + 0.3 * min(1.0, recall / 0.9)
+            rf = (0.7 + 0.3 * min(1.0, recall / 0.9)) if recall is not None else 1.0
+            if mastery is not None:
+                mastery *= rf
+            # how well the cards you HAVE seen are known (for lectures not held yet)
+            _sd = lrn + young + mature
+            seen_m = (((0.2 * lrn + 0.6 * young + mature) / _sd) * rf) if _sd else None
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
-                         "mastery": mastery, "mature_f": mat_f, "studied": bool(lrn or young or mature),
+                         "mastery": mastery, "mature_f": mat_f, "studied": bool(lrn or young or mature), "seen_m": seen_m,
+                         "seen_mat": (mature / _sd) if _sd else 0,
                          "active": active, "spark": spark,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
@@ -1515,7 +1524,14 @@ def _mastery_map(days):
     rows = _weak_cached(mode)
     if rows is None:
         if mode not in _weak_busy:
-            QTimer.singleShot(0, lambda: _weak_compute(mode))
+            # wait until navigation settles: a week-flip animation stays smooth
+            _mast_timer.stop()
+            try:
+                _mast_timer.timeout.disconnect()
+            except Exception:
+                pass
+            _mast_timer.timeout.connect(lambda: _weak_compute(mode))
+            _mast_timer.start(500)
         return _mast_last.get(mode, {})       # refreshing: keep the last colours up
     out = {r["m"]["key"]: r for r in rows}
     _mast_last[mode] = out
@@ -1523,6 +1539,8 @@ def _mastery_map(days):
 
 
 _mast_last = {}
+_mast_timer = QTimer()
+_mast_timer.setSingleShot(True)
 
 
 def _mastery_color(r, alpha=None):
