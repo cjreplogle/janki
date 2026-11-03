@@ -318,7 +318,7 @@ def _week_html():
     ads_h = max(8, ad_rows * AD_H + 4)
     cols = []
     pending = False
-    mast = _mastery_map() if _mastery_on() else None
+    mast = _mastery_map(days) if _mastery_on() else None
     for d in days:
         blocks, allday = [], []
         lanes = _lanes([(i, e) for i, e in enumerate(evs) if e["date"] == d and
@@ -342,7 +342,8 @@ def _week_html():
                 r_ = mast.get(m["key"])
                 if r_ is not None:
                     cls += " jkc-mast"
-                    tint = "--jkc-mc:%s;" % _mastery_color(r_, 0.34)
+                    tint = "--jkc-mc:%s;--jkc-mb:%s;" % (_mastery_color(r_, 0.34),
+                                                         _mastery_color(r_, 0.85))
             title = html.escape(e["summary"])
             mbadge = "<span class='jkc-m' title='Mandatory'>%s</span>" % _STAR if e.get("mandatory") else ""
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
@@ -1032,7 +1033,11 @@ def _weak_compute(mode, then=None):
     from aqt.operations import QueryOp
     from ..integrations import lectures
     today = datetime.date.today()
-    evs, _fresh = lectures.events_cached_between(_weak_start(mode), today)
+    if mode.startswith("cal:"):            # the calendar's shown days, future ones too
+        _w0, _w1 = (datetime.date.fromisoformat(x) for x in mode.split(":")[1:3])
+    else:
+        _w0, _w1 = _weak_start(mode), today
+    evs, _fresh = lectures.events_cached_between(_w0, _w1)
     off = set()          # every source: the lecture page's pills don't apply here
     key = _weak_key()
     now_min = _now_min()
@@ -1063,7 +1068,7 @@ def _weak_compute(mode, then=None):
         # spinner kept Chromium redrawing (100 % CPU) and the recompute kept looping.
         _weak_redo_runs[mode] = _weak_redo_runs.get(mode, 0) + 1
         _weak_redo.add(mode)
-        QTimer.singleShot(0, lambda: _prewarm(back=(today - _weak_start(mode)).days + 1))
+        QTimer.singleShot(0, lambda: _prewarm(back=max(1, (today - _w0).days + 1)))
     other = sorted({a for _e, _m, atoms in lecs for _f, a in atoms if _atom_plain(a) is None})
     _weak_progress(mode, 0.05)
 
@@ -1230,7 +1235,7 @@ def _weak_compute(mode, then=None):
             # End of block, computed on demand, could stay on "Looking through…")
             if _detail == WEAK:
                 _swap("refresh", force=True)
-        if mode == "block" and _view and _detail is None and _mastery_on():
+        if mode.startswith("cal:") and _view and _detail is None and _mastery_on():
             _swap("refresh", force=True)         # calendar colours by progress
         if then and _view:
             QTimer.singleShot(1500, then)
@@ -1437,13 +1442,14 @@ def _mastery_on():
         return False
 
 
-def _mastery_map():
-    """lecture key -> End-of-block row (has mastery), for the calendar's progress tint;
-    starts the End-of-block work in the background when it isn't ready yet."""
-    rows = _weak_cached("block")
+def _mastery_map(days):
+    """lecture key -> row (has mastery) for every lecture on the shown days, past or
+    future, for the calendar's progress tint; worked out in the background."""
+    mode = "cal:%s:%s" % (days[0].isoformat(), days[-1].isoformat())
+    rows = _weak_cached(mode)
     if rows is None:
-        if "block" not in _weak_busy:
-            QTimer.singleShot(0, lambda: _weak_compute("block"))
+        if mode not in _weak_busy:
+            QTimer.singleShot(0, lambda: _weak_compute(mode))
         return {}
     return {r["m"]["key"]: r for r in rows}
 
@@ -2014,7 +2020,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;box-sizing:border-box;
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
   font-size:.78em;line-height:1.25;transition:background .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
-.jkc-ev.jkc-mast{background:var(--jkc-mc) !important;}
+.jkc-ev.jkc-mast{background:var(--jkc-mc) !important;border-color:var(--jkc-mb) !important;}
 .jkc-mbtn{padding:4px 8px !important;}
 .jkc-mbtn svg{display:block;opacity:.5;transition:opacity .15s ease;}
 .jkc-mbtn.on svg{opacity:1;}
@@ -2058,7 +2064,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev:has(> .jkc-m) .jkc-t{padding-right:13px;}  /* room for the star */
 .jkd-m{position:relative;top:-3px;right:auto;display:inline-flex;vertical-align:middle;width:20px;height:20px;
   font-size:13px;border-radius:5px;margin-left:6px;}.jkc-tm,.jkc-sub{opacity:.75;font-size:.92em;}
-#jkc .jkc-r{display:flex;align-items:center;gap:6px;}
+#jkc .jkc-r{display:flex;align-items:center;gap:3px;}
+#jkc .jkc-r button{margin:0 !important;}
 #jkc .jkc-r button{height:2em;box-sizing:border-box;}
 #jkc .jkc-wand{padding:0 10px !important;}
 #jkc .jkc-wand svg{display:block;}
