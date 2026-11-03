@@ -923,11 +923,12 @@ def _weak_start(mode):
     b = _block_start()
     s0 = max(s0, b) if b else s0
     if mode == "2w":
-        # a biweekly was just sat: its lectures are done — start the day after it
+        # a biweekly was just sat: the old set's lectures are done — start on the exam
+        # day itself (the new set's first lectures can follow the exam that day)
         try:
             past = [d for d, _l in _exam_dates() if d < t]
             if past:
-                s0 = max(s0, past[-1] + datetime.timedelta(days=1))
+                s0 = max(s0, past[-1])
         except Exception:
             pass
     return s0
