@@ -2338,7 +2338,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-prog .jkw-bar{flex:1;}
 #jkc .jkw-prog span{font-size:.76em;opacity:.65;white-space:nowrap;font-variant-numeric:tabular-nums;}
 #jkc .jkw-chips{margin-top:8px;}
-#jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex:none;align-self:center;width:150px;}
+#jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex:1 1 150px;min-width:150px;align-self:center;}
+#jkc .jkw-row .jkw-main{flex:0 1 440px;}   /* the plot centres in the space beside it */
 #jkc .jkw-sp .jkw-spark text{display:none;}
 #jkc .jkw-sp span{font-size:.68em;opacity:.45;letter-spacing:.02em;}
 #jkc .jkw-btns{flex-direction:column;gap:6px;}
