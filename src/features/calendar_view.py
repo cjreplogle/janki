@@ -1492,13 +1492,26 @@ def _mastery_on():
 def _mastery_map(days):
     """lecture key -> row (has mastery) for every lecture on the shown days, past or
     future, for the calendar's progress tint; worked out in the background."""
-    mode = "cal:%s:%s" % (days[0].isoformat(), days[-1].isoformat())
+    # one wide window (8 weeks either side of this one) worked out once, so moving
+    # between weeks draws with colours already there; weeks beyond it on their own
+    t = datetime.date.today()
+    w0 = t - datetime.timedelta(days=t.weekday() + 56)
+    w1 = t + datetime.timedelta(days=6 - t.weekday() + 56)
+    if w0 <= days[0] and days[-1] <= w1:
+        mode = "cal:%s:%s" % (w0.isoformat(), w1.isoformat())
+    else:
+        mode = "cal:%s:%s" % (days[0].isoformat(), days[-1].isoformat())
     rows = _weak_cached(mode)
     if rows is None:
         if mode not in _weak_busy:
             QTimer.singleShot(0, lambda: _weak_compute(mode))
-        return {}
-    return {r["m"]["key"]: r for r in rows}
+        return _mast_last.get(mode, {})       # refreshing: keep the last colours up
+    out = {r["m"]["key"]: r for r in rows}
+    _mast_last[mode] = out
+    return out
+
+
+_mast_last = {}
 
 
 def _mastery_color(r, alpha=None):
