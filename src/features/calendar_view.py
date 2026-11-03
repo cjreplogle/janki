@@ -1064,7 +1064,7 @@ def _weak_compute(mode, then=None):
         # re-splitting every note's tags on each recompute
         data = {"tix": lectures._tag_index(col),
                 "cards": col.db.all("select id, nid, queue, type, due, "
-                                    "case when odid then odid else did end from cards"),
+                                    "case when odid then odid else did end, ivl from cards"),
                 "rev": col.db.all("select cid, ease, count() from revlog where id > ? and "
                                   "type < 3 group by cid, ease",
                                   int((_t.time() - 30 * 86400) * 1000)),
@@ -1100,8 +1100,8 @@ def _weak_compute(mode, then=None):
         tag_nids, keys = tix["nids"], tix["keys"]
         leech_nids = set(tag_nids.get("leech", ()))
         nid_cards = {}
-        for cid, nid, q, typ, d, did in data["cards"]:
-            nid_cards.setdefault(nid, []).append((cid, q, typ, d, did))
+        for cid, nid, q, typ, d, did, ivl in data["cards"]:
+            nid_cards.setdefault(nid, []).append((cid, q, typ, d, did, ivl))
         allow = data.get("allow") or {}
         daily = {}
         for cid, day, cnt in data.get("daily") or []:
@@ -1154,11 +1154,11 @@ def _weak_compute(mode, then=None):
             for fam, a in atoms:
                 for nid in atom_nids(a):
                     hits.setdefault(nid, set()).add(fam)
-            n = sus = new = due = leech = good = bad = 0
+            n = sus = new = due = leech = good = bad = lrn = young = mature = 0
             spark = [0] * 14
             for nid, fams in hits.items():
                 lch = nid in leech_nids
-                for cid, q, typ, d, did in nid_cards.get(nid, ()):
+                for cid, q, typ, d, did, ivl in nid_cards.get(nid, ()):
                     # a source tied to a deck only counts cards in that deck
                     if not any(f not in allow or did in allow[f] for f in fams):
                         continue
@@ -1167,7 +1167,13 @@ def _weak_compute(mode, then=None):
                         sus += 1
                     elif typ == 0:
                         new += 1
-                    elif (q == 2 and d <= sched_today) or q in (1, 3):
+                    elif typ in (1, 3):
+                        lrn += 1                 # seen, still in (re)learning steps
+                    elif ivl >= 21:
+                        mature += 1
+                    else:
+                        young += 1
+                    if q != -1 and ((q == 2 and d <= sched_today) or q in (1, 3)):
                         due += 1
                     if lch:
                         leech += 1
@@ -1184,7 +1190,13 @@ def _weak_compute(mode, then=None):
             unstarted = new / active if active else 0.0
             score = (0.55 * unstarted + 0.3 * (1 - recall if recall is not None else 0.5)
                      + 0.15 * min(1.0, due / n * 3) + min(0.15, leech * 0.02))
+            # how learned the lecture is, 0..1: each card weighted by how far along it
+            # is (new 0, learning .15, young .55, mature 1), then scaled by recall
+            mastery = ((0.15 * lrn + 0.55 * young + mature) / active) if active else None
+            if mastery is not None and recall is not None:
+                mastery *= 0.5 + 0.5 * min(1.0, recall / 0.9)
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
+                         "mastery": mastery, "mature_f": (mature / active) if active else 0,
                          "active": active, "spark": spark,
                          "leech": leech, "recall": recall, "revs": revs,
                          "unstarted": unstarted, "score": score})
@@ -1400,6 +1412,18 @@ def _ago(d):
         "%d days ago" % n if n < 14 else "%d weeks ago" % (n // 7))
 
 
+def _mastery_color(r):
+    """Left-edge colour: a red → amber → green gradient by how learned the lecture is;
+    the green deepens as more of its cards are mature. Grey: nothing active."""
+    m = r.get("mastery")
+    if m is None:
+        return "rgba(255,255,255,.18)"
+    m = max(0.0, min(1.0, m))
+    hue = 6 + 124 * m                       # 6 = red, ~45 amber, 130 = green
+    light = 70 - 24 * max(0.0, min(1.0, r.get("mature_f", 0))) * m
+    return "hsl(%d,62%%,%d%%)" % (round(hue), round(light))
+
+
 def _weak_html():
     seg = "".join("<button class='jkw-m%s' onclick=\"jkwMode(this,'%s')\">%s</button>"
                   % (" on" if _weak_mode == k else "", k, l)
@@ -1446,18 +1470,16 @@ def _weak_html():
                "ok")
         cards = ("%d cards" % r["n"]) if act == r["n"] else ("%d cards · %d active" % (r["n"], act))
         return (
-            "<div class='jkw-row jkw-s-%s' onclick=\"pycmd('janki:cal:weak:open:%d')\">"
+            "<div class='jkw-row jkw-s-%s' style='border-left-color:%s' "
+            "onclick=\"pycmd('janki:cal:weak:open:%d')\">"
             "<div class='jkw-main'><div class='jkw-t'>%s</div>"
             "<div class='jkw-sub'>%s · %s</div>"
             "<div class='jkw-prog'><div class='jkw-bar'><i style='width:%d%%'></i></div>"
             "<span>%d%% started</span></div>"
             "<div class='jkw-chips'>%s</div></div>"
-            "<div class='jkw-sp'>%s<span>reviews · 14d</span></div><div class='jkw-btns'>"
-            "<button class='jkd-sec jkw-study' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:study:%d')\">Study</button>"
-            "<button class='jkd-sec jkw-prac' onclick=\"event.stopPropagation();pycmd('janki:cal:weak:prac:%d')\">"
-            "Practice</button></div></div>"
-            % (sev, i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
-               done_pct, "".join(chips), _spark_svg(r.get("spark") or []), i, i))
+            "<div class='jkw-sp'>%s<span>reviews · 14d</span></div></div>"
+            % (sev, _mastery_color(r), i, html.escape(r["m"]["display"]), _ago(r["e"]["date"]), cards, done_pct,
+               done_pct, "".join(chips), _spark_svg(r.get("spark") or [])))
 
     rows = list(enumerate(_weak))
     start = _weak_start(_weak_mode)
