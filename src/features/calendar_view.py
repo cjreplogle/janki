@@ -1224,7 +1224,11 @@ def _weak_compute(mode, then=None):
             pool = studied or list(pf.values())
             den = sum(t_[0] for t_ in pool)
             if den:
-                mastery = sum(W[0] * t_[2] + W[1] * t_[3] + W[2] * t_[4] for t_ in pool) / den
+                # mostly how many you've started, then how far along those are
+                sd = sum(t_[2] + t_[3] + t_[4] for t_ in pool)
+                qual = ((0.3 * sum(t_[2] for t_ in pool) + 0.75 * sum(t_[3] for t_ in pool)
+                         + sum(t_[4] for t_ in pool)) / sd) if sd else 0.0
+                mastery = (sd / den) * (0.55 + 0.45 * qual)
                 mat_f = sum(t_[4] for t_ in pool) / den
             else:
                 ss = [t_[5:] for t_ in pf.values()]
@@ -1232,7 +1236,7 @@ def _weak_compute(mode, then=None):
                 mastery = (sum(W[0] * a + W[1] * b + W[2] * c for a, b, c in ss) / den) if den else None
                 mat_f = (sum(c for _a, _b, c in ss) / den) if den else 0
             if mastery is not None and recall is not None:
-                mastery *= 0.5 + 0.5 * min(1.0, recall / 0.9)
+                mastery *= 0.7 + 0.3 * min(1.0, recall / 0.9)
             rows.append({"e": e, "m": m, "n": n, "sus": sus, "new": new, "due": due,
                          "mastery": mastery, "mature_f": mat_f,
                          "active": active, "spark": spark,
@@ -1487,15 +1491,17 @@ def _mastery_color(r, alpha=None):
     m = max(0.0, min(1.0, m))
     # mostly red or green: a short pass through amber, and the best-known lectures go a
     # deep green-blue (teal)
-    if m < 0.3:
-        hue = 4 + 10 * m / 0.3                    # red
-    elif m < 0.42:
-        hue = 14 + 86 * (m - 0.3) / 0.12          # brief amber → green
-    elif m < 0.8:
-        hue = 100 + 40 * (m - 0.42) / 0.38        # green
+    if m < 0.15:
+        hue = 4 + 6 * m / 0.15                    # red: barely started
+    elif m < 0.45:
+        hue = 10 + 45 * (m - 0.15) / 0.3          # amber / yellow: part new, part started
+    elif m < 0.6:
+        hue = 55 + 50 * (m - 0.45) / 0.15         # → green: mostly started
+    elif m < 0.85:
+        hue = 105 + 35 * (m - 0.6) / 0.25         # green
     else:
-        hue = 140 + 40 * (m - 0.8) / 0.2          # → teal / green-blue
-    light = 70 - 26 * max(0.0, min(1.0, r.get("mature_f", 0))) * m - (8 if m >= 0.8 else 0)
+        hue = 140 + 40 * (m - 0.85) / 0.15        # → teal / green-blue: well known
+    light = 70 - 26 * max(0.0, min(1.0, r.get("mature_f", 0))) * m - (8 if m >= 0.85 else 0)
     if alpha:
         return "hsla(%d,62%%,%d%%,%.2f)" % (round(hue), round(light), alpha)
     return "hsl(%d,62%%,%d%%)" % (round(hue), round(light))
