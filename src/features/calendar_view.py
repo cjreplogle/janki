@@ -318,6 +318,7 @@ def _week_html():
     ads_h = max(8, ad_rows * AD_H + 4)
     cols = []
     pending = False
+    mast = _mastery_map() if _mastery_on() else None
     for d in days:
         blocks, allday = [], []
         lanes = _lanes([(i, e) for i, e in enumerate(evs) if e["date"] == d and
@@ -336,6 +337,12 @@ def _week_html():
                 cls = "jkc-ev" + (" jkc-un" if not m else (" jkc-fz" if m["fuzzy"] else ""))
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
+            tint = ""
+            if m and mast is not None:
+                r_ = mast.get(m["key"])
+                if r_ is not None:
+                    cls += " jkc-mast"
+                    tint = "--jkc-mc:%s;" % _mastery_color(r_, 0.34)
             title = html.escape(e["summary"])
             mbadge = "<span class='jkc-m' title='Mandatory'>%s</span>" % _STAR if e.get("mandatory") else ""
             sub = html.escape(m["display"]) if m and _norm(m["display"]) != _norm(e["summary"]) else ""
@@ -347,8 +354,8 @@ def _week_html():
                     allday.append("<div class='jkc-ev jkc-ad jkc-dress'>%s%s</div>"
                                   % (_SHIRT, html.escape(val or e["summary"])))
                     continue
-                allday.append("<div class='%s jkc-ad' data-i='%d'>%s%s</div>"
-                              % (cls, i, mbadge, title))
+                allday.append("<div class='%s jkc-ad' data-i='%d' style='%s'>%s%s</div>"
+                              % (cls, i, tint, mbadge, title))
                 continue
             top = 100.0 * (e["start"] - lo) / span           # % of the day: the grid
             h = 100.0 * (e["end"] - e["start"]) / span        # stretches to the window
@@ -357,9 +364,9 @@ def _week_html():
                    "left:calc(%.4f%% + 2px);right:auto;width:calc(%.4f%% - 4px);"
                    % (100.0 * ln / nl, 100.0 / nl))
             blocks.append(
-                "<div class='%s%s' data-i='%d' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s'>"
+                "<div class='%s%s' data-i='%d' style='top:%.3f%%;height:calc(%.3f%% - 2px);min-height:22px;%s%s'>"
                 "%s<div class='jkc-t'>%s</div><div class='jkc-tm'>%s–%s%s</div>%s</div>"
-                % (cls, " jkc-narrow" if nl > 1 else "", i, top, h, pos, mbadge, title,
+                % (cls, " jkc-narrow" if nl > 1 else "", i, top, h, pos, tint, mbadge, title,
                    _hm(e["start"]), _hm(e["end"]), _tag_count_html(m),
                    ("<div class='jkc-sub'>%s</div>" % sub) if sub else ""))
         if d == today:                     # "now" line, kept current by the page's timer
@@ -400,8 +407,11 @@ def _week_html():
            "<span class='jkc-lbl'>%s</span>"
            "<button class='jkc-arr jkc-next' onclick=\"jkcNav('next')\"><svg width='9' height='14' viewBox='0 0 9 14'><path d='M2 1l5 6-5 6' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg></button></div>"
            "<div class='jkc-r'><button onclick=\"jkcNav('today')\">Today</button> "
+           "<button class='jkc-mbtn%s' title='Colour lectures by how well you know them' "
+           "aria-label='Colour by progress' onclick=\"pycmd('janki:cal:mastery')\">%s</button> "
            "<button class='jkc-wand' title='Lecture wizard' aria-label='Lecture wizard' "
-           "onclick=\"pycmd('janki:cal:loader')\">%s</button></div></div>" % (seg, label, _WAND))
+           "onclick=\"pycmd('janki:cal:loader')\">%s</button></div></div>"
+           % (seg, label, " on" if _mastery_on() else "", _VENN, _WAND))
     # day height: at least the old fixed size, else whatever the window leaves below
     # the bar, day names and all-day strip
     grid = ("<div class='jkc-grid' style='--jkc-n:%d;--jkc-h:max(%dpx,calc(100vh - %dpx))'>"
@@ -1220,6 +1230,8 @@ def _weak_compute(mode, then=None):
             # End of block, computed on demand, could stay on "Looking through…")
             if _detail == WEAK:
                 _swap("refresh", force=True)
+        if mode == "block" and _view and _detail is None and _mastery_on():
+            _swap("refresh", force=True)         # calendar colours by progress
         if then and _view:
             QTimer.singleShot(1500, then)
 
@@ -1412,15 +1424,41 @@ def _ago(d):
         "%d days ago" % n if n < 14 else "%d weeks ago" % (n // 7))
 
 
-def _mastery_color(r):
+# three overlapping circles (white line art) — the calendar's colour-by-progress toggle
+_VENN = ("<svg width='16' height='15' viewBox='0 0 16 15' fill='none' stroke='#fff' "
+         "stroke-width='1.3'><circle cx='8' cy='5' r='4'/><circle cx='5.2' cy='9.6' r='4'/>"
+         "<circle cx='10.8' cy='9.6' r='4'/></svg>")
+
+
+def _mastery_on():
+    try:
+        return bool((mw.addonManager.getConfig(__name__) or {}).get("calendar_mastery_colors", False))
+    except Exception:
+        return False
+
+
+def _mastery_map():
+    """lecture key -> End-of-block row (has mastery), for the calendar's progress tint;
+    starts the End-of-block work in the background when it isn't ready yet."""
+    rows = _weak_cached("block")
+    if rows is None:
+        if "block" not in _weak_busy:
+            QTimer.singleShot(0, lambda: _weak_compute("block"))
+        return {}
+    return {r["m"]["key"]: r for r in rows}
+
+
+def _mastery_color(r, alpha=None):
     """Left-edge colour: a red → amber → green gradient by how learned the lecture is;
     the green deepens as more of its cards are mature. Grey: nothing active."""
     m = r.get("mastery")
     if m is None:
-        return "rgba(255,255,255,.18)"
+        return "rgba(255,255,255,%s)" % (".10" if alpha else ".18")
     m = max(0.0, min(1.0, m))
     hue = 6 + 124 * m                       # 6 = red, ~45 amber, 130 = green
     light = 70 - 24 * max(0.0, min(1.0, r.get("mature_f", 0))) * m
+    if alpha:
+        return "hsla(%d,62%%,%d%%,%.2f)" % (round(hue), round(light), alpha)
     return "hsl(%d,62%%,%d%%)" % (round(hue), round(light))
 
 
@@ -1976,6 +2014,10 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkc-ev{position:absolute;left:2px;right:2px;border-radius:8px;padding:3px 6px;overflow:hidden;box-sizing:border-box;
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
   font-size:.78em;line-height:1.25;transition:background .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
+.jkc-ev.jkc-mast{background:var(--jkc-mc) !important;}
+.jkc-mbtn{padding:4px 8px !important;}
+.jkc-mbtn svg{display:block;opacity:.5;transition:opacity .15s ease;}
+.jkc-mbtn.on svg{opacity:1;}
 .jkc-ev:hover,.jkc-ev.jk-kb{background:rgba(156,188,243,.36);transform:translateY(-1px);}
 .jkc-fz{border-left-width:2px !important;border-left-style:dashed !important;}
 .jkc-c0{background:rgba(120,165,245,.24);border-color:rgba(120,165,245,.55);}
@@ -3034,6 +3076,11 @@ def on_js_message(handled, message, context):
             _swap("refresh")
         elif cmd == "weak":
             open_weak()
+        elif cmd == "mastery":
+            c = mw.addonManager.getConfig(__name__) or {}
+            c["calendar_mastery_colors"] = not bool(c.get("calendar_mastery_colors", False))
+            mw.addonManager.writeConfig(__name__, c)
+            _swap("refresh", force=True)
         elif cmd == "weakcheck":               # the page is still on the loading state
             global _weak
             if _detail == WEAK and _weak is None:
