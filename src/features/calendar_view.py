@@ -2111,7 +2111,9 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
    static fade at its edges (a band behind the tabs read as a dark slab on the glass) */
 #jkc .jkc-grid.jkc-detail.jkw{overflow:hidden !important;display:flex !important;flex-direction:column !important;}
 #jkc .jkw > .jkd{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
-#jkc .jkw > .jkd{max-width:660px;}   /* weak areas: wider lecture rows */
+#jkc .jkw > .jkd{max-width:760px;width:100%;box-sizing:border-box;}   /* weak areas: room for the 760px lists */
+/* Biweekly rows match End of block's (inside a group: 6px padding + 4px margin) */
+#jkc .jkw .jkw-list > .jkw-row{margin-left:10px;margin-right:10px;}
 #jkc .jkw .jkw-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   width:100%;box-sizing:border-box;padding:12px 6px 28px;margin-top:4px !important;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 16px,#000 calc(100% - 24px),transparent 100%);
