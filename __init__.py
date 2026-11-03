@@ -1839,6 +1839,12 @@ try:   # older image occlusion cards keep every other box covered (io_masks.py)
 except Exception as _iom_exc:
     log("io_masks: %s" % _iom_exc)
 
+try:   # auto-hidden top bar shows near the top, not only at the screen edge (top_reveal.py)
+    from .src.features import top_reveal as _top_reveal
+    _top_reveal.install()
+except Exception as _tr_exc:
+    log("top_reveal: %s" % _tr_exc)
+
 try:   # no controller connected → nothing listens for one (battery; gamepad.py)
     from .src.integrations import gamepad as _gp_gate
     gui_hooks.profile_did_open.append(lambda: _gp_gate.start_controller_gate())
