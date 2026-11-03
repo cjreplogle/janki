@@ -921,7 +921,16 @@ def _weak_start(mode):
     t = datetime.date.today()
     s0 = t - datetime.timedelta(days=t.weekday() + 7 * (_WEAK_SPAN[mode] - 1))
     b = _block_start()
-    return max(s0, b) if b else s0
+    s0 = max(s0, b) if b else s0
+    if mode == "2w":
+        # a biweekly was just sat: its lectures are done — start the day after it
+        try:
+            past = [d for d, _l in _exam_dates() if d < t]
+            if past:
+                s0 = max(s0, past[-1] + datetime.timedelta(days=1))
+        except Exception:
+            pass
+    return s0
 _weak_cache = {}       # mode → (key, rows); key changes when the collection does
 _weak_busy = set()
 _weak_redo = set()      # views to recompute once background matching finishes
@@ -978,7 +987,7 @@ def _weak_key():
     # anything while a background job holds it froze the window (33 s in a profile)
     from ..integrations import lectures
     lectures._excl_map()                     # a file stat; refreshes if edited
-    return (_weak_gen, datetime.date.today(), tuple(sorted(_fams_off())), lectures._EXCL["mt"],
+    return (_weak_gen, datetime.date.today(), _weak_start("2w"), tuple(sorted(_fams_off())), lectures._EXCL["mt"],
             tuple(sorted((k, tuple(v)) for k, v in lectures.source_decks().items())))
 
 
