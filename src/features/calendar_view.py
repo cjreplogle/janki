@@ -1492,11 +1492,11 @@ def _mastery_on():
 def _mastery_map(days):
     """lecture key -> row (has mastery) for every lecture on the shown days, past or
     future, for the calendar's progress tint; worked out in the background."""
-    # one wide window (8 weeks either side of this one) worked out once, so moving
+    # one window (2 weeks either side of this one) worked out once, so moving
     # between weeks draws with colours already there; weeks beyond it on their own
     t = datetime.date.today()
-    w0 = t - datetime.timedelta(days=t.weekday() + 56)
-    w1 = t + datetime.timedelta(days=6 - t.weekday() + 56)
+    w0 = t - datetime.timedelta(days=t.weekday() + 14)
+    w1 = t + datetime.timedelta(days=6 - t.weekday() + 14)
     if w0 <= days[0] and days[-1] <= w1:
         mode = "cal:%s:%s" % (w0.isoformat(), w1.isoformat())
     else:
