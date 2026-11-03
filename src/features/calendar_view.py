@@ -1017,6 +1017,11 @@ def prewarm_weak():
         return
     # only the 2-week view: End of block (8 weeks of AnKing-heavy lectures) runs
     # when you actually open it
+    if _view and _mastery_on():               # calendar open: its colours go first
+        _prewarm_cal()
+        if _weak_cached("2w") is None:
+            QTimer.singleShot(6000, lambda: _weak_cached("2w") is None and _weak_compute("2w"))
+        return
     if _weak_cached("2w") is None:
         _weak_compute("2w")
     QTimer.singleShot(6000, _prewarm_cal)     # staggered: one job at a time
