@@ -338,7 +338,9 @@ def _week_html():
             if m:                                          # one colour per course
                 cls += " jkc-c%d" % _course_colour(e["summary"])
             tint = ""
-            if m and mast is not None:
+            if m and mast is not None and not mast:
+                cls += " jkc-mwait"                # colours still being worked out
+            if m and mast:
                 r_ = mast.get(m["key"])
                 if r_ is not None:
                     cls += " jkc-mast"
@@ -1017,6 +1019,19 @@ def prewarm_weak():
     # when you actually open it
     if _weak_cached("2w") is None:
         _weak_compute("2w")
+    QTimer.singleShot(6000, _prewarm_cal)     # staggered: one job at a time
+
+
+def _prewarm_cal():
+    # the calendar's progress colours for the week it opens on, so its first draw has
+    # them (no course-colour → progress-colour flash)
+    try:
+        if _closing or not _mastery_on():
+            return
+        days = _days()
+        _mastery_map(days)
+    except Exception:
+        pass
 
 
 def _weak_compute(mode, then=None):
@@ -2060,6 +2075,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   background:rgba(156,188,243,.22);border:1px solid rgba(156,188,243,.45);cursor:pointer;
   font-size:.78em;line-height:1.25;transition:background .18s ease,transform .18s cubic-bezier(.2,.8,.2,1);}
 .jkc-ev.jkc-mast{background:var(--jkc-mc) !important;border-color:var(--jkc-mb) !important;}
+.jkc-ev.jkc-mwait{background:rgba(255,255,255,.07) !important;border-color:rgba(255,255,255,.18) !important;}
 .jkc-mbtn{padding:4px 8px !important;}
 .jkc-mbtn svg{display:block;opacity:.5;transition:opacity .15s ease;}
 .jkc-mbtn.on svg{opacity:1;}
