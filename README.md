@@ -157,6 +157,15 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 <details>
 <summary><b>2.13</b> · 2026-10-26 · 6 releases</summary>
 
+**2.13.6** · 2026-11-03
+
+- Older image occlusion cards now keep every other box covered until you press Toggle Masks (tables stay as they were). Settings → General.
+- Lectures: the Biweekly page starts after your last biweekly and includes today's lectures; it no longer changes with the source pills on a lecture page.
+- Lectures: lectures are colour-coded by how well you know them (red → green → blue), and the calendar can show the same colours (new button beside the wizard).
+- Calendar: the day ends at 5 pm.
+- In full screen the top bar shows when you move near the top, and the sidebar and deck list reach the top of the screen.
+- Anki can no longer get stuck open after quitting.
+
 **2.13.5** · 2026-10-29
 
 - Anki should now use about 10x less battery than before on MacOS.
