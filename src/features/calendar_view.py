@@ -1535,7 +1535,7 @@ def _mastery_color(r, alpha=None):
     elif m < 0.85:
         hue = 105 + 35 * (m - 0.6) / 0.25         # green
     else:
-        hue = 140 + 40 * (m - 0.85) / 0.15        # → teal / green-blue: well known
+        hue = 150 + 65 * (m - 0.85) / 0.15        # → blue: well known (mature)
     light = 70 - 26 * max(0.0, min(1.0, r.get("mature_f", 0))) * m - (8 if m >= 0.85 else 0)
     if alpha:
         return "hsla(%d,62%%,%d%%,%.2f)" % (round(hue), round(light), alpha)
