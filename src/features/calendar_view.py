@@ -2339,7 +2339,8 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-prog span{font-size:.76em;opacity:.65;white-space:nowrap;font-variant-numeric:tabular-nums;}
 #jkc .jkw-chips{margin-top:8px;}
 #jkc .jkw-sp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex:1 1 150px;min-width:150px;align-self:center;}
-#jkc .jkw-row .jkw-main{flex:0 1 440px;}   /* the plot centres in the space beside it */
+#jkc .jkw-row .jkw-main{flex:0 0 340px;min-width:0;}   /* = the progress bar row: plots line up */
+#jkc .jkw-row .jkw-sp{margin-left:-16px;}   /* centre between the details and the edge */
 #jkc .jkw-sp .jkw-spark text{display:none;}
 #jkc .jkw-sp span{font-size:.68em;opacity:.45;letter-spacing:.02em;}
 #jkc .jkw-btns{flex-direction:column;gap:6px;}
