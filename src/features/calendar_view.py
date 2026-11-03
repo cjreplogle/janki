@@ -2111,7 +2111,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
    static fade at its edges (a band behind the tabs read as a dark slab on the glass) */
 #jkc .jkc-grid.jkc-detail.jkw{overflow:hidden !important;display:flex !important;flex-direction:column !important;}
 #jkc .jkw > .jkd{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
-#jkc .jkw > .jkd{max-width:760px;width:100%;box-sizing:border-box;}   /* weak areas: room for the 760px lists */
+#jkc .jkw > .jkd{max-width:680px;width:100%;box-sizing:border-box;}   /* weak areas: room for the 680px lists */
 /* Biweekly rows match End of block's (inside a group: 6px padding + 4px margin) */
 #jkc .jkw .jkw-list > .jkw-row{margin-left:5px;margin-right:5px;}
 #jkc .jkw .jkw-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
@@ -2136,7 +2136,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 #jkc .jkw-more{display:inline-flex;align-items:center;gap:7px;opacity:.75;font-size:.85em;margin-top:6px;}
 #jkc .jkw-more i{width:10px;height:10px;border-radius:50%;border:2px solid rgba(156,188,243,.3);
   border-top-color:#9cbcf3;animation:jkcSpin .8s linear 38;}
-#jkc .jkw-grp{max-width:760px;margin:10px auto 0;text-align:left;border-radius:14px;padding:4px 6px 6px;
+#jkc .jkw-grp{max-width:680px;margin:10px auto 0;text-align:left;border-radius:14px;padding:4px 6px 6px;
   background:rgba(255,255,255,.035) !important;border:1px solid rgba(255,255,255,.08);}
 #jkc .jkw-grp summary{list-style:none;cursor:pointer;padding:8px 10px;display:grid;
   grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;}
@@ -2157,7 +2157,7 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
 .jkw-gs{grid-column:2;opacity:.7;font-size:.85em;}
 #jkc .jkw-gbar{grid-column:2;margin-top:4px;}
 #jkc .jkw-grp .jkw-row{margin:6px 4px;}
-#jkc .jkw .jkw-list{max-width:760px;margin:14px auto 0;text-align:left;}
+#jkc .jkw .jkw-list{max-width:680px;margin:14px auto 0;text-align:left;}
 #jkc .jkw-row{cursor:pointer;transition:background-color .15s ease;display:flex;gap:14px;align-items:center;padding:10px 14px;margin:6px 0;border-radius:12px;
   background:rgba(255,255,255,.05) !important;border:1px solid rgba(255,255,255,.08);}
 #jkc .jkw-row:hover,#jkc .jkw-row.jk-kbf{background:rgba(255,255,255,.09) !important;}
