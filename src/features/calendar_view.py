@@ -988,7 +988,7 @@ def _weak_key():
     # anything while a background job holds it froze the window (33 s in a profile)
     from ..integrations import lectures
     lectures._excl_map()                     # a file stat; refreshes if edited
-    return (_weak_gen, datetime.date.today(), _weak_start("2w"), tuple(sorted(_fams_off())), lectures._EXCL["mt"],
+    return (_weak_gen, datetime.date.today(), _weak_start("2w"), lectures._EXCL["mt"],
             tuple(sorted((k, tuple(v)) for k, v in lectures.source_decks().items())))
 
 
@@ -1023,7 +1023,7 @@ def _weak_compute(mode, then=None):
     from ..integrations import lectures
     today = datetime.date.today()
     evs, _fresh = lectures.events_cached_between(_weak_start(mode), today)
-    off = _fams_off()
+    off = set()          # every source: the lecture page's pills don't apply here
     key = _weak_key()
     now_min = _now_min()
     _weak_busy.add(mode)
@@ -1654,7 +1654,9 @@ def study_event(e, fams=None, which="all"):
     if not m:
         tooltip("No lecture matches “%s”." % e["summary"])
         return
-    if fams is None:
+    if fams == "all":                      # Biweekly page: every source
+        fams = {_fam(s) for s in m["searches"]}
+    elif fams is None:
         fams = {_fam(s) for s in m["searches"]} - _fams_off()
     q = _lecture_query(m, fams)
     if not q:
@@ -3025,7 +3027,7 @@ def on_js_message(handled, message, context):
                 if act == "open":
                     _open_weak_lecture(i)
                 elif act == "study":
-                    study_event(_weak[i]["e"], None, "all")
+                    study_event(_weak[i]["e"], "all", "all")
                 else:
                     practice_event(_weak[i]["e"])
         elif cmd == "det:practice":
