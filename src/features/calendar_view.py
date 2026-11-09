@@ -1070,6 +1070,15 @@ def _weak_compute(mode, then=None):
     else:
         _w0, _w1 = _weak_start(mode), today
     evs, _fresh = lectures.events_cached_between(_w0, _w1)
+    if mode.startswith("cal:") and (not _fresh or not evs):
+        # calendar not loaded yet: an empty result here was kept and the colours never
+        # came until something forced a redo — wait for the events instead
+        if (_weak_redo_runs.get(mode, 0) or 0) < 4:
+            _weak_redo_runs[mode] = (_weak_redo_runs.get(mode, 0) or 0) + 1
+            lectures.load_events_bg(lambda: QTimer.singleShot(300, lambda: _weak_compute(mode)))
+            if _fresh:                         # loaded but empty: just try again shortly
+                QTimer.singleShot(1500, lambda: _weak_compute(mode))
+        return
     off = set()          # every source: the lecture page's pills don't apply here
     key = _weak_key()
     now_min = _now_min()
