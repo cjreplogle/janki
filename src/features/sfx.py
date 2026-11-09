@@ -102,6 +102,32 @@ def play(name, force=False):
     if sys.platform.startswith("win"):
         _play_windows(name, c, vol, force)
         return
+    if not force and name in _REVIEW_WEB and _bank() != "custom" and mw.state == "review":
+        # in the reviewer's page (Web Audio): QSoundEffect.play() held Anki's main thread
+        # for ~300 ms on every reveal and rating, so each flip waited for its own sound
+        try:
+            mw.reviewer.web.eval("if(!(window.__jkPlay&&window.__jkPlay(%r)))pycmd('janki:sfxq:%s');"
+                                 % (name, name))
+            return
+        except Exception:
+            pass
+    _play_qt(name, c, vol, force)
+
+
+_REVIEW_WEB = ("reveal", "again", "hard", "good", "easy")
+
+
+def _reviewer_player(web_content, context):
+    """The reviewer page gets its own Web Audio player for the review sounds."""
+    try:
+        from aqt.reviewer import Reviewer
+        if isinstance(context, Reviewer):
+            web_content.head += web_player(_REVIEW_WEB)
+    except Exception as e:
+        log("sfx reviewer player: %s" % e)
+
+
+def _play_qt(name, c, vol, force=False):
     fx = _effect(name)
     if fx is None:
         return
@@ -305,6 +331,11 @@ def _on_show_answer(card):
 
 
 def on_js_message(handled, message, context):
+    if isinstance(message, str) and message.startswith("janki:sfxq:"):
+        # the page couldn't play it (not loaded yet): Qt's player, as before
+        c = _cfg()
+        _play_qt(message.split(":", 2)[2], c, int(c.get("sfx_volume", 0)))
+        return (True, None)
     if isinstance(message, str) and message.startswith("janki:sfx:"):
         play(message.split(":", 2)[2])
         return (True, None)
@@ -379,6 +410,7 @@ def install():
     gui_hooks.reviewer_did_answer_card.append(_on_answer)
     gui_hooks.reviewer_did_show_answer.append(_on_show_answer)   # a subtle slide
     gui_hooks.webview_did_receive_js_message.append(on_js_message)
+    gui_hooks.webview_will_set_content.append(_reviewer_player)
     try:                                        # a sync you start yourself (not auto)
         orig = mw.on_sync_button_clicked
         if not getattr(orig, "_jk_sfx", False):
