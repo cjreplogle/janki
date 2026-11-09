@@ -155,7 +155,12 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.13</b> · 2026-10-26 · 6 releases</summary>
+<summary><b>2.13</b> · 2026-10-26 · 7 releases</summary>
+
+**2.13.7** · 2026-11-09
+
+- Flipping and grading cards is much faster with sounds on (about 300 ms less per card).
+- Calendar: progress colours now show as soon as you open it, without pressing the button.
 
 **2.13.6** · 2026-11-03
 
