@@ -155,7 +155,11 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.13</b> · 2026-10-26 · 7 releases</summary>
+<summary><b>2.13</b> · 2026-10-26 · 8 releases</summary>
+
+**2.13.8** · 2026-11-15
+
+- Improvements to OCR parsing of slide decks.
 
 **2.13.7** · 2026-11-09
 
