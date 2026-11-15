@@ -3411,8 +3411,16 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
             shutil.rmtree(tmp, ignore_errors=True)
             showWarning("Text recognition failed:\n\n%s" % e)
             return
-        qs, detected, incomplete = _parse_ocr_blocks(
-            [(p, ocr_map.get(p, []), cat, sid) for p, cat, sid in imgs])
+        _blocks = [(p, ocr_map.get(p, []), cat, sid) for p, cat, sid in imgs]
+        qs, detected, incomplete = _parse_ocr_blocks(_blocks)
+        try:    # question-screenshot + answer-screenshot decks: keep whichever reads more
+            from . import qbank_paired
+            _pq = qbank_paired.parse(path, _blocks)
+            _n0 = len(qs)
+            qs, detected, incomplete = qbank_paired.merge((qs, detected, incomplete), _pq)
+            log("pptx: generic %d + paired %d -> %d" % (_n0, len(_pq[0]), len(qs)))
+        except Exception as _pe:
+            log("pptx paired parser: %s" % _pe)
         # Keep `tmp` alive until after _write_qb_plain — each question's figure
         # images (_media_paths) point into it and are copied into the .qb.
         try:
