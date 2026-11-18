@@ -26,7 +26,7 @@ from aqt.utils import showInfo, tooltip
 from ..util.config import log
 
 MODEL_NAME = "Janki Anatomy 3D"
-ENGINE = "_jk3d-anat-69.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
+ENGINE = "_jk3d-anat-70.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
 LOWER_LIMB = "_jk3d_lowerlimb2.glb"   # bump the name when the model changes (phones cache by name)
 UPPER_LIMB = "_jk3d_upperlimb2.glb"
 TRUNK = "_jk3d_trunk7.glb"   # shared context (CT); also the base for future back / thorax cards
@@ -74,7 +74,7 @@ var cfg={model:txt('jka-model')||'""" + LOWER_LIMB + r"""',side:root.getAttribut
  mode:root.getAttribute('data-mode'),name:txt('jka-name'),meshes:txt('jka-meshes'),nerve:txt('jka-nerve'),
  region:txt('jka-region'),cam:txt('jka-cam'),limb:txt('jka-limb'),reflect:txt('jka-reflect'),landmark:txt('jka-landmark'),front:root.getAttribute('data-front')||'adaptive',ivl:window.__jkaIvl,xray:root.getAttribute('data-xray')==='1',origin:txt('jka-origin'),insertion:txt('jka-insertion'),peel:peel?peel.split('\n').filter(function(x){return x.trim();}):[]};
 function go(){window.JKANAT.mount(root,cfg);}
-if(window.JKANAT&&window.JKANAT.v>=69){go();return;}
+if(window.JKANAT&&window.JKANAT.v>=70){go();return;}
 (window.__jkaQ=window.__jkaQ||[]).push(go);
 if(window.__jkaLoading)return;window.__jkaLoading=1;
 fetch('""" + ENGINE + r"""',{cache:'no-cache'}).then(function(r){if(!r.ok)throw r.status;return r.text();})

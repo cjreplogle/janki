@@ -155,7 +155,11 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.14</b> · 2026-11-18 · 2 releases</summary>
+<summary><b>2.14</b> · 2026-11-18 · 3 releases</summary>
+
+**2.14.2** · 2026-11-18
+
+- 3D anatomy Lite is lighter on slow machines and virtual machines: the model holds still until you press play (an idle card draws nothing), moves at up to 30 frames a second, and uses simpler shading.
 
 **2.14.1** · 2026-11-18
 

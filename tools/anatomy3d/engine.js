@@ -256,7 +256,9 @@ function mount(root, cfg) {
       const ex = o.userData || {};
       const name = ex.n || o.name, layer = ex.l || 'muscle';
       const base = (layer === 'vein' || (layer === 'vessel' && /vein/i.test(name))) ? COL.vein : COL[layer] || 0x999999;
-      o.material = new THREE.MeshStandardMaterial({color: base, roughness: layer === 'bone' ? 0.85 : 0.6,
+      o.material = LITE   // Lite: per-vertex Lambert shading (far cheaper per pixel, esp. on software GL)
+        ? new THREE.MeshLambertMaterial({color: base, emissive: layer === 'nerve' ? 0x302400 : 0x000000})
+        : new THREE.MeshStandardMaterial({color: base, roughness: layer === 'bone' ? 0.85 : 0.6,
         metalness: 0, emissive: layer === 'nerve' ? 0x302400 : 0x000000});
       o.userData.base = base;
       parts.push({mesh: o, name, key: norm(name), layer, box: new THREE.Box3().setFromObject(o)});
@@ -2697,7 +2699,7 @@ function mount(root, cfg) {
     // slow turntable spin to show the structure from all sides; any touch stops it, and it
     // picks up again after a while untouched
     ctl.autoRotateSpeed = 1.2;   // ≈ 50 s per turn
-    let user = false, spinT = 0, noSpin = false;
+    let user = false, spinT = 0, noSpin = LITE;   // Lite: no turntable unless played (an idle model draws nothing)
     const spinOn = () => { if (!radOn) ctl.autoRotate = true; };   // no turntable on an X-ray
     function touched() {
       user = true; ctl.autoRotate = false; clearTimeout(spinT);
@@ -2705,7 +2707,7 @@ function mount(root, cfg) {
     }
     ['pointerdown', 'wheel'].forEach(ev => renderer.domElement.addEventListener(ev, touched, true));
     renderer.domElement.addEventListener('pointerup', () => { setTimeout(() => { user = false; }, 0); }, true);
-    setTimeout(spinOn, back ? 700 : 400);
+    if (!LITE) setTimeout(spinOn, back ? 700 : 400);
     ctl.addEventListener('change', () => {
       if (user || ease) moved(); else { dirty = true; checksDue = true; }
       if (!back) keepCam(); });
@@ -2731,6 +2733,7 @@ function mount(root, cfg) {
     view.in_zoom = s => zoomBy(s > 0 ? 0.75 : 1 / 0.75);
     document.addEventListener('keydown', onKey, true); document.addEventListener('keyup', offKey, true);
     window.addEventListener('blur', () => keys.clear());
+    let liteDrawn = -1e9;
     (function tick(t) {
       if (stopped || !root.isConnected) { if (!stopped) view.stop(); return; }
       requestAnimationFrame(tick);
@@ -2763,9 +2766,11 @@ function mount(root, cfg) {
       if (!ease) ctl.update(dt); else cam.lookAt(ctl.target);
       if (radWant && !radOn) return;   // X-ray coming: no plain-3D frame first (that was the flicker)
       if (!dirty && t > 1500) { if (labMoving || labDirty) labMoving = place(t); return; }
+      if (LITE && t - liteDrawn < 32) return;   // Lite: at most ~30 frames a second (dirty stays set)
+      liteDrawn = t;
       dirty = false;
       key.position.copy(cam.position).add(new THREE.Vector3(0.3, 0.5, 0.2));
-      if (!moving && checksDue && t - lastX > (ctl.autoRotate ? 200 : 60)) { lastX = t; checksDue = false; doXray(); occl(); }
+      if (!moving && checksDue && t - lastX > (LITE ? 400 : ctl.autoRotate ? 200 : 60)) { lastX = t; checksDue = false; doXray(); occl(); }
       if (radOn && rad) drawRad(); else { renderer.clear(); renderer.render(scene, cam); renderer.render(fadeScene, fadeCam); }
       if (!wrap.classList.contains('jka-shown')) requestAnimationFrame(() => wrap.classList.add('jka-shown'));   // one fade-in, once drawn
       drawCube(); drawSec(); gplSync();
@@ -2776,5 +2781,5 @@ function mount(root, cfg) {
   return view;
 }
 
-window.JKANAT = {v: 69, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
+window.JKANAT = {v: 70, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
 (window.__jkaQ || []).splice(0).forEach(f => f());
