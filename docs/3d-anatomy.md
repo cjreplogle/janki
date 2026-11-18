@@ -4,7 +4,7 @@
 dissect. Cards for identifying structures, clicking them on the model, origins and
 insertions, innervations and key facts, plus an X-ray view and a simulated CT.*
 
-**[⬇ Download the deck (janki-3d-anatomy.apkg, 19 MB)](https://github.com/cjreplogle/janki/releases/download/anatomy3d-deck/janki-3d-anatomy.apkg)**
+**[<span class="dl-x">⬇ </span>Download the deck (<span class="dl-x">janki-3d-anatomy.apkg, </span>19 MB)](https://github.com/cjreplogle/janki/releases/download/anatomy3d-deck/janki-3d-anatomy.apkg)**
 
 ---
 
