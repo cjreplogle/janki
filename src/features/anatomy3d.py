@@ -26,17 +26,17 @@ from aqt.utils import showInfo, tooltip
 from ..util.config import log
 
 MODEL_NAME = "Janki Anatomy 3D"
-ENGINE = "_jk3d-anat-70.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
+ENGINE = "_jk3d-anat-80.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
 LOWER_LIMB = "_jk3d_lowerlimb2.glb"   # bump the name when the model changes (phones cache by name)
 UPPER_LIMB = "_jk3d_upperlimb2.glb"
-TRUNK = "_jk3d_trunk7.glb"   # shared context (CT); also the base for future back / thorax cards
+TRUNK = "_jk3d_trunk8.glb"   # shared context (CT); also the base for future back / thorax cards
 DECK_ROOT = "Janki 3D Anatomy::Lower Limb"
 # Lite version (slower devices): the same cards on simplified models in their own note type and
 # deck tree, so its reviews stay apart and the full setup never treats them as duplicates.
 # The engine sees "_lite.glb" and also draws at 1x pixels without anti-aliasing.
 LITE = {"MODEL_NAME": "Janki Anatomy 3D (Lite)", "DECK_ROOT": "Janki 3D Anatomy (Lite)::Lower Limb",
         "LOWER_LIMB": "_jk3d_lowerlimb2_lite.glb", "UPPER_LIMB": "_jk3d_upperlimb2_lite.glb",
-        "TRUNK": "_jk3d_trunk7_lite.glb"}
+        "TRUNK": "_jk3d_trunk8_lite.glb"}
 FULL = {"MODEL_NAME": MODEL_NAME, "DECK_ROOT": DECK_ROOT, "LOWER_LIMB": LOWER_LIMB,
         "UPPER_LIMB": UPPER_LIMB, "TRUNK": TRUNK}
 
@@ -74,7 +74,7 @@ var cfg={model:txt('jka-model')||'""" + LOWER_LIMB + r"""',side:root.getAttribut
  mode:root.getAttribute('data-mode'),name:txt('jka-name'),meshes:txt('jka-meshes'),nerve:txt('jka-nerve'),
  region:txt('jka-region'),cam:txt('jka-cam'),limb:txt('jka-limb'),reflect:txt('jka-reflect'),landmark:txt('jka-landmark'),front:root.getAttribute('data-front')||'adaptive',ivl:window.__jkaIvl,xray:root.getAttribute('data-xray')==='1',origin:txt('jka-origin'),insertion:txt('jka-insertion'),peel:peel?peel.split('\n').filter(function(x){return x.trim();}):[]};
 function go(){window.JKANAT.mount(root,cfg);}
-if(window.JKANAT&&window.JKANAT.v>=70){go();return;}
+if(window.JKANAT&&window.JKANAT.v>=80){go();return;}
 (window.__jkaQ=window.__jkaQ||[]).push(go);
 if(window.__jkaLoading)return;window.__jkaLoading=1;
 fetch('""" + ENGINE + r"""',{cache:'no-cache'}).then(function(r){if(!r.ok)throw r.status;return r.text();})
@@ -1676,6 +1676,29 @@ def _category(n, sub, limb, diss):
     return "Joints, Spaces & Structures"
 
 
+# Landmark cards whose patch sits behind another bone in the opening view: that bone is reflected
+LM_REFLECT = {
+    "Glenoid cavity": "Humerus", "Supraglenoid tubercle": "Humerus", "Infraglenoid tubercle": "Humerus",
+    "Medial tibial plateau": "Femur, Patella", "Lateral tibial plateau": "Femur, Patella",
+    "Auricular surface of ilium": "Sacrum",
+    "Intercondylar fossa": "Patella",
+    "Olecranon fossa": "Ulna", "Trochlear notch": "Humerus", "Coronoid process of ulna": "Humerus",
+    "Anatomical neck of humerus": "Scapula",
+    "Radial notch of ulna": "Radius", "Carpal articular surface of radius": "Scaphoid bone, Lunate bone",
+}
+LM_CAMERA = {
+    "Conoid tubercle": "inferior posterior",
+    "Medial tibial plateau": "anterior +45", "Lateral tibial plateau": "anterior +45",
+    "Trochanteric fossa": "posteromedial +20",
+    "Intercondylar fossa": "posterior -10",
+    "Groove for ulnar nerve": "posteromedial",
+}
+# Cards under review after the 2026-11-18 accuracy audit: kept in their own subdeck until checked.
+# Empty this set (and re-run setup) to send them back to their normal decks.
+FLAG_DECK = "⚑ Flagged for Review"
+FLAGGED = set()   # 2026-11-18 audit: reviewed and released in 2.14.3
+
+
 def _sort_by_type(placed):
     """Region-first decks: Janki 3D Anatomy::<limb>::<subdeck> (scheduling history is kept).
     Card types are picked on the deck overview instead (see _overview). Then any deck under
@@ -1696,6 +1719,9 @@ def _sort_by_type(placed):
         for nid, cat in items:
             if cnt[cat] < 3:                  # too few: into the dissection's biggest group
                 cat = big
+            if mw.col.get_note(nid)["Structure"] in FLAGGED:   # under review: its own subdeck, by region
+                by_deck.setdefault("::".join((top, FLAG_DECK, limb)), []).extend(mw.col.card_ids_of_note(nid))
+                continue
             by_deck.setdefault("::".join((top, limb, diss, cat)), []).extend(mw.col.card_ids_of_note(nid))
     for dname, cids in by_deck.items():
         mw.col.set_deck(list(dict.fromkeys(cids)), mw.col.decks.id(dname))
@@ -2060,6 +2086,10 @@ def setup():
         def put(sub, vals, limb="Lower Limb"):
             nonlocal added
             vals = dict(vals); vals["Structure"] = LL_RENAME.get(vals["Structure"], vals["Structure"])
+            if not vals.get("Reflect") and vals["Structure"] in LM_REFLECT:   # the bone that hides the landmark
+                vals["Reflect"] = LM_REFLECT[vals["Structure"]]
+            if vals["Structure"] in LM_CAMERA:
+                vals["Camera"] = LM_CAMERA[vals["Structure"]]
             n = existing.get(vals["Structure"])
             new = n is None
             if new:

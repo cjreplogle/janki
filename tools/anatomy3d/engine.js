@@ -18,7 +18,7 @@ const REGIONS = {   // y-range (m) of the model kept in view
   shoulder: [1.15, 1.5], plexus: [1.2, 1.53], arm: [1.0, 1.45], elbow: [0.95, 1.2], forearm: [0.66, 1.15], wrist: [0.66, 0.95], hand: [0.64, 0.92], 'upper limb': [0.66, 1.5]};
 // CT context: a shared trunk model (spine, rib cage, heart, lungs, organs) sliced into the CT
 // panes listed here, around the limb. Add planes ('axial', 'sagittal') or swap the model to extend.
-const CT_CONTEXT = {model: '_jk3d_trunk7.glb', planes: ['coronal', 'axial', 'sagittal']};
+const CT_CONTEXT = {model: '_jk3d_trunk8.glb', planes: ['coronal', 'axial', 'sagittal']};
 const DIRS = {anterior: [0, 0, 1], posterior: [0, 0, -1], lateral: [-1, 0, 0], medial: [1, 0, 0],
   superior: [0, 1, 0.001], inferior: [0, -1, 0.001]};
 
@@ -320,27 +320,27 @@ function mount(root, cfg) {
       const H = {
         'scapula: acromion': {k: 'ext', d: [-0.7, 0.7, 0.1], tol: 0.02, reach: 0.04},
         'scapula: coracoid process': {k: 'ext', d: [0.1, 0.15, 1], tol: 0.012, reach: 0.03},
-        'scapula: spine': {k: 'ridge', bin: 'm', d: [0, 0.15, -1], b: [0.45, 0.98], sm: [0, 0.86], tol: 0.004},
+        'scapula: spine': {k: 'ridge', bin: 'm', d: [0, 0.15, -1], b: [0.45, 0.98], sm: [0, 0.86], tol: 0.005},
         'scapula: supraspinous fossa': {k: 'spinefossa', up: true},
         'scapula: infraspinous fossa': {k: 'spinefossa', up: false},
         'scapula: subscapular fossa': {k: 'band', b: [0.04, 0.84], f: [0.4, 0, 1, 0.45]},
-        'scapula: scapular notch': {k: 'notch', b: [0.7, 1], sm: [0.3, 0.75]},
+        'scapula: scapular notch': {k: 'contact', o: ['Suprascapular nerve'], dist: 0.008, grow: 0.004, b: [0.8, 1], top: 0.018},   // where the suprascapular nerve crosses the superior border (not the spinoglenoid notch lower down)
         'scapula: glenoid cavity': {k: 'ext', d: [-1, 0, 0], b: [0.62, 0.86], f: [-1, 0, 0, 0.45], tol: 0.007, reach: 0.025},
         'scapula: supraglenoid tubercle': {k: 'glenoidend', up: true},
         'scapula: infraglenoid tubercle': {k: 'glenoidend', up: false},
-        'scapula: medial border': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.05, 0.85], tol: 0.003},
+        'scapula: medial border': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.05, 0.85], tol: 0.005},
         'scapula: superior angle': {k: 'ext', d: [0.8, 1, 0], tol: 0.006, reach: 0.02},
         'scapula: inferior angle': {k: 'ext', d: [0, -1, 0], tol: 0.006, reach: 0.02},
         'clavicle: acromial end': {k: 'band', ax: 'lat', b: [0, 0.12]},
         'clavicle: shaft': {k: 'band', ax: 'lat', b: [0.25, 0.75]},
         'clavicle: sternal end': {k: 'band', ax: 'lat', b: [0.88, 1]},
-        'clavicle: conoid tubercle': {k: 'ext', ax: 'lat', d: [0, -1, -0.4], b: [0.12, 0.38], tol: 0.003, reach: 0.012},
+        'clavicle: conoid tubercle': {k: 'ext', ax: 'lat', d: [0, -1, -0.4], b: [0.12, 0.38], tol: 0.005, reach: 0.016},
         'clavicle: sternal articular surface': {k: 'ext', ax: 'lat', d: [1, 0, 0], f: [1, 0, 0, 0.2], tol: 0.004, reach: 0.02},
         'humerus: head': {k: 'sphere', d: [1, 0.7, -0.4], b: [0.8, 1], seedR: 0.022, tol: 0.003, reach: 0.05},
         'humerus: greater tubercle': {k: 'ext', d: [-1, 0.2, 0.15], b: [0.82, 0.97], tol: 0.01, reach: 0.025},
         'humerus: lesser tubercle': {k: 'ext', d: [0.25, 0, 1], b: [0.78, 0.9], tol: 0.004, reach: 0.015},
         'humerus: intertubercular groove': {k: 'spiral', b: [0.72, 0.9], phi: [2.7, 2.7], w: 0.22},
-        'humerus: anatomical neck': {k: 'aneck'},
+        'humerus: anatomical neck': {k: 'capedge', ref: 'humerus: head', b: [0.75, 1]},   // the articular cap's margin (a ring round the head's axis)
         'humerus: surgical neck': {k: 'band', b: [0.76, 0.82]},
         'humerus: deltoid tuberosity': {k: 'ext', d: [-1, 0, 0.35], b: [0.45, 0.65], tol: 0.003, reach: 0.03},
         'humerus: radial groove': {k: 'spiral', b: [0.36, 0.64], phi: [0.1, 1.5], w: 0.3},   // winds from posterior (top) to lateral (bottom)
@@ -348,16 +348,16 @@ function mount(root, cfg) {
         'humerus: trochlea': {k: 'band', b: [0, 0.075], sm: [0.38, 0.78], f: [0, -1, 0, -0.5]},
         'humerus: medial epicondyle': {k: 'ext', d: [1, 0, 0], b: [0.02, 0.16], tol: 0.007, reach: 0.02},
         'humerus: lateral epicondyle': {k: 'ext', d: [-1, 0, 0], b: [0.02, 0.16], tol: 0.005, reach: 0.018},
-        'humerus: medial supracondylar ridge': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.12, 0.32], tol: 0.002},
-        'humerus: lateral supracondylar ridge': {k: 'ridge', bin: 'y', d: [-1, 0, 0], b: [0.12, 0.35], tol: 0.002},
-        'humerus: radial fossa': {k: 'cav', b: [0.06, 0.17], f: [0, 0, 1, 0.4], sm: [0, 0.5], thr: 0.35, reach: 0.012},
-        'humerus: coronoid fossa': {k: 'cav', b: [0.06, 0.17], f: [0, 0, 1, 0.4], sm: [0.5, 1], thr: 0.35, reach: 0.012},
-        'humerus: olecranon fossa': {k: 'cav', b: [0.05, 0.2], f: [0, 0, -1, 0.4], sm: [0.25, 0.75], thr: 0.3, reach: 0.018},
-        'humerus: groove for ulnar nerve': {k: 'cav', b: [0.03, 0.14], f: [0.3, 0, -1, 0.2], sm: [0.72, 1], thr: 0.3, reach: 0.012},
+        'humerus: medial supracondylar ridge': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.12, 0.32], tol: 0.004},
+        'humerus: lateral supracondylar ridge': {k: 'ridge', bin: 'y', d: [-1, 0, 0], b: [0.12, 0.35], tol: 0.004},
+        'humerus: radial fossa': {k: 'above', ref: 'humerus: capitulum', b: [0.07, 0.125], f: [0, 0, 1, 0.35], w: 0.08},   // lateral: just above the capitulum (small)
+        'humerus: coronoid fossa': {k: 'above', ref: 'humerus: trochlea', b: [0.075, 0.14], f: [0, 0, 1, 0.35], w: 0.12},   // medial: just above the trochlea (larger)
+        'humerus: olecranon fossa': {k: 'cav', b: [0.05, 0.2], f: [0, 0, -1, 0.4], sm: [0.25, 0.75], thr: 0.18, reach: 0.022},   // posterior, the deepest and largest
+        'humerus: groove for ulnar nerve': {k: 'contact', o: ['Ulnar nerve'], dist: 0.009, grow: 0.005, b: [0, 0.2]},   // where the ulnar nerve lies, behind the medial epicondyle
         'radius: head': {k: 'band', b: [0.94, 1]},
         'radius: neck': {k: 'band', b: [0.87, 0.935]},
         'radius: radial tuberosity': {k: 'ext', d: [0.8, 0, 0.5], b: [0.76, 0.88], tol: 0.003, reach: 0.014},
-        'radius: interosseous border': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.2, 0.75], tol: 0.002},
+        'radius: interosseous border': {k: 'ridge', bin: 'y', d: [1, 0, 0], b: [0.2, 0.75], tol: 0.0035},
         'radius: dorsal tubercle': {k: 'ext', d: [0, 0, -1], b: [0.04, 0.14], tol: 0.0015, reach: 0.008},
         'radius: styloid process': {k: 'ext', d: [-0.7, -1, 0], b: [0, 0.15], tol: 0.006, reach: 0.014},
         'radius: carpal articular surface': {k: 'contact', o: ['Scaphoid bone', 'Lunate bone'], dist: 0.004, grow: 0.003, b: [0, 0.1]},
@@ -399,27 +399,37 @@ function mount(root, cfg) {
         'thoracic: transverse costal facet': {k: 'vert', part: 'contact', o: ['Sixth rib.l', 'Sixth rib.r'], xr: [1.4, 9], zr: [-9, 0.4]},
         'vertebra: intervertebral foramen': {k: 'vert', part: 'ivf'},
         // ---- lower limb (same frame: m medial, u up, a anterior) ----
-        'hip: ilium': {k: 'band', b: [0.5, 1]},
-        'hip: ischium': {k: 'band', b: [0, 0.42], sa: [0, 0.5]},
-        'hip: pubis': {k: 'band', b: [0, 0.45], sa: [0.5, 1], sm: [0.45, 1]},
+        // femur, proximal end: a sphere fitted to the head; neck / intertrochanteric line + crest
+        // are shells around its centre (neck = head margin outwards; line / crest = the neck's base)
+        'femur: head': {k: 'sphere', d: [1, 0.6, 0], b: [0.85, 1], seedR: 0.016, tol: 0.003, reach: 0.06},
+        'neck': {k: 'shell', ref: 'femur: head', r0: 0.0015, r1: 0.017, b: [0.82, 1]},
+        'femur: intertrochanteric line': {k: 'shell', ref: 'femur: head', r0: 0.021, r1: 0.029, b: [0.8, 0.97], f: [0, 0, 1, 0.35]},
+        'femur: intertrochanteric crest': {k: 'shell', ref: 'femur: head', r0: 0.022, r1: 0.031, b: [0.8, 0.97], f: [0, 0, -1, 0.35]},
+        'iliac crest': {k: 'crest', tol: 0.0065},   // ASIS → PSIS along the top of the ilium
+        'intercondylar fossa': {k: 'cav', b: [0, 0.08], f: [0, -0.3, -1, 0.1], sm: [0.3, 0.7], thr: 0.25, reach: 0.022},
+        'patellar surface': {k: 'band', b: [0.015, 0.09], f: [0, 0, 1, 0.45], sm: [0.15, 0.85]},
+        'femur: patellar surface': {k: 'band', b: [0.015, 0.09], f: [0, 0, 1, 0.45], sm: [0.15, 0.85]},
+        // ilium / ischium / pubis meet in a Y inside the acetabulum (the femoral head's centre):
+        // ilium above it, ischium behind-below, pubis in front-below
+        'hip: ilium': {k: 'hippart', part: 'ilium'},
+        'hip: ischium': {k: 'hippart', part: 'ischium'},
+        'hip: pubis': {k: 'hippart', part: 'pubis'},
         'hip: superior pubic ramus': {k: 'band', b: [0.22, 0.45], sa: [0.55, 1], sm: [0.45, 0.92]},
         'hip: inferior pubic ramus': {k: 'band', b: [0.04, 0.25], sm: [0.6, 1], sa: [0.35, 0.85]},
         'hip: symphyseal surface': {k: 'ext', d: [1, 0, 0], f: [1, 0, 0, 0.4], tol: 0.004, reach: 0.03},
-        'hip: pectineal line': {k: 'ridge', bin: 'm', d: [0, 1, 0.3], b: [0.25, 0.48], sa: [0.5, 1], sm: [0.5, 0.95], tol: 0.003},
-        'hip: arcuate line': {k: 'arcuate', b: [0.42, 0.8], f: [1, 0.2, 0.3, 0.45], sa: [0.1, 0.85]},
+        'hip: pectineal line': {k: 'brim', seg: 'pecten', w: 0.003},   // the brim's pubic part: iliopubic eminence → pubic tubercle
+        'hip: arcuate line': {k: 'brim', w: 0.0035},   // pelvic brim on the ilium: sacro-iliac joint → iliopubic eminence
         'hip: obturator foramen': {k: 'hole', b: [0, 0.45], outline: 'loop'},
         'hip: auricular surface': {k: 'contact', o: ['Sacrum'], dist: 0.006, grow: 0.004},
-        'hip: iliac fossa': {k: 'band', b: [0.6, 0.97], f: [1, 0.2, 0.3, 0.45]},
-        'femur: trochanteric fossa': {k: 'cav', b: [0.9, 0.98], f: [0.3, 0, -1, 0.1], sm: [0, 0.5], thr: 0.3, reach: 0.015},
-        'femur: intertrochanteric crest': {k: 'ridge', bin: 'y', d: [0, 0, -1], b: [0.83, 0.95], sm: [0.05, 0.6], tol: 0.003},
-        'femur: intertrochanteric line': {k: 'ridge', bin: 'y', d: [0, 0, 1], b: [0.84, 0.95], sm: [0.05, 0.7], tol: 0.003},
-        'femur: gluteal tuberosity': {k: 'ext', d: [-0.6, 0, -1], b: [0.68, 0.82], tol: 0.003, reach: 0.03},
-        'femur: popliteal surface': {k: 'band', b: [0.06, 0.22], f: [0, 0, -1, 0.5], sm: [0.2, 0.8]},
+        'hip: iliac fossa': {k: 'brim', above: true, b: [0.5, 0.985], f: [1, 0.2, 0.3, 0.35]},
+        'femur: trochanteric fossa': {k: 'cav', b: [0.88, 0.98], f: [0.5, 0, -1, 0], sm: [0, 0.5], thr: 0.2, reach: 0.02},
+        'femur: gluteal tuberosity': {k: 'ridge', bin: 'y', d: [-0.6, 0, -1], b: [0.66, 0.85], tol: 0.0022},   // an elongated ridge below the greater trochanter
+        'femur: popliteal surface': {k: 'band', b: [0.1, 0.25], f: [0, 0, -1, 0.5], sm: [0.2, 0.8]},   // above the condyles
         'tibia: medial plateau': {k: 'band', b: [0.96, 1], f: [0, 1, 0, 0.55], sm: [0.5, 1]},
         'tibia: lateral plateau': {k: 'band', b: [0.96, 1], f: [0, 1, 0, 0.55], sm: [0, 0.5]},
         'tibia: medial condyle': {k: 'band', b: [0.86, 0.99], sm: [0.52, 1]},
         'tibia: lateral condyle': {k: 'band', b: [0.86, 0.99], sm: [0, 0.48]},
-        'tibia: soleal line': {k: 'spiral', b: [0.6, 0.8], phi: [0.9, -1.1], w: 0.2},
+        'tibia: soleal line': {k: 'spiral', b: [0.64, 0.86], phi: [0.9, -1.1], w: 0.2},   // upper third, from below the fibular facet
         'tibia: tibial tuberosity': {k: 'ext', d: [0, 0, 1], b: [0.8, 0.94], tol: 0.004, reach: 0.02},
         'tibia: medial malleolus': {k: 'ext', d: [1, -1, 0], b: [0, 0.1], tol: 0.008, reach: 0.02},
         'fibula: head': {k: 'band', b: [0.93, 1]},
@@ -436,10 +446,10 @@ function mount(root, cfg) {
         'space: adductor hiatus': {k: 'band', ya: [0.5, 0.56]},
         // spinal cord / meninges (trunk model; levels from its own vertebrae)
         'cord: cervical enlargement': {k: 'band', ya: [1.435, 1.515]},     // ≈ C3–C7 vertebrae (cord reshaped in build_trunk)
-        'cord: lumbosacral enlargement': {k: 'band', ya: [1.09, 1.225]},  // ≈ T10–L1
-        'cord: conus medullaris': {k: 'band', ya: [1.05, 1.115]},
+        'cord: lumbosacral enlargement': {k: 'band', ya: [1.11, 1.215]},  // ≈ T11–L1 vertebrae, above the conus
+        'cord: conus medullaris': {k: 'band', ya: [1.05, 1.11]},   // the cone, ending at L1–L2
         'cauda: filum terminale': {k: 'band', b: [0, 0.18]},
-        'dura: dural sac': {k: 'band', ya: [0.85, 1.07]},
+        'dura: dural sac': {k: 'band', ya: [0.918, 1.075]},   // below the conus (L2) to its blind end at S2
         'temporal: mastoid': {k: 'ext', each: true, d: [0, -1, -0.7], tol: 0.008, reach: 0.02},
         'vertebra: epidural': {k: 'vert', part: 'foramen', on: /^(vertebra|atlas|axis)/i},
         'muscle: gluteal fold': {k: 'ext', d: [0, -1, -0.3], tol: 0.012, reach: 0.09},
@@ -548,9 +558,13 @@ function mount(root, cfg) {
           }
           if (bs > bestS) { bestS = bs; best = bp; }
         } else if (k === 'ridge') {
-          const key2 = (D, i) => Math.round((S.bin === 'm' ? sg * D.P[i * 3] : S.bin === 'a' ? D.P[i * 3 + 2] : D.P[i * 3 + 1]) / 0.006), mx = {};
-          each((D, i) => { const kk = key2(D, i), s = dot3(D, i, S.d, D.P); if (mx[kk] == null || s > mx[kk]) mx[kk] = s; });
-          each((D, i, di) => { const w = 1 - (mx[key2(D, i)] - dot3(D, i, S.d, D.P)) / S.tol; if (w > 0) ws[di][i] = Math.min(1, w * 1.5); });
+          // per 3 mm slice the most extreme value, smoothed over neighbours and interpolated between
+          // slices (a step per slice drew the ridge as dashes)
+          const bw = 0.003, pos = (D, i) => (S.bin === 'm' ? sg * D.P[i * 3] : S.bin === 'a' ? D.P[i * 3 + 2] : D.P[i * 3 + 1]) / bw, mx = {};
+          each((D, i) => { const kk = Math.round(pos(D, i)), s = dot3(D, i, S.d, D.P); if (mx[kk] == null || s > mx[kk]) mx[kk] = s; });
+          const ms = {}; Object.keys(mx).map(Number).forEach(kk => { const n = [kk - 1, kk, kk + 1].filter(x => mx[x] != null); ms[kk] = n.reduce((t, x) => t + mx[x], 0) / n.length; });
+          const at = f => { const b0 = Math.floor(f), a = ms[b0] ?? ms[b0 + 1], c = ms[b0 + 1] ?? ms[b0]; return a == null ? null : a + (c - a) * (f - b0); };
+          each((D, i, di) => { const m = at(pos(D, i)); if (m == null) return; const w = 1 - (m - dot3(D, i, S.d, D.P)) / S.tol; if (w > 0) ws[di][i] = Math.min(1, w * 1.5); });
         } else if (k === 'cav') {
           const [b, bs] = top((D, i) => D.K[i]); if (!b || bs <= 0) return; const bp = vec(b[0], b[1]);
           each((D, i, di) => { const s = D.K[i]; if (s >= S.thr * bs && vec(D, i).distanceTo(bp) < S.reach) ws[di][i] = Math.min(1, (s - S.thr * bs) / (0.3 * bs)); });
@@ -664,18 +678,93 @@ function mount(root, cfg) {
           while (W[lo - 1] && sm(lo - 1) >= thr) lo--; while (W[hi + 1] && sm(hi + 1) >= thr) hi++;
           each((D, i, di) => { const b = Math.round(D.P[i * 3 + 1] / 0.003); if (b >= lo && b <= hi) ws[di][i] = 1; });
           try { document.documentElement.setAttribute('data-swell', [lo * 3, hi * 3, (sm(pk) * 1000).toFixed(1)].join(',')); } catch (x) {}
+        } else if (k === 'shell') {   // a shell around a fitted head's centre (femoral neck, its base lines)
+          const ref = parts.filter(q => q.name === G[0].name), hs = ulLandmark(S.ref, ref); if (!hs || !hs.sphere) return;
+          const c = hs.sphere.c, r = hs.sphere.r;
+          each((D, i, di) => { const d = vec(D, i).distanceTo(c) - r; if (d > S.r0 && d < S.r1) ws[di][i] = Math.min(1, Math.min(d - S.r0, S.r1 - d) / 0.002 + 0.3); });
+        } else if (k === 'above') {   // a fossa just above an articular surface: the same medio-lateral position, a band higher
+          const ref = parts.filter(q => q.name === G[0].name), rs = ulLandmark(S.ref, ref); if (!rs || !rs.pts.length) return;
+          let mlo = 1e9, mhi = -1e9; Ds.forEach(D => { for (let i = 0; i < D.n; i++) { const m = sg * D.P[i * 3]; mlo = Math.min(mlo, m); mhi = Math.max(mhi, m); } });
+          const mc = rs.pts.reduce((t, q) => t + sg * q.x, 0) / rs.pts.length, hw = S.w * (mhi - mlo);
+          const tc = (S.b[0] + S.b[1]) / 2, th = (S.b[1] - S.b[0]) / 2;   // an oval pit, not a box
+          each((D, i, di) => { const e = ((sg * D.P[i * 3] - mc) / hw) ** 2 + ((tf(D, i) - tc) / th) ** 2; if (e < 1) ws[di][i] = Math.min(1, (1 - e) / 0.35); });
+          best = null;
+        } else if (k === 'crest') {   // top edge of the ilium between ASIS (front end) and PSIS (back end), smooth along its length
+          const fem = parts.filter(q => q.name === 'Femur'); const hs = fem.length ? ulLandmark('femur: head', fem) : null; if (!hs || !hs.sphere) return;
+          const yA = hs.sphere.c.y; let asis = null, psis = null;
+          each((D, i) => { const q = vec(D, i); if (q.y > yA + 0.04 && (!asis || q.z + 0.2 * q.y > asis.z + 0.2 * asis.y)) asis = q;
+            if (q.y > yA + 0.03 && (!psis || q.z < psis.z)) psis = q; });
+          if (!asis || !psis) return;
+          const bw = 0.003, T = {}; each((D, i) => { const q = vec(D, i); if (q.z > asis.z + 0.002 || q.z < psis.z - 0.002) return; const b = Math.round(q.z / bw); if (T[b] == null || q.y > T[b]) T[b] = q.y; });
+          const ks = Object.keys(T).map(Number).sort((a, b) => a - b); if (ks.length < 3) return;
+          const Ts = {}; ks.forEach(b => { const n = [b - 1, b, b + 1].filter(x => T[x] != null); Ts[b] = n.reduce((t, x) => t + T[x], 0) / n.length; });
+          const topAt = z => { const f = z / bw, b0 = Math.floor(f), b1 = b0 + 1, a = Ts[b0] ?? Ts[b1], c = Ts[b1] ?? Ts[b0]; return a == null ? null : a + (c - a) * (f - b0); };
+          each((D, i, di) => { const q = vec(D, i); if (q.z > asis.z + 0.002 || q.z < psis.z - 0.002) return; const t = topAt(q.z); if (t == null) return;
+            const w = 1 - (t - q.y) / S.tol; if (w > 0) ws[di][i] = Math.min(1, w * 1.6); });
+          best = asis.clone().lerp(psis, 0.5);
+        } else if (k === 'capedge') {   // margin of a spherical articular cap: the angle (from the pole) where the bone leaves the sphere
+          const ref = parts.filter(q => q.name === G[0].name), hs = ulLandmark(S.ref, ref); if (!hs || !hs.sphere) return;
+          const c = hs.sphere.c, r = hs.sphere.r, ax = hs.pt.clone().sub(c).normalize();
+          const ang = q => Math.acos(Math.max(-1, Math.min(1, q.clone().sub(c).normalize().dot(ax)))) * 180 / Math.PI;
+          const on = {}, all = {};
+          each((D, i) => { const q = vec(D, i), a = Math.round(ang(q) / 2); if (a > 60) return; all[a] = (all[a] || 0) + 1; if (Math.abs(q.distanceTo(c) - r) < 0.0018) on[a] = (on[a] || 0) + 1; });
+          let edge = null; for (let a = 10; a <= 60; a++) if (all[a] > 8 && (on[a] || 0) / all[a] < 0.5) { edge = a * 2; break; }
+          if (edge == null) return;
+          each((D, i, di) => { const q = vec(D, i), a = ang(q), d = q.distanceTo(c) - r;
+            if (a > edge - 6 && a < edge + 8 && d > -0.004 && d < 0.009) ws[di][i] = Math.min(1, Math.min(a - (edge - 6), edge + 7 - a) / 3 + 0.3); });
+          best = c.clone().addScaledVector(ax, r * Math.cos(edge * Math.PI / 180));
+          try { document.documentElement.setAttribute('data-capedge', edge); } catch (x) {}
+        } else if (k === 'hippart') {   // the three hip-bone parts, split at the acetabulum's centre
+          const fem = parts.filter(q => q.name === 'Femur'); const hs = fem.length ? ulLandmark('femur: head', fem) : null; if (!hs || !hs.sphere) return;
+          const c = hs.sphere.c;
+          each((D, i, di) => { const q = vec(D, i), up = q.y > c.y + 0.003, post = q.z < c.z - 0.002;
+            if (S.part === 'ilium' ? up : S.part === 'ischium' ? !up && post : !up && !post) ws[di][i] = 1; });
+          best = c.clone();
+        } else if (k === 'brim') {   // arcuate line: auricular surface's front-lower corner → iliopubic eminence (above the acetabulum, front)
+          const fem = parts.filter(q => q.name === 'Femur'); const hs = fem.length ? ulLandmark('femur: head', fem) : null;
+          const au = ulLandmark('hip: auricular surface', G); if (!hs || !hs.sphere || !au) return;
+          const A = au.pts.reduce((b, q) => (!b || q.z - q.y > b.z - b.y ? q : b), null), c = hs.sphere.c;
+          const all = f => Ds.forEach((D, di) => { for (let i = 0; i < D.n; i++) f(D, i, di); });   // the end points: whole bone, not the card's band
+          let B = null; all((D, i) => { const q = vec(D, i); if (q.z > c.z && q.y > c.y && q.y < c.y + 0.03 && sg * (q.x - c.x) > 0.01 && D.N[i * 3 + 1] > 0.3 && (!B || q.z + q.y > B.z + B.y)) B = q; });
+          if (!B) return;
+          let A0 = A;
+          if (S.seg === 'pecten') {   // second leg of the brim: eminence → pubic tubercle (upper front point near the symphysis)
+            let mx = -1e9; all((D, i) => { mx = Math.max(mx, sg * D.P[i * 3]); });
+            let T = null; all((D, i) => { const q = vec(D, i), m = sg * q.x; if (m > mx - 0.035 && m < mx - 0.012 && (!T || q.z + 0.5 * q.y > T.z + 0.5 * T.y)) T = q; });
+            if (!T) return; A0 = B; B = T; }
+          const A1 = A0, AB = B.clone().sub(A1), L2 = AB.lengthSq();
+          const onLine = q => { const t = Math.max(0, Math.min(1, q.clone().sub(A1).dot(AB) / L2)); return {t, d: q.distanceTo(A1.clone().addScaledVector(AB, t))}; };
+          if (S.above) each((D, i, di) => { const q = vec(D, i), t = Math.max(0, Math.min(1, q.clone().sub(A1).dot(AB) / L2)), ly = A1.y + AB.y * t;
+              if (q.y > ly + 0.004 && sg * D.N[i * 3] > 0.2) ws[di][i] = 1; });
+          else { const best2 = {}; each((D, i) => { if (S.seg !== 'pecten' && sg * D.N[i * 3] < 0.05) return; const o = onLine(vec(D, i)); if (o.d > 0.012) return;
+              const kk = Math.round(o.t * 40); if (best2[kk] == null || o.d < best2[kk]) best2[kk] = o.d; });
+            each((D, i, di) => { if (S.seg !== 'pecten' && sg * D.N[i * 3] < 0.05) return; const o = onLine(vec(D, i)), kk = Math.round(o.t * 40);
+              if (best2[kk] != null && o.d < best2[kk] + S.w) ws[di][i] = 1; }); }
+          best = A1.clone().lerp(B, 0.5);
         } else if (k === 'band') {
           each((D, i, di) => { ws[di][i] = 1; });
         } else if (k === 'contact') {
           const other = []; S.o.forEach(nm => parts.filter(q => q.name === nm).forEach(q => { const D = md(q); for (let i = 0; i < D.n; i++) other.push(vec(D, i)); }));
           const near = pointGrid(other, 0.005), hit = [];
           each((D, i, di) => { const q = vec(D, i); if (near(q, S.dist)) { ws[di][i] = 1; hit.push(q); } });
+          if (S.top && hit.length) {   // only around the highest contact (e.g. the notch, not the nerve's later course)
+            const hi = hit.reduce((a, q) => (q.y > a.y ? q : a)); hit.length = 0;
+            each((D, i, di) => { if (ws[di][i] && vec(D, i).distanceTo(hi) > S.top) ws[di][i] = 0; else if (ws[di][i]) hit.push(vec(D, i)); });
+            best = hi; }
           if (S.grow && hit.length) { const nh = pointGrid(hit, 0.005); each((D, i, di) => { if (!ws[di][i] && nh(vec(D, i), S.grow)) ws[di][i] = 0.7; }); }
         } else if (k === 'notch') {   // the dip in the superior border between the superior angle and the coracoid
-          const top = {}; each((D, i) => { if (D.N[i * 3 + 1] < 0.2) return; const kk = Math.round(sg * D.P[i * 3] / 0.004); if (top[kk] == null || D.P[i * 3 + 1] > top[kk]) top[kk] = D.P[i * 3 + 1]; });
-          const ks = Object.keys(top).map(Number).sort((a, b) => a - b); if (ks.length < 3) return;
-          let kmin = ks[1]; ks.slice(1, -1).forEach(kk => { if (top[kk] < top[kmin]) kmin = kk; });
-          each((D, i, di) => { const kk = Math.round(sg * D.P[i * 3] / 0.004); if (Math.abs(kk - kmin) <= 1 && D.P[i * 3 + 1] > top[kmin] - 0.006 && D.N[i * 3 + 1] > 0) ws[di][i] = 1; });
+          // blade only: per 3 mm medial slice the blade's own plane (median z of front/back-facing points), so
+          // the coracoid (juts forward) and the spine (juts back) don't count as border
+          const bw = 0.003, bk = (D, i) => Math.round(sg * D.P[i * 3] / bw), zs = {};
+          each((D, i) => { if (Math.abs(D.N[i * 3 + 2]) > 0.7) (zs[bk(D, i)] ||= []).push(D.P[i * 3 + 2]); });
+          const zb = {}; Object.keys(zs).forEach(k2 => { const a = zs[k2].sort((x, y) => x - y); zb[k2] = a[a.length >> 1]; });
+          const onBlade = (D, i) => zb[bk(D, i)] != null && Math.abs(D.P[i * 3 + 2] - zb[bk(D, i)]) < 0.008;
+          const top = {}; each((D, i) => { if (!onBlade(D, i) || D.N[i * 3 + 1] < 0.3) return; const kk = bk(D, i); if (top[kk] == null || D.P[i * 3 + 1] > top[kk]) top[kk] = D.P[i * 3 + 1]; });
+          const ks = Object.keys(top).map(Number).sort((a, b) => a - b); if (ks.length < 5) return;
+          const sm3 = kk => [kk - 1, kk, kk + 1].filter(q => top[q] != null).reduce((t, q, _, a) => t + top[q] / a.length, 0);
+          let kmin = ks[2]; ks.slice(2, -2).forEach(kk => { if (sm3(kk) < sm3(kmin)) kmin = kk; });
+          each((D, i, di) => { const kk = bk(D, i); if (Math.abs(kk - kmin) <= 2 && onBlade(D, i) && D.N[i * 3 + 1] > 0.1 && D.P[i * 3 + 1] > top[kmin] - 0.006) ws[di][i] = 1; });
+          { let bp = null; each((D, i) => { if (bk(D, i) === kmin && onBlade(D, i) && (!bp || D.P[i * 3 + 1] > bp.y)) bp = vec(D, i); }); if (bp) best = bp; }
         } else if (k === 'glenoidend') {
           const gl = ulLandmark('scapula: glenoid cavity', G); if (!gl) return; const glen = gl.pts;
           const e = glen.reduce((a, q) => (!a || (S.up ? q.y > a.y : q.y < a.y) ? q : a), null).clone();
@@ -2781,5 +2870,5 @@ function mount(root, cfg) {
   return view;
 }
 
-window.JKANAT = {v: 70, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
+window.JKANAT = {v: 80, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
 (window.__jkaQ || []).splice(0).forEach(f => f());
