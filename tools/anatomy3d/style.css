@@ -341,6 +341,7 @@ html body #qa .jka-c-attach tr + tr th.jka-th{margin-top:22px !important}
 /* the 3D view fades in once, after its first frame (no half-ready frames popping in) */
 .jka-wrap > canvas{opacity:0;transition:opacity .25s ease}
 .jka-wrap.jka-shown > canvas{opacity:1}
+.jka-wrap.jka-nofade > canvas{transition:none}   /* answer side after an X-ray question: the film stays put */
 .jka-mini canvas{opacity:1 !important}
 /* (the "show" rule must outrank the "hide while over the model" one: hovering the widget is also hovering the model) */
 @media (hover:hover){

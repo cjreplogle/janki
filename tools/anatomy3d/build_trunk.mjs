@@ -61,6 +61,12 @@ for (const sys of ['skeletal','visceral','cardiovascular','muscular','nervous','
         for(let i=0;i<np.length;i+=3){const c=C[Math.round(np[i+1]/0.004)], cx=c[0]/c[2], cz=c[1]/c[2], f=sc(np[i+1]);
           np[i]=cx+(np[i]-cx)*f; np[i+2]=cz+(np[i+2]-cz)*f;}
       }
+      // peripheral nerves: the source draws them as thin cables — grow to typical adult calibre
+      // (mm added to the radius; the cord / roots / ganglia keep their own shape)
+      const TGROW={'Accessory nerve (XI)':0.7,'Dorsal scapular nerve':0.35,'Thoracodorsal nerve':0.8,'Intercostal nerves':0.9,
+        'Long thoracic nerve':0.6,'Suprascapular nerve':0.6};
+      const tg=TGROW[nm.replace(/\.[lr]$/,'')];
+      if(rule[2]==='nerve' && tg && nn) for(let i=0;i<np.length;i+=3){const l=Math.hypot(nn[i],nn[i+1],nn[i+2])||1; np[i]+=nn[i]/l*tg/1000; np[i+1]+=nn[i+1]/l*tg/1000; np[i+2]+=nn[i+2]/l*tg/1000;}
       const det=m[0]*(m[5]*m[10]-m[6]*m[9])-m[4]*(m[1]*m[10]-m[2]*m[9])+m[8]*(m[1]*m[6]-m[2]*m[5]);
       const p2=out.createPrimitive().setAttribute('POSITION',out.createAccessor().setType('VEC3').setArray(np).setBuffer(buf));
       if(nn) p2.setAttribute('NORMAL',out.createAccessor().setType('VEC3').setArray(nn).setBuffer(buf));

@@ -163,6 +163,9 @@ Grouped by version; open one to see its releases. Every release is also on [GitH
 - Decks are grouped by region and dissection; on a 3D deck's overview, chips switch card types on and off (switched-off types are suspended) and you choose whether the model shows on the front of recall cards (show / adaptive / hide). Only ID cards are on at first.
 - Calendar: dissection / anatomy classes get buttons that open the matching 3D cards.
 - Slide-deck OCR: spinal levels like "L4" are no longer misread as "LA".
+- 3D anatomy: smoother card changes (the 3D view is reused instead of rebuilt each card; X-ray cards open straight on the film, and the answer's film glides to the midline without flicker).
+- Card-type chips: switching types no longer turns ID back on, and the last type can't be switched off (that left the decks looking finished).
+- Attachment cards don't show the nerve unless you turn it on; back nerves at real thickness; clicking into openings (e.g. the intervertebral foramen) works; the "What is highlighted?" line is no longer cut off without Janki.
 
 </details>
 

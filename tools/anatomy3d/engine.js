@@ -17,7 +17,7 @@ const REGIONS = {   // y-range (m) of the model kept in view
   shoulder: [1.15, 1.5], plexus: [1.2, 1.53], arm: [1.0, 1.45], elbow: [0.95, 1.2], forearm: [0.66, 1.15], wrist: [0.66, 0.95], hand: [0.64, 0.92], 'upper limb': [0.66, 1.5]};
 // CT context: a shared trunk model (spine, rib cage, heart, lungs, organs) sliced into the CT
 // panes listed here, around the limb. Add planes ('axial', 'sagittal') or swap the model to extend.
-const CT_CONTEXT = {model: '_jk3d_trunk6.glb', planes: ['coronal', 'axial', 'sagittal']};
+const CT_CONTEXT = {model: '_jk3d_trunk7.glb', planes: ['coronal', 'axial', 'sagittal']};
 const DIRS = {anterior: [0, 0, 1], posterior: [0, 0, -1], lateral: [-1, 0, 0], medial: [1, 0, 0],
   superior: [0, 1, 0.001], inferior: [0, -1, 0.001]};
 
@@ -187,14 +187,29 @@ function mount(root, cfg) {
   // and no answer-side slide (CSS keys off this class)
   let ctPre = false; try { ctPre = localStorage.getItem('jka-ct') === '1'; } catch (x) {}
   root.classList.toggle('jka-ctpre', ctPre);
-  const slideBox = root.closest('.jka-left'); if (slideBox && ctPre) slideBox.style.animation = 'none';
+  // X-ray / CT open framed (a hard film edge): no slide-in on the answer, or that edge visibly moves
+  let radPre = !!cfg.xray; try { radPre = radPre || localStorage.getItem('jka-rad') === '1'; } catch (x) {}
+  const slideBox = root.closest('.jka-left');
+  if (slideBox && ctPre) slideBox.style.animation = 'none';
+  else if (slideBox && radPre) slideBox.style.animation = 'jka-shrink .5s cubic-bezier(.2, .8, .2, 1) both';   // left edge fixed, right edge to the midline
   const wrap = document.createElement('div'); wrap.className = 'jka-wrap'; root.appendChild(wrap);
   const msg = document.createElement('div'); msg.className = 'jka-msg'; msg.textContent = 'Loading model…';
   wrap.appendChild(msg);
+  // one renderer for the whole review session: a new card reuses it (shaders compiled and model
+  // geometry already on the GPU), so question → answer and card → card don't rebuild everything
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    const R = window.__jkaR;
+    if (R && R.getContext() && !R.getContext().isContextLost()) {
+      renderer = R; renderer.setRenderTarget(null); renderer.autoClear = true; renderer.setClearColor(0x000000, 0);
+      renderer.domElement.removeAttribute('style'); renderer.domElement.className = '';
+    } else { renderer = new THREE.WebGLRenderer({antialias: true, alpha: true}); window.__jkaR = renderer; }
   } catch (e) { msg.textContent = '3D needs WebGL, which is off in this Anki.'; return; }
+  // listeners this view puts on the shared canvas are removed when it goes (else an old card's
+  // handlers would keep reacting)
+  const cvEvs = [], cvEl = renderer.domElement, ET = EventTarget.prototype;
+  cvEl.addEventListener = function (t, f, o) { ET.addEventListener.call(cvEl, t, f, o); cvEvs.push([t, f, o]); };
+  const viewDisp = [];   // per-view GPU resources (render targets) to free on stop
   const DPR = Math.min(2, window.devicePixelRatio || 1), DPR_MOVE = Math.min(DPR, 1);
   renderer.setPixelRatio(DPR);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -202,7 +217,9 @@ function mount(root, cfg) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'jka-lines');
   wrap.appendChild(svg);
   let stopped = false;
-  const view = {stop() { stopped = true; try { renderer.dispose(); renderer.forceContextLoss(); } catch (e) {} }};
+  const view = {stop() { stopped = true;
+    cvEvs.forEach(([t, f, o]) => { try { ET.removeEventListener.call(cvEl, t, f, o); } catch (x) {} }); cvEvs.length = 0;
+    viewDisp.forEach(d => { try { d.dispose(); } catch (x) {} }); viewDisp.length = 0; }};
   live = view;
 
   load(cfg.model).then(src => {
@@ -831,12 +848,12 @@ function mount(root, cfg) {
     const ligCard = target.length && target.every(p => p.layer === 'ligament' || p.layer === 'capsule');
     const boneCard = target.length && target.every(p => p.layer === 'bone');
     const boneLigCard = !boneCard && target.length && target.every(p => p.layer === 'bone' || p.layer === 'ligament' || p.layer === 'capsule');   // e.g. sciatic foramina: bone + ligaments only   // osteology: the skeleton alone
-    const layers = new Set(names(cfg.show || (boneCard ? 'bone' : (ligCard || boneLigCard) ? 'bone,ligament' : (mode === 'nerve' || nerve.length ? 'bone,muscle,nerve,ligament' : 'bone,muscle,ligament')))
+    const layers = new Set(names(cfg.show || (boneCard ? 'bone' : (ligCard || boneLigCard) ? 'bone,ligament' : (mode === 'nerve' ? 'bone,muscle,nerve,ligament' : 'bone,muscle,ligament')))
       .map(norm).map(x => x.replace(/s$/, '').replace('artery', 'vessel').replace('arterie', 'vessel')));
     const inRegion = p => p.box.max.y > yr[0] && p.box.min.y < yr[1];
     const isolate = norm(cfg.region || '') === 'vertebra';   // a vertebra on its own, like a bench specimen
     parts.forEach(p => {
-      p.mesh.visible = isolate ? target.includes(p) : inRegion(p) && (layers.has(p.layer) || target.includes(p) || nerve.includes(p));
+      p.mesh.visible = isolate ? target.includes(p) : inRegion(p) && (layers.has(p.layer) || target.includes(p) || (mode === 'nerve' && nerve.includes(p)));
     });
     const focus = new THREE.Box3();
     parts.forEach(p => { if (p.mesh.visible) focus.union(p.box); });
@@ -1050,7 +1067,7 @@ function mount(root, cfg) {
       // (ligaments / menisci: no automatic gray attachment labels — both ends lie on bone, the
       //  written answer names them)
       if (mode !== 'attach' && !LM && !target.some(p => p.layer === 'ligament' || p.layer === 'capsule' || p.layer === 'bone')) footprints(true);
-      if (mode !== 'nerve' && nerve.length) {
+      if (mode !== 'nerve' && mode !== 'attach' && nerve.length) {   // (attachments: no nerve — Nerve button if wanted)
         nerve.forEach(p => { p.mesh.visible = true; paint(p, 0xd9c070, 0x2a2200); });
         const nn = nerve[0].name;
         minor.push({text: 'Nerve · ' + nn, parts: nerve.filter(p => p.name === nn), cls: 'minor'});
@@ -1465,7 +1482,7 @@ function mount(root, cfg) {
     const white = new THREE.MeshBasicMaterial({color: 0xffffff});
     function buildMask() {
       MH = Math.max(40, Math.round(MW * VH / Math.max(1, VW)));
-      if (!maskRT || maskRT.height !== MH) { if (maskRT) maskRT.dispose(); maskRT = new THREE.WebGLRenderTarget(MW, MH); mask = new Uint8Array(MW * MH * 4); }
+      if (!maskRT || maskRT.height !== MH) { if (maskRT) maskRT.dispose(); maskRT = new THREE.WebGLRenderTarget(MW, MH); viewDisp.push(maskRT); mask = new Uint8Array(MW * MH * 4); }
       const off = parts.filter(p => p.mesh.visible && p.mesh.material.opacity < 0.5);
       off.forEach(p => { p.mesh.visible = false; });
       const bg = scene.background; scene.overrideMaterial = white;
@@ -1809,7 +1826,10 @@ function mount(root, cfg) {
       rb.onclick = () => setRad(!radOn);
       bar.appendChild(rb);
       radWant = !!(rOn || cfg.xray);
-      if (radWant) setTimeout(() => setRad(true, !!cfg.xray), 0);   // X-ray ID cards open on the film
+      if (radWant) {
+        if (back && window.__jkaWasRad) wrap.classList.add('jka-nofade');   // the question was a film too: no fade-out/in
+        Promise.resolve().then(() => setRad(true, !!cfg.xray, true));
+      }   // X-ray ID cards open on the film
 
     }
 
@@ -2347,11 +2367,11 @@ function mount(root, cfg) {
     // Each structure adds (back depth − front depth) × its attenuation into a float buffer
     // (= thickness along the ray); shown as 1 − e^(−sum): bone bright, soft tissue faint.
     // The asked structure's thickness goes to a second channel and is tinted.
-    function setRad(on, forced) {
-      radWant = false;   // from here on X-ray is on or off for real
+    function setRad(on, forced, instant) {   // instant: a card opening in X-ray — no glide from the 3D view
+      radWant = false; if (!back) window.__jkaWasRad = on;   // from here on X-ray is on or off for real
       if (on && ctOn) setCT(false);
       const wasRad = radOn; radOn = on; ctl.turntable = on;
-      wrap.classList.add('jka-glide'); setTimeout(() => wrap.classList.remove('jka-glide'), 450);   // glide only for this switch
+      if (!instant) { wrap.classList.add('jka-glide'); setTimeout(() => wrap.classList.remove('jka-glide'), 450); }   // glide only for a switch by hand
       wrap.classList.toggle('jka-radmode', on); fit(); edgeAlign();   // a crisp, rounded film box (no edge fade)
       // X-ray beams are near-parallel: a long narrow lens from far back (same framing) so
       // joints anywhere in the picture are seen straight-on, not looked down / up into
@@ -2360,8 +2380,8 @@ function mount(root, cfg) {
         cam.fov = 7; cam.far = 40; cam.updateProjectionMatrix();
         const p0 = ctl.target.clone().add(cam.position.clone().sub(ctl.target).multiplyScalar(LENS));
         const p1 = ctl.target.clone().add(L.p1.clone().sub(ctl.target).multiplyScalar(LENS));
-        cam.position.copy(p0);
-        ease = {p0, t0: ctl.target.clone(), p1, t1: ctl.target.clone(), s: 0, u1: L.u1}; }
+        if (instant) { cam.position.copy(p1); if (L.u1) cam.up.copy(L.u1); cam.lookAt(ctl.target); ease = null; }   // straight to the level film view
+        else { cam.position.copy(p0); ease = {p0, t0: ctl.target.clone(), p1, t1: ctl.target.clone(), s: 0, u1: L.u1}; } }
       if (!on && wasRad) { cam.fov = 30; cam.far = 20; cam.updateProjectionMatrix();
         cam.position.copy(ctl.target.clone().add(cam.position.clone().sub(ctl.target).multiplyScalar(1 / LENS))); }
       wrap.querySelectorAll('button[data-l=xray]').forEach(b => { b.className = on ? 'jka-b on' : 'jka-b'; });
@@ -2420,7 +2440,7 @@ function mount(root, cfg) {
             addBone(o.geometry, o.matrixWorld, new THREE.Box3().setFromObject(o), false); });
           dirty = true;
         }).catch(() => {});
-        const rt = new THREE.WebGLRenderTarget(4, 4, {type: THREE.HalfFloatType, depthBuffer: false});
+        const rt = new THREE.WebGLRenderTarget(4, 4, {type: THREE.HalfFloatType, depthBuffer: false}); viewDisp.push(rt);
         const show = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
           vertexShader: 'varying vec2 vu; void main(){ vu = uv; gl_Position = vec4(position.xy, 0., 1.); }',
           uniforms: {t: {value: rt.texture}, px: {value: new THREE.Vector2(1, 1)}},
@@ -2679,7 +2699,11 @@ function mount(root, cfg) {
       if (user || ease) moved(); else { dirty = true; checksDue = true; }
       if (!back) keepCam(); });
     if (!back) keepCam();
-    new ResizeObserver(() => { fit(); dirty = true; }).observe(wrap);
+    // a resize clears the canvas: redraw right here (before the browser paints) so a resizing
+    // film / view never shows an empty frame (the X-ray answer's glide resizes it every frame)
+    new ResizeObserver(() => { fit(); dirty = true;
+      try { if (stopped) return; if (radOn && rad) drawRad(); else { renderer.clear(); renderer.render(scene, cam); renderer.render(fadeScene, fadeCam); } } catch (x) {}
+    }).observe(wrap);
     labels.push(...minor);
     if (peelUI) setPeel(back ? 1 : 0); else layout();
     // arrow keys turn the model (held = continuous, smooth)
@@ -2741,5 +2765,5 @@ function mount(root, cfg) {
   return view;
 }
 
-window.JKANAT = {v: 59, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
+window.JKANAT = {v: 67, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
 (window.__jkaQ || []).splice(0).forEach(f => f());

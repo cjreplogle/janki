@@ -26,10 +26,10 @@ from aqt.utils import showInfo, tooltip
 from ..util.config import log
 
 MODEL_NAME = "Janki Anatomy 3D"
-ENGINE = "_jk3d-anat-59.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
+ENGINE = "_jk3d-anat-67.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
 LOWER_LIMB = "_jk3d_lowerlimb2.glb"   # bump the name when the model changes (phones cache by name)
 UPPER_LIMB = "_jk3d_upperlimb2.glb"
-TRUNK = "_jk3d_trunk6.glb"   # shared context (CT); also the base for future back / thorax cards
+TRUNK = "_jk3d_trunk7.glb"   # shared context (CT); also the base for future back / thorax cards
 DECK_ROOT = "Janki 3D Anatomy::Lower Limb"
 FIELDS = ("Structure", "Meshes", "Region", "Camera", "Limb", "Reflect", "Landmark", "Origin", "Insertion", "Innervation",
           "Nerve", "Action", "Peel", "Extra", "Model", "XrayID")
@@ -45,7 +45,7 @@ var cfg={model:txt('jka-model')||'""" + LOWER_LIMB + r"""',side:root.getAttribut
  mode:root.getAttribute('data-mode'),name:txt('jka-name'),meshes:txt('jka-meshes'),nerve:txt('jka-nerve'),
  region:txt('jka-region'),cam:txt('jka-cam'),limb:txt('jka-limb'),reflect:txt('jka-reflect'),landmark:txt('jka-landmark'),front:root.getAttribute('data-front')||'adaptive',ivl:window.__jkaIvl,xray:root.getAttribute('data-xray')==='1',origin:txt('jka-origin'),insertion:txt('jka-insertion'),peel:peel?peel.split('\n').filter(function(x){return x.trim();}):[]};
 function go(){window.JKANAT.mount(root,cfg);}
-if(window.JKANAT&&window.JKANAT.v>=59){go();return;}
+if(window.JKANAT&&window.JKANAT.v>=67){go();return;}
 (window.__jkaQ=window.__jkaQ||[]).push(go);
 if(window.__jkaLoading)return;window.__jkaLoading=1;
 fetch('""" + ENGINE + r"""',{cache:'no-cache'}).then(function(r){if(!r.ok)throw r.status;return r.text();})
@@ -146,6 +146,7 @@ def _css():
 .jka-credit { margin-top: 14px; font-size: 11px; opacity: .4; }
 .jka-split { display: flex; align-items: center; gap: 28px; }
 .jka-left { flex: 0 0 58%; min-width: 0; animation: jka-slide .5s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes jka-shrink { from { flex-basis: 100%; } to { flex-basis: 58%; } }   /* X-ray answer: the film's right edge glides to the midline */
 .jka-right { flex: 1; min-width: 0; text-align: left; animation: jka-in .45s .15s ease-out both; }
 .jka-right hr#answer { display: none; }
 .jka-right .jka-head { text-align: left; }
@@ -1686,7 +1687,7 @@ def _types_on():
         v = mw.col.get_config("jka3d_types", None)
     except Exception:
         v = None
-    return set(v) if v else {"Identify"}   # first launch: ID cards only
+    return set(v) if v is not None else {"Identify"}   # first launch: ID cards only (an empty list = all off, kept)
 
 
 def _overview(overview, content):
@@ -1774,6 +1775,13 @@ def _on_js(handled, msg, context):
             t = msg[len("jka3d:t:"):]
             on = _types_on()
             on.symmetric_difference_update({t})
+            if not on:
+                # all off would suspend every card → Anki shows "Congratulations" instead of this
+                # page, and the chips with it: keep the last type on
+                from aqt.utils import tooltip
+                tooltip("At least one card type has to stay on.")
+                mw.overview.refresh()   # the chip toggled itself off in the page: redraw it on
+                return (True, None)
             mw.col.set_config("jka3d_types", sorted(on))   # the chip already toggled itself in the page
             apply_types(refresh=True)
         elif msg.startswith("jka3d:front:"):
@@ -2090,6 +2098,8 @@ def setup():
             mw.col.remove_notes(peel_nids)
         _sort_by_type(placed)
         try:
+            if mw.col.get_config("jka3d_types", None) == []:     # all off (decks would show as finished): ID back on
+                mw.col.set_config("jka3d_types", ["Identify"])
             if not mw.col.get_config("jka3d_types_v2", False):   # new default: ID only (once)
                 mw.col.set_config("jka3d_types", ["Identify"])
                 mw.col.set_config("jka3d_types_v2", True)
