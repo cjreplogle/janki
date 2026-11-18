@@ -12,7 +12,7 @@ insertions, innervations and key facts, plus an X-ray view and a simulated CT.*
 ## How to use
 
 **With Janki** (recommended): you don't need this file — install or update Janki and
-choose **Tools → Janki: Set up 3D anatomy cards**. Janki adds the same cards, and on any 3D
+choose **Tools → Janki: Set up 3D anatomy cards** (Normal, or Lite for slower devices: Janki suggests one from your computer). Janki adds the same cards, and on any 3D
 deck's overview you can switch card types on and off and choose whether the model shows on
 the front of recall cards.
 
