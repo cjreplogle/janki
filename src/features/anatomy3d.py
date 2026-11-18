@@ -1734,6 +1734,38 @@ def _overview(overview, content):
                       "adaptive": "Show it until the card has graduated (interval of a day or more); then hide it",
                       "hide": "Never show the model on the front of those cards"}[k], k, lbl)
                   for k, lbl in FRONT_MODES))
+    # Onigiri: its overview hides add-on rows behind a "Click to reveal" button — keep the chips and
+    # the front-model row visible (they ARE the deck's controls), drop the button when nothing else is
+    # hidden, and style the chips like Onigiri's own buttons
+    try:
+        from ..util import compat as _compat
+        oni = _compat.onigiri_on()
+    except Exception:
+        oni = False
+    if oni:
+        content.table += (
+            "<style>"
+            "#jka3row .jka3t,#jka3front .jka3f{border-radius:10px !important;font-family:inherit !important;"
+            "font-weight:500 !important;padding:4px 11px !important;font-size:12.5px !important;"
+            "background:rgba(255,255,255,.07) !important;border:1px solid rgba(255,255,255,.2) !important;"
+            "color:rgba(255,255,255,.72) !important;transition:background .15s,color .15s,border-color .15s,filter .15s}"
+            "#jka3row .jka3t:hover,#jka3front .jka3f:hover{background:rgba(255,255,255,.13) !important;color:#fff !important}"
+            "#jka3row .jka3t.on,#jka3front .jka3f.on{background:var(--accent-color,#8ab4f8) !important;"
+            "border-color:var(--accent-color,#8ab4f8) !important;color:#0d1626 !important}"
+            "#jka3row .jka3t.on:hover,#jka3front .jka3f.on:hover{filter:brightness(1.08)}"
+            "#jka3row{gap:6px !important}"
+            "</style>"
+            "<script>(function(){var IDS=['jka3row','jka3front','jka3tip'];"
+            "function fix(){var ours=0,other=0;"
+            "document.querySelectorAll('.onigiri-external-overview-addon').forEach(function(el){"
+            "var mine=IDS.some(function(i){return el.id===i||el.querySelector('#'+i);})"
+            "||(el.tagName==='STYLE'||el.tagName==='SCRIPT');"
+            "if(mine){el.style.display='';el.classList.remove('onigiri-external-overview-addon');ours++;}else other++;});"
+            "IDS.forEach(function(i){var e=document.getElementById(i);if(e)e.style.display='';});"
+            "if(!other){var r=document.getElementById('onigiri-reveal-btn');"
+            "if(r){(r.closest('.overview-reveal-action')||r).style.display='none';}}}"
+            "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(fix,0);});"
+            "else setTimeout(fix,0);setTimeout(fix,150);setTimeout(fix,600);})();</script>")
     # first time: a one-off hint under the chips
     try:
         seen = mw.col.get_config("jka3d_tip_seen", False)
