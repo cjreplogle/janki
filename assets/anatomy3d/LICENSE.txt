@@ -1,0 +1,39 @@
+Janki 3D anatomy — model licence and attributions
+=================================================
+
+_jk3d_lowerlimb.glb (and any other _jk3d_*.glb anatomy model here) is a derivative of:
+
+    -"BodyParts3D - The Database Center for Life Science - CC-BY-SA 2.1 Japan"
+
+    -"Z-Anatomy - The open source atlas of anatomy - CC-BY-SA 4.0"
+
+obtained via the GLB export of github.com/nqwrc/3d-anatomy. Only BodyParts3D / Z-Anatomy
+meshes are included: none of the non-commercial components of that distribution (the inner
+ear, CC BY-NC-SA; the kidney, CC BY-NC), nor its brain / cranial-nerve models.
+
+_jk3d_upperlimb*.glb: the right upper limb and shoulder girdle (bones, muscles, ligaments,
+joint capsules, brachial plexus branches, arteries, veins), same sources and treatment.
+
+_jk3d_trunk*.glb: spine, rib cage and sternum, heart chambers and great vessels, lungs and
+airway, abdominal and pelvic organs, diaphragm, spinal cord — same sources and treatment. The
+kidney is NOT included (it is CC BY-NC in the source distribution). The spinal cord was reshaped
+by Janki (narrower thoracic cord with cervical and lumbosacral enlargements; the source cord is the
+same width throughout). The spinal arachnoid mater (a layer just inside the dura) and the
+dorsal rami of the spinal nerves were modelled by Janki (not in the source).
+
+Changes made by Janki: extracted the right lower limb (bones, muscles, ligaments, joint
+capsules, nerves, arteries, veins) plus the lower lumbar spine and pelvis; simplified and
+quantized the meshes; flipped mirrored geometry; thickened ligaments (+1 mm) and nerves (to
+typical adult calibre); renamed parts by structure. The anterior and posterior cruciate ligaments
+were re-modelled by Janki (the source pair was misplaced) from standard attachment sites on
+the model's own tibia and femur. The coracoacromial ligament (upper limb) was modelled by Janki between the model's own
+coracoid and acromion tips (the source has none). The left limb is shown by mirroring.
+
+This derived model is distributed under the same licence:
+    Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+    https://creativecommons.org/licenses/by-sa/4.0/
+(BodyParts3D: https://creativecommons.org/licenses/by-sa/2.1/jp/deed.en)
+
+Software: _jk3d-anat-*.js bundles three.js (MIT licence, (c) 2010-2024 three.js authors,
+https://threejs.org) and three-mesh-bvh (MIT licence, (c) Garrett Johnson).
+Janki's own code is not covered by the share-alike terms above.

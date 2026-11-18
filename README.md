@@ -155,6 +155,18 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
+<summary><b>2.14</b> · 2026-11-17 · 1 release</summary>
+
+**2.14.0** · 2026-11-17
+
+- **3D anatomy cards** (Tools → Janki: Set up 3D anatomy cards): lower limb, upper limb, back and brachial plexus on a rotatable 3D model (BodyParts3D / Z-Anatomy, CC BY-SA). Card types: ID, Click, X-ray ID, attachments, innervations and key facts; bony landmarks shown as patches on the bone, vessels with their connections, a simulated CT (three planes, whole body) and X-ray view.
+- Decks are grouped by region and dissection; on a 3D deck's overview, chips switch card types on and off (switched-off types are suspended) and you choose whether the model shows on the front of recall cards (show / adaptive / hide). Only ID cards are on at first.
+- Calendar: dissection / anatomy classes get buttons that open the matching 3D cards.
+- Slide-deck OCR: spinal levels like "L4" are no longer misread as "LA".
+
+</details>
+
+<details>
 <summary><b>2.13</b> · 2026-10-26 · 8 releases</summary>
 
 **2.13.8** · 2026-11-15

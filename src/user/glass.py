@@ -2230,6 +2230,17 @@ def install_anki_dialog_glass() -> None:
         def __init__(self, *a, **k):
             orig(self, *a, **k)
             global _glass_on_show
+            # Anki closing (main window already gone): its sync / backup progress window
+            # can't paint while the close work blocks the event loop, so it showed as an
+            # empty glass panel for a few seconds. Keep it invisible instead.
+            try:
+                from aqt import mw as _mw
+                if _mw is not None and (getattr(_mw, "_jk_closing", False) or not _mw.isVisible()):
+                    self.setWindowOpacity(0.0)
+                    self._jk_quiet_close = True
+                    return
+            except Exception:
+                pass
             try:
                 glass_dialog(self)
                 from . import css as _css
@@ -2251,6 +2262,21 @@ def install_anki_dialog_glass() -> None:
         cls.__init__ = __init__
         cls._jk_glass_wrapped = True
         _wrap_progress_cancel(cls)
+        # mark "closing" so a close-time progress window stays invisible (see __init__)
+        try:
+            from aqt import gui_hooks as _gh, mw as _mw0
+            def _closing():
+                from aqt import mw as _m
+                if _m is not None:
+                    _m._jk_closing = True
+            def _opened():
+                from aqt import mw as _m
+                if _m is not None:
+                    _m._jk_closing = False
+            _gh.profile_will_close.append(_closing)
+            _gh.profile_did_open.append(_opened)
+        except Exception as exc:
+            log(f"progress close flag: {exc}")
     except Exception as exc:
         log(f"anki dialog glass: {exc}")
 

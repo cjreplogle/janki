@@ -101,6 +101,12 @@ _key_bridge.practice_or_rate.connect(lambda kc, fwd: _practice_or_rate(kc, fwd))
 
 
 def _remote_zoom(d):
+    try:                                   # 3D anatomy card: +/− zoom the model instead
+        from ..features import anatomy3d as _a3
+        if _a3.zoom(d):
+            return
+    except Exception:
+        pass
     try:
         from ..features import focus
         focus._change_card_zoom(d)

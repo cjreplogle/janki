@@ -1901,6 +1901,12 @@ except Exception as _wn_exc:
     log("whats_new: %s" % _wn_exc)
 
 try:
+    from .src.features import anatomy3d as _anatomy3d
+    _anatomy3d.install()
+except Exception as _a3_exc:
+    log("anatomy3d: %s" % _a3_exc)
+
+try:
     from .src.features import model3d as _model3d
     _model3d.install()
 except Exception as _m3_exc:

@@ -1066,7 +1066,7 @@ function trim(){var qa=document.getElementById('qa');if(!qa)return;
   if(n.nodeType!==1)continue;var t=n.tagName;if(t==='STYLE'||t==='SCRIPT')continue;
   if(t==='BR'){n.style.setProperty('display','none','important');continue;}
   if(getComputedStyle(n).display==='none')continue;
-  if(/^(DIV|P|SPAN)$/.test(t)&&!n.querySelector('img,svg,canvas,video,iframe,input,button')&&!/\S/.test(n.textContent)){
+  if(/^(DIV|P|SPAN)$/.test(t)&&!/^jk/.test(n.id||'')&&!n.querySelector('img,svg,canvas,video,iframe,input,button')&&!/\S/.test(n.textContent)){
    n.style.setProperty('display','none','important');continue;}
   if(/^(DIV|P|SPAN|SECTION)$/.test(t)&&tail(n))return true;return true;}
   return false;})(qa);}

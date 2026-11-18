@@ -1,0 +1,393 @@
+.jka-wrap{position:relative;width:100%;height:calc(100vh - 130px);min-height:320px;overflow:hidden;border-radius:14px;background:radial-gradient(ellipse at 50% 40%,rgba(120,130,150,.18),rgba(0,0,0,0) 70%)}
+.jka-wrap canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.jka-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.jka-lines line{stroke:rgba(255,255,255,.75);stroke-width:1.2}
+.jka-lines line.behind{stroke-dasharray:3 4;opacity:.8}
+.jka-lines line.orig{stroke:#ff9326}.jka-lines line.ins{stroke:#b46bff}.jka-lines line.nerve{stroke:#ffe14a}.jka-lines line.ok{stroke:#38d97a}.jka-lines line.hl{stroke:#35c8ff}
+.jka-labels{position:absolute;inset:0;pointer-events:none}
+.jka-label{position:absolute;left:0;top:0;font:600 15px/1.2 -apple-system,system-ui,sans-serif;color:#fff;text-shadow:0 1px 3px #000,0 0 8px rgba(0,0,0,.7);white-space:nowrap}
+.jka-label.orig{color:#ffb15e}.jka-label.ins{color:#d3a6ff}.jka-label.nerve{color:#ffe873}.jka-label.ok{color:#6cf09c}.jka-label.hl{color:#8fe1ff}
+.jka-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.7;font:14px system-ui}
+.jka-status{position:absolute;left:50%;top:10px;transform:translateX(-50%);font:600 15px system-ui;padding:4px 12px;border-radius:999px;background:rgba(0,0,0,.45);color:#fff;opacity:0;transition:opacity .2s}
+.jka-status.ok,.jka-status.bad{opacity:1}.jka-status.ok{color:#6cf09c}.jka-status.bad{color:#ff8a8a}
+.jka-chips{display:grid;grid-template-columns:auto auto;column-gap:2px;row-gap:0;margin-top:6px;align-self:flex-start;pointer-events:auto}
+.jka-chips button{font:500 10px/1.1 -apple-system,system-ui !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:2px 5px 2px 3px !important;border:none !important;background:none !important;color:rgba(255,255,255,.35);cursor:pointer;display:flex;align-items:center;gap:4px;transition:color .15s;white-space:nowrap}
+.jka-chips button:hover{color:rgba(255,255,255,.75)}
+.jka-chips button::before{content:"";width:5px;height:5px;border-radius:50%;box-shadow:inset 0 0 0 1px currentColor}
+.jka-chips button.on{color:rgba(255,255,255,.8)}
+.jka-chips button.on[data-l=bone]::before{background:#e9dfc6 !important;box-shadow:none}
+.jka-chips button.on[data-l=muscle]::before{background:#c0574e !important;box-shadow:none}
+.jka-chips button.on[data-l=nerve]::before{background:#f0c541 !important;box-shadow:none}
+.jka-chips button.on[data-l=vessel]::before{background:#e04444 !important;box-shadow:none}
+.jka-peel{position:absolute;right:12px;bottom:10px;display:flex;gap:8px;align-items:center;font:12px system-ui;color:#fff}
+.jka-peel input{width:160px}
+.jka-label.minor{font-weight:500;font-size:12px;color:rgba(255,255,255,.62);text-shadow:0 1px 2px #000}
+.jka-lines line.minor{stroke:rgba(255,255,255,.3);stroke-width:1}
+.jka-views{position:absolute;top:6px;left:8px;display:flex;flex-direction:column;align-items:flex-start;gap:1px;z-index:3;opacity:0;transition:opacity .2s;pointer-events:none}
+.jka-wrap:hover .jka-views{opacity:1;pointer-events:auto}
+.jka-views{opacity:1 !important}
+.jka-views .jka-gizmo{opacity:0;transition:opacity .2s}
+.jka-wrap:hover .jka-views .jka-gizmo{opacity:1}
+.jka-views .jka-sect{opacity:0;transition:opacity .2s}
+.jka-wrap:hover .jka-views .jka-sect{opacity:1}
+.jka-views button.jka-v{font:500 11px/1.2 -apple-system,system-ui !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:3px 6px !important;border:none !important;background:none !important;color:rgba(255,255,255,.45);cursor:pointer;transition:color .15s}
+.jka-views button.jka-v:hover{color:#8fe1ff}
+@media (hover:none){.jka-views{opacity:.8;pointer-events:auto}}
+.jka-side{position:absolute;top:8px;left:12px;z-index:3;font:500 11px/1.2 -apple-system,system-ui;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.4);pointer-events:none}
+.jka-gizmo{width:112px;height:112px;display:block;cursor:grab;touch-action:none;overflow:visible}
+.jka-gizmo line{stroke-width:2;stroke-linecap:round}
+.jka-gizmo text.jka-gt{font:700 11px/1 -apple-system,system-ui,sans-serif !important;text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:rgba(0,0,0,.6);stroke-width:2.5px;pointer-events:none}
+.jka-gizmo .jka-hit{fill:transparent;cursor:pointer}
+.jka-gizmo .jka-arm:hover circle:not(.jka-hit){stroke:#fff;stroke-width:1.5}
+.jka-gizmo .jka-arm:hover text{fill:#fff}
+.jka-gizmo .jka-gcube polygon{fill:#dfe7f2;stroke:rgba(255,255,255,.7);stroke-width:.8;stroke-linejoin:round}
+.jka-sect{margin:-4px 0 0;align-self:center;text-align:center;font:600 10px/1.3 -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.8);white-space:nowrap}
+.jka-sect span{display:block;font-weight:500;color:rgba(255,255,255,.55)}
+.jka-secsvg{width:64px;height:64px;align-self:center;overflow:visible;margin-top:-6px}
+.jka-secsvg .jka-sb{fill:none;stroke:rgba(255,255,255,.35);stroke-width:1}
+.jka-secsvg .jka-sn{fill:rgba(255,255,255,.6)}
+.jka-secsvg .jka-sp{fill:rgba(53,200,255,.28);stroke:#5fd3ff;stroke-width:1.2;stroke-linejoin:round}
+.jka-views .jka-secsvg{opacity:.6;transition:opacity .2s}
+.jka-wrap:hover .jka-views .jka-secsvg{opacity:1}
+.jka-gizmo .jka-gsec{fill:rgba(53,200,255,.45);stroke:#6fdcff;stroke-width:1.2;stroke-linejoin:round;pointer-events:none}
+.jka-views button.jka-gsw{outline:none !important;box-shadow:none !important;-webkit-appearance:none;appearance:none;position:absolute;top:6px;left:6px;z-index:4;display:flex;align-items:center;justify-content:center;width:22px !important;height:18px !important;min-height:0 !important;margin:0 !important;padding:0 !important;border:none !important;border-radius:6px;background:none !important;color:#bfeeff;cursor:pointer;opacity:0;transition:opacity .2s,color .15s,background .15s}
+.jka-wrap:hover .jka-views button.jka-gsw{opacity:1}
+.jka-views button.jka-gsw:hover,.jka-views button.jka-gsw:focus,.jka-views button.jka-gsw:focus-visible{color:#fff;background:none !important;outline:none !important;box-shadow:none !important}
+.jka-views button.jka-gsw svg{width:15px;height:10px;transform:rotate(-45deg);filter:drop-shadow(0 1px 1px rgba(0,0,0,.8))}
+.jka-lines polyline{fill:none;stroke:rgba(255,255,255,.6);stroke-width:1;stroke-linejoin:round}
+.jka-lines polyline.hl{stroke:rgba(53,200,255,.85)}.jka-lines polyline.ok{stroke:#38d97a}.jka-lines polyline.nerve{stroke:#ffe14a}
+.jka-lines polyline.orig{stroke:#ff9326}.jka-lines polyline.ins{stroke:#b46bff}.jka-lines polyline.minor{stroke:rgba(255,255,255,.3)}
+.jka-lines polyline.behind{stroke-dasharray:3 3;opacity:.85}
+.jka-zoom{position:absolute;right:10px;bottom:48px;z-index:3;display:flex;flex-direction:row;gap:2px}
+.jka-zoom.jka-zoom-up{bottom:76px}
+.jka-zoom button.jka-zb{width:24px !important;height:24px !important;min-height:0 !important;margin:0 !important;padding:0 !important;display:flex;align-items:center;justify-content:center;font:400 17px/1 -apple-system,system-ui !important;color:rgba(255,255,255,.55);border:none !important;outline:none !important;box-shadow:none !important;background:none !important;border-radius:6px;cursor:pointer;transition:color .15s}
+.jka-zoom button.jka-zb:hover{color:#fff}
+.jka-chips button.on[data-l=xray]::before{background:#8fe1ff !important;box-shadow:none}
+.jka-ct{position:absolute;inset:0;z-index:2;background:#222 !important;border-radius:14px;overflow:hidden}
+.jka-ctp{position:absolute;overflow:hidden;background:#0a0a0a !important}
+.jka-ctp canvas{width:100% !important;height:100% !important;display:block;cursor:crosshair}
+.jka-ctp-axial{left:0;top:0;bottom:0;width:58%}
+.jka-ctp-coronal{right:0;top:0;width:calc(42% - 2px);height:calc(50% - 1px)}
+.jka-ctp-sagittal{right:0;bottom:0;width:calc(42% - 2px);height:calc(50% - 1px)}
+.jka-ctp-t{position:absolute;left:8px;top:6px;font:600 10px/1 -apple-system,system-ui !important;letter-spacing:.06em;text-transform:uppercase;pointer-events:none}
+.jka-ct-h{position:absolute;left:calc(58% - 8px);transform:translateX(-100%);bottom:8px;z-index:1;font:600 10px/1.2 -apple-system,system-ui !important;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.75)}
+.jka-ct-h span{font-weight:400;text-transform:none;letter-spacing:0;color:rgba(255,255,255,.45)}
+.jka-ct-r{position:absolute;right:10px;top:50%;width:200px;transform:translateY(-50%) rotate(-90deg);transform-origin:center;margin-right:-86px;z-index:1}
+.jka-chips button.on[data-l=ct]::before{background:#5fc8ff !important;box-shadow:none}
+.jka-mini{position:absolute;left:10px;bottom:52px;width:120px;height:150px;z-index:3;border-radius:10px;overflow:hidden;background:rgba(20,22,28,.85) !important;box-shadow:0 0 0 1px rgba(255,255,255,.12) !important}
+.jka-mini canvas{width:100% !important;height:100% !important;display:block}
+.jka-ct-h button.jka-ctb{font:600 10px/1 -apple-system,system-ui !important;min-height:0 !important;height:auto !important;margin:0 0 0 4px !important;padding:3px 6px !important;border:1px solid rgba(255,255,255,.25) !important;border-radius:5px;background:none !important;color:rgba(255,255,255,.6);cursor:pointer}
+.jka-ct-h button.jka-ctb.on{color:#fff;border-color:#5fc8ff !important}
+.jka-ctmode .jka-gizmo,.jka-ctmode .jka-sect,.jka-ctmode .jka-gsw{display:none !important}
+.jka-chips button.on[data-l=ligament]::before{background:#c3ccd6 !important;box-shadow:none}
+.jka-chips button.on[data-l=capsule]::before{background:#bdb6a2 !important;box-shadow:none}
+.jka-ct.jka-ct-solo .jka-ctp{display:none}
+.jka-ct.jka-ct-solo .jka-ctp.jka-on{display:block;left:0 !important;top:0 !important;right:auto;bottom:auto;width:100% !important;height:100% !important}
+.jka-ct.jka-ct-solo .jka-ct-h{left:auto;right:12px;transform:none}
+.jka-ctp button.jka-ctp-f{position:absolute;right:6px;top:4px;z-index:2;width:22px !important;height:20px !important;min-height:0 !important;margin:0 !important;padding:0 !important;border:none !important;background:none !important;outline:none !important;font:400 15px/1 -apple-system,system-ui !important;color:rgba(255,255,255,.45);cursor:pointer}
+.jka-ctp button.jka-ctp-f:hover{color:#fff}
+html body #qa .jka-ctp-t{left:auto;right:32px;top:7px;font:600 10px/1 -apple-system,system-ui,sans-serif !important;letter-spacing:.06em}
+.jka-ctsel{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:3;display:flex;gap:2px;padding:2px;border-radius:8px;background:rgba(0,0,0,.55) !important}
+.jka-ctsel button.jka-ctsb{font:600 10px/1 -apple-system,system-ui,sans-serif !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:4px 8px !important;border:none !important;border-radius:6px;background:none !important;color:rgba(255,255,255,.5);cursor:pointer}
+.jka-ctsel button.jka-ctsb:hover{color:#fff}
+.jka-ctsel button.jka-ctsb.on{color:#fff;background:rgba(95,200,255,.3) !important}
+.jka-refl{position:absolute;right:10px;top:8px;z-index:3;display:flex;align-items:center;gap:6px;padding:3px 4px 3px 9px;border-radius:999px;background:rgba(0,0,0,.5) !important;font:500 11px/1.2 -apple-system,system-ui,sans-serif !important;color:rgba(255,255,255,.75)}
+.jka-refl button.jka-reflb{font:600 10px/1 -apple-system,system-ui,sans-serif !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:4px 8px !important;border:none !important;border-radius:999px;background:rgba(95,200,255,.3) !important;color:#fff;cursor:pointer}
+.jka-views .jka-chips{align-self:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.jka-wrap:hover .jka-views .jka-chips{opacity:1;pointer-events:auto}
+.jka-ctmode .jka-views .jka-chips{align-self:flex-start}
+@media (hover:none){.jka-views .jka-chips{opacity:.85;pointer-events:auto}}
+.jka-views button.jka-gpl{outline:none !important;box-shadow:none !important;position:absolute;top:6px;left:84px;z-index:4;display:flex;align-items:center;justify-content:center;width:22px !important;height:18px !important;min-height:0 !important;margin:0 !important;padding:0 !important;border:none !important;background:none !important;color:#bfeeff;cursor:pointer;opacity:0;transition:opacity .2s,color .15s}
+.jka-wrap:hover .jka-views button.jka-gpl{opacity:1}
+.jka-views button.jka-gpl:hover{color:#fff}
+.jka-views button.jka-gpl svg{filter:drop-shadow(0 1px 1px rgba(0,0,0,.8))}
+.jka-ctmode .jka-gpl{display:none !important}
+html body #qa button.jka-ctp-t,.jka-ctp button.jka-ctp-t{position:absolute;left:auto;right:8px;top:6px;z-index:2;pointer-events:auto;font:600 10px/1 -apple-system,system-ui,sans-serif !important;letter-spacing:.06em;text-transform:uppercase;min-height:0 !important;height:auto !important;margin:0 !important;padding:4px 6px !important;border:none !important;border-radius:5px;background:rgba(0,0,0,.35) !important;cursor:pointer}
+.jka-ctp button.jka-ctp-t span{font-size:8px;opacity:.8}
+.jka-ctp button.jka-ctp-t:hover{background:rgba(255,255,255,.12) !important}
+.jka-ctmenu{position:absolute;z-index:5;width:120px;display:flex;flex-direction:column;padding:4px;border-radius:8px;background:rgba(20,22,28,.96) !important;box-shadow:0 6px 20px rgba(0,0,0,.5) !important}
+.jka-ctmenu button.jka-ctmi{text-align:left;font:500 12px/1.2 -apple-system,system-ui,sans-serif !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:6px 8px !important;border:none !important;border-radius:5px;background:none !important;color:rgba(255,255,255,.8);cursor:pointer}
+.jka-ctmenu button.jka-ctmi:hover{background:rgba(255,255,255,.1) !important;color:#fff}
+.jka-ctmenu button.jka-ctmi.on{color:#5fc8ff}
+.jka-lines polyline.behind{stroke-dasharray:5 4 !important;opacity:1 !important;stroke-width:1.2}
+html body #qa .jka-refl,html body #qa .jka-refl span{font:500 11px/1.2 -apple-system,system-ui,sans-serif !important}
+html body #qa .jka-gizmo text.jka-gt{font-family:-apple-system,system-ui,sans-serif !important}
+html body #qa .jka-sect,html body #qa .jka-chips button{font-family:-apple-system,system-ui,sans-serif !important}
+.jka-tip{position:absolute;left:50%;bottom:56px;z-index:4;transform:translate(-50%,6px);opacity:0;transition:opacity .5s,transform .5s;pointer-events:none;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.6) !important;color:rgba(255,255,255,.85);white-space:nowrap}
+html body #qa .jka-tip{font:500 12px/1.2 -apple-system,system-ui,sans-serif !important}
+.jka-tip.on{opacity:1;transform:translate(-50%,0)}
+html body #qa .jka-label{font-family:-apple-system,system-ui,sans-serif !important}
+html body #qa .jka-label.minor{font-size:12px !important}
+html body #qa .jka-ctmenu button.jka-ctmi{font:500 12px/1.2 -apple-system,system-ui,sans-serif !important;white-space:nowrap}
+.jka-ctmenu{width:auto !important;min-width:110px}
+/* CT ends above the reviewer's bottom fade, with rounded bottom corners like the top */
+.jka-wrap.jka-ctmode .jka-ct{bottom:48px;border-radius:14px;box-shadow:0 0 0 1px rgba(255,255,255,.06) !important}
+.jka-wrap.jka-ctmode .jka-zoom{bottom:60px}
+.jka-wrap.jka-radmode > canvas{height:calc(100% - 48px) !important;border-radius:14px;background:#000 !important;box-shadow:0 0 0 1px rgba(255,255,255,.06) !important}
+.jka-wrap.jka-radmode .jka-zoom{bottom:60px}
+/* phones / tablets: layer buttons in one column; a dark backdrop (AnkiMobile's light card
+   background showed through the transparent 3D view as light grey) */
+@media (hover:none), (max-width:720px){
+  .jka-views .jka-chips{grid-template-columns:auto !important}
+  html, body, .card, #qa{background:#15171b !important;color:#e8e8e8}
+  .jka-wrap{background:radial-gradient(ellipse at 50% 40%,#262a32,#15171b 70%) !important}
+}
+@media (hover:none), (max-width:720px){ .jka-zoom{display:none !important} }
+.jka-wrap button{-webkit-appearance:none;appearance:none}
+/* a little larger: the switch and play/pause (kept mirror-symmetric about the widget's centre) */
+.jka-views button.jka-gsw{width:26px !important;height:22px !important;left:4px !important;top:4px !important}
+.jka-views button.jka-gsw svg{width:19px !important;height:13px !important}
+.jka-views button.jka-gpl{width:26px !important;height:22px !important;left:82px !important;top:4px !important}
+.jka-views button.jka-gpl svg{width:14px !important;height:14px !important}
+/* layer list: bottom-left corner of the view (hover on desktop, always on touch) */
+.jka-wrap > .jka-chips{position:absolute;left:12px;bottom:56px;z-index:4;margin:0;opacity:0;pointer-events:none;transition:opacity .2s}
+.jka-wrap:hover > .jka-chips{opacity:1;pointer-events:auto}
+.jka-wrap.jka-radmode > .jka-chips,.jka-wrap.jka-ctmode > .jka-chips{bottom:62px}
+.jka-wrap .jka-mini{bottom:150px !important}
+@media (hover:none){.jka-wrap > .jka-chips{opacity:.9;pointer-events:auto}}
+@media (hover:none), (max-width:720px){.jka-wrap .jka-mini{bottom:220px !important}}
+@media (hover:none), (max-width:720px){ .jka-wrap > .jka-chips{grid-template-columns:auto !important} }
+/* no pale panel behind the model: transparent on desktop (glass shows through), flat and the
+   same as the page on phones */
+.jka-wrap{background:none !important}
+@media (hover:none), (max-width:720px){ .jka-wrap{background:#15171b !important} html, body, .card, #qa{background:#15171b !important} }
+.jka-wrap.jka-ctmode > .jka-chips{display:none !important}
+.jka-wrap > button.jka-ctoff{position:absolute;left:14px;bottom:62px;z-index:4;font:600 11px/1 -apple-system,system-ui,sans-serif !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:6px 11px !important;border:none !important;border-radius:999px;background:rgba(95,200,255,.22) !important;color:#dff4ff;cursor:pointer;-webkit-appearance:none}
+.jka-wrap > button.jka-ctoff:hover{background:rgba(95,200,255,.38) !important;color:#fff}
+/* all three views: name + "+" (enlarge); single view: name ▾ dropdown */
+.jka-ct:not(.jka-ct-solo) .jka-ctp button.jka-ctp-t{right:34px !important;cursor:default}
+.jka-ct:not(.jka-ct-solo) .jka-ctp button.jka-ctp-t span{display:none}
+.jka-ct:not(.jka-ct-solo) .jka-ctp button.jka-ctp-t:hover{background:rgba(0,0,0,.35) !important}
+.jka-ctp button.jka-ctp-plus{position:absolute;right:8px;top:5px;z-index:2;width:22px !important;height:20px !important;min-height:0 !important;margin:0 !important;padding:0 !important;border:none !important;border-radius:5px;background:rgba(0,0,0,.35) !important;font:500 16px/1 -apple-system,system-ui,sans-serif !important;cursor:pointer;-webkit-appearance:none}
+.jka-ctp button.jka-ctp-plus:hover{filter:brightness(1.35);background:rgba(255,255,255,.14) !important}
+.jka-ct.jka-ct-solo .jka-ctp button.jka-ctp-plus{display:none}
+/* overlays pinned to the window's left edge sit partly outside the view box: don't clip them */
+.jka-wrap{overflow:visible !important}
+.jka-wrap > canvas{border-radius:14px}
+.jka-ctp button.jka-ctp-plus{display:flex;align-items:center;justify-content:center}
+.jka-ct > button.jka-ctoff{position:absolute;left:10px;bottom:10px;z-index:4;font:600 11px/1 -apple-system,system-ui,sans-serif !important;min-height:0 !important;height:auto !important;margin:0 !important;padding:6px 11px !important;border:none !important;border-radius:999px;background:rgba(95,200,255,.22) !important;color:#dff4ff;cursor:pointer;-webkit-appearance:none}
+.jka-ct > button.jka-ctoff:hover{background:rgba(95,200,255,.38) !important;color:#fff}
+.jka-wrap.jka-ctmode .jka-zoom{bottom:84px !important}
+.jka-wrap.jka-ctmode .jka-mini{bottom:96px !important}
+/* CT about to open: keep the 3D canvas, labels and model-only controls hidden meanwhile */
+.jka.jka-ctpre .jka-wrap > canvas,.jka.jka-ctpre .jka-labels,.jka.jka-ctpre .jka-lines,.jka.jka-ctpre .jka-views{visibility:hidden !important}
+.jka-wrap{background:none}
+.jka-chips button.on[data-l=vein]::before{background:#2f6bff !important;box-shadow:none}
+@media (hover:none), (max-width:720px){ html, body, .card, #qa, .jka-wrap{background:#000 !important} }
+/* phones: the least text — only the row the card asks about (no other rows, extra or credit) */
+@media (hover:none), (max-width:720px){
+  .jka-chart tr:not(.on), .jka-extra, .jka-credit{display:none !important}
+  .jka-head{font-size:19px !important;margin:2px 0 4px !important}
+  .jka-right .jka-chart th{margin-top:4px !important}
+}
+@media (hover:none), (max-width:720px){
+  /* the prompt already names the structure: drop the repeated name (and the lone row label) */
+  .card:has(#jka[data-mode=action]) .jka-head, .card:has(#jka[data-mode=nerve]) .jka-head, .card:has(#jka[data-mode=attach]) .jka-head{display:none !important}
+  .card:has(#jka[data-mode=action]) .jka-chart th, .card:has(#jka[data-mode=nerve]) .jka-chart th{display:none !important}
+}
+@media (hover:none){
+  /* no hover on a phone: the view widget's parts stay visible */
+  .jka-views .jka-gizmo, .jka-views .jka-sect, .jka-views button.jka-gsw, .jka-views button.jka-gpl{opacity:.9 !important;pointer-events:auto}
+  .jka-views{pointer-events:auto}
+}
+@media (hover:none), (max-width:720px){
+  .jka-h-action, .jka-h-nerve, .jka-h-attach{display:none !important}
+  .jka-c-action th, .jka-c-nerve th{display:none !important}
+}
+@media (hover:none), (max-width:720px){
+  /* answer side: a shorter model so the answer text sits higher */
+  .jka-left .jka-wrap{min-height:260px}   /* height: set by the engine (model + answer fill the screen) */
+  .jka-right{margin-top:-28px !important;position:relative;z-index:3}
+}
+.jka-tip{bottom:18px !important}
+.jka-tip{bottom:calc(20% + 8px) !important}   /* just above the bottom fade (it covers the lowest 20%) */
+.jka-tip{bottom:11% !important}
+/* layer list centred under the view widget's S–I axis (widget at left 8px, 112px wide → centre 64px) */
+.jka-wrap > .jka-chips{left:64px !important;transform:translateX(-50%)}
+/* two columns (desktop): left column reads "Bone ●", right "● Muscle" — the dots meet in the middle */
+@media (hover:hover) and (min-width:721px){
+  .jka-wrap > .jka-chips{column-gap:6px}
+  .jka-wrap > .jka-chips button:nth-child(odd){flex-direction:row-reverse;justify-self:end;padding:2px 3px 2px 5px !important}
+}
+.jka-tip{bottom:calc(11% - 6px) !important}
+@media (hover:hover) and (min-width:721px){
+  .jka-wrap > .jka-chips{column-gap:0 !important}
+  .jka-wrap > .jka-chips button:nth-child(odd){padding:2px 2px 2px 5px !important}
+  .jka-wrap > .jka-chips button:nth-child(even){padding:2px 5px 2px 2px !important}
+}
+.jka-tip{bottom:calc(11% - 12px) !important}
+/* desktop: the layer list sits right under the view widget (phones keep it bottom-left) */
+@media (hover:hover) and (min-width:721px){
+  .jka-wrap > .jka-chips{top:158px !important;bottom:auto !important}
+}
+@media (hover:hover) and (min-width:721px){ .jka-wrap > .jka-chips{top:148px !important} }
+.jka-tip{bottom:calc(11% - 18px) !important}
+/* desktop too: Attachments / Innervation / Action answers show only what was asked */
+.jka-c-attach tr:not(.on), .jka-c-nerve tr:not(.on), .jka-c-action tr:not(.on){display:none !important}
+.jka-h-action, .jka-h-nerve, .jka-h-attach{display:none !important}
+.jka-c-action th, .jka-c-nerve th{display:none !important}
+/* entering / leaving X-ray: the widget and the layer list glide to their new spot */
+.jka-wrap > .jka-views, .jka-wrap > .jka-chips{transition:margin-left .35s cubic-bezier(.2,.8,.2,1), opacity .2s}
+.jka-c-attach{transform:translateY(-24px)}
+.jka-c-nerve{transform:translateY(-24px)}
+.jka-c-action{transform:translateY(-24px)}
+/* the single answer on Innervation / Action cards: considerably larger */
+html body #qa .jka-c-nerve td, html body #qa .jka-c-action td{font-size:24px !important;line-height:1.35 !important;font-weight:500}
+@media (hover:none), (max-width:720px){ html body #qa .jka-c-nerve td, html body #qa .jka-c-action td{font-size:21px !important} }
+html body #qa .jka-label.pick{color:rgba(255,255,255,.92) !important}
+.jka-lines polyline.pick{stroke:rgba(255,255,255,.6)}
+html body #qa .jka-c-nerve td.jka-td, html body #qa .jka-c-action td.jka-td{font-size:26px !important;line-height:1.35 !important;font-weight:500}
+@media (hover:none), (max-width:720px){ html body #qa .jka-c-nerve td.jka-td, html body #qa .jka-c-action td.jka-td{font-size:22px !important} }
+/* answer column: the answer itself is centred against the model (no fixed nudges);
+   the Extra note and the credit sit at the bottom, outside the centring */
+.jka-c-attach, .jka-c-nerve, .jka-c-action{transform:none !important}
+@media (hover:hover) and (min-width:721px){
+  .jka-split{align-items:stretch !important}
+  .jka-right{display:flex;flex-direction:column;justify-content:center;position:relative;padding-bottom:56px;padding-top:56px}
+  .jka-right .jka-extra, .jka-right .jka-credit{position:absolute;left:0;right:0}
+  .jka-right .jka-credit{bottom:4px}
+  .jka-right .jka-extra{bottom:22px}
+}
+@media (hover:hover) and (min-width:721px){
+  .jka-right .jka-extra{position:static !important;margin-top:14px}
+  .jka-right{padding-bottom:28px}
+}
+html body #qa .jka-sect, html body #qa .jka-sect span, html body #qa .jka-refl button, html body #qa .jka-refl span{font-family:-apple-system,system-ui,sans-serif !important}
+html body #qa .jka-sect b{font-family:-apple-system,system-ui,sans-serif !important;font-size:11px !important;font-weight:600}
+@media (hover:hover) and (min-width:721px){
+  /* centred a little above the middle; nothing extends past the model (no page scroll) */
+  .jka-right{padding-top:0 !important;padding-bottom:9vh !important;overflow:hidden}
+  .jka-right .jka-credit{position:static !important;margin-top:10px}
+}
+html, body{overflow:hidden !important}
+/* never taller than the window (Janki can still scroll overflowing content): the answer column
+   counts its padding inside the model's height, and no extra bottom padding on these cards */
+.jka-right{box-sizing:border-box !important}
+@media (hover:hover) and (min-width:721px){ .jka-split{align-items:flex-start !important} }   /* heights: set by the engine to the exact space */
+html body #qa{padding-bottom:0 !important}
+html body #qa .jka-prompt{font-weight:700 !important}
+/* the widget / list only glide while X-ray is being switched — never when a card opens */
+.jka-wrap > .jka-views, .jka-wrap > .jka-chips{transition:opacity .2s !important}
+.jka-wrap.jka-glide > .jka-views, .jka-wrap.jka-glide > .jka-chips{transition:margin-left .35s cubic-bezier(.2,.8,.2,1), opacity .2s !important}
+html body #qa .jka-c-attach td.jka-td{font-size:24px !important;line-height:1.35 !important;font-weight:500}
+html body #qa .jka-c-attach th.jka-th{font-size:13px !important}
+@media (hover:none), (max-width:720px){ html body #qa .jka-c-attach td.jka-td{font-size:20px !important} }
+html body #qa .jka-c-attach tr + tr th.jka-th{margin-top:22px !important}
+/* phones: larger type throughout */
+@media (hover:none), (max-width:720px){
+  html body #qa .jka-prompt{font-size:21px !important}
+  html body #qa .jka-label{font-size:15px !important}
+  html body #qa .jka-label.minor{font-size:13.5px !important}
+  html body #qa .jka-wrap > .jka-chips button{font-size:13.5px !important;padding:3px 6px !important}
+  html body #qa .jka-sect, html body #qa .jka-sect b{font-size:12.5px !important}
+  html body #qa .jka-gizmo text.jka-gt{font-size:13px !important}
+  html body #qa .jka-c-attach td.jka-td{font-size:22px !important}
+  html body #qa .jka-c-nerve td.jka-td, html body #qa .jka-c-action td.jka-td{font-size:24px !important}
+  html body #qa .jka-chart th.jka-th{font-size:14px !important}
+  html body #qa .jka-head{font-size:23px !important}
+  html body #qa .jka-refl, html body #qa .jka-refl span, html body #qa .jka-refl button{font-size:13px !important}
+}
+@media (hover:none), (max-width:720px){ .jka-split .jka-left .jka-wrap{height:calc(100vh - 300px)} }
+/* the view widget no longer appears / disappears with hover (it flickered whenever hover was
+   lost): always shown, a little dimmer until the pointer is over the model */
+.jka-views .jka-gizmo, .jka-views .jka-sect, .jka-views button.jka-gsw, .jka-views button.jka-gpl{opacity:.75 !important;pointer-events:auto}
+.jka-views{pointer-events:auto}
+.jka-wrap:hover .jka-views .jka-gizmo, .jka-wrap:hover .jka-views .jka-sect, .jka-wrap:hover .jka-views button.jka-gsw, .jka-wrap:hover .jka-views button.jka-gpl{opacity:1 !important}
+/* phones only: the answer matches the question's size and is centred */
+@media (hover:none), (max-width:720px){
+  html body #qa .jka-right, html body #qa .jka-right .jka-head, html body #qa .jka-right .jka-chart, html body #qa .jka-right .jka-extra{text-align:center !important}
+  html body #qa .jka-right .jka-chart{margin:0 auto !important;width:100%}
+  html body #qa .jka-right .jka-chart th.jka-th, html body #qa .jka-right .jka-chart td.jka-td{text-align:center !important}
+  html body #qa .jka-c-attach td.jka-td, html body #qa .jka-c-nerve td.jka-td, html body #qa .jka-c-action td.jka-td,
+  html body #qa .jka-chart td.jka-td, html body #qa .jka-head{font-size:21px !important;font-weight:400 !important}
+}
+/* phones: the model is the same height on the question and the answer (no jump on reveal) */
+@media (hover:none), (max-width:720px){ .jka-wrap{height:calc(100vh - 300px) !important;min-height:260px} }
+/* phones: no view widget (crosshair, plane name, switch, play) */
+@media (hover:none), (max-width:720px){ .jka-wrap > .jka-views{display:none !important} }
+.jka-wrap > button.jka-mplay{display:none}
+@media (hover:none), (max-width:720px){
+  .jka-wrap > button.jka-mplay{display:flex;position:absolute;right:14px;bottom:14px;z-index:4;width:44px !important;height:44px !important;min-height:0 !important;margin:0 !important;padding:0 !important;align-items:center;justify-content:center;border:none !important;border-radius:50%;background:rgba(255,255,255,.12) !important;color:#dff4ff;-webkit-appearance:none}
+  .jka-wrap > button.jka-mplay svg{width:18px;height:18px}
+  .jka-wrap.jka-ctmode > button.jka-mplay{display:none}
+}
+/* phones: play / pause pinned to the screen's bottom-left corner (Janki's gear is bottom-right) */
+@media (hover:none), (max-width:720px){
+  .jka-wrap > button.jka-mplay{position:fixed !important;left:max(14px, env(safe-area-inset-left)) !important;right:auto !important;bottom:max(14px, env(safe-area-inset-bottom)) !important;z-index:2147483000}
+}
+@media (hover:none), (max-width:720px){ .jka-wrap > button.jka-mplay{left:max(4px, env(safe-area-inset-left)) !important} }
+/* answer side: no view widget (crosshair, plane, switch, play) */
+#jka[data-side=back] .jka-wrap > .jka-views{display:none !important}
+/* desktop: the layer list stays invisible until the pointer is over the list itself */
+@media (hover:hover){
+  .jka-wrap > .jka-chips, .jka-wrap:hover > .jka-chips{opacity:0 !important;pointer-events:auto !important}
+  .jka-wrap > .jka-chips:hover{opacity:1 !important}
+}
+/* view widget: shown on both sides again, but only while the pointer is over the widget itself */
+#jka[data-side=back] .jka-wrap > .jka-views{display:flex !important}
+@media (hover:hover){
+  .jka-views .jka-gizmo, .jka-views .jka-sect, .jka-views button.jka-gsw, .jka-views button.jka-gpl,
+  .jka-wrap:hover .jka-views .jka-gizmo, .jka-wrap:hover .jka-views .jka-sect, .jka-wrap:hover .jka-views button.jka-gsw, .jka-wrap:hover .jka-views button.jka-gpl{opacity:0 !important}
+  .jka-views:hover .jka-gizmo, .jka-views:hover .jka-sect, .jka-views:hover button.jka-gsw, .jka-views:hover button.jka-gpl{opacity:1 !important}
+}
+/* "Reflected: … Restore" chip: bottom-left */
+.jka-refl{left:12px !important;right:auto !important;top:auto !important;bottom:14px !important}
+@media (hover:none), (max-width:720px){ .jka-refl{bottom:8px !important} }
+/* answer side (desktop): +/- stay invisible until the pointer is over them */
+@media (hover:hover){
+  #jka[data-side=back] .jka-zoom{opacity:0;transition:opacity .2s}
+  #jka[data-side=back] .jka-zoom:hover{opacity:1}
+}
+/* the 3D view fades in once, after its first frame (no half-ready frames popping in) */
+.jka-wrap > canvas{opacity:0;transition:opacity .25s ease}
+.jka-wrap.jka-shown > canvas{opacity:1}
+.jka-mini canvas{opacity:1 !important}
+/* (the "show" rule must outrank the "hide while over the model" one: hovering the widget is also hovering the model) */
+@media (hover:hover){
+  .jka-wrap:hover .jka-views:hover .jka-gizmo, .jka-wrap:hover .jka-views:hover .jka-sect,
+  .jka-wrap:hover .jka-views:hover button.jka-gsw, .jka-wrap:hover .jka-views:hover button.jka-gpl{opacity:1 !important}
+  #jka[data-side=back] .jka-wrap .jka-zoom:hover{opacity:1 !important}
+  .jka-wrap:hover > .jka-chips:hover{opacity:1 !important}
+}
+/* desktop: one column on the left, centred vertically in the view */
+@media (hover:hover) and (min-width:721px){
+  .jka-wrap > .jka-chips{top:50% !important;bottom:auto !important;left:12px !important;transform:translateY(-50%) !important;grid-template-columns:auto !important;row-gap:1px !important}
+  .jka-wrap > .jka-chips button:nth-child(odd), .jka-wrap > .jka-chips button:nth-child(even){flex-direction:row !important;justify-self:start !important;padding:2px 5px 2px 3px !important}
+}
+/* desktop: + at the orbit widget's bottom-left, − at its bottom-right (mirroring ⇄ and play) */
+.jka-views .jka-zoom.jka-zoom-w{position:absolute !important;top:94px !important;left:4px !important;right:auto !important;bottom:auto !important;width:104px;display:flex;justify-content:space-between;gap:0;z-index:4}
+@media (hover:hover){
+  .jka-views .jka-zoom.jka-zoom-w, #jka[data-side=back] .jka-views .jka-zoom.jka-zoom-w{opacity:0 !important;transition:opacity .2s}
+  .jka-wrap:hover .jka-views:hover .jka-zoom.jka-zoom-w{opacity:1 !important}
+}
+.jka-views .jka-zoom.jka-zoom-w{top:88px !important}
+/* phones: no "Reflected: … Restore" chip (it covered other things) */
+@media (hover:none), (max-width:720px){ .jka-refl{display:none !important} }
+/* answer side: +/- inside the orbit widget show with the widget, like on the question side
+   (an older "#jka[data-side=back] .jka-zoom" hide rule outranked the widget-hover rule) */
+@media (hover:hover){
+  #jka[data-side=back] .jka-wrap:hover .jka-views:hover .jka-zoom.jka-zoom-w{opacity:1 !important}
+}
+/* flush with the window's left edge: layer list, orbit widget, phones' play button */
+.jka-wrap > .jka-chips{left:2px !important}
+.jka-wrap > .jka-views{left:2px !important}
+.jka-views button.jka-gsw{left:0 !important}
+@media (hover:none), (max-width:720px){ .jka-wrap > button.jka-mplay{left:max(2px, env(safe-area-inset-left)) !important} .jka-wrap > .jka-chips{left:2px !important} }
+/* phones: the list was pushed past the screen edge (the edge alignment already shifts it left) */
+@media (hover:none), (max-width:720px){ .jka-wrap > .jka-chips{left:14px !important;margin-left:0 !important} }
+/* desktop: a little breathing room left of the layer list */
+@media (hover:hover) and (min-width:721px){ .jka-wrap > .jka-chips{left:10px !important} }
+/* phones: no leftover "centre under the widget" shift (it pushed half the list off-screen) */
+@media (hover:none), (max-width:720px){ .jka-wrap > .jka-chips{transform:none !important;left:12px !important;margin-left:0 !important} }
+@media (hover:none), (max-width:720px){ .jka-wrap > button.jka-mplay{left:max(-2px, env(safe-area-inset-left)) !important} }
+/* phones: the layer list centred vertically on the left (was bottom-left) */
+@media (hover:none), (max-width:720px){ .jka-wrap > .jka-chips{top:50% !important;bottom:auto !important;transform:translateY(-50%) !important} }
+@media (hover:none), (max-width:720px){
+  .jka-wrap > button.jka-mplay{left:max(-6px, env(safe-area-inset-left)) !important}
+  .jka-wrap > .jka-chips{left:6px !important}
+}
+/* phones: no orbit widget on ANY card / side (the answer-side "show it again" rule outranked the phone hide) */
+@media (hover:none), (max-width:720px){ #jka[data-side] .jka-wrap > .jka-views{display:none !important} }
+
+/* X-ray ID card: a small "X-ray" chip after the question */
+.jka-xrtag{display:inline-block;font-size:.62em;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;margin-left:6px;border-radius:999px;background:rgba(120,200,255,.16);color:#9fdcff;vertical-align:middle;}

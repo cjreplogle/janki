@@ -381,7 +381,16 @@ def _start_hid_monitor():
                     if page == 0x01 and u in (0x30, 0x31):
                         cur = 0 if iv < 64 else (255 if iv > 191 else 127)
                         if _hid_axis_last.get(u) != cur:
+                            _prev = _hid_axis_last.get(u)
                             _hid_axis_last[u] = cur
+                            # 3D anatomy card up: the d-pad turns the model (press AND
+                            # release, so holding keeps it turning) — nothing else
+                            try:
+                                from ..features import anatomy3d as _a3
+                                if _a3.dpad_axis(u, _prev, cur):
+                                    return
+                            except Exception:
+                                pass
                             if cur != 127:
                                 import time as _tm2
                                 _hid_last_input[0] = _tm2.monotonic()

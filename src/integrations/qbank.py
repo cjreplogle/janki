@@ -2827,6 +2827,25 @@ def _fix_t_cells(line: str) -> str:
     return _RE_T_HELPER.sub("Th", _RE_T_CELL.sub("T", line))
 
 
+# Vision reads the "4" of spinal level L4 (also C4/T4) as "A": "LA", "LA-5", "L2 to LA".
+# "LA" is also left atrium, so this fires only on a slide that is plainly about spinal
+# levels (another level like L5/S1/C7, or nerve-root vocabulary).
+_RE_SPINAL_CTX = re.compile(
+    r"(?i)(?<![A-Za-z0-9])[CTLS][1-9](?![0-9])|\b(?:spinal|ramus|rami|dermatome|myotome|"
+    r"nerve roots?|vertebra\w*|intervertebral|disc|disk|lumbar|cervical|thoracic|sacral|"
+    r"plexus|herniat\w*|radicul\w*|reflex)\b")
+_RE_SPINAL_A = re.compile(r"(?<![A-Za-z0-9])([CTL])A(?![A-Za-z0-9])")
+
+
+def _fix_spinal_lines(lines):
+    if not lines or not any(_RE_SPINAL_A.search(l) for l in lines):
+        return lines
+    txt = " ".join(_RE_SPINAL_A.sub("", l) for l in lines)
+    if not _RE_SPINAL_CTX.search(txt):
+        return lines
+    return [_RE_SPINAL_A.sub(r"\g<1>4", l) for l in lines]
+
+
 # A radio button before a choice reads as "O A) …" / "OB) …" / "0 C) …" (exam-software
 # screenshots) — drop it so the choice letter leads the line.
 _RE_RADIO = re.compile(r"^\s*[O0o○◯◦●•·›»©®@Qq]\s?[LlI|]?(?=\(?[A-F][\)\.:](?:\s|$))")
@@ -3411,7 +3430,7 @@ def pptx_import_dialog(on_done=None, path=None, build_deck=False):
             shutil.rmtree(tmp, ignore_errors=True)
             showWarning("Text recognition failed:\n\n%s" % e)
             return
-        _blocks = [(p, ocr_map.get(p, []), cat, sid) for p, cat, sid in imgs]
+        _blocks = [(p, _fix_spinal_lines(ocr_map.get(p, [])), cat, sid) for p, cat, sid in imgs]
         qs, detected, incomplete = _parse_ocr_blocks(_blocks)
         try:    # question-screenshot + answer-screenshot decks: keep whichever reads more
             from . import qbank_paired

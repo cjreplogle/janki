@@ -683,6 +683,19 @@ def _detail_html(e):
             sw=sw, act=act_lbl, all=all_lbl, sus_cmd=sus_cmd, sus_lbl=sus_lbl,
             n=_tag_count(m), word=_tags_word(_tag_count(m)), tags=_tags_html(m))
         QTimer.singleShot(0, lambda m=m: _recount(m))
+    # dissection / anatomy class → its Janki 3D cards
+    global _3d_opts
+    try:
+        from . import anatomy3d
+        _3d_opts = anatomy3d.calendar_links(e["summary"])
+    except Exception as ex:
+        log("calendar 3d links: %s" % ex)
+        _3d_opts = []
+    if _3d_opts:
+        body += ("<div class='jkd-3d'><div class='jkd-3d-h'>3D anatomy</div><div class='jkd-3d-row'>%s</div></div>"
+                 % "".join("<button class='jkd-sec jkd-3d-b' onclick=\"pycmd('janki:cal:det:3d:%d')\">%s "
+                           "<span class='jkd-3d-n'>%d</span></button>" % (i, html.escape(lbl), n)
+                           for i, (lbl, _q, n) in enumerate(_3d_opts)))
     # Open in LMS whenever the calendar has the event's link — matched or not
     if e.get("url"):
         loc += ("<div class='jkd-lmsrow'><button class='jkd-sec jkd-lms' "
@@ -693,6 +706,47 @@ def _detail_html(e):
                (" <span class='jkc-m jkd-m' title='Mandatory'>%s</span>" % _STAR
                 if e.get("mandatory") else ""),
                sub, html.escape(when), loc, body))
+
+
+_3d_opts = []
+
+
+def study_3d(i):
+    """Study one 3D-anatomy card set (from a class page) in a temporary filtered deck."""
+    from aqt.utils import tooltip
+    if not (0 <= i < len(_3d_opts)):
+        return
+    label, q, _n = _3d_opts[i]
+    try:
+        from . import sfx
+        sfx.play("open")
+    except Exception:
+        pass
+
+    def build(col):
+        _cleanup_temp()
+        did = col.decks.new_filtered(TEMP_PREFIX + "3D " + label[:50])
+        d = col.decks.get(did)
+        d["terms"] = [[q + " -is:suspended -is:buried", 99999, 0]]
+        d["resched"] = True
+        col.decks.save(d)
+        col.sched.rebuild_filtered_deck(did)
+        if not col.decks.cids(did):
+            col.decks.remove([did])
+            return None
+        col.decks.select(did)
+        return did
+
+    def done(did):
+        if did is None:
+            tooltip("No 3D cards to study for %s." % label)
+            return
+        close()
+        mw.moveToState("review")
+
+    from aqt.operations import QueryOp
+    QueryOp(parent=mw, op=build, success=done).failure(
+        lambda ex: tooltip("Couldn't start 3D study (%s)." % ex)).run_in_background()
 
 
 def _tag_label(frag):
@@ -2199,6 +2253,10 @@ html,body{overflow-x:hidden !important;overscroll-behavior-x:none;}
   border:2px solid rgba(156,188,243,.3);border-top-color:#9cbcf3;animation:jkcSpin .8s linear 38;}
 .jkc-empty{opacity:.7;text-align:center;margin:18px 0;}
 .jkc-detail{display:block;position:relative;text-align:center;padding:4px 0 24px;}
+.jkd-3d{margin:14px auto 0;max-width:520px;}
+.jkd-3d-h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin-bottom:6px;}
+.jkd-3d-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;}
+.jkd-3d-n{opacity:.55;margin-left:4px;font-variant-numeric:tabular-nums;}
 .jkd-back{position:absolute;left:0;top:0;background:rgba(255,255,255,.08);color:inherit;border:none;
   border-radius:8px;padding:4px 11px;cursor:pointer;}
 .jkd-back:hover{background:rgba(255,255,255,.16);}
@@ -3269,6 +3327,8 @@ def on_js_message(handled, message, context):
                 except Exception:
                     pass
                 _swap("refresh")
+        elif cmd.startswith("det:3d:"):
+            study_3d(int(cmd.split(":")[2]))
         elif cmd == "det:lms":
             if _detail is not None and 0 <= _detail < len(_shown) and _shown[_detail].get("url"):
                 from aqt.utils import openLink
