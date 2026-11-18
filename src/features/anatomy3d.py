@@ -26,11 +26,40 @@ from aqt.utils import showInfo, tooltip
 from ..util.config import log
 
 MODEL_NAME = "Janki Anatomy 3D"
-ENGINE = "_jk3d-anat-67.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
+ENGINE = "_jk3d-anat-69.js"   # bump on engine changes that must reach phones (AnkiMobile caches)
 LOWER_LIMB = "_jk3d_lowerlimb2.glb"   # bump the name when the model changes (phones cache by name)
 UPPER_LIMB = "_jk3d_upperlimb2.glb"
 TRUNK = "_jk3d_trunk7.glb"   # shared context (CT); also the base for future back / thorax cards
 DECK_ROOT = "Janki 3D Anatomy::Lower Limb"
+# Lite version (slower devices): the same cards on simplified models in their own note type and
+# deck tree, so its reviews stay apart and the full setup never treats them as duplicates.
+# The engine sees "_lite.glb" and also draws at 1x pixels without anti-aliasing.
+LITE = {"MODEL_NAME": "Janki Anatomy 3D (Lite)", "DECK_ROOT": "Janki 3D Anatomy (Lite)::Lower Limb",
+        "LOWER_LIMB": "_jk3d_lowerlimb2_lite.glb", "UPPER_LIMB": "_jk3d_upperlimb2_lite.glb",
+        "TRUNK": "_jk3d_trunk7_lite.glb"}
+FULL = {"MODEL_NAME": MODEL_NAME, "DECK_ROOT": DECK_ROOT, "LOWER_LIMB": LOWER_LIMB,
+        "UPPER_LIMB": UPPER_LIMB, "TRUNK": TRUNK}
+
+
+def _with(vals, fn, *a, **k):
+    """Run fn with the module names set to `vals` (FULL or LITE), then put the previous back."""
+    g = globals()
+    saved = {x: g[x] for x in vals}
+    try:
+        g.update(vals)
+        return fn(*a, **k)
+    finally:
+        g.update(saved)
+
+
+def _variant_for_current():
+    """LITE while the current deck is in the Lite tree, else FULL."""
+    try:
+        name = mw.col.decks.name(mw.col.decks.current()["id"])
+    except Exception:
+        return FULL
+    top = LITE["DECK_ROOT"].split("::", 1)[0]
+    return LITE if (name == top or name.startswith(top + "::")) else FULL
 FIELDS = ("Structure", "Meshes", "Region", "Camera", "Limb", "Reflect", "Landmark", "Origin", "Insertion", "Innervation",
           "Nerve", "Action", "Peel", "Extra", "Model", "XrayID")
 _ASSETS = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "anatomy3d")
@@ -45,7 +74,7 @@ var cfg={model:txt('jka-model')||'""" + LOWER_LIMB + r"""',side:root.getAttribut
  mode:root.getAttribute('data-mode'),name:txt('jka-name'),meshes:txt('jka-meshes'),nerve:txt('jka-nerve'),
  region:txt('jka-region'),cam:txt('jka-cam'),limb:txt('jka-limb'),reflect:txt('jka-reflect'),landmark:txt('jka-landmark'),front:root.getAttribute('data-front')||'adaptive',ivl:window.__jkaIvl,xray:root.getAttribute('data-xray')==='1',origin:txt('jka-origin'),insertion:txt('jka-insertion'),peel:peel?peel.split('\n').filter(function(x){return x.trim();}):[]};
 function go(){window.JKANAT.mount(root,cfg);}
-if(window.JKANAT&&window.JKANAT.v>=67){go();return;}
+if(window.JKANAT&&window.JKANAT.v>=69){go();return;}
 (window.__jkaQ=window.__jkaQ||[]).push(go);
 if(window.__jkaLoading)return;window.__jkaLoading=1;
 fetch('""" + ENGINE + r"""',{cache:'no-cache'}).then(function(r){if(!r.ok)throw r.status;return r.text();})
@@ -134,7 +163,12 @@ def _css():
             line = re.sub(r"background:([^;}!]+?)\s*(?:!important)?\s*(?=[;}])", r"background:\1 !important", line)
         fixed.append(line)
     return """.card { font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: 19px; text-align: center; }
+@font-face { font-family: "jkaLora"; src: url("_jk3d_lora.ttf"); font-weight: 400 700; }
 .jka-prompt { margin: 6px 0 18px; padding-top: 2px; line-height: 1.3; position: relative; z-index: 2; }
+/* the prompt: the same size / weight everywhere. Font: Lora (carried in the deck's media) as a
+   weak default only — Janki's chosen card font (desktop) and its mobile-theming font override it */
+.jka-prompt { font-family: "jkaLora", "Lora", Georgia, "Times New Roman", serif; }
+html body #qa .jka-prompt, html body .jka-prompt { font-size: 24px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
 #jk-sc .jka-prompt { margin-top: -6px; }   /* Janki's frame leaves room above; plain Anki doesn't */
 .jka-head { font-size: 24px; font-weight: 600; margin: 4px 0 8px; }
 .jka-chart { margin: 0 auto; border-collapse: collapse; text-align: left; max-width: 760px; font-size: 16px; }
@@ -193,7 +227,7 @@ def _rewrite_templates():
 def _card_will_show(text, card, kind):
     """Desktop: hand the card's interval to the engine (adaptive front model)."""
     try:
-        if card.note_type()["name"] == MODEL_NAME and kind.endswith("Question"):
+        if card.note_type()["name"] in (MODEL_NAME, LITE["MODEL_NAME"]) and kind.endswith("Question"):
             return "<script>window.__jkaIvl=%d;</script>" % max(0, card.ivl) + text
     except Exception:
         pass
@@ -239,8 +273,9 @@ def _copy_media():
     """Copy bundled files into the media folder, replacing older copies (Anki's
     write_data would save a changed file under a new hashed name instead)."""
     mdir = mw.col.media.dir()
-    for name in (ENGINE, LOWER_LIMB, UPPER_LIMB, TRUNK):
-        with open(os.path.join(_ASSETS, name), "rb") as f:
+    _font = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts", "Lora.ttf")
+    for name in (ENGINE, LOWER_LIMB, UPPER_LIMB, TRUNK, "_jk3d_lora.ttf"):
+        with open(_font if name == "_jk3d_lora.ttf" else os.path.join(_ASSETS, name), "rb") as f:
             data = f.read()
         dst = os.path.join(mdir, name)
         try:
@@ -1690,7 +1725,7 @@ def _types_on():
     return set(v) if v is not None else {"Identify"}   # first launch: ID cards only (an empty list = all off, kept)
 
 
-def _overview(overview, content):
+def _overview_one(overview, content):
     try:
         name = mw.col.decks.name(mw.col.decks.current()["id"])
     except Exception:
@@ -1799,7 +1834,7 @@ def _in_root():
     return name == top or name.startswith(top + "::")
 
 
-def _on_js(handled, msg, context):
+def _on_js_one(handled, msg, context):
     if not isinstance(msg, str) or not msg.startswith("jka3d:"):
         return handled
     try:
@@ -1826,6 +1861,18 @@ def _on_js(handled, msg, context):
     except Exception as e:
         log("anatomy3d overview: %s" % e)
     return (True, None)
+
+
+def apply_types(refresh=False):
+    """The card-type choice is shared by the full and Lite decks: apply it to both."""
+    a1 = _with(FULL, _apply_types_one, False)
+    a2 = _with(LITE, _apply_types_one, False)
+    if refresh and (any(a1) or any(a2)):
+        try:
+            mw.overview.refresh()
+        except Exception:
+            pass
+    return a1[0] + a2[0], a1[1] + a2[1]
 
 
 def order_new():
@@ -1855,7 +1902,7 @@ def order_new():
     return len(cards)
 
 
-def apply_types(refresh=False):
+def _apply_types_one(refresh=False):
     """Switched-off card types are suspended across Janki 3D Anatomy (so they leave the New
     count and Study Now); switching one back on unsuspends only the cards this suspended
     (their ids are kept in the collection config), never ones you suspended yourself."""
@@ -2028,8 +2075,9 @@ def setup():
             tag = "Janki3D::%s::%s" % (limb.replace(" ", ""), sub.replace(" ", ""))
             n.tags = [t for t in n.tags if not t.startswith("Janki3D::")] + [tag]
             if new:
-                mw.col.add_note(n, mw.col.decks.id("Janki 3D Anatomy::" + limb + "::" + sub))
+                mw.col.add_note(n, mw.col.decks.id(DECK_ROOT.split("::", 1)[0] + "::" + limb + "::" + sub))
                 added += 1
+                existing[vals["Structure"]] = n   # listed again later (another list): update it, don't add a twin
             else:
                 mw.col.update_note(n)
             if vals["Structure"] in TDAVNH and TDAVNH_TXT not in n["Extra"]:   # tarsal tunnel mnemonic
@@ -2158,12 +2206,262 @@ def setup():
         showInfo("Janki 3D anatomy setup failed: %s" % e)
 
 
+def setup_lite():
+    """Tools → Set up 3D anatomy cards (Lite): run the same setup against the Lite note type,
+    deck tree and models (module names swapped for the duration, then put back)."""
+    g = globals()
+    saved = {k: g[k] for k in LITE}
+    try:
+        g.update(LITE)
+        setup()
+    finally:
+        g.update(saved)
+
+
+def _specs():
+    """(RAM in GB or None, CPU cores, Apple Silicon?) for the Normal / Lite suggestion."""
+    import platform, subprocess
+    ram = None
+    try:
+        if platform.system() == "Darwin":
+            ram = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=2).stdout) / 2**30
+        elif platform.system() == "Windows":
+            import ctypes
+            class MS(ctypes.Structure):
+                _fields_ = [("l", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong)] + \
+                           [("x%d" % i, ctypes.c_ulonglong) for i in range(6)]
+            ms = MS(); ms.l = ctypes.sizeof(MS)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                ram = ms.total / 2**30
+        else:
+            with open("/proc/meminfo") as f:
+                ram = int(f.readline().split()[1]) / 2**20
+    except Exception:
+        ram = None
+    cores = os.cpu_count() or 0
+    arm_mac = platform.system() == "Darwin" and platform.machine() == "arm64"
+    return ram, cores, arm_mac
+
+
+# A tiny WebGL test run in Anki's own page (the same Chromium as the cards): which renderer is in
+# use (a real GPU, or a software fallback such as SwiftShader) and how long the GPU takes to draw a
+# fixed load (200k small triangles). Measured: Apple M5 1.6 ms; SwiftShader on the same Mac 14 ms.
+_GPU_BENCH = r"""(function(){try{
+var c=document.createElement('canvas');c.width=512;c.height=512;
+var g=c.getContext('webgl2',{antialias:false})||c.getContext('webgl',{antialias:false})||c.getContext('experimental-webgl');
+if(!g)return JSON.stringify({gl:false});
+var e=g.getExtension('WEBGL_debug_renderer_info');
+var r=e?g.getParameter(e.UNMASKED_RENDERER_WEBGL):g.getParameter(g.RENDERER);
+function sh(t,s){var x=g.createShader(t);g.shaderSource(x,s);g.compileShader(x);return x;}
+var p=g.createProgram();
+g.attachShader(p,sh(g.VERTEX_SHADER,'attribute vec3 a;uniform float k;varying float v;void main(){v=a.z;gl_Position=vec4(a.xy*0.9+vec2(sin(k+a.z*40.0),cos(k))*0.05,a.z,1.0);}'));
+g.attachShader(p,sh(g.FRAGMENT_SHADER,'precision mediump float;varying float v;void main(){gl_FragColor=vec4(v,0.5,1.0-v,1.0);}'));
+g.linkProgram(p);g.useProgram(p);
+var N=200000,a=new Float32Array(N*9);
+for(var i=0;i<N*9;i+=9){var x=Math.random()*2-1,y=Math.random()*2-1,z=Math.random();a[i]=x;a[i+1]=y;a[i+2]=z;a[i+3]=x+0.02;a[i+4]=y;a[i+5]=z;a[i+6]=x;a[i+7]=y+0.02;a[i+8]=z;}
+var b=g.createBuffer();g.bindBuffer(g.ARRAY_BUFFER,b);g.bufferData(g.ARRAY_BUFFER,a,g.STATIC_DRAW);
+var L=g.getAttribLocation(p,'a');g.enableVertexAttribArray(L);g.vertexAttribPointer(L,3,g.FLOAT,false,0,0);
+var K=g.getUniformLocation(p,'k');g.enable(g.DEPTH_TEST);
+g.uniform1f(K,0);g.drawArrays(g.TRIANGLES,0,N*3);g.readPixels(0,0,1,1,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(4));  // warm-up
+var t0=performance.now(),F=12;
+for(var f=0;f<F;f++){g.clear(g.COLOR_BUFFER_BIT|g.DEPTH_BUFFER_BIT);g.uniform1f(K,f);g.drawArrays(g.TRIANGLES,0,N*3);}
+g.readPixels(0,0,1,1,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(4));
+var ms=(performance.now()-t0)/F;
+var lc=g.getExtension('WEBGL_lose_context');if(lc)lc.loseContext();
+return JSON.stringify({gl:true,renderer:r,ms:Math.round(ms*10)/10});
+}catch(x){return JSON.stringify({gl:false,err:String(x)});}})()"""
+
+
+def _gpu_probe(done):
+    """Calls done(dict | None) with {gl, renderer, ms}; None if the page didn't answer in time."""
+    import json
+    from aqt.qt import QTimer
+    state = {"fired": False}
+    def fire(v):
+        if state["fired"]:
+            return
+        state["fired"] = True
+        try:
+            done(json.loads(v) if isinstance(v, str) else None)
+        except Exception:
+            done(None)
+    try:
+        mw.web.evalWithCallback(_GPU_BENCH, fire)
+    except Exception:
+        fire(None)
+        return
+    QTimer.singleShot(4000, lambda: fire(None))
+
+
+def _gpu_name(r):
+    r = str(r or "")
+    if "Renderer:" in r:                       # ANGLE (Apple, ANGLE Metal Renderer: Apple M5, …)
+        return r.split("Renderer:")[-1].split(",")[0].strip()
+    if r.startswith("ANGLE (") and r.count(",") >= 2:   # ANGLE (NVIDIA, NVIDIA GeForce … Direct3D11 …)
+        return r.split(",")[1].split(" Direct3D")[0].split(" (0x")[0].strip()
+    return r
+
+
+def _recommend(gpu, ram, cores, arm_mac):
+    """('lite' | 'normal', reason line)."""
+    bits, lite = [], False
+    fast_gpu = False
+    if gpu and gpu.get("gl"):
+        r = str(gpu.get("renderer") or "")
+        soft = any(k in r.lower() for k in ("swiftshader", "llvmpipe", "software", "basic render"))
+        ms = gpu.get("ms")
+        if soft:
+            lite = True
+            bits.append("No GPU in use (software rendering)")
+        elif isinstance(ms, (int, float)):
+            speed = "fast" if ms < 4 else "moderate" if ms < 10 else "slow"
+            fast_gpu = ms < 4
+            bits.append("GPU: %s · %s (%.1f ms test)" % (_gpu_name(r) or "unknown", speed, ms))
+            if ms >= 10 or (ms >= 4 and ram is not None and ram < 8):
+                lite = True
+    elif gpu is not None:
+        lite = True
+        bits.append("WebGL unavailable")
+    else:
+        bits.append("GPU: not measured")
+    if ram:
+        bits.append("%d GB memory" % round(ram))
+    if cores:
+        bits.append("%d CPU cores" % cores)
+    if (ram is not None and ram < 8 and not fast_gpu) or (cores and cores < 4):
+        lite = True
+    return ("lite" if lite else "normal"), " · ".join(bits)
+
+
+def choose_setup():
+    """Tools → Set up 3D anatomy cards: Normal or Lite, suggested from this computer's GPU
+    (renderer + a quick draw test), memory and CPU cores."""
+    from aqt.qt import QApplication, Qt
+    try:
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    except Exception:
+        pass
+    def go(gpu):
+        try:
+            QApplication.restoreOverrideCursor()
+        except Exception:
+            pass
+        ram, cores, arm_mac = _specs()
+        rec, why = _recommend(gpu, ram, cores, arm_mac)
+        try:
+            log("anatomy3d setup suggestion: %s (%s)" % (rec, why))
+        except Exception:
+            pass
+        _choose_dialog(rec, why)
+    _gpu_probe(go)
+
+
+def _choose_dialog(rec, why):
+    from aqt.qt import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, Qt
+    dlg = QDialog(mw)
+    dlg.setWindowTitle("Set up 3D anatomy cards")
+    try:
+        from ..user import glass as _glass, css as _css
+        _glass.glass_dialog(dlg)
+        _css.apply_widget_ui_font(dlg)
+    except Exception:
+        pass
+    v = QVBoxLayout(dlg)
+    v.setSpacing(10)
+    if getattr(dlg, "_jk_expanded", False):          # content sits in the titlebar row
+        _m = v.contentsMargins()
+        v.setContentsMargins(_m.left(), 30, _m.right(), _m.bottom())
+    title = QLabel("Set up 3D anatomy cards")
+    title.setStyleSheet("font-size:17px;font-weight:600;background:transparent")
+    v.addWidget(title)
+    sub = QLabel("Choose the version for this computer. Lite is a separate deck with its own "
+                 "reviews, so set up the one you'll study.")
+    sub.setWordWrap(True)
+    sub.setStyleSheet("color:rgba(255,255,255,.62);background:transparent")
+    v.addWidget(sub)
+    choice = {"v": None}
+    from aqt.qt import QFrame
+
+    class _Opt(QFrame):
+        def __init__(self, key, head, body):
+            super().__init__()
+            self.key = key
+            self.setObjectName("jkaOpt")
+            self.setProperty("rec", key == rec)
+            self.setProperty("sel", False)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            lay = QVBoxLayout(self); lay.setContentsMargins(16, 12, 16, 12); lay.setSpacing(3)
+            top = QHBoxLayout(); top.setSpacing(8)
+            h = QLabel(head); h.setStyleSheet("font-size:14px;font-weight:700;background:transparent;border:none")
+            top.addWidget(h)
+            if key == rec:
+                tag = QLabel("Recommended")
+                tag.setStyleSheet("font-size:11px;font-weight:600;color:#06202c;background:rgba(95,200,255,.92);"
+                                  "border:none;border-radius:8px;padding:1px 8px")
+                top.addWidget(tag)
+            top.addStretch()
+            lay.addLayout(top)
+            b = QLabel(body); b.setWordWrap(True)
+            b.setStyleSheet("font-size:12.5px;color:rgba(255,255,255,.66);background:transparent;border:none")
+            lay.addWidget(b)
+
+        def mouseReleaseEvent(self, e):
+            select(self.key)
+
+    dlg.setStyleSheet((dlg.styleSheet() or "") +
+        "QFrame#jkaOpt{border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14)}"
+        "QFrame#jkaOpt:hover{background:rgba(255,255,255,.10)}"
+        'QFrame#jkaOpt[sel="true"]{background:rgba(95,200,255,.14);border:1.5px solid rgba(95,200,255,.85)}'
+        'QFrame#jkaOpt[sel="true"]:hover{background:rgba(95,200,255,.19)}')
+    opts = {}
+
+    def select(key):
+        choice["v"] = key
+        for k, w in opts.items():
+            w.setProperty("sel", k == key)
+            w.style().unpolish(w); w.style().polish(w); w.update()
+
+    def card(key, head, body):
+        opts[key] = _Opt(key, head, body)
+        v.addWidget(opts[key])
+    card("normal", "Normal", "Full-detail models, sharp on high-resolution screens.")
+    card("lite", "Lite", "Simplified models drawn at a lower resolution, for older or slower computers and phones.")
+    info = QLabel(why)
+    info.setWordWrap(True)
+    info.setStyleSheet("color:rgba(255,255,255,.5);font-size:11.5px;background:transparent")
+    v.addWidget(info)
+    row = QHBoxLayout()
+    cancel = QPushButton("Cancel")
+    cancel.setStyleSheet("QPushButton{padding:5px 14px;border-radius:8px;background:rgba(255,255,255,.07);"
+                         "border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.8)}"
+                         "QPushButton:hover{background:rgba(255,255,255,.12)}")
+    cancel.clicked.connect(dlg.reject)
+    ok = QPushButton("OK")
+    ok.setDefault(True)
+    ok.setStyleSheet("QPushButton{padding:5px 20px;border-radius:8px;font-weight:600;color:#06202c;"
+                     "background:rgba(95,200,255,.92);border:1px solid rgba(95,200,255,1)}"
+                     "QPushButton:hover{background:rgba(125,212,255,1)}")
+    ok.clicked.connect(dlg.accept)
+    row.addWidget(cancel)
+    row.addStretch()
+    row.addWidget(ok)
+    v.addLayout(row)
+    select(rec)
+    dlg.setMinimumWidth(440)
+    if not dlg.exec():
+        return
+    if choice["v"] == "normal":
+        setup()
+    elif choice["v"] == "lite":
+        setup_lite()
+
+
 # ---- controller: while a 3D anatomy card is up, the d-pad turns the model (held = keeps
 # turning) and the remote's +/− zoom it, instead of their usual jobs.
 def showing():
     try:
         return (mw.state == "review" and mw.reviewer.card is not None
-                and mw.reviewer.card.note_type()["name"] == MODEL_NAME)
+                and mw.reviewer.card.note_type()["name"] in (MODEL_NAME, LITE["MODEL_NAME"]))
     except Exception:
         return False
 
@@ -2205,6 +2503,16 @@ def zoom(step):
     return True
 
 
+def _overview(overview, content):
+    return _with(_variant_for_current(), _overview_one, overview, content)
+
+
+def _on_js(handled, msg, context):
+    if not isinstance(msg, str) or not msg.startswith("jka3d:"):
+        return handled
+    return _with(_variant_for_current(), _on_js_one, handled, msg, context)
+
+
 def _hooks():
     from aqt import gui_hooks
     gui_hooks.overview_will_render_content.append(_overview)
@@ -2215,7 +2523,7 @@ def _hooks():
 
 def install():
     act = QAction("Janki: Set up 3D anatomy cards", mw)
-    act.triggered.connect(setup)
+    act.triggered.connect(choose_setup)
     mw.form.menuTools.addAction(act)
     try:
         _hooks()
@@ -2227,8 +2535,13 @@ def install():
         from aqt import gui_hooks
         def _once():
             try:
+                with open(flag) as f:
+                    what = f.read().strip()   # "" = full setup, "lite" = Lite, "both" = full then Lite
                 os.remove(flag)
             except OSError:
-                pass
-            setup()
+                what = ""
+            if what in ("", "both"):
+                setup()
+            if what in ("lite", "both"):
+                setup_lite()
         gui_hooks.profile_did_open.append(_once)

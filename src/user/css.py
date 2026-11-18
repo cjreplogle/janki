@@ -2444,6 +2444,8 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         "        if((p.id||'')==='jk-rw-bar') return true;   // reword control bar (toggle + arrow)\n"
         "        if((p.id||'')==='jk-pq-bar'||(p.id||'')==='jp-slide-btn'||(p.classList&&p.classList.contains('jp-slide-btn'))) return true;   // practice slide button\n"
         "        if((p.id||'')==='tags-container') return true;   // card tags: fade in, not typed\n"
+        # 3D anatomy prompt ("What is highlighted?"): typed once; repeated on the next card it stays put
+        "        if(p.classList&&p.classList.contains('jka-prompt')&&window.__jkPPrev&&(p.textContent||'').replace(/\\s+/g,' ').trim()===window.__jkPPrev) return true;\n"
         "        if(t.indexOf('AMBOSS')===0) return true;   // AMBOSS custom elements\n"
         "        if(p.classList && (p.classList.contains('MathJax')||\n"
         "            p.classList.contains('MathJax_Preview')||p.classList.contains('mjx-chtml')||\n"
@@ -2495,8 +2497,10 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # confined to a single visual line; a run that wraps across several lines
         # (a long stretch of plain text with no inline markup breaking it up) falls
         # back to the old per-char step, scoped to just that one run.
+        # 3D prompt: remember the last one shown, so an identical prompt on the next card isn't retyped
+        "    function jkPrompt(){ try{ var jpE=document.querySelector('#qa .jka-prompt'); window.__jkPPrev=window.__jkPCur||''; window.__jkPCur=jpE?(jpE.textContent||'').replace(/\\s+/g,' ').trim():''; }catch(e){} }\n"
         "    function typeOutStatic(clozeOnly, done){\n"
-        "      var g=gen, nodes=collect(clozeOnly);\n"
+        "      jkPrompt(); var g=gen, nodes=collect(clozeOnly);\n"
         "      var totalChars=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!totalChars){ reveal(); done(); return; }\n"
         # EVERY <li> around the text (not just the nearest): a parent item whose text is
@@ -2612,7 +2616,7 @@ def _typewriter_head(cfg, prev_hash: str = "") -> str:
         # late (a fresh page), and a clock started before it opened the card part-typed
         "      requestAnimationFrame(function(){ next(); }); }\n"
         "    function typeOut(clozeOnly, done){ if(STATIC){ return typeOutStatic(clozeOnly, done); }\n"
-        "      var g=gen, nodes=collect(clozeOnly);\n"
+        "      jkPrompt(); var g=gen, nodes=collect(clozeOnly);\n"
         "      var total=nodes.reduce(function(a,x){return a+x[1].length;},0);\n"
         "      if(!total){ reveal(); done(); return; }\n"
         "      // duration scales with length at WPM (5 chars/word), clamped.\n"

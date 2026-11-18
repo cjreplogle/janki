@@ -2,6 +2,7 @@
 // Models: glb whose nodes carry extras {n: structure name, l: layer}.
 import './consolefix.js';   // first: AnkiMobile's console lacks error / warn
 import * as THREE from 'three';
+import SUPPLIES from './supplies.json';   // nerve → the muscle meshes it supplies (from the deck's Nerve fields)
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {computeBoundsTree, acceleratedRaycast} from 'three-mesh-bvh';
 // BVH-accelerated raycasts (x-ray / dotted lines / picking test hundreds of thousands of triangles)
@@ -164,6 +165,9 @@ function names(s) { return String(s || '').split(/[\n,;]+/).map(x => x.trim()).f
 
 function mount(root, cfg) {
   if (live) live.stop();
+  // Lite deck (slower devices): simplified models ("…_lite.glb"), 1× pixels, no anti-aliasing, lite CT context
+  const LITE = /_lite\.glb(\?|$)/.test(String(cfg.model || ''));
+  const ctxModel = LITE ? CT_CONTEXT.model.replace(/\.glb$/, '_lite.glb') : CT_CONTEXT.model;
   root.innerHTML = '';
   root.style.removeProperty('display');
   // recall cards (attachments / innervation / action): the model is on the front only the
@@ -203,14 +207,14 @@ function mount(root, cfg) {
     if (R && R.getContext() && !R.getContext().isContextLost()) {
       renderer = R; renderer.setRenderTarget(null); renderer.autoClear = true; renderer.setClearColor(0x000000, 0);
       renderer.domElement.removeAttribute('style'); renderer.domElement.className = '';
-    } else { renderer = new THREE.WebGLRenderer({antialias: true, alpha: true}); window.__jkaR = renderer; }
+    } else { renderer = new THREE.WebGLRenderer({antialias: !LITE, alpha: true}); window.__jkaR = renderer; }
   } catch (e) { msg.textContent = '3D needs WebGL, which is off in this Anki.'; return; }
   // listeners this view puts on the shared canvas are removed when it goes (else an old card's
   // handlers would keep reacting)
   const cvEvs = [], cvEl = renderer.domElement, ET = EventTarget.prototype;
   cvEl.addEventListener = function (t, f, o) { ET.addEventListener.call(cvEl, t, f, o); cvEvs.push([t, f, o]); };
   const viewDisp = [];   // per-view GPU resources (render targets) to free on stop
-  const DPR = Math.min(2, window.devicePixelRatio || 1), DPR_MOVE = Math.min(DPR, 1);
+  const DPR = LITE ? 1 : Math.min(2, window.devicePixelRatio || 1), DPR_MOVE = Math.min(DPR, 1);
   renderer.setPixelRatio(DPR);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   wrap.appendChild(renderer.domElement);
@@ -997,6 +1001,13 @@ function mount(root, cfg) {
       parts.forEach(p => { if (p.layer === 'nerve' && !nerve.includes(p) && !back) p.mesh.visible = false; });
     } else if (mode === 'nerveid') {   // a nerve card: name / course
       parts.forEach(p => { if (p.layer === 'muscle') ghost(p, 0.18); });
+      // answer: the muscles this nerve supplies stay more solid (the rest stay faint)
+      if (back) {
+        const base = n => String(n).replace(/\.[lr]$/, '');
+        const sup = new Set();
+        Object.keys(SUPPLIES).forEach(k => { if (target.some(t => base(t.name) === base(k))) SUPPLIES[k].forEach(m => sup.add(base(m))); });
+        if (sup.size) parts.forEach(p => { if (p.layer === 'muscle' && p.mesh.visible && sup.has(base(p.name))) ghost(p, 0.6); });
+      }
       // vessels: show their branches (every vessel of the same kind in the region), dimmer
       const vl = target[0] && (target[0].layer === 'vessel' || target[0].layer === 'vein') ? target[0].layer : null;
       if (vl) {
@@ -1871,7 +1882,7 @@ function mount(root, cfg) {
       });
       // anatomical context (trunk) — loaded on demand, drawn only in CT_CONTEXT.planes
       const ctxPlanes = cfg.ctPlanes || CT_CONTEXT.planes;
-      load(cfg.ctContext || CT_CONTEXT.model).then(g => {
+      load(cfg.ctContext || ctxModel).then(g => {
         if (stopped) return; g.updateMatrixWorld(true);
         const own = new Set(parts.map(q => q.name));
         g.traverse(o => { if (!o.isMesh) return;
@@ -2433,7 +2444,7 @@ function mount(root, cfg) {
           if (p.box.min.x < 0.005 && p.box.max.x > -0.005) return;   // crosses the midline: already whole
           const b = p.box.clone().applyMatrix4(MIR);
           addBone(p.mesh.geometry, MIR.clone().multiply(p.mesh.matrixWorld), b, false); });   // three.js flips the facing for mirrored matrices itself
-        load(CT_CONTEXT.model).then(g => {
+        load(ctxModel).then(g => {
           if (stopped) return; g.updateMatrixWorld(true); const own = new Set(parts.map(q => q.name));
           g.traverse(o => { if (!o.isMesh || (o.userData || {}).l !== 'bone') return;
             if (own.has(String(o.userData.n || o.name).replace(/\.[lr]$/, ''))) return;
@@ -2765,5 +2776,5 @@ function mount(root, cfg) {
   return view;
 }
 
-window.JKANAT = {v: 67, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
+window.JKANAT = {v: 69, mount, input: (t, a, b) => { const f = live && live['in_' + t]; if (f) f(a, b); return !!f; }};
 (window.__jkaQ || []).splice(0).forEach(f => f());

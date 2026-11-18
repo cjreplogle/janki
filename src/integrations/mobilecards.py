@@ -204,6 +204,10 @@ def _css_block() -> str:
         "  background:#000 !important;color:#fff !important;\n"
         "  font-family:" + _font_stack() + " !important;\n"
         "}\n"
+        # 3D anatomy prompt: its note type gives it a Lora default; the chosen mobile font wins
+        ".mobile .jka-prompt,.iphone .jka-prompt,.ipad .jka-prompt,.android .jka-prompt{\n"
+        "  font-family:" + _font_stack() + " !important;\n"
+        "}\n"
         ".mobile .card a,.card.mobile a,.iphone .card a,.card.iphone a,"
         ".ipad .card a,.card.ipad a,.android .card a,.card.android a{color:#6db3ff !important;}\n"
         # Hard-coded black text (e.g. <font color="#000000"> in pasted KCOM cards) was

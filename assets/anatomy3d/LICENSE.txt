@@ -37,3 +37,8 @@ This derived model is distributed under the same licence:
 Software: _jk3d-anat-*.js bundles three.js (MIT licence, (c) 2010-2024 three.js authors,
 https://threejs.org) and three-mesh-bvh (MIT licence, (c) Garrett Johnson).
 Janki's own code is not covered by the share-alike terms above.
+
+Lite models (_jk3d_lowerlimb2_lite.glb, _jk3d_upperlimb2_lite.glb, _jk3d_trunk7_lite.glb):
+simplified copies of the models above, made by Janki (mesh decimation with meshoptimizer via
+glTF-Transform: about half the triangles kept on bones, a quarter on other structures). Same
+licence (CC BY-SA 4.0) and attribution as the full models.

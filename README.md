@@ -155,7 +155,15 @@ Runs as a plugin on top of Anki — no separate app. Available for **macOS** and
 Grouped by version; open one to see its releases. Every release is also on [GitHub Releases](https://github.com/cjreplogle/janki/releases).
 
 <details>
-<summary><b>2.14</b> · 2026-11-17 · 1 release</summary>
+<summary><b>2.14</b> · 2026-11-18 · 2 releases</summary>
+
+**2.14.1** · 2026-11-18
+
+- **3D anatomy Lite:** Tools → Janki: Set up 3D anatomy cards now asks Normal or Lite, and suggests one from your computer (a quick GPU test, memory and CPU cores). Lite is the same cards on simplified models drawn at a lower resolution, for older or slower computers and phones, in its own deck with its own reviews.
+- Nerve cards: on the answer, the muscles the nerve supplies stand out from the rest.
+- The "What is highlighted?" prompt isn't retyped when the next card asks the same, looks the same on every device (Lora, carried with the deck), and follows your Janki card font.
+- With Onigiri: the 3D deck's card-type chips and front-model row stay visible (no "Click to reveal") and match Onigiri's buttons.
+- First-time 3D setup no longer makes duplicate notes when a structure is listed twice.
 
 **2.14.0** · 2026-11-17
 
