@@ -5,6 +5,7 @@ dissect. Cards for identifying structures, clicking them on the model, origins a
 insertions, innervations and key facts, plus an X-ray view and a simulated CT.*
 
 **[<span class="dl-x">⬇ </span>Download the deck (<span class="dl-x">janki-3d-anatomy.apkg, </span>19 MB)](https://github.com/cjreplogle/janki/releases/download/anatomy3d-deck/janki-3d-anatomy.apkg)**
+[<span class="dl-x">⬇ </span>Lite version for slower devices (<span class="dl-x">janki-3d-anatomy-lite.apkg, </span>9 MB)](https://github.com/cjreplogle/janki/releases/download/anatomy3d-deck/janki-3d-anatomy-lite.apkg)
 
 ---
 
@@ -22,6 +23,10 @@ and *Toggle Suspend*. Card types: `Identify`, `Locate` (Click), `Identify (X-ray
 `Attachments`, `Innervation`, `Action` (key facts).
 
 Sync to take the deck — and its 3D models (about 30 MB of media) — to your phone.
+
+**Lite version:** the same cards on simplified models (roughly 40–50% of the triangles) that draw fewer
+pixels, for older phones, tablets and laptops. It is a separate deck with its own note type, so its
+reviews are kept apart from the full deck's — use one or the other on a given collection.
 
 ## Credits
 
