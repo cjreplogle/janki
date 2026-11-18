@@ -8,7 +8,7 @@ insertions, innervations and key facts, plus an X-ray view and a simulated CT.*
 
 ---
 
-## Using it
+## How to use
 
 **With Janki** (recommended): you don't need this file — install or update Janki and
 choose **Tools → Janki: Set up 3D anatomy cards**. Janki adds the same cards, and on any 3D
