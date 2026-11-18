@@ -8,18 +8,6 @@ insertions, innervations and key facts, plus an X-ray view and a simulated CT.*
 
 ---
 
-## What's in it
-
-- **483 structures**, each with up to six card types: **ID** (what is highlighted?),
-  **Click** (find it on the model), **X-ray ID** (bones, on a radiograph view),
-  **Attachments**, **Innervations** and **Key facts**.
-- Bony landmarks are highlighted as patches on the bone itself; vessels are shown with the
-  vessels they connect to; deep structures open with the muscles over them moved aside.
-- Decks are grouped by **region → dissection → type** (muscles, nerves, vessels, bone
-  landmarks, joints and spaces), with a separate *Osteology & Prosections* group.
-- On the answer: rotate, zoom, pan, switch layers (bone / muscle / nerve / artery / vein),
-  move structures aside (double-click), and switch to **X-ray** or **CT**.
-
 ## Using it
 
 **With Janki** (recommended): you don't need this file — install or update Janki and
